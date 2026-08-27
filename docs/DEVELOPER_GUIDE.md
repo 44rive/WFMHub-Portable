@@ -3,10 +3,10 @@
 ## Local checks
 
 ```bash
-python -m pip install -e .
-python -m wfmhub --home . doctor
-python -m unittest discover -s tests -v
-python -m compileall -q src tests packaging
+python3 -m pip install -e .
+python3 -m wfmhub --home . doctor
+python3 -m unittest discover -s tests -v
+python3 -m compileall -q src tests packaging
 ```
 
 Use an isolated `--home` for real-source acceptance so local user configuration
@@ -27,6 +27,11 @@ and the preserved v0.1 database are not modified.
    business rule.
 9. Update architecture and beginner documentation.
 
+Business KPI equations and activity classifications belong in
+`config/default_rules.toml` and the validated `rules.py` engine. Do not add a
+second hidden formula in SQL or an Excel sheet. Every new result must carry the
+rule version/hash when applicable.
+
 Forecast fields must remain forecast-only. Do not join forecast into employee
 attendance, absence, correction, or payroll models.
 
@@ -45,7 +50,7 @@ attendance, absence, correction, or payroll models.
 ## Windows portable build
 
 ```bash
-python packaging/windows/build_portable.py --version 0.3.2 --python-version 3.13.7
+python3 packaging/windows/build_portable.py --version 0.4.0 --python-version 3.13.7
 ```
 
 The builder always deletes and recreates stage and wheelhouse. It:
@@ -71,10 +76,14 @@ At minimum, verify:
 - source hashes/size/mtime are unchanged;
 - `PRAGMA quick_check` and `foreign_key_check` pass;
 - one active version exists per source path;
-- agent-day, PCS agent-day, call-key, forecast-hour, and actual-interval grains
-  are unique;
+- agent-day, absence-event, absence agent-day, PCS agent-day, call-key,
+  forecast-hour, and service-interval grains are correct;
 - multi-day sources use row dates and ambiguous blank LILO rows are rejected;
 - every no-show passes the full source/roster/boundary gate;
+- all Verint activity labels are mapped or appear in an explicit review output;
+- service availability equals answered/offered and is never an agent metric;
+- aggregate rates use summed numerators and denominators;
+- the applied rule version/hash matches generated reports and exports;
 - correction minutes equal displayed interval endpoints;
 - failed model/action operations restore prior state;
 - unchanged refresh creates no raw/source-registry growth;
@@ -88,13 +97,13 @@ the rejected compatibility path. It is not part of v0.3.0 or its runtime.
 Rebuild the blank public roster template deterministically:
 
 ```bash
-python tools/build_fte_template.py
+python3 tools/build_fte_template.py
 ```
 
 Create a local populated standard copy without changing the source workbook:
 
 ```bash
-python tools/build_fte_template.py --source /path/to/current/FTE.xlsx \
+python3 tools/build_fte_template.py --source /path/to/current/FTE.xlsx \
   --output output/setup/FTE\ Count.xlsx
 ```
 
@@ -106,7 +115,7 @@ builders through `build_report_pack`; do not import them directly in the CLI.
 Call-by-call uses a stable deterministic leg key. Full-history extracts may
 overlap, so `core.clean_call_leg` chooses the newest active row at that key.
 PCS numerator, denominator, eligible survey mode, scored questions, thresholds
-and zero-denominator behavior live in configuration/model code and tests.
+and zero-denominator behavior live in the central rulebook and tests.
 
 `exports.py` streams detailed clean data to CSV/XLSX only on explicit request.
 `custom_jobs.py` exposes a query-only context, but Python jobs remain trusted

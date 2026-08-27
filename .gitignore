@@ -1,5 +1,6 @@
 # Local data and generated state
 config/wfmhub.toml
+config/wfm_rules.toml
 database/
 backups/
 logs/

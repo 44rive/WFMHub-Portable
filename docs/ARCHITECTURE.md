@@ -5,7 +5,7 @@
 Every feature follows the same layers:
 
 ```text
-untouched source -> parser/scope gate -> raw table -> core model -> mart -> Excel
+untouched source -> parser/scope gate -> raw table -> rule engine -> mart -> Excel
 ```
 
 A new forecast KPI, queue feed, or attendance rule adds an adapter, a numbered
@@ -25,6 +25,8 @@ WFMHub/
 ├── templates/FTE Count.xlsx    blank standard roster workbook
 ├── config/default.toml         shipped defaults
 ├── config/wfmhub.toml          user configuration
+├── config/default_rules.toml   shipped calculation defaults
+├── config/wfm_rules.toml       editable/versioned business rulebook
 ├── database/wfm.sqlite3        durable SQLite hub
 ├── input/                      persistent human inputs
 ├── custom/                     Python and read-only SQL job templates
@@ -54,6 +56,7 @@ details remain in one module.
 | `meta.source_file` | One immutable file-content + roster-scope version |
 | `meta.refresh_run` | One refresh attempt |
 | `meta.quality_issue` | One issue detected by the current model run |
+| `meta.rule_application` | Exact rule version/hash applied by one model run |
 | `raw.fte_agent` | One FTE Agent-sheet row |
 | `raw.schedule_shift` | One admitted Verint schedule row |
 | `raw.schedule_event` | One parsed event interval belonging to an admitted shift |
@@ -72,6 +75,9 @@ details remain in one module.
 | `mart.forecast_hour` | One forecast queue/hour |
 | `mart.intraday_queue_interval` | One actual queue/15-minute interval |
 | `mart.agent_pcs_day` | One admitted Agent ID/day with call and PCS measures |
+| `mart.absence_event` | One classified, schedule-clipped Verint/LILO evidence interval |
+| `mart.absence_agent_day` | One payroll absence/vacation/shrinkage result per Agent ID/day |
+| `mart.service_interval` | One rule-versioned APBE/APFR/APDE service interval |
 | `mart.source_health` | One configured source family |
 
 ## Report packs
@@ -80,8 +86,10 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 
 | Pack | Folder | Scope |
 |---|---|---|
-| `operations` | `output/operations` | Attendance, GAPS, RTA, operational quality/health |
-| `intraday` | `output/intraday` | APBE/APFR actuals and separate Verint forecast |
+| `operations` | `output/operations` | Attendance, GAPS and quality/health; no adherence KPI |
+| `absence` | `output/absence` | Payroll absence, activity evidence, spells and Bradford |
+| `intraday` | `output/intraday` | APBE/APFR/APDE actuals and separate Verint forecast |
+| `scorecard` | `output/scorecard` | Pivot-ready daily Service, Forecast, Absence and PCS KPI facts |
 | `quality_pcs` | `output/quality_pcs` | Agent call performance, PCS, trends and responses |
 
 Operations remains the only workbook accepted for correction-action import.
@@ -109,7 +117,7 @@ matching.
 The scope has a deterministic fingerprint. If FTE changes, the same untouched
 schedule/LILO/status/call file is reprocessed against the new roster. This prevents
 both stale worldwide rows and the “new agent missing from an unchanged file”
-problem. Forecast and APBE/APFR are queue data, so they bypass the agent gate.
+problem. Forecast and APBE/APFR/APDE are queue data, so they bypass the agent gate.
 
 ## Incremental and atomic refresh
 
@@ -130,7 +138,7 @@ them. Deleting a physical extract does not silently erase loaded history.
 ## Row dates and multi-day extracts
 
 Filename dates are hints, never the primary business date. Schedule, Agent
-Status, Call-by-Call, Forecast and APBE/APFR use row fields. LILO prefers a
+Status, Call-by-Call, Forecast and APBE/APFR/APDE use row fields. LILO prefers a
 row-level Date field, then the first/last boundary. A single filename date may
 be used only for a boundary-blank daily LILO row. In a multi-day LILO file, a
 row with both boundaries blank and no Date is rejected because its day cannot
@@ -186,9 +194,64 @@ Overnight shifts require every touched LILO date. Planned absence/adjustment is
 physically subtracted from late and early intervals, so displayed endpoints and
 gap minutes agree.
 
-## Status, conformance, and RTA
+## Central rulebook and calculation audit
 
-Status intervals are clipped to the scheduled shift. When overlaps exist, the
+`config/wfm_rules.toml` is the canonical business definition. It contains
+named, validated KPI expressions, activity categories/flags, standard-day
+hours, service-level profiles and queue scopes. The expression engine supports
+only numeric variables, arithmetic, and a small function allowlist. It never
+uses Python `eval`.
+
+Every absence and service row stores the active `rule_version` and
+`rule_sha256`. `meta.rule_application` records the same identity by refresh run.
+The KPI catalog workbook is generated from this rulebook; documentation and
+calculation code therefore cannot silently drift.
+
+Clipping, overlap unions, overnight handling, deduplication, identity, and
+spell grouping remain tested engine primitives rather than editable formulas.
+
+## Absence engine
+
+Activities and wide StartEndTimes both normalize into `raw.schedule_shift`;
+Activities also produces `raw.schedule_event`. Data Source IDs is the primary
+operational Agent ID.
+
+The absence engine:
+
+1. selects the active schedule version per Agent ID/day;
+2. classifies the shift assignment and every detailed event through the
+   first-match activity rulebook;
+3. clips event intervals to the scheduled shift;
+4. adds proven LILO no-show/late/early evidence;
+5. unions intervals separately for absence, vacation, unpaid and shrinkage;
+6. caps planned net minutes at the configured standard day;
+7. groups consecutive absence days into spells and calculates Bradford;
+8. surfaces unmapped and `NO_ACTIVITY` evidence for review.
+
+Planned absence and observed no-show remain distinct evidence types. Overlaps
+may be visible as multiple evidence rows, but never double-count within a daily
+KPI.
+
+## Service model
+
+`mart.service_interval` contains both raw additive components and calculated
+KPIs. Service availability has one unambiguous meaning:
+
+```text
+answered / offered
+```
+
+The model also retains gross SL and short-abandon-adjusted SL. Queue scopes
+choose the reported profile, while both variants remain available for audit.
+AHT is weighted from handled seconds divided by answered contacts. Higher-grain
+reports use ratios of summed components, never averages of interval percentages.
+
+## Optional legacy Agent Status compatibility
+
+Agent Status and the former conformance/RTA tables are disabled by default in
+v0.4 because adherence is not part of the approved SOTA reporting scope. They
+remain as compatibility tables for an existing SQLite hub. If explicitly
+enabled, status intervals are clipped to the scheduled shift. When overlaps exist, the
 newest state wins; category totals cannot exceed covered time. Agent Status is
 the conformance basis only above configured coverage (80% by default), else the
 explicitly labelled LILO span or `None` is used.
@@ -196,21 +259,21 @@ explicitly labelled LILO span or `None` is used.
 Agent Status filenames may describe one date, a date range, or full history.
 Every row's `Status Start Date and Time` determines its business date.
 
-RTA uses the newest admitted status timestamp. If no status row passes agent
+Legacy RTA uses the newest admitted status timestamp. If no status row passes agent
 scope, RTA is empty and source health is `ERROR`; current time is never used as
 a fake snapshot.
 
 ## Forecast boundary
 
 Verint Forecast contributes only forecast/required values. Exported actual
-fields are discarded. APBE/APFR contributes actual performance. Both remain
+fields are discarded. APBE/APFR/APDE contributes actual performance. Both remain
 separate until a reviewed queue/LOB mapping is configured.
 
 ## Upgrades
 
-v0.3 uses SQLite and does not convert or open v0.1 DuckDB data. Install v0.3 in
+v0.4 uses SQLite and does not convert or open v0.1 DuckDB data. Install v0.4 in
 a new folder, point it at the same untouched source root, and let it rebuild
-SQLite. Preserve the entire v0.1 folder. Saved Excel reports can re-import
+SQLite. Preserve the entire old folder. Saved Excel reports can re-import
 correction decisions.
 
 Within the SQLite generation, migrations are additive and never edited after

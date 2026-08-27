@@ -13,6 +13,7 @@ import xlsxwriter
 from .config import Config
 from .database import DatabaseConnection
 from .progress import ProgressCallback
+from .rules import load_rulebook
 
 
 @dataclass(frozen=True)
@@ -52,18 +53,17 @@ DATASETS: dict[str, ExportDataset] = {
         "SELECT * FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id",
     ),
     "attendance": ExportDataset(
-        "attendance", "Attendance and conformance agent/day results.",
-        """SELECT a.*, c.scheduled_net_minutes, c.productive_minutes,
-                  c.auxiliary_minutes, c.break_minutes, c.lunch_minutes,
-                  c.unavailable_minutes, c.logged_off_minutes,
-                  c.status_covered_minutes, c.status_coverage_percent,
-                  c.measurement_basis, c.worked_minutes, c.conformance_percent,
-                  c.break_overrun_minutes, c.lunch_overrun_minutes,
-                  c.unexplained_minutes
-           FROM mart.attendance_agent_day a
-           LEFT JOIN mart.conformance_agent_day c USING(agent_day_key)
-           WHERE a.business_date BETWEEN ? AND ?
-           ORDER BY a.business_date, a.agent_id""",
+        "attendance", "Attendance agent/day results without adherence metrics.",
+        """SELECT * FROM mart.attendance_agent_day
+           WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id""",
+    ),
+    "absence_agent_day": ExportDataset(
+        "absence_agent_day", "Rule-versioned payroll absence, vacation and shrinkage per agent/day.",
+        "SELECT * FROM mart.absence_agent_day WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id",
+    ),
+    "absence_events": ExportDataset(
+        "absence_events", "Classified, schedule-clipped Verint and LILO absence evidence.",
+        "SELECT * FROM mart.absence_event WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start",
     ),
     "gaps": ExportDataset(
         "gaps", "Correction candidates and saved decisions.",
@@ -134,8 +134,12 @@ DATASETS: dict[str, ExportDataset] = {
            ) x WHERE row_rank=1 ORDER BY extract_date, agent_id, status_start""",
     ),
     "intraday_actual": ExportDataset(
-        "intraday_actual", "Clean Storm APBE/APFR queue intervals.",
+        "intraday_actual", "Legacy clean Storm APBE/APFR/APDE queue intervals.",
         "SELECT * FROM mart.intraday_queue_interval WHERE business_date BETWEEN ? AND ? ORDER BY business_date, interval_start, source_system, queue",
+    ),
+    "service_actual": ExportDataset(
+        "service_actual", "Rule-versioned service performance; availability means answered/offered.",
+        "SELECT * FROM mart.service_interval WHERE business_date BETWEEN ? AND ? ORDER BY business_date, interval_start, source_system, queue",
     ),
     "forecast": ExportDataset(
         "forecast", "Clean Verint forecast and required staffing hours.",
@@ -260,6 +264,7 @@ def export_dataset(
     if progress is not None:
         progress(rows, 0, f"Exported {dataset.key}: {rows:,} rows")
     manifest = output.with_name(output.name + ".manifest.txt")
+    rulebook = load_rulebook(config.home, config.business_rules)
     manifest.write_text(
         "\n".join([
             "WFMHub clean-data export",
@@ -269,6 +274,8 @@ def export_dataset(
             f"Rows: {rows}",
             f"Generated: {datetime.now().isoformat(timespec='seconds')}",
             f"Format: {file_format.upper()}",
+            f"Rule version: {rulebook.version}",
+            f"Rule SHA-256: {rulebook.sha256}",
             "Source extracts modified: no",
         ]) + "\n",
         encoding="utf-8",

@@ -19,6 +19,7 @@ class CustomLabTests(unittest.TestCase):
         home = Path(folder) / "hub"
         (home / "config").mkdir(parents=True)
         shutil.copy2(REPO / "config" / "default.toml", home / "config" / "default.toml")
+        shutil.copy2(REPO / "config" / "default_rules.toml", home / "config" / "default_rules.toml")
         shutil.copytree(REPO / "sql", home / "sql")
         config_file = ensure_user_config(home)
         write_source_root(config_file, Path(folder) / "source")

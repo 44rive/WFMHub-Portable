@@ -109,7 +109,7 @@ TABLE_COLUMNS: dict[str, list[str]] = {
     "raw.lilo": ["source_file_id", "source_row", "extract_date", "agent_id", "agent_name", "first_login", "raw_last_logout", "last_logout", "overnight_adjusted"],
     "raw.agent_status": ["source_file_id", "source_row", "serial_number", "extract_date", "agent_id", "agent_name", "status", "actual_category", "status_start", "status_end", "duration_seconds", "queue"],
     "raw.forecast_interval": ["source_file_id", "source_row", "queue_name", "business_date", "interval_time", "interval_minutes", "interval_start", "volume_forecast", "abandons_forecast", "sl_forecast", "sl_required", "aht_forecast_seconds", "headcount_forecast", "net_staffing_forecast", "fte_forecast", "fte_required"],
-    "raw.queue_actual": ["source_file_id", "source_row", "source_system", "business_date", "interval_time", "interval_start", "hour_start", "language", "queue_id", "queue", "business_partner", "lob", "offered", "answered", "abandoned", "short_calls", "answered_15s", "answered_20s", "answered_30s", "asa_seconds", "aht_seconds"],
+    "raw.queue_actual": ["source_file_id", "source_row", "source_system", "business_date", "interval_time", "interval_start", "hour_start", "language", "queue_id", "queue", "business_partner", "lob", "offered", "answered", "abandoned", "short_calls", "answered_15s", "answered_20s", "answered_30s", "asa_seconds", "aht_seconds", "abandoned_20s"],
     "raw.call_leg": [
         "source_file_id", "source_row", "call_key", "interaction_key", "business_date",
         "call_start", "call_end", "communication_type", "call_direction",
@@ -189,6 +189,7 @@ def discover_sources(config: Config) -> list[SourceCandidate]:
         ("forecast", "forecast_folder", "*.txt"),
         ("apbe", "apbe_folder", "*.xlsx"),
         ("apfr", "apfr_folder", "*.xlsx"),
+        ("apde", "apde_folder", "*.xlsx"),
         ("calls", "call_folder", "*.csv"),
     )
     for family, key, pattern in specs:
@@ -196,7 +197,7 @@ def discover_sources(config: Config) -> list[SourceCandidate]:
             continue
         if family in {"forecast"} and not config.modules.get("forecast", True):
             continue
-        if family in {"apbe", "apfr"} and not config.modules.get("intraday", True):
+        if family in {"apbe", "apfr", "apde"} and not config.modules.get("intraday", True):
             continue
         if family == "calls" and not config.modules.get("pcs", True):
             continue
@@ -328,7 +329,72 @@ def parse_fte(path: Path, file_id: str) -> ParseResult:
         workbook.close()
 
 
+def _parse_start_end_schedule(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
+    """Normalize Verint's wide one-column-per-day StartEndTimes extract."""
+    shifts: list[dict[str, Any]] = []
+    rejected: list[str] = []
+    scoped_out = 0
+    with path.open("r", encoding="cp1252", newline="") as handle:
+        reader = csv.reader(handle, delimiter="\t")
+        try:
+            headers = next(reader)
+        except StopIteration as exc:
+            raise SourceSchemaError("StartEndTimes extract is empty") from exc
+        normalized = [str(value or "").strip() for value in headers]
+        if len(normalized) < 3 or normalized[:2] != ["Name", "Data Source IDs"]:
+            raise SourceSchemaError("StartEndTimes must begin with Name and Data Source IDs")
+        date_columns = [(index, parse_date(header)) for index, header in enumerate(normalized[2:], 2)]
+        date_columns = [(index, value) for index, value in date_columns if value is not None]
+        if not date_columns:
+            raise SourceSchemaError("StartEndTimes contains no date columns")
+        for physical_row, values in enumerate(reader, 2):
+            name = _clean(values[0] if values else None)
+            raw_id = normalize_id(values[1] if len(values) > 1 else None, reject_placeholders=False)
+            agent_id = normalize_id(values[1] if len(values) > 1 else None)
+            if not name and raw_id is None:
+                continue
+            if scope is not None:
+                resolved_id = scope.resolve(agent_id, name)
+                if resolved_id is None:
+                    scoped_out += sum(
+                        1 for column, _ in date_columns
+                        if column < len(values) and str(values[column] or "").strip()
+                    )
+                    continue
+                agent_id = resolved_id
+            for ordinal, (column, business_date) in enumerate(date_columns, 1):
+                raw_assignment = _clean(values[column] if column < len(values) else None)
+                if not raw_assignment:
+                    continue
+                assignment, start, end = parse_verint_interval(raw_assignment)
+                is_off = raw_assignment.strip().upper() == "OFF"
+                parse_ok = is_off or bool(start and end and end > start)
+                shifts.append({
+                    "source_file_id": file_id,
+                    "source_row": physical_row * 1000 + ordinal,
+                    "schedule_date": start.date() if start else business_date,
+                    "agent_id_raw": raw_id,
+                    "agent_id": agent_id,
+                    "agent_name": name,
+                    "scheduling_period": f"{date_columns[0][1]:%m/%d/%Y} to {date_columns[-1][1]:%m/%d/%Y}",
+                    "shift_assignment": raw_assignment,
+                    "assignment": assignment or raw_assignment,
+                    "assignment_type": classify_assignment(raw_assignment, assignment),
+                    "scheduled_start": start,
+                    "scheduled_end": end,
+                    "shift_events": None,
+                    "parse_ok": parse_ok,
+                })
+                if not parse_ok:
+                    rejected.append(f"row {physical_row}, {business_date:%Y-%m-%d}: shift interval could not be parsed")
+    return ParseResult({"raw.schedule_shift": shifts, "raw.schedule_event": []}, rejected, scoped_out)
+
+
 def parse_schedule(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
+    with path.open("r", encoding="cp1252", newline="") as probe:
+        headers = next(csv.reader(probe, delimiter="\t"), [])
+    if "Scheduling Period" not in headers and len(headers) >= 3 and any(parse_date(value) for value in headers[2:]):
+        return _parse_start_end_schedule(path, file_id, scope)
     shifts: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     rejected: list[str] = []
@@ -816,25 +882,21 @@ def parse_queue_actual(path: Path, file_id: str, source_system: str) -> ParseRes
         time_i = require("15 Minute Periods of Day")
         partner_i = require("BusinessPartnerID")
         lob_i = require("LineOfBusiness")
-        if source_system == "APBE":
-            offered_i = require("Offered_calls (w/o short calls)")
-            answered_i = require("Answered_Calls")
-            abandoned_i = require("Abandoned_Calls (w/o short calls)")
-            ans15_i = require("Answered_Calls <= 15s")
-            ans20_i = require("Answered_Calls <= 20s")
-            ans30_i = require("Answered_Calls <= 30s")
-        else:
-            offered_i = require("APPELS ENTRANTS")
-            answered_i = require("APPELS RÉP", "APPELS REP")
-            abandoned_i = require("APPELS ABAN")
-            ans15_i = require("APPELS RÉP <= 15s", "APPELS REP <= 15s")
-            ans20_i = require("APPELS RÉP <= 20s", "APPELS REP <= 20s")
-            ans30_i = require("APPELS RÉP <= 30s", "APPELS REP <= 30s")
-        short_i = require("Short_calls < 5s")
-        asa_i = require("Average_Speed_of_Answer")
-        talk_i = require("Average_Talk_Time")
-        hold_i = require("Average_Hold_Time")
-        wrap_i = require("Average Total Wrap Time")
+        offered_i = require("Offered_calls (w/o short calls)", "APPELS ENTRANTS", "Offered Calls")
+        answered_i = require("Answered_Calls", "APPELS RÉP", "APPELS REP", "Answered Calls")
+        abandoned_i = require("Abandoned_Calls (w/o short calls)", "APPELS ABAN", "Abandoned Calls")
+        ans15_i = require("Answered_Calls <= 15s", "APPELS RÉP <= 15s", "APPELS REP <= 15s", "Answered Calls <= 15s")
+        ans20_i = require("Answered_Calls <= 20s", "APPELS RÉP <= 20s", "APPELS REP <= 20s", "Answered Calls <= 20s")
+        ans30_i = require("Answered_Calls <= 30s", "APPELS RÉP <= 30s", "APPELS REP <= 30s", "Answered Calls <= 30s")
+        abandoned20_i = next((normalized.get(normalize_header(name)) for name in (
+            "Abandoned_Calls <= 20s", "Abandoned Calls <= 20s",
+            "APPELS ABAN <= 20s", "Abandoned <= 20s",
+        ) if normalized.get(normalize_header(name)) is not None), None)
+        short_i = require("Short_calls < 5s", "Short Calls < 5s")
+        asa_i = require("Average_Speed_of_Answer", "Average Speed of Answer")
+        talk_i = require("Average_Talk_Time", "Average Talk Time")
+        hold_i = require("Average_Hold_Time", "Average Hold Time")
+        wrap_i = require("Average Total Wrap Time", "Average_Total_Wrap_Time")
         queue_i = normalized.get("QUEUE")
         queue_id_i = normalized.get("QUEUEID")
         language_i = normalized.get("LANGUAGE")
@@ -862,7 +924,7 @@ def parse_queue_actual(path: Path, file_id: str, source_system: str) -> ParseRes
                 "source_file_id": file_id, "source_row": source_row, "source_system": source_system,
                 "business_date": business_date, "interval_time": interval_time,
                 "interval_start": interval_start, "hour_start": interval_start.replace(minute=0, second=0, microsecond=0),
-                "language": _clean(get(language_i)) if language_i is not None else ("FR" if source_system == "APFR" else None),
+                "language": _clean(get(language_i)) if language_i is not None else ({"APFR": "FR", "APDE": "DE"}.get(source_system)),
                 "queue_id": normalize_id(get(queue_id_i), reject_placeholders=False) if queue_id_i is not None else None,
                 "queue": queue, "business_partner": partner, "lob": _clean(get(lob_i)),
                 "offered": _number(get(offered_i)), "answered": _number(get(answered_i)),
@@ -870,6 +932,7 @@ def parse_queue_actual(path: Path, file_id: str, source_system: str) -> ParseRes
                 "answered_15s": _number(get(ans15_i)), "answered_20s": _number(get(ans20_i)),
                 "answered_30s": _number(get(ans30_i)), "asa_seconds": duration_seconds(get(asa_i)),
                 "aht_seconds": sum(parts) if parts else None,
+                "abandoned_20s": _number(get(abandoned20_i)) if abandoned20_i is not None else None,
             })
         return ParseResult({"raw.queue_actual": output}, rejected)
     finally:
@@ -884,6 +947,7 @@ PARSERS: dict[str, Callable[[Path, str, AgentScope | None], ParseResult]] = {
     "forecast": lambda path, file_id, scope: parse_forecast(path, file_id),
     "apbe": lambda path, file_id, scope: parse_queue_actual(path, file_id, "APBE"),
     "apfr": lambda path, file_id, scope: parse_queue_actual(path, file_id, "APFR"),
+    "apde": lambda path, file_id, scope: parse_queue_actual(path, file_id, "APDE"),
     "calls": parse_calls,
 }
 

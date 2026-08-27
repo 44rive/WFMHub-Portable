@@ -19,6 +19,7 @@ class DashboardTests(unittest.TestCase):
         home = Path(folder) / "hub"
         (home / "config").mkdir(parents=True)
         shutil.copy2(REPO / "config" / "default.toml", home / "config" / "default.toml")
+        shutil.copy2(REPO / "config" / "default_rules.toml", home / "config" / "default_rules.toml")
         if include_sql:
             shutil.copytree(REPO / "sql", home / "sql")
         ensure_user_config(home)
@@ -40,7 +41,8 @@ class DashboardTests(unittest.TestCase):
             quality_reviews=2,
         ))
 
-        self.assertIn("W   W FFFFF M   M H   H U   U BBBB", text)
+        self.assertIn("______", text)
+        self.assertIn("\\_/\\_/", text)
         self.assertIn("made by Anass ASSRI", text)
         self.assertIn("Latest data: 2026-08-27", text)
         self.assertIn("(schedule)", text)

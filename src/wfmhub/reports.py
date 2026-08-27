@@ -15,9 +15,11 @@ from .report_packs import report_pack, report_pack_folder
 
 
 COLORS = {
-    "dark": "#1F2933",
-    "muted": "#7B8794",
-    "teal": "#0F3B42",
+    "dark": "#16212A",
+    "muted": "#52636F",
+    "teal": "#075E68",
+    "teal_light": "#DDEFF1",
+    "gold": "#D6A84B",
     "rule": "#9AA5B1",
     "thin": "#D5DADD",
     "blue": "#0563C1",
@@ -42,6 +44,11 @@ def _display_header(name: str) -> str:
         "response_rate": "Response Rate %", "top_box_percent": "Top Box %",
         "low_score_percent": "Low Score %", "pcs_average": "PCS Average",
         "q1_average": "Q1 Average", "q2_average": "Q2 Average",
+        "sl_gross": "Gross SL %", "sl_adjusted": "Adjusted SL %",
+        "service_level": "Configured SL %", "service_availability": "Service Availability %",
+        "abandon_rate": "Abandon Rate %", "absence_rate": "Absence Rate %",
+        "vacation_rate": "Vacation Rate %", "shrinkage_rate": "Shrinkage Rate %",
+        "rule_sha256": "Rule SHA-256", "rule_version": "Rule Version",
     }
     return custom.get(name, name.replace("_", " ").title().replace("Id", "ID"))
 
@@ -56,14 +63,14 @@ class ExcelReport:
         self.workbook.set_properties({
             "title": "WFMHub Portable Report",
             "subject": "Curated WFMHub report pack",
-            "author": "WFMHub Portable",
+            "author": "Anass ASSRI",
             "company": "WFM",
         })
-        self.title = self.workbook.add_format({"font_name": "Calibri", "font_size": 15, "bold": True, "font_color": COLORS["dark"]})
-        self.subtitle = self.workbook.add_format({"font_name": "Calibri", "font_size": 9, "font_color": COLORS["muted"]})
-        self.section = self.workbook.add_format({"font_name": "Calibri", "font_size": 11, "bold": True, "font_color": COLORS["teal"]})
+        self.title = self.workbook.add_format({"font_name": "Aptos Display", "font_size": 16, "bold": True, "font_color": COLORS["white"], "bg_color": COLORS["teal"], "align": "center", "valign": "vcenter"})
+        self.subtitle = self.workbook.add_format({"font_name": "Aptos", "font_size": 9, "font_color": COLORS["dark"], "bg_color": COLORS["teal_light"], "align": "center", "valign": "vcenter"})
+        self.section = self.workbook.add_format({"font_name": "Aptos Display", "font_size": 11, "bold": True, "font_color": COLORS["teal"], "bottom": 2, "bottom_color": COLORS["gold"]})
         self.body = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "bottom": 1, "bottom_color": COLORS["thin"]})
-        self.header = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "bold": True, "font_color": COLORS["dark"], "text_wrap": True, "top": 2, "bottom": 2, "top_color": COLORS["rule"], "bottom_color": COLORS["rule"], "bg_color": COLORS["white"]})
+        self.header = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "bold": True, "font_color": COLORS["teal"], "text_wrap": True, "top": 2, "bottom": 2, "top_color": COLORS["teal"], "bottom_color": COLORS["gold"], "bg_color": COLORS["teal_light"], "valign": "vcenter"})
         self.editable = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["blue"], "bottom": 1, "bottom_color": COLORS["thin"]})
         self.editable_date = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["blue"], "num_format": "yyyy-mm-dd", "bottom": 1, "bottom_color": COLORS["thin"]})
         self.error = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["red"]})
@@ -85,6 +92,7 @@ class ExcelReport:
     ) -> None:
         editable_headers = editable_headers or set()
         worksheet = self.workbook.add_worksheet(name)
+        worksheet.set_tab_color(COLORS["teal"])
         worksheet.hide_gridlines(2)
         worksheet.freeze_panes(4, 0)
         last_col = max(0, len(headers) - 1)
@@ -116,7 +124,7 @@ class ExcelReport:
             columns = [{"header": header, "header_format": self.header} for header in display]
             worksheet.add_table(3, 0, 3 + len(rows), last_col, {
                 "name": "tbl" + "".join(char for char in name.title() if char.isalnum()),
-                "style": "Table Style Light 1",
+                "style": "Table Style Medium 2",
                 "columns": columns,
             })
         else:
@@ -153,7 +161,7 @@ def _summary_sheet(report: ExcelReport, conn: DatabaseConnection, start: date, e
         ("Open corrections", "SELECT count(*) FROM mart.correction_candidate WHERE business_date BETWEEN ? AND ? AND validation_status='Open'", [start, end]),
         ("No-shows", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND attendance_result='No show'", [start, end]),
         ("Present", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND attendance_result='Present'", [start, end]),
-        ("RTA exceptions", "SELECT count(*) FROM mart.rta_snapshot WHERE snapshot_at >= ? AND snapshot_at < ? AND rta_result='Out of adherence'", [datetime.combine(start, datetime.min.time()), datetime.combine(end + timedelta(days=1), datetime.min.time())]),
+        ("Absence hours", "SELECT coalesce(sum(absence_minutes),0)/60.0 FROM mart.absence_agent_day WHERE business_date BETWEEN ? AND ?", [start, end]),
         ("Quality errors", """SELECT count(*) FROM meta.quality_issue
              WHERE severity='ERROR' AND business_date BETWEEN ? AND ?
                AND (source_family IS NULL OR source_family NOT IN ('calls','pcs','intraday','forecast','apbe','apfr'))""", [start, end]),
@@ -193,7 +201,7 @@ def _start_sheet(report: ExcelReport, config: Config, start: date, end: date, ge
             "1. Put untouched exports in their normal source folders.",
             "2. Run WFMHub.cmd and choose Refresh + build report.",
             "3. Open SOURCE_HEALTH first. If it is red or ERROR, stop.",
-            "4. Review ATTENDANCE, GAPS and RTA.",
+            "4. Review ATTENDANCE and GAPS. Adherence is intentionally not calculated in this report.",
         ]),
         (11, "Monthly gaps", [
             "Run a custom period from the first through last day of the month.",
@@ -208,7 +216,7 @@ def _start_sheet(report: ExcelReport, config: Config, start: date, end: date, ge
         (23, "Configuration", [
             f"Source root: {config.source_root}",
             f"Database: {config.database}",
-            f"Tolerance: {config.rules.tolerance_minutes} minutes; status coverage gate: {config.rules.minimum_status_coverage:.0%}",
+            f"Central business rules: {config.business_rules}",
             "Agent scope: FTE roster ID or one unique normalized-name match; operational source IDs are preserved.",
         ]),
     ]
@@ -246,10 +254,8 @@ def build_report(
                    a.scheduled_start, a.scheduled_end, a.scheduled_minutes, a.assignment_type,
                    a.first_login, a.last_logout, a.raw_late_minutes, a.raw_early_leave_minutes,
                    a.uncoded_late_minutes, a.uncoded_early_leave_minutes, a.no_show_minutes,
-                   a.attendance_result, a.attendance_percent, c.measurement_basis,
-                   c.status_coverage_percent, c.worked_minutes, c.conformance_percent,
-                   a.schedule_source, a.lilo_source
-            FROM mart.attendance_agent_day a LEFT JOIN mart.conformance_agent_day c USING(agent_day_key)
+                   a.attendance_result, a.attendance_percent, a.schedule_source, a.lilo_source
+            FROM mart.attendance_agent_day a
             WHERE a.business_date BETWEEN ? AND ?
             ORDER BY a.business_date, CASE a.attendance_result WHEN 'No show' THEN 1 WHEN 'Data not loaded' THEN 2 ELSE 5 END, a.agent_name
             LIMIT ?
@@ -277,16 +283,6 @@ def build_report(
 
         headers, rows = _query(
             conn,
-            """SELECT * FROM mart.rta_snapshot
-               WHERE snapshot_at >= ? AND snapshot_at < ?
-               ORDER BY CASE severity WHEN 'High' THEN 1 WHEN 'Review' THEN 2 ELSE 3 END, agent_name
-               LIMIT ?""",
-            [datetime.combine(start, datetime.min.time()), datetime.combine(end + timedelta(days=1), datetime.min.time()), config.report_limits.get("max_rta_rows", 10000)],
-        )
-        report.add_table_sheet("RTA", "RTA snapshot", "Historical/current snapshot based on the newest loaded Agent Status timestamp; check freshness before action.", headers, rows, exception_column="Severity")
-
-        headers, rows = _query(
-            conn,
             """SELECT detected_at, source_family, source_file, business_date, agent_id,
                       issue_type, severity, details
                FROM meta.quality_issue
@@ -301,7 +297,7 @@ def build_report(
                                                modified_at, loaded_at, row_count, rejected_count,
                                                scoped_out_count, status, details
                                         FROM mart.source_health
-                                        WHERE source_family IN ('fte','schedule','lilo','agent_status')
+                                        WHERE source_family IN ('fte','schedule','lilo')
                                         ORDER BY source_family""")
         report.add_table_sheet("SOURCE_HEALTH", "Source health", "What was found, loaded, rejected or missing for every configured feed.", headers, rows, exception_column="Status")
     except Exception:

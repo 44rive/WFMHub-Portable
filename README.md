@@ -1,108 +1,121 @@
 # WFMHub Portable
 
-WFMHub Portable turns untouched WFM exports into a durable SQLite database and
-a set of finished Excel reports and clean-data exports. It runs on Windows x64 without administrator rights,
-installed Python, Power Query, Power Pivot, ODBC, or Python in Excel.
+WFMHub Portable turns untouched WFM extracts into a durable SQLite database,
+finished Excel reports, pivot-ready model tables, and clean exports. It runs on
+Windows x64 without administrator rights, installed Python, Power Query, Power
+Pivot, ODBC, DuckDB, or Python in Excel.
 
-Normal report workbooks contain curated summaries only and no Excel Data Model.
-Detailed clean rows appear in Excel only when the user explicitly chooses an
-XLSX clean-data export; CSV remains the standard for large call datasets.
+Raw extracts are never edited and are never copied into normal report sheets.
+The SQLite hub remains the source of truth.
 
-## What v0.3.2 does
+## What v0.4 adds
 
-- Ingests FTE, Verint Schedules & Activities, Storm LILO, Storm Agent Status,
-  Verint Forecast, APBE/APFR queue actuals, and Storm Call by Call.
-- Uses the FTE Agent sheet as the “our agents” gate. Agent-level extracts are
-  kept on exact Agent ID or a unique normalized name match; populated Verint
-  `Data Source IDs` remain the operational Agent ID.
-- Shows kept and outside-roster row counts in `SOURCE_HEALTH` without changing
-  a source file.
-- Fingerprints every file and skips unchanged content. A roster change safely
-  re-evaluates unchanged agent extracts.
-- Stores immutable raw versions, clean models, report marts, source health, and
-  persistent correction decisions in `database\wfm.sqlite3`.
-- Produces separate Operations, Intraday and Agent PCS workbooks.
-- Calculates agent call counts, talk/hold/wrap averages, AHT, PCS response rate,
-  Q1/Q2 averages, equal-response-weighted PCS average, top box and low scores.
-- Exports clean detailed CSV/XLSX datasets without changing an extract.
-- Runs trusted custom portable-Python jobs and read-only custom SQL jobs.
-- Lets the user choose the source group, report pack and date period from the
-  daily menu.
-- Shows an in-place progress bar for loading, models, reports, exports, custom
-  jobs, imports and backups. Large LILO, Call-by-Call and export streams show
-  their processed row count.
-- Opens on a branded ASCII dashboard with a fixed status panel for hub state,
-  database size, agent count, last refresh, reporting period, source health,
-  quality issues, and the latest loaded source date/family.
-- Keeps Verint Forecast isolated from attendance, absence, corrections, and
-  payroll logic.
+- One editable, validated business rulebook: `config\wfm_rules.toml`.
+- Rule-versioned payroll absence, vacation, unpaid leave, shrinkage, late,
+  early-leave, no-show, spell, and Bradford calculations.
+- Automatic support for both Verint Activities and wide StartEndTimes extracts.
+- APBE, APFR, and APDE service actuals plus separate Verint forecast.
+- Two named SL definitions: gross and short-abandon-adjusted.
+- Service availability defined only as `answered / offered`; it is never agent
+  availability or adherence.
+- Attendance & Absence and Executive Scorecard report packs.
+- Pivot-ready Excel Tables without automatically creating PivotTables.
+- A generated KPI catalog showing every formula, grain, unit, active version,
+  and rulebook SHA-256.
+- A safer Rules tool that validates formulas before any refresh.
+- A redesigned CMD dashboard showing the active rule version.
+- Agent Status and adherence disabled by default. The legacy database tables
+  remain readable for backward compatibility, but new reports contain no
+  adherence KPI.
+
+## Existing capabilities
+
+- FTE-authoritative agent scope. Exact Agent ID or one unique normalized name
+  admits a row; populated Verint `Data Source IDs` remain the operational ID.
+- Immutable, fingerprinted ingestion with safe reprocessing after roster changes.
+- Multi-day and overlapping-file support using row dates rather than filenames.
+- Attendance and correction gaps from Verint schedules plus Storm LILO.
+- Forecast and staffing requirements from Verint only.
+- Agent call performance and PCS from FTE-scoped Call-by-Call extracts.
+- Clean CSV/XLSX exports and trusted custom portable-Python/read-only SQL jobs.
+- Progress and fixed source-health/latest-date status displays.
 
 ## Windows quick start
 
-Download `WFMHub-Portable-v0.3.2-win-x64.zip` from GitHub Releases—not GitHub's
-automatic “Source code” ZIP. Choose **Extract All**, keep the complete `WFMHub`
-folder together, double-click `SETUP.cmd` once, then use `WFMHub.cmd` each day.
+1. Download `WFMHub-Portable-v0.4.0-win-x64.zip` from GitHub Releases. Do not
+   use GitHub's automatic Source code ZIP.
+2. Choose **Extract All** and keep the complete `WFMHub` folder together.
+3. Double-click `SETUP.cmd` once and select the folder containing `FTE`,
+   `Storm`, and `Verint`.
+4. Double-click `WFMHub.cmd` for daily work.
+5. Choose **Validate rules and build KPI catalog** once before the first refresh.
+6. Refresh the required source group and date period.
 
-`SETUP.cmd` first tests the bundled runtime, SQLite transactions/backups, and
-Excel write/read support. The portable package uses SQLite built into the
-official CPython runtime and adds no third-party database extension or app-local
-MSVC package.
+Use the blank `templates\FTE Count.xlsx` roster if needed. Read the
+[beginner guide](docs/BEGINNER_GUIDE.md), [rulebook guide](docs/RULEBOOK_GUIDE.md),
+and [PivotTable guide](docs/PIVOT_GUIDE.md).
 
-Read [`docs/BEGINNER_GUIDE.md`](docs/BEGINNER_GUIDE.md) for click-by-click help.
+## Output folders
 
-The release includes `templates\FTE Count.xlsx`, the standard blank roster.
-Copy it to the configured `FTE` folder and maintain agent rows on its `Agent`
-sheet. WFMHub also recognizes safe renamed/offset roster tables and refuses
-ambiguous workbooks instead of guessing.
+| Folder | Contents |
+|---|---|
+| `output\operations` | Attendance and correction candidates; no adherence KPI |
+| `output\absence` | Agent-day absence, classified events, spells, Bradford, and rules |
+| `output\intraday` | APBE/APFR/APDE service actuals and separate Verint forecast |
+| `output\scorecard` | Daily service, forecast, absence, and PCS KPI facts |
+| `output\quality_pcs` | Agent call performance, PCS, and survey responses |
+| `output\reference` | Generated KPI catalog |
+| `output\data_exports` | Explicit clean CSV/XLSX exports |
+| `output\custom` | Custom Lab results |
 
-Generated workbooks are independent report packs:
-
-- `output\operations`: Attendance, GAPS and RTA.
-- `output\intraday`: APBE/APFR actuals and separate Verint forecast.
-- `output\quality_pcs`: agent call performance, PCS and survey comments.
-- `output\data_exports`: clean detailed CSV/XLSX data selected from the menu.
-- `output\custom`: results from Custom Lab jobs.
+The `PIVOT_*`, `KPI_DAILY`, `SERVICE_INTERVALS`, and `ABSENCE_DAILY` sheets are
+curated Excel Tables designed as PivotTable sources. They are not raw extracts.
 
 ## Source boundaries
 
 | Source | Used for |
 |---|---|
 | FTE Agent sheet | Agent scope and organisation context |
-| Verint Schedules & Activities | Planned shifts, activities, absence, start/end time |
-| Storm LILO | Actual first login and last logout |
-| Storm Agent Status | Actual status timeline, conformance, and RTA |
+| Verint Activities | Schedule assignments and detailed activity intervals |
+| Verint StartEndTimes | Schedule start/end and assignment by agent/day |
+| Storm LILO | Actual first login and last logout for attendance evidence |
 | Verint Forecast | Forecast and staffing requirements only |
-| Storm APBE/APFR | Queue actuals only |
-| Storm Call by Call | Agent call performance and PCS survey results |
+| Storm APBE/APFR/APDE | Service actuals only |
+| Storm Call by Call | Agent performance and PCS |
+| Storm Agent Status | Optional legacy compatibility only; disabled by default |
 
-Every dated source uses the date contained in each row. A filename may contain
-one date, a start/end range or no date. For a blank LILO row in a multi-day
-file, include a `Date`, `Business Date`, `Extract Date` or `Report Date` column;
-without a row date the hub rejects that row instead of inventing a no-show day.
+Filename dates are hints. Each dated row or Verint date column determines its
+business date. Missing files and missing LILO roster rows are never invented as
+no-shows.
 
-## Custom Lab
+## Central rulebook
 
-Copy `custom\jobs\_paste_your_python_here.py`, rename the copy without the
-leading underscore and paste custom code inside `run(ctx)`. Custom jobs receive
-the selected start/end dates and a read-only hub query API. Read-only SQL jobs
-work the same way under `custom\sql`. Run only Python you trust; a Python script
-is executable code. The work computer never runs `pip`.
+Edit `config\wfm_rules.toml`, increase `rulebook.version`, then run:
 
-If an Agent Status file has zero rows matching the active FTE roster, the hub
-creates no RTA result and marks `SOURCE_HEALTH` as `ERROR`. It never substitutes
-worldwide rows or invents a current snapshot.
+```text
+WFMHub.cmd > Validate rules and build KPI catalog
+```
+
+The file controls activity taxonomy, absence/payroll/shrinkage flags, standard
+day hours, SL formulas, service availability, AHT, forecast deviation, queue
+scopes, and other business definitions. Unsafe Python and unknown formula
+elements are rejected.
+
+Every modeled row stores the rule version and SHA-256 so a result can be traced
+back to its exact definitions.
 
 ## Developer start
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install -e .
-python -m wfmhub --home . doctor
-python -m wfmhub --home . setup --source-root /path/to/untouched-extracts --non-interactive
-python -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31
-python -m unittest discover -s tests -v
+python3 -m pip install -e .
+python3 -m wfmhub --home . doctor
+python3 -m wfmhub --home . setup --source-root /path/to/untouched-extracts --non-interactive
+python3 -m wfmhub --home . rules catalog
+python3 -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31 --all-packs
+python3 -m unittest discover -s tests -v
 ```
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for storage grains, identity
-scope, business rules, and the extension pattern for future modules.
+See [Architecture](docs/ARCHITECTURE.md) for grains, formulas, audit behavior,
+and the extension pattern.

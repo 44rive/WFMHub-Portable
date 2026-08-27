@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0 — 2026-08-28
+
+- Added `config/wfm_rules.toml`, a safe, editable, versioned source of truth for
+  activity classification, payroll absence, shrinkage, SL, service
+  availability, AHT, forecast deviation, and scope rules.
+- Added rule validation, exact SHA-256 audit identity, and generated KPI,
+  activity, and queue-scope catalog sheets.
+- Added automatic parsing of Verint's wide StartEndTimes extract alongside the
+  existing Activities format; Data Source IDs remains the operational Agent ID.
+- Added schedule-clipped, overlap-safe absence events and agent-day absence,
+  vacation, unpaid, shrinkage, spell, and Bradford marts.
+- Added APDE actual ingestion and a service mart retaining gross/adjusted SL,
+  weighted AHT, and service availability (`answered / offered`).
+- Added Attendance & Absence and Executive Scorecard workbooks with bounded
+  PivotTable-ready Excel Tables. WFMHub does not create the PivotTables.
+- Added beginner Rulebook and PivotTable guides.
+- Removed adherence metrics and RTA from generated Operations reports. Agent
+  Status ingestion and legacy marts are disabled by default but preserved for
+  compatibility.
+- Redesigned the CMD logo and added active rule version/hash to the fixed status
+  panel.
+
 ## 0.3.2 — 2026-08-27
 
 - Added a compact WFMHUB ASCII logo and `made by Anass ASSRI` credit to the

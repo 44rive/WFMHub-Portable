@@ -26,7 +26,7 @@ REPORT_PACKS = {
         key="operations",
         default_folder="operations",
         filename_prefix="WFMHub_Operations",
-        purpose="Attendance, corrections, RTA, data quality, and source health.",
+        purpose="Attendance, corrections, data quality, and source health without adherence KPIs.",
     ),
     "intraday": ReportPack(
         key="intraday",
@@ -39,6 +39,18 @@ REPORT_PACKS = {
         default_folder="quality_pcs",
         filename_prefix="WFMHub_Quality_PCS",
         purpose="Agent call performance and PCS metrics sourced from call-by-call data.",
+    ),
+    "absence": ReportPack(
+        key="absence",
+        default_folder="absence",
+        filename_prefix="WFMHub_Attendance_Absence",
+        purpose="Payroll absence, vacation, shrinkage, spells and classified Verint events.",
+    ),
+    "scorecard": ReportPack(
+        key="scorecard",
+        default_folder="scorecard",
+        filename_prefix="WFMHub_Executive_Scorecard",
+        purpose="Rule-versioned service, forecast, absence and PCS KPI facts.",
     ),
 }
 
@@ -88,4 +100,12 @@ def build_report_pack(
         from .pcs_reports import build_pcs_report
 
         return build_pcs_report(conn, config, start, end, output)
+    if key == "absence":
+        from .sota_reports import build_absence_report
+
+        return build_absence_report(conn, config, start, end, output)
+    if key == "scorecard":
+        from .sota_reports import build_scorecard_report
+
+        return build_scorecard_report(conn, config, start, end, output)
     raise ValueError(f"Report pack {key!r} has no registered builder")

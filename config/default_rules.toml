@@ -1,0 +1,358 @@
+# WFMHub business rulebook
+#
+# Copy-on-first-run target: config/wfm_rules.toml
+# Edit the target file, not this default. Run "WFMHub.cmd rules validate" after
+# every change. All percentages are stored as decimals (0.80 = 80%).
+
+[rulebook]
+version = "2026.08.1"
+effective_from = "2026-01-01"
+description = "Canonical WFM rules learned from the August Verint, Storm, PCS and reporting references."
+
+[absence]
+standard_day_hours = 8.75
+late_tolerance_minutes = 5
+spell_gap_days = 1
+cap_event_to_schedule = true
+unmapped_activity_is_error = true
+
+[pcs]
+scored_questions = [1, 2]
+comment_questions = [3]
+survey_mode = "2"
+minimum_score = 1
+maximum_score = 5
+top_box_minimum = 4
+low_score_maximum = 2
+
+[service]
+target_seconds = 20
+default_sl_profile = "adjusted_20"
+
+[service.profiles.adjusted_20]
+label = "Adjusted SL 20s"
+formula = "answered_within_target / nullif(offered - short_abandoned, 0)"
+description = "Answered within target divided by offered calls excluding short abandons."
+
+[service.profiles.gross_20]
+label = "Gross SL 20s"
+formula = "answered_within_target / nullif(offered, 0)"
+description = "Answered within target divided by every offered call."
+
+[formulas.service_availability]
+label = "Service availability"
+formula = "answered / nullif(offered, 0)"
+unit = "percent"
+grain = "queue interval; ratio of sums at higher grains"
+description = "Share of offered contacts answered by the service. This is not agent availability or adherence."
+
+[formulas.abandon_rate]
+label = "Abandon rate"
+formula = "abandoned / nullif(offered, 0)"
+unit = "percent"
+grain = "queue interval; ratio of sums at higher grains"
+description = "Abandoned contacts divided by offered contacts."
+
+[formulas.aht_seconds]
+label = "Average handle time"
+formula = "handled_seconds / nullif(answered, 0)"
+unit = "seconds"
+grain = "queue interval; weighted at higher grains"
+description = "Total handled workload seconds divided by answered contacts."
+
+[formulas.forecast_deviation]
+label = "Forecast attainment"
+formula = "offered / nullif(forecast_volume, 0)"
+unit = "percent"
+grain = "mapped queue period; ratio of sums"
+description = "Actual offered volume divided by forecast volume."
+
+[formulas.absence_rate]
+label = "Absence rate"
+formula = "absence_hours / nullif(planned_net_hours, 0)"
+unit = "percent"
+grain = "agent day; ratio of sums at higher grains"
+description = "Payroll absence hours divided by planned net hours."
+
+[formulas.shrinkage_rate]
+label = "Shrinkage rate"
+formula = "shrinkage_hours / nullif(planned_net_hours, 0)"
+unit = "percent"
+grain = "agent day; ratio of sums at higher grains"
+description = "All configured non-productive scheduled hours divided by planned net hours."
+
+[formulas.vacation_rate]
+label = "Vacation rate"
+formula = "vacation_hours / nullif(planned_net_hours, 0)"
+unit = "percent"
+grain = "agent day; ratio of sums at higher grains"
+description = "Vacation hours divided by planned net hours."
+
+[formulas.pcs_average]
+label = "PCS average"
+formula = "pcs_score_sum / nullif(pcs_score_count, 0)"
+unit = "score"
+grain = "agent day; response-weighted at higher grains"
+description = "Sum of valid per-response scores divided by valid scored responses."
+
+[formulas.pcs_response_rate]
+label = "PCS response rate"
+formula = "survey_responses / nullif(pcs_enabled_calls, 0)"
+unit = "percent"
+grain = "agent day; ratio of sums at higher grains"
+description = "Valid scored survey responses divided by PCS-enabled calls."
+
+[formulas.pcs_top_box_rate]
+label = "PCS top-box rate"
+formula = "top_box_responses / nullif(survey_responses, 0)"
+unit = "percent"
+grain = "agent day; ratio of sums at higher grains"
+description = "Responses at or above the configured top-box threshold."
+
+[formulas.pcs_low_score_rate]
+label = "PCS low-score rate"
+formula = "low_score_responses / nullif(survey_responses, 0)"
+unit = "percent"
+grain = "agent day; ratio of sums at higher grains"
+description = "Responses at or below the configured low-score threshold."
+
+[formulas.agent_aht_seconds]
+label = "Agent average handle time"
+formula = "handle_seconds / nullif(handled_calls, 0)"
+unit = "seconds"
+grain = "agent day; weighted at higher grains"
+description = "Agent talk, hold and wrap workload divided by handled calls."
+
+# First matching rule wins. Keep specific activities above broad rules.
+# Flags drive absence, payroll and shrinkage marts without changing extracts.
+
+[[activity_rules]]
+name = "off"
+category = "OFF"
+patterns = ["OFF"]
+match = "exact"
+planned = true
+working = false
+absence = false
+vacation = false
+unpaid = false
+shrinkage = false
+
+[[activity_rules]]
+name = "short_sickness"
+category = "SICKNESS_SHORT"
+patterns = ["SHORT SICKNESS", "SHORT-SICKNESS"]
+match = "contains"
+planned = false
+working = false
+absence = true
+vacation = false
+unpaid = false
+shrinkage = true
+
+[[activity_rules]]
+name = "long_sickness"
+category = "SICKNESS_LONG"
+patterns = ["LONG SICKNESS", "LONG-SICKNESS"]
+match = "contains"
+planned = false
+working = false
+absence = true
+vacation = false
+unpaid = false
+shrinkage = true
+
+[[activity_rules]]
+name = "no_show"
+category = "NO_SHOW"
+patterns = ["NO SHOW", "NO-SHOW", "NOSHOW"]
+match = "contains"
+planned = false
+working = false
+absence = true
+vacation = false
+unpaid = true
+shrinkage = true
+
+[[activity_rules]]
+name = "unpaid_leave"
+category = "UNPAID_LEAVE"
+patterns = ["LEAVE - UNPAID", "UNPAID LEAVE"]
+match = "contains"
+planned = true
+working = false
+absence = true
+vacation = false
+unpaid = true
+shrinkage = true
+
+[[activity_rules]]
+name = "vacation"
+category = "VACATION"
+patterns = ["VACATION", "ANNUAL LEAVE", "HOLIDAY"]
+match = "contains"
+planned = true
+working = false
+absence = false
+vacation = true
+unpaid = false
+shrinkage = true
+
+[[activity_rules]]
+name = "maternity_parental"
+category = "MATERNITY_PARENTAL"
+patterns = ["MATERNITY", "PATERNITY", "PARENTAL LEAVE"]
+match = "contains"
+planned = true
+working = false
+absence = true
+vacation = false
+unpaid = false
+shrinkage = true
+
+[[activity_rules]]
+name = "late"
+category = "LATE"
+patterns = ["LATE"]
+match = "exact_or_suffix"
+planned = false
+working = false
+absence = true
+vacation = false
+unpaid = false
+shrinkage = true
+
+[[activity_rules]]
+name = "early_leave"
+category = "EARLY_LEAVE"
+patterns = ["EARLY LEAVING", "EARLY LEAVE"]
+match = "contains"
+planned = false
+working = false
+absence = true
+vacation = false
+unpaid = false
+shrinkage = true
+
+[[activity_rules]]
+name = "lunch"
+category = "LUNCH"
+patterns = ["LUNCH"]
+match = "contains"
+planned = true
+working = false
+absence = false
+vacation = false
+unpaid = false
+shrinkage = false
+
+[[activity_rules]]
+name = "break"
+category = "BREAK"
+patterns = ["SHORT-BREAK", "SHORT BREAK", "BREAK"]
+match = "contains"
+planned = true
+working = false
+absence = false
+vacation = false
+unpaid = false
+shrinkage = false
+
+[[activity_rules]]
+name = "training"
+category = "TRAINING"
+patterns = ["TRAINING", "TRAINER", "ONBOARDING"]
+match = "contains"
+planned = true
+working = false
+absence = false
+vacation = false
+unpaid = false
+shrinkage = true
+
+[[activity_rules]]
+name = "meeting_quality"
+category = "MEETING_QUALITY"
+patterns = ["MEETING", "QUALITY", "COACHING", "KEY-USER"]
+match = "contains"
+planned = true
+working = false
+absence = false
+vacation = false
+unpaid = false
+shrinkage = true
+
+[[activity_rules]]
+name = "system_issue"
+category = "SYSTEM_ISSUE"
+patterns = ["IT FAILURE", "SYSTEM ISSUE", "TECHNICAL ISSUE"]
+match = "contains"
+planned = false
+working = false
+absence = false
+vacation = false
+unpaid = false
+shrinkage = true
+
+[[activity_rules]]
+name = "general_unavailability"
+category = "GENERAL_UNAVAILABILITY"
+patterns = ["GENERAL UNAVAILABILITY"]
+match = "contains"
+planned = false
+working = false
+absence = false
+vacation = false
+unpaid = false
+shrinkage = true
+
+[[activity_rules]]
+name = "production"
+category = "PRODUCTION"
+patterns = ["FRONT-OFFICE", "LEVEL 1", "LEVEL 2", "ACM", "BO DISPATCH", "PRODUCTION", "AT THE OFFICE"]
+match = "contains"
+planned = true
+working = true
+absence = false
+vacation = false
+unpaid = false
+shrinkage = false
+
+[[activity_rules]]
+name = "no_activity"
+category = "NO_ACTIVITY"
+patterns = ["NO ACTIVITY"]
+match = "exact"
+planned = false
+working = false
+absence = false
+vacation = false
+unpaid = false
+shrinkage = true
+
+[[queue_scopes]]
+name = "RSA"
+sources = ["APBE"]
+lob_contains = ["RSA"]
+sl_profile = "adjusted_20"
+
+[[queue_scopes]]
+name = "FORD_FR"
+sources = ["APBE", "APFR"]
+lob_contains = ["FORD"]
+languages = ["FR"]
+sl_profile = "adjusted_20"
+
+[[queue_scopes]]
+name = "FORD_DE"
+sources = ["APDE"]
+lob_contains = ["FORD"]
+languages = ["DE"]
+sl_profile = "adjusted_20"
+
+[[queue_scopes]]
+name = "FORD_NL"
+sources = ["APBE"]
+lob_contains = ["FORD"]
+languages = ["NL"]
+sl_profile = "adjusted_20"

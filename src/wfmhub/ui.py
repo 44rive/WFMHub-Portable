@@ -15,11 +15,11 @@ from .database import connect
 
 
 ASCII_LOGO = (
-    "W   W FFFFF M   M H   H U   U BBBB ",
-    "W   W F     MM MM H   H U   U B   B",
-    "W W W FFFF  M M M HHHHH U   U BBBB ",
-    "WW WW F     M   M H   H U   U B   B",
-    "W   W F     M   M H   H  UUU  BBBB ",
+    " __        ________ __  __    _   _ _   _ ____  ",
+    " \\ \\      / /  ____|  \\/  |  | | | | | | |  _ \\ ",
+    "  \\ \\ /\\ / /| |__  | |\\/| |  | |_| | | | | |_) |",
+    "   \\ V  V / |  __| | |  | |  |  _  | |_| |  _ < ",
+    "    \\_/\\_/  |_|    |_|  |_|  |_| |_|\\___/|_| \\_\\",
 )
 PANEL_INNER_WIDTH = 76
 
@@ -35,6 +35,8 @@ class DashboardStatus:
     latest_source_family: str = ""
     quality_errors: int = 0
     quality_reviews: int = 0
+    rule_version: str = "not applied"
+    rule_sha256: str = ""
     last_status: str = "NEVER"
     last_refresh: datetime | str | None = None
     period_start: date | str | None = None
@@ -115,6 +117,10 @@ def load_dashboard_status(home: Path) -> DashboardStatus:
                    coalesce(sum(CASE WHEN severity<>'ERROR' THEN 1 ELSE 0 END), 0)
                FROM meta.quality_issue"""
         ).fetchone()
+        rule = conn.execute(
+            """SELECT rule_version, rule_sha256 FROM meta.rule_application
+               ORDER BY applied_at DESC LIMIT 1"""
+        ).fetchone()
 
         last_status = str(last[0]).upper() if last else "NEVER"
         last_refresh = last[1] if last else None
@@ -146,6 +152,8 @@ def load_dashboard_status(home: Path) -> DashboardStatus:
             latest_source_family=latest_source_family,
             quality_errors=int(quality_errors or 0),
             quality_reviews=int(quality_reviews or 0),
+            rule_version=str(rule[0]) if rule else "not applied",
+            rule_sha256=str(rule[1]) if rule else "",
             last_status=last_status,
             last_refresh=last_refresh,
             period_start=period_start,
@@ -193,6 +201,10 @@ def dashboard_text(status: DashboardStatus) -> str:
         ),
         _panel_line(
             f"Quality: {status.quality_errors} errors / {status.quality_reviews} review"
+        ),
+        _panel_line(
+            f"Rules: {status.rule_version}"
+            f"{f'  |  {status.rule_sha256[:12]}' if status.rule_sha256 else ''}"
         ),
     ])
     if status.detail:

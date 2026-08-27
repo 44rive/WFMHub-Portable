@@ -139,6 +139,7 @@ class EndToEndTests(unittest.TestCase):
             source = Path(folder) / "source"
             (home / "config").mkdir(parents=True)
             shutil.copy2(REPO / "config" / "default.toml", home / "config" / "default.toml")
+            shutil.copy2(REPO / "config" / "default_rules.toml", home / "config" / "default_rules.toml")
             shutil.copytree(REPO / "sql", home / "sql")
             make_fte(source / "FTE/FTE Count.xlsx")
             make_schedule(source / "Verint/Schedules & Activities/schedule.txt")
@@ -167,9 +168,9 @@ class EndToEndTests(unittest.TestCase):
                     progress=lambda current, total, label: ingest_progress.append((current, total, label)),
                 )
                 self.assertEqual(ingest.failed, 0)
-                self.assertEqual(ingest.loaded, 10)
-                self.assertEqual(ingest.scoped_out, 5)
-                self.assertEqual(ingest_progress[-1][:2], (10, 10))
+                self.assertEqual(ingest.loaded, 9)
+                self.assertEqual(ingest.scoped_out, 4)
+                self.assertEqual(ingest_progress[-1][:2], (9, 9))
                 self.assertTrue(any(total == 0 and "Call by Call" in label for _, total, label in ingest_progress))
                 for table in ("raw.schedule_shift", "raw.lilo", "raw.agent_status", "raw.call_leg"):
                     self.assertEqual(conn.execute(f"SELECT count(*) FROM {table} WHERE agent_id='999'").fetchone()[0], 0)
@@ -178,7 +179,7 @@ class EndToEndTests(unittest.TestCase):
                     conn, config, "test", date(2026, 8, 1), date(2026, 8, 2),
                     progress=lambda current, total, label: model_progress.append((current, total, label)),
                 )
-                self.assertEqual(model_progress[-1], (14, 14, "Models ready"))
+                self.assertEqual(model_progress[-1], (17, 17, "Models ready"))
                 saved_period = replace(config, period_start=date(2026, 8, 1), period_end=date(2026, 8, 1))
                 self.assertEqual(resolve_period(conn, saved_period, None, None, True), (date(2026, 8, 1), date(2026, 8, 1)))
                 self.assertEqual(resolve_period(conn, saved_period, None, None, False), (date(2026, 8, 1), date(2026, 8, 2)))
@@ -189,11 +190,23 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(str(late[0]), "2026-08-01 08:10:00")
                 self.assertEqual(str(late[1]), "2026-08-01 08:20:00")
                 self.assertEqual(late[2], 10)
-                basis = conn.execute("SELECT measurement_basis FROM mart.conformance_agent_day WHERE agent_day_key='20260801-100'").fetchone()[0]
-                self.assertEqual(basis, "LILO span")
+                self.assertEqual(conn.execute("SELECT count(*) FROM mart.conformance_agent_day").fetchone()[0], 0)
                 self.assertEqual(model.forecast_rows, 1)
                 self.assertEqual(model.intraday_rows, 2)
                 self.assertEqual(model.pcs_rows, 1)
+                self.assertEqual(model.absence_rows, 4)
+                self.assertGreater(model.absence_event_rows, 0)
+                self.assertEqual(model.service_rows, 2)
+                absence_100 = conn.execute(
+                    "SELECT absence_minutes, absence_rate FROM mart.absence_agent_day WHERE agent_day_key='20260801-100'"
+                ).fetchone()
+                self.assertEqual(absence_100[0], 20)
+                self.assertAlmostEqual(absence_100[1], 20 / 480)
+                service = conn.execute(
+                    "SELECT sum(answered), sum(offered), sum(handled_seconds) FROM mart.service_interval"
+                ).fetchone()
+                self.assertEqual(service[:2], (18, 22))
+                self.assertEqual(service[2], 2390)
                 self.assertEqual(conn.execute("SELECT count(*) FROM raw.call_leg").fetchone()[0], 2)
                 self.assertEqual(conn.execute("SELECT count(*) FROM core.clean_call_leg").fetchone()[0], 1)
                 pcs = conn.execute("SELECT survey_responses, pcs_average, average_handle_seconds FROM mart.agent_pcs_day WHERE agent_id='100'").fetchone()
@@ -203,7 +216,7 @@ class EndToEndTests(unittest.TestCase):
                 before_failure = conn.execute(
                     "SELECT agent_day_key, attendance_result FROM mart.attendance_agent_day ORDER BY agent_day_key"
                 ).fetchall()
-                with patch("wfmhub.models._build_conformance", side_effect=RuntimeError("injected model failure")):
+                with patch("wfmhub.models._build_absence", side_effect=RuntimeError("injected model failure")):
                     with self.assertRaises(RuntimeError):
                         refresh_models(conn, config, "failed", date(2026, 8, 1), date(2026, 8, 2))
                 self.assertEqual(
@@ -215,6 +228,8 @@ class EndToEndTests(unittest.TestCase):
                 self.assertTrue(report.name.startswith("WFMHub_Operations_"))
                 intraday_report = build_report_pack("intraday", conn, config, model.start, model.end)
                 pcs_report = build_report_pack("quality_pcs", conn, config, model.start, model.end)
+                absence_report = build_report_pack("absence", conn, config, model.start, model.end)
+                scorecard_report = build_report_pack("scorecard", conn, config, model.start, model.end)
                 export_progress = []
                 clean_calls = export_dataset(
                     conn, config, "calls", model.start, model.end,
@@ -264,7 +279,7 @@ class EndToEndTests(unittest.TestCase):
             self.assertTrue(report.exists())
             workbook = load_workbook(report, read_only=True, data_only=True)
             try:
-                self.assertEqual(workbook.sheetnames, ["START_HERE", "SUMMARY", "ATTENDANCE", "GAPS", "RTA", "DATA_QUALITY", "SOURCE_HEALTH"])
+                self.assertEqual(workbook.sheetnames, ["START_HERE", "SUMMARY", "ATTENDANCE", "GAPS", "DATA_QUALITY", "SOURCE_HEALTH"])
             finally:
                 workbook.close()
             intraday_book = load_workbook(intraday_report, read_only=True, data_only=True)
@@ -279,6 +294,20 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("PYTHON_RECIPES", pcs_book.sheetnames)
             finally:
                 pcs_book.close()
+            absence_book = load_workbook(absence_report, read_only=False, data_only=True)
+            try:
+                self.assertIn("PIVOT_ABSENCE", absence_book.sheetnames)
+                self.assertIn("KPI_CATALOG", absence_book.sheetnames)
+                self.assertIn("tblPivotAbsence", absence_book["PIVOT_ABSENCE"].tables)
+            finally:
+                absence_book.close()
+            scorecard_book = load_workbook(scorecard_report, read_only=False, data_only=True)
+            try:
+                self.assertIn("KPI_DAILY", scorecard_book.sheetnames)
+                self.assertIn("SERVICE_INTERVALS", scorecard_book.sheetnames)
+                self.assertIn("tblKpiDaily", scorecard_book["KPI_DAILY"].tables)
+            finally:
+                scorecard_book.close()
             with zipfile.ZipFile(report) as archive:
                 self.assertFalse(any("externalLinks" in name for name in archive.namelist()))
 

@@ -113,6 +113,25 @@ class ParserTests(unittest.TestCase):
             self.assertEqual(result.tables["raw.schedule_shift"][0]["agent_id"], "123456")
             self.assertEqual(result.tables["raw.schedule_shift"][0]["agent_name"], "Doe,\tJane")
 
+    def test_start_end_times_wide_extract_normalizes_every_date_column(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "VERINT_01082026_03082026_StartEndTimes.txt"
+            with path.open("w", encoding="cp1252", newline="") as handle:
+                writer = csv.writer(handle, delimiter="\t")
+                writer.writerow(["Name", "Data Source IDs", "08/01/2026", "08/02/2026", "08/03/2026"])
+                writer.writerow([
+                    "Agent One", "123", ".AP | Short Sickness 08/01/2026 8:30 AM-08/01/2026 6:00 PM",
+                    "Off", ".AP | Front-office 08/03/2026 9:00 AM-08/03/2026 6:30 PM",
+                ])
+            result = parse_schedule(path, "file")
+            shifts = result.tables["raw.schedule_shift"]
+            self.assertEqual(len(shifts), 3)
+            self.assertEqual([str(row["schedule_date"]) for row in shifts], ["2026-08-01", "2026-08-02", "2026-08-03"])
+            self.assertEqual(shifts[0]["agent_id"], "123")
+            self.assertEqual(shifts[0]["assignment_type"], "Planned absence")
+            self.assertEqual(shifts[1]["assignment_type"], "Off")
+            self.assertEqual(result.tables["raw.schedule_event"], [])
+
     def test_lilo_preserves_and_adjusts_overnight_boundary(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "AP-Historical-Report---Agent-Login 2026-08-01.csv"

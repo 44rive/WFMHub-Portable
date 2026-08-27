@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.3.2"
+DEFAULT_VERSION = "0.4.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -95,6 +95,7 @@ def validate_stage(stage: Path, expected_native: dict[str, str]) -> None:
         raise RuntimeError(f"Native runtime differs from reviewed CPython ZIP: added={added}, missing={missing}, changed={changed}")
     forbidden_user_files = [
         stage / "config" / "wfmhub.toml",
+        stage / "config" / "wfm_rules.toml",
         stage / "database" / "wfm.sqlite3",
         stage / "database" / "wfm.duckdb",
     ]
@@ -183,6 +184,7 @@ def build(args) -> Path:
     )
     (stage / "config").mkdir(exist_ok=True)
     shutil.copy2(ROOT / "config" / "default.toml", stage / "config" / "default.toml")
+    shutil.copy2(ROOT / "config" / "default_rules.toml", stage / "config" / "default_rules.toml")
     shutil.copy2(ROOT / "WFMHub.cmd", stage / "WFMHub.cmd")
     shutil.copy2(ROOT / "SETUP.cmd", stage / "SETUP.cmd")
     shutil.copy2(ROOT / "README.md", stage / "README.md")

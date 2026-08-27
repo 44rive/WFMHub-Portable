@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -46,6 +46,7 @@ class Config:
     backups: Path
     input: Path
     custom: Path
+    business_rules: Path
     sources: dict[str, str]
     period_start: date | None
     period_end: date | None
@@ -129,8 +130,10 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         backups=_portable_path(home, str(paths.get("backups", "backups"))),
         input=_portable_path(home, str(paths.get("input", "input"))),
         custom=_portable_path(home, str(paths.get("custom", "custom"))),
+        business_rules=_portable_path(home, str(paths.get("business_rules", "config/wfm_rules.toml"))),
         sources={
             "call_folder": "Storm/Call by Call",
+            "apde_folder": "Storm/APDE Standard KPIs Inbound Calls",
             **{str(k): str(v) for k, v in raw.get("sources", {}).items()},
         },
         period_start=_date_or_none(period.get("start"), "period.start"),
@@ -151,12 +154,14 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
             top_box_minimum=float(raw.get("pcs", {}).get("top_box_minimum", 4)),
             low_score_maximum=float(raw.get("pcs", {}).get("low_score_maximum", 2)),
         ),
-        modules={"pcs": True, **{str(k): bool(v) for k, v in raw.get("modules", {}).items()}},
+        modules={"pcs": True, "absence": True, **{str(k): bool(v) for k, v in raw.get("modules", {}).items()}},
         report_limits={str(k): int(v) for k, v in raw.get("report", {}).items()},
         report_packs={
             "operations": "operations",
             "intraday": "intraday",
             "quality_pcs": "quality_pcs",
+            "absence": "absence",
+            "scorecard": "scorecard",
             **{str(k): str(v) for k, v in raw.get("report_packs", {}).items()},
         },
     )
@@ -179,6 +184,20 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
             "This corporate-compatible release uses SQLite. Change paths.database "
             "in config\\wfmhub.toml to database/wfm.sqlite3; the old DuckDB file is preserved."
         )
+    from .rules import ensure_rulebook, load_rulebook, validate_rulebook
+
+    ensure_rulebook(home)
+    business = load_rulebook(home, cfg.business_rules)
+    validate_rulebook(business)
+    cfg = replace(cfg, pcs=PCSSettings(
+        scored_questions=business.pcs_scored_questions,
+        comment_questions=business.pcs_comment_questions,
+        survey_mode=business.pcs_survey_mode,
+        minimum_score=business.pcs_minimum_score,
+        maximum_score=business.pcs_maximum_score,
+        top_box_minimum=business.pcs_top_box_minimum,
+        low_score_maximum=business.pcs_low_score_maximum,
+    ))
     for path in (cfg.database.parent, cfg.output, cfg.logs, cfg.backups, cfg.input, cfg.custom):
         path.mkdir(parents=True, exist_ok=True)
     return cfg

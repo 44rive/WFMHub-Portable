@@ -10,6 +10,7 @@ logs = "logs"
 backups = "backups"
 input = "input"
 custom = "custom"
+business_rules = "config/wfm_rules.toml"
 
 [sources]
 # FTE Agent is the authoritative "our agents" roster. Schedule, LILO, and
@@ -22,6 +23,7 @@ schedule_folder = "Verint/Schedules & Activities"
 forecast_folder = "Verint/Forecast"
 apbe_folder = "Storm/APBE ALL WFM"
 apfr_folder = "Storm/APFR KPI SUIVI JOUR"
+apde_folder = "Storm/APDE Standard KPIs Inbound Calls"
 call_folder = "Storm/Call by Call"
 
 [period]
@@ -30,6 +32,8 @@ start = ""
 end = ""
 
 [rules]
+# Legacy status-compatibility settings. Attendance/absence tolerance and all
+# active KPI formulas live in config/wfm_rules.toml.
 tolerance_minutes = 5
 break_minutes = 30
 lunch_minutes = 45
@@ -38,15 +42,17 @@ rta_stale_minutes = 30
 
 [modules]
 attendance = true
-agent_status = true
+# Disabled by default: the SOTA hub does not calculate adherence. Enable only
+# if you still need the legacy RTA/status compatibility output.
+agent_status = false
 intraday = true
 forecast = true
 pcs = true
+absence = true
 
 [pcs]
-# Numeric survey questions are averaged per response, then per agent. Change
-# these when the survey questionnaire changes; Question 3 is text in the
-# current extract.
+# Legacy compatibility copy. v0.4 reads the authoritative PCS calculation
+# settings from config/wfm_rules.toml so every business rule is cataloged.
 scored_questions = [1, 2]
 comment_questions = [3]
 survey_mode = "2"
@@ -62,6 +68,8 @@ max_rta_rows = 10000
 max_intraday_rows = 100000
 max_pcs_agent_rows = 100000
 max_pcs_exception_rows = 100000
+max_absence_rows = 100000
+max_service_rows = 100000
 
 [report_packs]
 # Keep outputs separated by business grain and audience. Quality PCS will use
@@ -69,3 +77,5 @@ max_pcs_exception_rows = 100000
 operations = "operations"
 intraday = "intraday"
 quality_pcs = "quality_pcs"
+absence = "absence"
+scorecard = "scorecard"

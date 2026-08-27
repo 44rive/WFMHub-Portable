@@ -21,13 +21,15 @@ from .models import refresh_models
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
 from .progress import ProgressBar, ProgressCallback
 from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack
+from .rules import load_rulebook, validate_rulebook
+from .sota_reports import build_kpi_catalog
 from .ui import clear_screen, render_dashboard
 
 
 SOURCE_GROUPS = {
     "all": None,
-    "operations": {"fte", "schedule", "lilo", "agent_status"},
-    "intraday": {"forecast", "apbe", "apfr"},
+    "operations": {"fte", "schedule", "lilo"},
+    "intraday": {"forecast", "apbe", "apfr", "apde"},
     "pcs": {"fte", "calls"},
 }
 
@@ -97,6 +99,7 @@ def setup(home: Path, source_root: Path | None, non_interactive: bool) -> int:
     print("\nSetup complete.")
     print(f"Source root : {config.source_root}")
     print(f"Database    : {config.database}")
+    print(f"Rules       : {config.business_rules}")
     print(f"Log         : {log}")
     if migrations:
         print(f"Database migrations applied: {', '.join(migrations)}")
@@ -139,7 +142,7 @@ def refresh(
                     bar.update(report_end, f"Created {pack} report")
                 conn.execute(
                     """UPDATE meta.refresh_run SET finished_at=?, status='SUCCESS', files_loaded=?, files_skipped=?, files_failed=?, details=? WHERE run_id=?""",
-                    [datetime.now(), ingested.loaded, ingested.skipped, ingested.failed, f"attendance={model.attendance_rows}; gaps={model.correction_rows}; quality={model.quality_rows}; scoped_out={ingested.scoped_out}", run_id],
+                    [datetime.now(), ingested.loaded, ingested.skipped, ingested.failed, f"attendance={model.attendance_rows}; absence={model.absence_rows}; service={model.service_rows}; gaps={model.correction_rows}; quality={model.quality_rows}; scoped_out={ingested.scoped_out}", run_id],
                 )
             except Exception as exc:
                 conn.execute("UPDATE meta.refresh_run SET finished_at=?, status='ERROR', details=? WHERE run_id=?", [datetime.now(), str(exc)[:4000], run_id])
@@ -154,10 +157,12 @@ def refresh(
     print(f"Agent scope : {ingested.scoped_out:,} outside-roster source rows excluded")
     print(f"Attendance  : {model.attendance_rows:,} rows")
     print(f"Gaps        : {model.correction_rows:,} rows")
-    print(f"RTA         : {model.rta_rows:,} rows")
-    print(f"Intraday    : {model.intraday_rows:,} actual + {model.forecast_rows:,} forecast rows")
+    print(f"Absence     : {model.absence_rows:,} agent-day + {model.absence_event_rows:,} evidence rows")
+    print(f"Service     : {model.service_rows:,} actual + {model.forecast_rows:,} forecast rows")
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
     print(f"Quality     : {model.quality_rows:,} issues")
+    business = load_rulebook(home, config.business_rules)
+    print(f"Rules       : {business.version} ({business.sha256[:12]})")
     if ingested.errors:
         print("\nFiles with errors:")
         for error in ingested.errors:
@@ -352,6 +357,19 @@ def create_backup(home: Path) -> int:
     return 0
 
 
+def rules_tool(home: Path, action: str = "validate") -> int:
+    config = load_config(home)
+    rulebook = load_rulebook(home, config.business_rules)
+    for line in validate_rulebook(rulebook):
+        print(line)
+    if action == "catalog":
+        path = build_kpi_catalog(config)
+        print(f"KPI catalog: {path}")
+    else:
+        print(f"Editable file: {rulebook.file}")
+    return 0
+
+
 def _choose_period() -> tuple[date | None, date | None, bool]:
     print("\nDATE PERIOD")
     print("1. Today")
@@ -392,8 +410,8 @@ def _choose_period() -> tuple[date | None, date | None, bool]:
 def _choose_source_group() -> str:
     print("\nDATA TO REFRESH")
     print("1. All sources")
-    print("2. Operations: FTE, schedule, LILO and Agent Status")
-    print("3. Intraday: APBE, APFR and Forecast")
+    print("2. Attendance/absence: FTE, Verint schedule and LILO")
+    print("3. Service: APBE, APFR, APDE and Verint Forecast")
     print("4. Agent PCS: FTE and Call by Call")
     choice = input("Choose 1-4: ").strip()
     try:
@@ -407,17 +425,21 @@ def _choose_packs(allow_none: bool = True) -> tuple[str, ...]:
     print("1. Operations")
     print("2. Intraday")
     print("3. Agent PCS")
-    print("4. All three reports")
+    print("4. Attendance & Absence")
+    print("5. Executive Scorecard")
+    print("6. All reports")
     if allow_none:
-        print("5. No report")
-    choice = input(f"Choose 1-{'5' if allow_none else '4'}: ").strip()
+        print("7. No report")
+    choice = input(f"Choose 1-{'7' if allow_none else '6'}: ").strip()
     mapping = {
         "1": ("operations",),
         "2": ("intraday",),
         "3": ("quality_pcs",),
-        "4": IMPLEMENTED_REPORT_PACK_KEYS,
+        "4": ("absence",),
+        "5": ("scorecard",),
+        "6": IMPLEMENTED_REPORT_PACK_KEYS,
     }
-    if allow_none and choice == "5":
+    if allow_none and choice == "7":
         return ()
     try:
         return mapping[choice]
@@ -477,14 +499,15 @@ def menu(home: Path) -> int:
         print("    [3] Export clean data")
         print("    [4] Run custom Python or SQL analysis")
         print("\n  CONTROL & REVIEW")
-        print("    [5] Show source health and date coverage")
-        print("    [6] Import correction decisions")
+        print("    [5] Validate rules and build KPI catalog")
+        print("    [6] Show source health and date coverage")
+        print("    [7] Import correction decisions")
         print("\n  HUB TOOLS")
-        print("    [7] Create database backup")
-        print("    [8] Change source root")
-        print("    [9] Run system check")
-        print("   [10] Exit")
-        choice = input("\n  Choose 1-10: ").strip()
+        print("    [8] Create database backup")
+        print("    [9] Change source root")
+        print("   [10] Run system check")
+        print("   [11] Exit")
+        choice = input("\n  Choose 1-11: ").strip()
         try:
             if choice == "1":
                 group = _choose_source_group()
@@ -507,19 +530,21 @@ def menu(home: Path) -> int:
                 start, end, use_config = _choose_period()
                 run_custom(home, kind, job, start, end, use_config)
             elif choice == "5":
+                rules_tool(home, "catalog")
+            elif choice == "6":
                 show_status(home)
                 show_coverage(home)
-            elif choice == "6":
+            elif choice == "7":
                 path = Path(input("Paste the edited Operations report path: ").strip().strip('"'))
                 import_decisions(home, path)
-            elif choice == "7":
-                create_backup(home)
             elif choice == "8":
+                create_backup(home)
+            elif choice == "9":
                 path = Path(input("Paste the folder containing FTE, Storm and Verint: ").strip().strip('"'))
                 setup(home, path, True)
-            elif choice == "9":
-                run_doctor(home)
             elif choice == "10":
+                run_doctor(home)
+            elif choice == "11":
                 return 0
             else:
                 print("Please choose a number from 1 to 10.")
@@ -566,6 +591,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("coverage", help="Show available dates and row counts")
     commands.add_parser("backup", help="Create a database backup")
     commands.add_parser("doctor", help="Test the corporate runtime, SQLite and Excel libraries")
+    rules_p = commands.add_parser("rules", help="Validate the central rulebook or generate its KPI catalog")
+    rules_p.add_argument("action", choices=("validate", "catalog"), nargs="?", default="validate")
     commands.add_parser("menu", help="Open the interactive menu")
     return root
 
@@ -595,6 +622,8 @@ def main(argv: list[str] | None = None) -> int:
             return create_backup(home)
         if args.command == "doctor":
             return 0 if run_doctor(home) else 1
+        if args.command == "rules":
+            return rules_tool(home, args.action)
         return menu(home)
     except (ConfigError, HubLockedError, FileNotFoundError, ValueError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
