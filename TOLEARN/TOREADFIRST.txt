@@ -1,0 +1,8 @@
+Forecast : Verint
+Absenteeism : Verint + Transformation on Power Query
+
+
+Realisation & Performance : Storm 
+Source RSA : APBE_RSA_ALL_WFM
+Source Ford Dutch & FR : APBE_RSA_ALL_WFM & APFR_Standard-KPIs-Suivi-Jour
+Source Ford DE : APDE-Standard-KPIs---Inbound-Calls
