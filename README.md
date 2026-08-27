@@ -36,6 +36,10 @@ the whole `WFMHub` folder together, run `SETUP.cmd` once, then run `WFMHub.cmd`
 every day. Read
 [`docs/BEGINNER_GUIDE.md`](docs/BEGINNER_GUIDE.md) for click-by-click help.
 
+If company Application Control blocks the Python DuckDB module, run the small
+signed-CLI compatibility probe from the `duckdb-cli-probe-v1.5.5` release
+before selecting a replacement backend. The probe never reads WFM data.
+
 ## Data boundaries
 
 | Source | Used for |

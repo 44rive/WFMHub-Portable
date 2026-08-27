@@ -45,3 +45,14 @@ python packaging/windows/build_portable.py --clean
 It downloads the official CPython embeddable ZIP, downloads Windows wheels,
 extracts them into `runtime/site-packages`, copies the application and produces
 `dist/WFMHub-Portable-v<version>-win-x64.zip` plus its SHA-256 file.
+
+## Build the DuckDB CLI policy probe
+
+```bash
+python packaging/windows/build_cli_probe.py
+```
+
+The builder pins the official DuckDB Windows CLI asset and SHA-256, verifies
+that `duckdb.exe` contains a PE Authenticode certificate table, and packages
+only the signed executable, the test launcher and its readme. The probe does
+not include WFMHub, extracts, configuration or databases.
