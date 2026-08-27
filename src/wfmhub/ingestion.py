@@ -98,7 +98,6 @@ AGENT_SCOPE_POLICY_VERSION = "v1-id-or-unique-name-preserve-source-id"
 
 
 LILO_FILE_RE = re.compile(r"^AP-Historical-Report---Agent-Login (\d{4}-\d{2}-\d{2})\.csv$", re.I)
-STATUS_FILE_RE = re.compile(r"^AP-Historical-Report---Agent-Status (\d{4}-\d{2}-\d{2})\.csv$", re.I)
 
 
 TABLE_COLUMNS: dict[str, list[str]] = {
@@ -464,7 +463,6 @@ def _insert_lilo_direct(
 
 
 def parse_agent_status(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
-    extract_date = _extract_date(path.name, STATUS_FILE_RE, "Agent Status")
     output: list[dict[str, Any]] = []
     rejected: list[str] = []
     scoped_out = 0
@@ -492,7 +490,9 @@ def parse_agent_status(path: Path, file_id: str, scope: AgentScope | None = None
                 rejected.append(f"line {source_row}: invalid status interval")
             output.append({
                 "source_file_id": file_id, "source_row": source_row,
-                "serial_number": serial, "extract_date": extract_date,
+                # Agent Status exports can contain one day or a date range. The
+                # row timestamp is the authority; the filename is only a label.
+                "serial_number": serial, "extract_date": start.date() if start else None,
                 "agent_id": agent_id,
                 "agent_name": _clean(row.get("[Agent]")), "status": _clean(row.get("[Status]")),
                 "actual_category": classify_status(_clean(row.get("[Status]"))),

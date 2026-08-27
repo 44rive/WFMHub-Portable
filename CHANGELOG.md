@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fixed Agent Status ingestion for multi-day and full-history exports. Each
+  row is now dated from `Status Start Date and Time` instead of requiring or
+  applying one date from the filename.
+
 ## 0.2.1 — 2026-08-27
 
 - Added a standard blank `templates\FTE Count.xlsx` workbook with instructions,

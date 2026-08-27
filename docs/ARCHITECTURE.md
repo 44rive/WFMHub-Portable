@@ -149,6 +149,10 @@ newest state wins; category totals cannot exceed covered time. Agent Status is
 the conformance basis only above configured coverage (80% by default), else the
 explicitly labelled LILO span or `None` is used.
 
+Agent Status filenames may describe one date, a date range, or full history.
+Every row's `Status Start Date and Time` determines its business date; the
+filename is never used to date every row in a multi-day extract.
+
 RTA uses the newest admitted status timestamp. If no status row passes agent
 scope, RTA is empty and source health is `ERROR`; current time is never used as
 a fake snapshot.

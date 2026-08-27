@@ -135,7 +135,31 @@ class ParserTests(unittest.TestCase):
                 encoding="utf-8-sig",
             )
             row = parse_agent_status(path, "file").tables["raw.agent_status"][0]
+            self.assertEqual(str(row["extract_date"]), "2026-08-24")
             self.assertEqual(row["status_end"], datetime(2026, 8, 25, 13, 59, 56))
+
+    def test_status_range_filename_uses_each_rows_timestamp_date(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "AP-Historical-Report---Agent-Status 2026-08-24 - 2026-08-25.csv"
+            path.write_text(
+                "[Serial Number],[Status],[Status Start Date and Time],[Agent],[Agent ID],[Status Duration],[Queue]\n"
+                "one,Available,8/24/2026 23:55,Jane,123,0:05:00,Main\n"
+                "two,Available,8/25/2026 0:05,Jane,123,0:05:00,Main\n",
+                encoding="utf-8-sig",
+            )
+            rows = parse_agent_status(path, "file").tables["raw.agent_status"]
+            self.assertEqual([str(row["extract_date"]) for row in rows], ["2026-08-24", "2026-08-25"])
+
+    def test_status_filename_does_not_need_a_date_when_rows_have_timestamps(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "Agent Status full history.csv"
+            path.write_text(
+                "[Serial Number],[Status],[Status Start Date and Time],[Agent],[Agent ID],[Status Duration],[Queue]\n"
+                "one,Available,8/24/2026 12:00,Jane,123,0:05:00,Main\n",
+                encoding="utf-8-sig",
+            )
+            row = parse_agent_status(path, "file").tables["raw.agent_status"][0]
+            self.assertEqual(str(row["extract_date"]), "2026-08-24")
 
     def test_forecast_discovers_header_and_scales_service_level(self):
         with tempfile.TemporaryDirectory() as folder:
