@@ -6,10 +6,100 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-from wfmhub.ingestion import parse_agent_status, parse_forecast, parse_lilo, parse_schedule
+from openpyxl import Workbook, load_workbook
+
+from wfmhub.ingestion import SourceSchemaError, parse_agent_status, parse_forecast, parse_fte, parse_lilo, parse_schedule
 
 
 class ParserTests(unittest.TestCase):
+    def test_shipped_fte_template_has_stable_contract(self):
+        template = Path(__file__).resolve().parents[1] / "templates" / "FTE Count.xlsx"
+        workbook = load_workbook(template, read_only=False, data_only=False)
+        try:
+            self.assertEqual(workbook.sheetnames[:2], ["START_HERE", "Agent"])
+            headers = [cell.value for cell in workbook["Agent"][1]]
+            self.assertEqual(headers, [
+                "Client ID", "Status", "Name", "Team leader", "Ops Manager", "LOB",
+                "Market", "Language", "Location", "City", "FTE", "End date if leaver",
+            ])
+            self.assertIn("tblFTEAgents", workbook["Agent"].tables)
+        finally:
+            workbook.close()
+
+    def test_fte_finds_renamed_sheet_offset_header_and_aliases(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "FTE Count.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "August Roster"
+            sheet.append(["FTE population report"])
+            sheet.append([])
+            sheet.append(["Agent ID", "Agent Name", "Employment Status", "TL", "Line of Business", "Site"])
+            sheet.append(["00123", "Jane Agent", "Active", "Team Lead", "Quality", "Berlin"])
+            workbook.save(path)
+
+            row = parse_fte(path, "file").tables["raw.fte_agent"][0]
+            self.assertEqual(row["source_row"], 4)
+            self.assertEqual(row["agent_id"], "00123")
+            self.assertEqual(row["agent_name"], "Jane Agent")
+            self.assertEqual(row["team_leader"], "Team Lead")
+            self.assertEqual(row["lob"], "Quality")
+            self.assertEqual(row["location"], "Berlin")
+            self.assertIsNone(row["ops_manager"])
+
+    def test_fte_error_names_searched_sheets_and_required_headers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "FTE Count.xlsx"
+            workbook = Workbook()
+            workbook.active.title = "People"
+            workbook.active.append(["Something", "Else"])
+            workbook.save(path)
+            with self.assertRaisesRegex(SourceSchemaError, "People.*Client ID/Agent ID"):
+                parse_fte(path, "file")
+
+    def test_fte_does_not_select_support_sheet_before_agent_roster(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "FTE Count.xlsx"
+            workbook = Workbook()
+            support = workbook.active
+            support.title = "Support"
+            support.append(["Client ID", "Name", "Status", "LOB", "Market", "Location", "End Date"])
+            support.append(["SUP-1", "Support Person", "Active", "Support", "Market", "Site", None])
+            agent = workbook.create_sheet("Agent")
+            agent.append(["Client ID", "Name"])
+            agent.append(["AGT-1", "Roster Person"])
+            workbook.save(path)
+
+            rows = parse_fte(path, "file").tables["raw.fte_agent"]
+            self.assertEqual([row["agent_id"] for row in rows], ["AGT-1"])
+
+    def test_fte_rejects_multiple_id_aliases_in_roster_header(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "FTE Count.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "Agent"
+            sheet.append(["Client ID", "Agent ID", "Name"])
+            sheet.append(["CLIENT-1", "VERINT-1", "Person"])
+            workbook.save(path)
+            with self.assertRaisesRegex(SourceSchemaError, "multiple aliases.*agent_id"):
+                parse_fte(path, "file")
+
+    def test_fte_rejects_two_authoritative_roster_sheets(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "FTE Count.xlsx"
+            workbook = Workbook()
+            agent = workbook.active
+            agent.title = "Agent"
+            agent.append(["Client ID", "Name"])
+            agent.append(["A-1", "First Person"])
+            roster = workbook.create_sheet("Roster")
+            roster.append(["Client ID", "Name"])
+            roster.append(["A-2", "Second Person"])
+            workbook.save(path)
+            with self.assertRaisesRegex(SourceSchemaError, "multiple equally likely agent tables"):
+                parse_fte(path, "file")
+
     def test_schedule_uses_quote_aware_tsv(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "schedule.txt"

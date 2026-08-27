@@ -112,6 +112,27 @@ TABLE_COLUMNS: dict[str, list[str]] = {
 }
 
 
+FTE_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
+    "agent_id": ("CLIENTID", "AGENTID", "VERINTID", "DATASOURCEID", "DATASOURCEIDS"),
+    "agent_name": ("NAME", "AGENTNAME", "AGENT", "EMPLOYEENAME", "FULLNAME"),
+    "employment_status": ("STATUS", "EMPLOYMENTSTATUS", "AGENTSTATUS"),
+    "team_leader": ("TEAMLEADER", "TEAMLEADERNAME", "TL"),
+    "ops_manager": ("OPSMANAGER", "OPERATIONSMANAGER", "OPERATIONSMANAGERNAME"),
+    "lob": ("LOB", "LINEOFBUSINESS"),
+    "market": ("MARKET",),
+    "language": ("LANGUAGE",),
+    "location": ("LOCATION", "SITE"),
+    "city": ("CITY",),
+    "fte": ("FTE", "FTECOUNT"),
+    "end_date": ("ENDDATEIFLEAVER", "ENDDATE", "LEAVERENDDATE"),
+}
+
+FTE_EXACT_ROSTER_TITLES = {
+    "AGENT", "AGENTS", "AGENTLIST", "AGENTROSTER", "FTE", "FTECOUNT",
+    "FTEAGENT", "FTEAGENTS", "HEADCOUNT", "ROSTER",
+}
+
+
 def _clean(value: Any) -> str | None:
     text = str(value).strip() if value is not None else ""
     return text or None
@@ -162,39 +183,120 @@ def discover_sources(config: Config) -> list[SourceCandidate]:
     return candidates
 
 
+def _fte_column_indexes(
+    headers: tuple[Any, ...] | list[Any],
+) -> tuple[dict[str, int], dict[str, list[int]]]:
+    normalized: dict[str, list[int]] = {}
+    for index, value in enumerate(headers):
+        if str(value or "").strip():
+            normalized.setdefault(normalize_header(value), []).append(index)
+    indexes: dict[str, int] = {}
+    duplicates: dict[str, list[int]] = {}
+    for field, aliases in FTE_HEADER_ALIASES.items():
+        matches = sorted({index for alias in aliases for index in normalized.get(alias, [])})
+        if len(matches) == 1:
+            indexes[field] = matches[0]
+        elif len(matches) > 1:
+            duplicates[field] = matches
+    return indexes, duplicates
+
+
+def _find_fte_table(workbook, path: Path) -> tuple[str, int, Any, dict[str, int]]:
+    def confidence_tier(sheet_title: str, recognized: set[str]) -> int:
+        normalized_title = normalize_header(sheet_title)
+        if normalized_title in FTE_EXACT_ROSTER_TITLES:
+            return 3
+        title_words = set(re.findall(r"[A-Z0-9]+", sheet_title.upper()))
+        if title_words & {"ROSTER", "HEADCOUNT"}:
+            return 2
+        org_fields = {"lob", "market", "language", "location", "city"}
+        has_leadership = bool(recognized & {"team_leader", "ops_manager"})
+        if "employment_status" in recognized and has_leadership and len(recognized & org_fields) >= 2:
+            return 1
+        return 0
+
+    candidates: list[tuple[int, Any, int, dict[str, int]]] = []
+    ambiguous: list[str] = []
+    for sheet in workbook.worksheets:
+        rows = sheet.iter_rows(values_only=True)
+        for header_row, values in enumerate(rows, 1):
+            if header_row > 100:
+                break
+            indexes, duplicates = _fte_column_indexes(values)
+            identity_present = "agent_id" in indexes or "agent_id" in duplicates
+            name_present = "agent_name" in indexes or "agent_name" in duplicates
+            recognized = set(indexes) | set(duplicates)
+            tier = confidence_tier(sheet.title, recognized)
+            if identity_present and name_present and duplicates and tier:
+                columns = ", ".join(sorted(duplicates))
+                ambiguous.append(f"{sheet.title!r} row {header_row} has multiple aliases for: {columns}")
+                break
+            if {"agent_id", "agent_name"} <= indexes.keys() and tier:
+                has_data = any(
+                    (
+                        indexes["agent_id"] < len(row) and row[indexes["agent_id"]] not in (None, "")
+                    )
+                    and (
+                        indexes["agent_name"] < len(row) and str(row[indexes["agent_name"]] or "").strip()
+                    )
+                    for row in rows
+                )
+                if has_data:
+                    candidates.append((tier, sheet, header_row, indexes))
+                break
+    if ambiguous:
+        raise SourceSchemaError(
+            f"FTE workbook has ambiguous roster headers. {'; '.join(ambiguous)}. "
+            "Keep only one ID and one name column in the authoritative roster table."
+        )
+    if candidates:
+        highest_tier = max(candidate[0] for candidate in candidates)
+        best = [candidate for candidate in candidates if candidate[0] == highest_tier]
+        if len(best) > 1:
+            locations = ", ".join(f"{item[1].title!r} row {item[2]}" for item in best)
+            raise SourceSchemaError(
+                f"FTE workbook has multiple equally likely agent tables: {locations}. "
+                "Keep one authoritative roster table or rename its sheet to Agent/Roster/FTE."
+            )
+        _, sheet, header_row, indexes = best[0]
+        rows = sheet.iter_rows(min_row=header_row + 1, values_only=True)
+        return sheet.title, header_row, rows, indexes
+    searched = ", ".join(workbook.sheetnames) or "(no worksheets)"
+    raise SourceSchemaError(
+        f"FTE agent table was not found in {path.name}. Looked in sheets: {searched}. "
+        "Expected an Agent/FTE/Roster/Headcount sheet with Client ID/Agent ID and Name/Agent Name."
+    )
+
+
 def parse_fte(path: Path, file_id: str) -> ParseResult:
     workbook = load_workbook(path, read_only=True, data_only=True, keep_links=False)
     try:
-        if "Agent" not in workbook.sheetnames:
-            raise SourceSchemaError(f"FTE workbook has no Agent sheet: {path.name}")
-        rows = workbook["Agent"].iter_rows(values_only=True)
-        headers = [str(value or "").strip() for value in next(rows)]
-        required = {"Client ID", "Status", "Name", "Team leader", "Ops Manager", "LOB", "Market", "Language", "Location", "City"}
-        missing = sorted(required - set(headers))
-        if missing:
-            raise SourceSchemaError(f"FTE missing columns: {', '.join(missing)}")
-        index = {name: headers.index(name) for name in headers if name}
+        sheet_name, header_row, rows, index = _find_fte_table(workbook, path)
         output: list[dict[str, Any]] = []
-        for source_row, values in enumerate(rows, 2):
-            get = lambda name: values[index[name]] if name in index and index[name] < len(values) else None
-            if get("Client ID") is None and not _clean(get("Name")):
+        for source_row, values in enumerate(rows, header_row + 1):
+            get = lambda field: values[index[field]] if field in index and index[field] < len(values) else None
+            if get("agent_id") is None and not _clean(get("agent_name")):
                 continue
             output.append({
                 "source_file_id": file_id,
                 "source_row": source_row,
-                "agent_id": normalize_id(get("Client ID")),
-                "employment_status": _clean(get("Status")),
-                "agent_name": _clean(get("Name")),
-                "team_leader": _clean(get("Team leader")),
-                "ops_manager": _clean(get("Ops Manager")),
-                "lob": _clean(get("LOB")),
-                "market": _clean(get("Market")),
-                "language": _clean(get("Language")),
-                "location": _clean(get("Location")),
-                "city": _clean(get("City")),
-                "fte": _number(get("FTE")),
-                "end_date": parse_date(get("End date if leaver")),
+                "agent_id": normalize_id(get("agent_id")),
+                "employment_status": _clean(get("employment_status")),
+                "agent_name": _clean(get("agent_name")),
+                "team_leader": _clean(get("team_leader")),
+                "ops_manager": _clean(get("ops_manager")),
+                "lob": _clean(get("lob")),
+                "market": _clean(get("market")),
+                "language": _clean(get("language")),
+                "location": _clean(get("location")),
+                "city": _clean(get("city")),
+                "fte": _number(get("fte")),
+                "end_date": parse_date(get("end_date")),
             })
+        if not output:
+            raise SourceSchemaError(
+                f"FTE agent table on sheet {sheet_name!r} has headers but no populated agent rows: {path.name}"
+            )
         return ParseResult({"raw.fte_agent": output})
     finally:
         workbook.close()

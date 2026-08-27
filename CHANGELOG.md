@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.1 — 2026-08-27
+
+- Added a standard blank `templates\FTE Count.xlsx` workbook with instructions,
+  canonical `Agent` headers, dropdowns, validation, and required-field cues.
+- Replaced the literal `Agent`-tab dependency with safe header-driven roster
+  discovery across the first 100 rows of every worksheet.
+- Added confidence tiers so Support/lookup sheets cannot silently become the
+  authoritative roster; ambiguous sheets or duplicate ID/name aliases fail with
+  actionable diagnostics.
+- Made organisation columns optional while retaining Client/Agent ID and Name
+  as the identity contract.
+- Added report-pack configuration and routing. The current workbook is the
+  Operations pack under `output\operations`; Agent PCS/call-by-call quality is
+  reserved as a separate future `quality_pcs` pack.
+- Added a reproducible template generator that can standardize an existing FTE
+  workbook without modifying the source.
+
 ## 0.2.0 — 2026-08-27
 
 - Replaced the blocked DuckDB extension with Python's standard SQLite runtime.

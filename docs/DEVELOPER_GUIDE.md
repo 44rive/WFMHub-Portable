@@ -44,7 +44,7 @@ attendance, absence, correction, or payroll models.
 ## Windows portable build
 
 ```bash
-python packaging/windows/build_portable.py --version 0.2.0 --python-version 3.13.7
+python packaging/windows/build_portable.py --version 0.2.1 --python-version 3.13.7
 ```
 
 The builder always deletes and recreates stage and wheelhouse. It:
@@ -78,4 +78,32 @@ At minimum, verify:
 - ZIP checksum and native inventory match the builder result.
 
 The historical DuckDB CLI probe remains in the repository only as evidence of
-the rejected compatibility path. It is not part of v0.2.0 or its runtime.
+the rejected compatibility path. It is not part of v0.2.1 or its runtime.
+
+## FTE template and report packs
+
+Rebuild the blank public roster template deterministically:
+
+```bash
+python tools/build_fte_template.py
+```
+
+Create a local populated standard copy without changing the source workbook:
+
+```bash
+python tools/build_fte_template.py --source /path/to/current/FTE.xlsx \
+  --output output/setup/FTE\ Count.xlsx
+```
+
+Report-pack keys and destinations live in `report_packs.py` and
+`[report_packs]`, separate from integer row limits in `[report]`.
+`reports.build_report()` remains the Operations compatibility API. Register
+future builders through `build_report_pack`; do not import them directly in the
+CLI.
+
+For call-by-call PCS, define one raw interaction grain and stable deterministic
+interaction key before ingestion. Full-history extracts overlap, so newest
+active versions must deduplicate at that key. Agree numerator, denominator,
+eligible calls, exclusions, zero-denominator behavior, and business-date
+timezone before implementing `mart.agent_pcs_day`. Never export raw calls to
+Excel.

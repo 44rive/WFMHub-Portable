@@ -155,6 +155,8 @@ class EndToEndTests(unittest.TestCase):
                     before_failure,
                 )
                 report = build_report(conn, config, model.start, model.end)
+                self.assertEqual(report.parent, home / "output" / "operations")
+                self.assertTrue(report.name.startswith("WFMHub_Operations_"))
 
                 filtered_report = build_report(
                     conn, config, date(2026, 8, 1), date(2026, 8, 1),

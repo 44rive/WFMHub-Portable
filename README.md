@@ -7,7 +7,7 @@ installed Python, Power Query, Power Pivot, ODBC, or Python in Excel.
 Excel is the presentation layer only. Raw data is never loaded into worksheets
 or embedded in an Excel Data Model.
 
-## What v0.2.0 does
+## What v0.2.1 does
 
 - Ingests FTE, Verint Schedules & Activities, Storm LILO, Storm Agent Status,
   Verint Forecast, and APBE/APFR queue actuals.
@@ -27,7 +27,7 @@ or embedded in an Excel Data Model.
 
 ## Windows quick start
 
-Download `WFMHub-Portable-v0.2.0-win-x64.zip` from GitHub Releases—not GitHub's
+Download `WFMHub-Portable-v0.2.1-win-x64.zip` from GitHub Releases—not GitHub's
 automatic “Source code” ZIP. Choose **Extract All**, keep the complete `WFMHub`
 folder together, double-click `SETUP.cmd` once, then use `WFMHub.cmd` each day.
 
@@ -37,6 +37,15 @@ official CPython runtime and adds no third-party database extension or app-local
 MSVC package.
 
 Read [`docs/BEGINNER_GUIDE.md`](docs/BEGINNER_GUIDE.md) for click-by-click help.
+
+The release includes `templates\FTE Count.xlsx`, the standard blank roster.
+Copy it to the configured `FTE` folder and maintain agent rows on its `Agent`
+sheet. WFMHub also recognizes safe renamed/offset roster tables and refuses
+ambiguous workbooks instead of guessing.
+
+Generated workbooks are report packs. The current operational report is written
+to `output\operations`; future call-by-call Agent PCS quality will be a separate
+`output\quality_pcs` workbook, not extra raw-call sheets in Operations.
 
 ## Source boundaries
 

@@ -17,6 +17,7 @@ from .database import HubLockedError, backup_database, connect, migrate, write_s
 from .doctor import run_doctor
 from .ingestion import ingest_all
 from .models import refresh_models, resolve_period
+from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack
 from .reports import build_report
 
 
@@ -67,7 +68,7 @@ def setup(home: Path, source_root: Path | None, non_interactive: bool) -> int:
     print(f"Log         : {log}")
     if migrations:
         print(f"Database migrations applied: {', '.join(migrations)}")
-    print("Run WFMHub.cmd and choose Refresh + build report.")
+    print("Run WFMHub.cmd and choose Refresh + build Operations report.")
     return 0
 
 
@@ -106,13 +107,19 @@ def refresh(home: Path, start: date | None, end: date | None, no_report: bool) -
     return 2 if ingested.failed else 0
 
 
-def report_only(home: Path, start: date | None, end: date | None, output: Path | None) -> int:
+def report_only(
+    home: Path,
+    start: date | None,
+    end: date | None,
+    output: Path | None,
+    pack: str = "operations",
+) -> int:
     config = load_config(home)
     _logging(config)
     conn = connect(config, read_only=True)
     try:
         start, end = resolve_period(conn, config, start, end)
-        path = build_report(conn, config, start, end, output)
+        path = build_report_pack(pack, conn, config, start, end, output)
     finally:
         conn.close()
     print(f"Report created: {path}")
@@ -152,10 +159,10 @@ def create_backup(home: Path) -> int:
 def menu(home: Path) -> int:
     while True:
         print("\nWFMHUB PORTABLE")
-        print("1. Refresh all available data + build report")
-        print("2. Refresh current month + build report")
-        print("3. Refresh a custom period + build report")
-        print("4. Build report only")
+        print("1. Refresh all available data + build Operations report")
+        print("2. Refresh current month + build Operations report")
+        print("3. Refresh a custom period + build Operations report")
+        print("4. Build Operations report only")
         print("5. Import correction decisions from an edited report")
         print("6. Show source health")
         print("7. Create database backup")
@@ -174,7 +181,7 @@ def menu(home: Path) -> int:
                 end = _date(input("End date YYYY-MM-DD: ").strip())
                 refresh(home, start, end, False)
             elif choice == "4":
-                report_only(home, None, None, None)
+                report_only(home, None, None, None, "operations")
             elif choice == "5":
                 path = Path(input("Paste the edited report path: ").strip().strip('"'))
                 import_decisions(home, path)
@@ -212,6 +219,7 @@ def parser() -> argparse.ArgumentParser:
     report_p.add_argument("--start", type=_date)
     report_p.add_argument("--end", type=_date)
     report_p.add_argument("--output", type=Path)
+    report_p.add_argument("--pack", choices=IMPLEMENTED_REPORT_PACK_KEYS, default="operations")
     import_p = commands.add_parser("import-actions", help="Import edited GAPS decision columns")
     import_p.add_argument("workbook", type=Path)
     commands.add_parser("status", help="Show source health")
@@ -230,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "refresh":
             return refresh(home, args.start, args.end, args.no_report)
         if args.command == "report":
-            return report_only(home, args.start, args.end, args.output)
+            return report_only(home, args.start, args.end, args.output, args.pack)
         if args.command == "import-actions":
             return import_decisions(home, args.workbook)
         if args.command == "status":

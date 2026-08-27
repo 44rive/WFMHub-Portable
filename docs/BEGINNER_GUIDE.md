@@ -13,7 +13,7 @@ report sheets.
 
 ## First setup — one time
 
-1. Download `WFMHub-Portable-v0.2.0-win-x64.zip` from **Releases**.
+1. Download `WFMHub-Portable-v0.2.1-win-x64.zip` from **Releases**.
 2. Do not download GitHub's “Source code” ZIP.
 3. Right-click the downloaded ZIP and choose **Extract All**.
 4. Put the entire extracted `WFMHub` folder in a place where you can write, for
@@ -41,6 +41,23 @@ report sheets.
 
 Setup creates `config\wfmhub.toml` and `database\wfm.sqlite3`. It does not edit,
 move, rename, or delete an extract.
+
+## Standard FTE file
+
+The release contains `templates\FTE Count.xlsx`.
+
+1. Open that template and read `START_HERE`.
+2. On `Agent`, paste/update one row per agent.
+3. Keep `Client ID` and `Name` populated. Store Client ID as text so leading
+   zeros survive.
+4. Keep the supplied headers.
+5. Save a working copy as `FTE\FTE Count.xlsx` under your source root.
+
+The other columns—Status, Team leader, Ops Manager, LOB, Market, Language,
+Location, City, FTE, and leaver end date—are recommended enrichment. WFMHub can
+find a safe renamed/offset roster, but if two worksheets look authoritative or
+two ID/name aliases exist, it stops and tells you exactly where instead of
+guessing.
 
 ## What “our agents” means
 
@@ -73,7 +90,7 @@ every Agent Status row is outside roster, RTA stays empty and source health says
 3. Double-click `WFMHub.cmd`.
 4. Choose **1. Refresh all available data + build report**.
 5. Wait for **Refresh complete**.
-6. Open the newest workbook in `output`.
+6. Open the newest workbook in `output\operations`.
 7. Open `SOURCE_HEALTH` first.
 8. Stop if a required source says `ERROR` or `MISSING`.
 9. Then review `ATTENDANCE`, `GAPS`, `RTA`, and `INTRADAY`.
@@ -161,6 +178,19 @@ refresh does not erase them.
 
 The workbook contains no raw extract sheet, Power Query connection, or embedded
 Data Model.
+
+## Separate report packs
+
+Keep different work grains in different workbooks:
+
+- `output\operations`: current attendance, gaps, RTA, intraday, data quality,
+  and source health.
+- `output\quality_pcs`: reserved for future Agent PCS quality from call-by-call.
+
+Call-by-call rows can be enormous. They will stay in SQLite, deduplicated by a
+stable interaction key. The PCS workbook will contain agent summaries, trends,
+and bounded exceptions—not millions of raw calls. Correction imports remain
+exclusive to the Operations `GAPS` sheet.
 
 ## Forecast and future features
 

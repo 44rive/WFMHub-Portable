@@ -22,6 +22,7 @@ WFMHub/
 ├── RUNTIME_MANIFEST.sha256     reviewed native-file hashes
 ├── app/wfmhub/                 application code
 ├── app/sql/migrations/         versioned SQL schema
+├── templates/FTE Count.xlsx    blank standard roster workbook
 ├── config/default.toml         shipped defaults
 ├── config/wfmhub.toml          user configuration
 ├── database/wfm.sqlite3        durable SQLite hub
@@ -68,6 +69,20 @@ details remain in one module.
 | `mart.forecast_hour` | One forecast queue/hour |
 | `mart.intraday_queue_interval` | One actual queue/15-minute interval |
 | `mart.source_health` | One configured source family |
+
+## Report packs
+
+The shared SQLite hub can serve multiple workbooks without mixing their grains:
+
+| Pack | Folder | Scope |
+|---|---|---|
+| `operations` | `output/operations` | Attendance, GAPS, RTA, intraday, data quality, source health |
+| `quality_pcs` | `output/quality_pcs` | Reserved for Agent PCS quality from call-by-call |
+
+Operations remains the automatic refresh report and the only workbook accepted
+for correction-action import. A future PCS builder will share dimensions and
+source health but own its raw call adapter, deduped interaction model, marts,
+limits, and workbook. Raw call-by-call rows stay in SQLite.
 
 ## Agent scope and identity
 

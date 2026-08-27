@@ -11,6 +11,7 @@ import xlsxwriter
 
 from .config import Config
 from .database import DatabaseConnection
+from .report_packs import report_pack, report_pack_folder
 
 
 COLORS = {
@@ -219,7 +220,12 @@ def build_report(
     output: Path | None = None,
 ) -> Path:
     generated = datetime.now()
-    output = (output or config.output / f"WFMHub_{start:%Y-%m-%d}_to_{end:%Y-%m-%d}_{generated:%H%M%S_%f}.xlsx").resolve()
+    pack = report_pack("operations")
+    output = (
+        output
+        or report_pack_folder(config, pack.key)
+        / f"{pack.filename_prefix}_{start:%Y-%m-%d}_to_{end:%Y-%m-%d}_{generated:%H%M%S_%f}.xlsx"
+    ).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(f"{output.stem}.partial{output.suffix}")
     report = ExcelReport(partial)

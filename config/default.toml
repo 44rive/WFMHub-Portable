@@ -45,3 +45,9 @@ max_attendance_rows = 100000
 max_gap_rows = 100000
 max_rta_rows = 10000
 max_intraday_rows = 100000
+
+[report_packs]
+# Keep outputs separated by business grain and audience. Quality PCS will use
+# its own folder when the call-by-call source is added.
+operations = "operations"
+quality_pcs = "quality_pcs"

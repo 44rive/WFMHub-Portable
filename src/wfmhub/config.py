@@ -40,6 +40,7 @@ class Config:
     rules: Rules
     modules: dict[str, bool]
     report_limits: dict[str, int]
+    report_packs: dict[str, str]
 
     def source_path(self, key: str) -> Path:
         value = self.sources.get(key)
@@ -126,6 +127,7 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         ),
         modules={str(k): bool(v) for k, v in raw.get("modules", {}).items()},
         report_limits={str(k): int(v) for k, v in raw.get("report", {}).items()},
+        report_packs={str(k): str(v) for k, v in raw.get("report_packs", {}).items()},
     )
     if cfg.period_start and cfg.period_end and cfg.period_start > cfg.period_end:
         raise ConfigError("period.start cannot be after period.end")
