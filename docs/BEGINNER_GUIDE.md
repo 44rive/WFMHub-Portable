@@ -7,13 +7,13 @@ Think of WFMHub as a suitcase. Everything it needs is already inside.
 - `SETUP.cmd` checks and prepares the suitcase. Run it once.
 - `WFMHub.cmd` opens the daily menu.
 
-You do not install Python, SQLite, Power Query, Power Pivot, ODBC, or Python in
-Excel. The database stays outside Excel. Excel receives only the small finished
-report sheets.
+You do not install Python, SQLite, Power Query, Power Pivot, or ODBC. The
+database stays outside Excel. Normal report workbooks contain small curated
+sheets; detailed data is created only when you explicitly choose an export.
 
 ## First setup — one time
 
-1. Download `WFMHub-Portable-v0.2.1-win-x64.zip` from **Releases**.
+1. Download `WFMHub-Portable-v0.3.0-win-x64.zip` from **Releases**.
 2. Do not download GitHub's “Source code” ZIP.
 3. Right-click the downloaded ZIP and choose **Extract All**.
 4. Put the entire extracted `WFMHub` folder in a place where you can write, for
@@ -63,7 +63,7 @@ guessing.
 
 The FTE `Agent` sheet is the list of people allowed into agent-level data.
 
-For every schedule, LILO, and Agent Status row, WFMHub asks:
+For every schedule, LILO, Agent Status, and Call-by-Call row, WFMHub asks:
 
 1. Does its Agent ID exist in FTE? Keep it.
 2. If not, does its cleaned name match exactly one FTE person? Keep it.
@@ -88,21 +88,33 @@ every Agent Status row is outside roster, RTA stays empty and source health says
 1. Put new untouched exports in their normal folders.
 2. Keep their original filenames.
 3. Double-click `WFMHub.cmd`.
-4. Choose **1. Refresh all available data + build report**.
-5. Wait for **Refresh complete**.
-6. Open the newest workbook in `output\operations`.
-7. Open `SOURCE_HEALTH` first.
-8. Stop if a required source says `ERROR` or `MISSING`.
-9. Then review `ATTENDANCE`, `GAPS`, `RTA`, and `INTRADAY`.
+4. Choose **1. Refresh hub data**.
+5. Choose the source group: All, Operations, Intraday, or Agent PCS.
+6. Choose the date period.
+7. Choose one report, all reports, or no report.
+8. Wait for **Refresh complete**.
+9. Open the report's `SOURCE_HEALTH` first.
+10. Stop if a required source says `ERROR` or `MISSING`.
 
 Unchanged files are fingerprinted and skipped. Their already-active kept and
 outside-roster counts still appear in the report.
 
 ## Run the current month or another date range
 
-For the current month, choose **2. Refresh current month + build report**.
+Every report, export and custom job offers these date choices:
 
-For any dates, choose **3. Refresh a custom period + build report** and type:
+```text
+Today
+Yesterday
+Current week
+Current month
+Previous month
+Custom dates
+All available dates
+Saved default dates
+```
+
+For custom dates, type:
 
 ```text
 Start date YYYY-MM-DD: 2026-08-01
@@ -124,8 +136,25 @@ start = ""
 end = ""
 ```
 
-Menu dates temporarily override setup dates. Report-only dates truly filter
-every dated KPI and sheet; they are not labels only.
+Menu dates temporarily override setup dates. WFMHub rebuilds the selected-period
+marts before a report, clean export, or custom job, so the dates are real
+filters—not labels only. Refreshing a new/changed source stores every row date
+found in that file so older periods remain available later.
+
+## Files containing several days
+
+The filename is not the business-date authority. WFMHub reads row dates from:
+
+- Schedule shift/event timestamps or the schedule date marker.
+- LILO `Date`/`Business Date`/`Extract Date`/`Report Date`, then login/logout.
+- Agent Status start timestamp.
+- Call start timestamp.
+- Forecast and APBE/APFR Date columns.
+
+A filename can contain one date, `start - end`, or no date. One special case is
+a multi-day LILO row with both login and logout blank: it must have a row-level
+Date column. Without that, no date can be known, so WFMHub rejects and counts
+the row instead of inventing a no-show day.
 
 ## No-show versus missing data
 
@@ -156,41 +185,55 @@ Only the first result is a no-show.
    - Injected Date
 
 7. Save the workbook.
-8. In `WFMHub.cmd`, choose **5. Import correction decisions** and paste the saved
+8. In `WFMHub.cmd`, choose **6. Import correction decisions** and paste the saved
    workbook path.
 
 The whole import is atomic: one invalid later row cancels the entire import.
 WFMHub stores accepted decisions in SQLite by stable `Correction ID`; a later
 refresh does not erase them.
 
-## Report sheets
-
-| Sheet | Meaning |
-|---|---|
-| `START_HERE` | Period and daily instructions |
-| `SUMMARY` | Main period-filtered KPIs |
-| `ATTENDANCE` | One scheduled admitted Agent ID/day |
-| `GAPS` | Reviewable Verint correction candidates |
-| `RTA` | Adherence at newest admitted status timestamp |
-| `INTRADAY` | Storm actuals and Verint forecast, still separate |
-| `DATA_QUALITY` | Unsafe, incomplete, or review conditions |
-| `SOURCE_HEALTH` | Files, kept rows, excluded rows, and failures |
-
-The workbook contains no raw extract sheet, Power Query connection, or embedded
-Data Model.
-
 ## Separate report packs
 
 Keep different work grains in different workbooks:
 
-- `output\operations`: current attendance, gaps, RTA, intraday, data quality,
-  and source health.
-- `output\quality_pcs`: reserved for future Agent PCS quality from call-by-call.
+- `output\operations`: attendance, gaps, RTA and operational data quality.
+- `output\intraday`: APBE/APFR actuals and separate Verint forecast.
+- `output\quality_pcs`: call performance, Agent PCS, trends, survey responses,
+  PCS data quality and copy/paste Python-in-Excel recipes.
 
 Call-by-call rows can be enormous. They will stay in SQLite, deduplicated by a
-stable interaction key. The PCS workbook will contain agent summaries, trends,
-and bounded exceptions—not millions of raw calls. Correction imports remain
+stable call-leg key. The PCS workbook contains agent summaries, trends and
+bounded survey responses—not millions of raw calls. Correction imports remain
 exclusive to the Operations `GAPS` sheet.
+
+PCS uses valid configured numeric answers. It averages configured questions
+within each response, then gives each response equal weight in the agent PCS
+average. A missing denominator displays blank, never zero.
+
+## Export clean data
+
+Choose **3. Export clean data**, then select a dataset, dates and CSV/XLSX.
+Available exports include calls, PCS responses, PCS agent/day, attendance,
+gaps, schedules, events, LILO, Agent Status, actuals, forecast and source
+health.
+
+Use CSV for large call data. XLSX stops before Excel's row limit. Every export
+gets a `.manifest.txt` beside it containing dates, row count and generation
+time. Outputs go to `output\data_exports`; extracts are not changed.
+
+## Custom Lab
+
+1. Open `custom\jobs` for Python or `custom\sql` for SQL.
+2. Copy the underscore template.
+3. Rename the copy without the leading underscore.
+4. Paste/edit your code in the copy.
+5. Choose **4. Run custom Python or SQL analysis**.
+6. Select the job and dates.
+
+The hub API passed to Python jobs has a read-only database connection. Python
+jobs are still trusted executable code, so run only code you understand. No
+`pip` runs on the work machine; use the standard library and shipped Excel
+libraries. Custom output goes to `output\custom`.
 
 ## Forecast and future features
 
@@ -217,11 +260,12 @@ the only copy first.
 
 ## Upgrade from v0.1
 
-v0.1 used a database extension blocked by the work computer. v0.2 starts a new
-SQLite database.
+v0.1 used a database extension blocked by the work computer. v0.2 and v0.3 use
+SQLite. v0.3 upgrades a v0.2 SQLite database with an automatic pre-migration
+backup and additive migration.
 
-1. Extract v0.2 into a new folder. Do not paste it over v0.1.
-2. Run v0.2 `SETUP.cmd` and select the same untouched source root.
+1. Extract v0.3 into a new folder. Do not paste it over v0.1.
+2. Run v0.3 `SETUP.cmd` and select the same untouched source root.
 3. Run a full refresh so SQLite rebuilds from the extracts.
 4. Keep the complete v0.1 folder and its `wfm.duckdb`; v0.2 never opens or
    deletes it.
@@ -234,10 +278,12 @@ SQLite database.
 |---|---|
 | System check fails | Copy the exact FAIL line; setup stopped before database creation |
 | `py` is not recognized | Ignore `py`; the release uses `runtime\python.exe` only |
-| A DLL/application-control error appears | Re-extract the complete v0.2 ZIP; do not overlay v0.1 or move runtime files |
+| A DLL/application-control error appears | Re-extract the complete v0.3 ZIP; do not overlay v0.1 or move runtime files |
 | Source is `MISSING` | Correct `source_root` in `config\wfmhub.toml` |
 | Agent Status is `ERROR`, 0 kept | The export does not match FTE IDs/unique names; obtain the correct scoped export |
 | RTA is empty | Fix Agent Status scope/freshness first; WFMHub will not invent RTA |
+| PCS average is blank | No valid configured survey response exists for the FTE-scoped calls and dates |
+| Multi-day LILO rejects blank rows | Add a row-level Date column; filename range cannot identify a blank row's day |
 | Report is empty | Check selected dates, `SOURCE_HEALTH`, and FTE scope |
 | Database is locked | Close the other WFMHub refresh and retry |
 | Decision disappeared | Import the edited report; editing Excel alone does not update SQLite |

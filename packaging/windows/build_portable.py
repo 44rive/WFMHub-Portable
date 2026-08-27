@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.2.1"
+DEFAULT_VERSION = "0.3.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -100,6 +100,14 @@ def validate_stage(stage: Path, expected_native: dict[str, str]) -> None:
     ]
     if any(path.exists() for path in forbidden_user_files):
         raise RuntimeError("Portable stage contains user configuration or database data")
+    unexpected_custom = [
+        path for path in (stage / "custom").rglob("*")
+        if path.is_file() and path.name not in {
+            "README.txt", "_paste_your_python_here.py", "_paste_your_sql_here.sql"
+        }
+    ]
+    if unexpected_custom:
+        raise RuntimeError(f"Portable stage contains runnable/user custom jobs: {unexpected_custom}")
 
 
 def copy_tree(source: Path, target: Path) -> None:
@@ -160,6 +168,19 @@ def build(args) -> Path:
     copy_tree(ROOT / "sql", stage / "app" / "sql")
     copy_tree(ROOT / "docs", stage / "docs")
     copy_tree(ROOT / "templates", stage / "templates")
+    # Ship only reviewed underscore templates. Runnable local jobs can contain
+    # business logic or data and must never leak into a public portable ZIP.
+    (stage / "custom" / "jobs").mkdir(parents=True, exist_ok=True)
+    (stage / "custom" / "sql").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / "custom" / "README.txt", stage / "custom" / "README.txt")
+    shutil.copy2(
+        ROOT / "custom" / "jobs" / "_paste_your_python_here.py",
+        stage / "custom" / "jobs" / "_paste_your_python_here.py",
+    )
+    shutil.copy2(
+        ROOT / "custom" / "sql" / "_paste_your_sql_here.sql",
+        stage / "custom" / "sql" / "_paste_your_sql_here.sql",
+    )
     (stage / "config").mkdir(exist_ok=True)
     shutil.copy2(ROOT / "config" / "default.toml", stage / "config" / "default.toml")
     shutil.copy2(ROOT / "WFMHub.cmd", stage / "WFMHub.cmd")

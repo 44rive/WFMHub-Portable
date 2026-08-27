@@ -9,6 +9,7 @@ output = "output"
 logs = "logs"
 backups = "backups"
 input = "input"
+custom = "custom"
 
 [sources]
 # FTE Agent is the authoritative "our agents" roster. Schedule, LILO, and
@@ -21,6 +22,7 @@ schedule_folder = "Verint/Schedules & Activities"
 forecast_folder = "Verint/Forecast"
 apbe_folder = "Storm/APBE ALL WFM"
 apfr_folder = "Storm/APFR KPI SUIVI JOUR"
+call_folder = "Storm/Call by Call"
 
 [period]
 # Leave blank to use every date currently available in the database.
@@ -39,15 +41,31 @@ attendance = true
 agent_status = true
 intraday = true
 forecast = true
+pcs = true
+
+[pcs]
+# Numeric survey questions are averaged per response, then per agent. Change
+# these when the survey questionnaire changes; Question 3 is text in the
+# current extract.
+scored_questions = [1, 2]
+comment_questions = [3]
+survey_mode = "2"
+minimum_score = 1
+maximum_score = 5
+top_box_minimum = 4
+low_score_maximum = 2
 
 [report]
 max_attendance_rows = 100000
 max_gap_rows = 100000
 max_rta_rows = 10000
 max_intraday_rows = 100000
+max_pcs_agent_rows = 100000
+max_pcs_exception_rows = 100000
 
 [report_packs]
 # Keep outputs separated by business grain and audience. Quality PCS will use
 # its own folder when the call-by-call source is added.
 operations = "operations"
+intraday = "intraday"
 quality_pcs = "quality_pcs"

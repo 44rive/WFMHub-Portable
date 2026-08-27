@@ -6,12 +6,11 @@ from wfmhub.report_packs import IMPLEMENTED_REPORT_PACK_KEYS, REPORT_PACKS, buil
 
 
 class ReportPackTests(unittest.TestCase):
-    def test_operations_is_only_implemented_pack_and_pcs_is_reserved(self):
-        self.assertEqual(IMPLEMENTED_REPORT_PACK_KEYS, ("operations",))
-        self.assertTrue(REPORT_PACKS["operations"].implemented)
-        self.assertFalse(REPORT_PACKS["quality_pcs"].implemented)
-        with self.assertRaisesRegex(ValueError, "reserved but not implemented"):
-            build_report_pack("quality_pcs", None, None, None, None)
+    def test_three_independent_report_packs_are_registered(self):
+        self.assertEqual(IMPLEMENTED_REPORT_PACK_KEYS, ("operations", "intraday", "quality_pcs"))
+        self.assertTrue(all(REPORT_PACKS[key].implemented for key in IMPLEMENTED_REPORT_PACK_KEYS))
+        self.assertEqual(REPORT_PACKS["intraday"].default_folder, "intraday")
+        self.assertEqual(REPORT_PACKS["quality_pcs"].default_folder, "quality_pcs")
 
 
 if __name__ == "__main__":

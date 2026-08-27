@@ -8,7 +8,7 @@ from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 
-from wfmhub.ingestion import SourceSchemaError, parse_agent_status, parse_forecast, parse_fte, parse_lilo, parse_schedule
+from wfmhub.ingestion import AgentScope, SourceSchemaError, parse_agent_status, parse_calls, parse_forecast, parse_fte, parse_lilo, parse_schedule
 
 
 class ParserTests(unittest.TestCase):
@@ -126,6 +126,30 @@ class ParserTests(unittest.TestCase):
             self.assertEqual(row["last_logout"], datetime(2026, 8, 2, 7, 0))
             self.assertTrue(row["overnight_adjusted"])
 
+    def test_lilo_range_file_uses_row_date_and_preserves_blank_no_show(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "AP-Historical-Report---Agent-Login 2026-08-01 - 2026-08-02.csv"
+            path.write_text(
+                "[Date],[Agent],[Agent ID],[First Log-on Time],[Last Log-off Time]\n"
+                "2026-08-01,Jane,123,,,\n"
+                "2026-08-02,Jane,123,2026-08-02 08:00:00,2026-08-02 16:00:00\n",
+                encoding="utf-8-sig",
+            )
+            rows = parse_lilo(path, "file").tables["raw.lilo"]
+            self.assertEqual([str(row["extract_date"]) for row in rows], ["2026-08-01", "2026-08-02"])
+            self.assertIsNone(rows[0]["first_login"])
+
+    def test_lilo_multiday_blank_row_without_date_is_rejected_not_invented(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "AP-Historical-Report---Agent-Login 2026-08-01 - 2026-08-02.csv"
+            path.write_text(
+                "[Agent],[Agent ID],[First Log-on Time],[Last Log-off Time]\nJane,123,,\n",
+                encoding="utf-8-sig",
+            )
+            result = parse_lilo(path, "file")
+            self.assertEqual(result.tables["raw.lilo"], [])
+            self.assertRegex(result.rejected[0], "no row date")
+
     def test_status_duration_can_exceed_24_hours(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "AP-Historical-Report---Agent-Status 2026-08-24.csv"
@@ -174,6 +198,43 @@ class ParserTests(unittest.TestCase):
             self.assertEqual(row["interval_minutes"], 60)
             self.assertEqual(row["sl_forecast"], 0.79)
             self.assertEqual(row["net_staffing_forecast"], -1)
+
+    def test_call_by_call_uses_row_dates_scores_and_fte_scope(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "Call by Call 2026-08-01 - 2026-08-31.csv"
+            headers = [
+                "[Call Date/Time]", "[Call End Date/Time]", "[Call ID]",
+                "[Call Reference Number]", "[Agent ID]", "[Agent]",
+                "[Talk Time]", "[Hold Time]", "[Total Wrap Time]",
+                "[Call Direction]", "[PostCallSurveyMode]", "[Question 1]",
+                "[Question 2]", "[Question 3]",
+            ]
+            with path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=headers)
+                writer.writeheader()
+                writer.writerow({
+                    "[Call Date/Time]": "8/1/2026 8:00", "[Call End Date/Time]": "8/1/2026 8:05",
+                    "[Call ID]": "call-1", "[Call Reference Number]": "ref-1",
+                    "[Agent ID]": "123", "[Agent]": "Jane", "[Talk Time]": "0:04:00",
+                    "[Hold Time]": "0:00:30", "[Total Wrap Time]": "0:00:30",
+                    "[Call Direction]": "I", "[PostCallSurveyMode]": "2",
+                    "[Question 1]": "5", "[Question 2]": "4", "[Question 3]": "Helpful",
+                })
+                writer.writerow({
+                    "[Call Date/Time]": "8/2/2026 9:00", "[Call End Date/Time]": "8/2/2026 9:01",
+                    "[Call ID]": "world", "[Call Reference Number]": "world",
+                    "[Agent ID]": "999", "[Agent]": "Worldwide", "[Talk Time]": "0:01:00",
+                    "[Hold Time]": "0:00:00", "[Total Wrap Time]": "0:00:00",
+                })
+            scope = AgentScope(frozenset({"123"}), {"jane": "123"}, "scope")
+            result = parse_calls(path, "file", scope)
+            self.assertEqual(result.scoped_out, 1)
+            self.assertEqual(len(result.tables["raw.call_leg"]), 1)
+            row = result.tables["raw.call_leg"][0]
+            self.assertEqual(str(row["business_date"]), "2026-08-01")
+            self.assertEqual(row["question_1_score"], 5)
+            self.assertEqual(row["question_2_score"], 4)
+            self.assertEqual(row["talk_seconds"], 240)
 
 
 if __name__ == "__main__":

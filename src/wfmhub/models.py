@@ -24,6 +24,7 @@ class ModelSummary:
     rta_rows: int = 0
     forecast_rows: int = 0
     intraday_rows: int = 0
+    pcs_rows: int = 0
     quality_rows: int = 0
 
 
@@ -37,9 +38,10 @@ def resolve_period(
     config: Config,
     start: date | None,
     end: date | None,
+    use_config_period: bool = True,
 ) -> tuple[date, date]:
-    start = start or config.period_start
-    end = end or config.period_end
+    start = start or (config.period_start if use_config_period else None)
+    end = end or (config.period_end if use_config_period else None)
     if start and end:
         if start > end:
             raise ValueError("Start date cannot be after end date")
@@ -53,6 +55,12 @@ def resolve_period(
             UNION ALL SELECT max(business_date) FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
             UNION ALL SELECT min(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
             UNION ALL SELECT max(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(extract_date) FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(extract_date) FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(extract_date) FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(extract_date) FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(business_date) FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(business_date) FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
         ) x WHERE d IS NOT NULL
         """
     ).fetchone()
@@ -199,6 +207,7 @@ def _build_agents(conn: DatabaseConnection) -> dict[str, dict[str, Any]]:
         ), ids AS (
             SELECT agent_id FROM roster UNION SELECT agent_id FROM actual_names
             UNION SELECT agent_id FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
+            UNION SELECT agent_id FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
             UNION SELECT agent_id FROM raw.fte_agent r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
         ), fte_ranked AS (
                 SELECT r.agent_id, r.agent_name, r.employment_status, r.team_leader,
@@ -703,6 +712,117 @@ def _build_intraday(conn: DatabaseConnection, start: date, end: date) -> tuple[i
     return forecast, actual
 
 
+def _build_pcs(conn: DatabaseConnection, config: Config, start: date, end: date) -> int:
+    """Aggregate deduplicated, FTE-scoped call legs to one agent/day."""
+    conn.execute("DELETE FROM mart.agent_pcs_day")
+    if not config.modules.get("pcs", True):
+        return 0
+    minimum = config.pcs.minimum_score
+    maximum = config.pcs.maximum_score
+    scored = sorted(set(config.pcs.scored_questions))
+    valid = {
+        number: f"CASE WHEN question_{number}_score BETWEEN {minimum:g} AND {maximum:g} THEN 1 ELSE 0 END"
+        for number in range(1, 11)
+    }
+    score_count = " + ".join(valid[number] for number in scored)
+    score_sum = " + ".join(
+        f"CASE WHEN question_{number}_score BETWEEN {minimum:g} AND {maximum:g} THEN question_{number}_score ELSE 0 END"
+        for number in scored
+    )
+    comments = sorted(set(config.pcs.comment_questions))
+    comment_test = " OR ".join(
+        f"coalesce(trim(question_{number}), '') <> ''" for number in comments
+    ) or "0"
+    sql = f"""
+        WITH prepared AS (
+            SELECT c.*,
+                   d.canonical_name, d.team_leader, d.ops_manager,
+                   d.lob AS roster_lob, d.market, d.language AS roster_language,
+                   d.location,
+                   coalesce(c.talk_seconds,0)+coalesce(c.hold_seconds,0)+coalesce(c.wrap_seconds,0) AS handle_seconds,
+                   CASE WHEN upper(coalesce(c.call_direction,''))='I'
+                              AND coalesce(c.post_call_survey_mode,'')=? THEN 1 ELSE 0 END AS pcs_eligible,
+                   ({score_count}) AS valid_score_count,
+                   ({score_sum}) AS valid_score_sum,
+                   CASE WHEN question_1_score BETWEEN {minimum:g} AND {maximum:g} THEN question_1_score END AS valid_q1,
+                   CASE WHEN question_2_score BETWEEN {minimum:g} AND {maximum:g} THEN question_2_score END AS valid_q2,
+                   CASE WHEN {comment_test} THEN 1 ELSE 0 END AS has_comment
+            FROM core.clean_call_leg c
+            LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
+            WHERE c.business_date BETWEEN ? AND ? AND c.agent_id IS NOT NULL
+        ), scored_calls AS (
+            SELECT *,
+                   CASE WHEN valid_score_count>0 THEN 1.0*valid_score_sum/valid_score_count END AS survey_score
+            FROM prepared
+        ), aggregated AS (
+            SELECT business_date, agent_id,
+                   coalesce(max(canonical_name), max(agent_name)) AS agent_name,
+                   max(team_leader) AS team_leader, max(ops_manager) AS ops_manager,
+                   coalesce(max(roster_lob), max(lob)) AS lob, max(market) AS market,
+                   coalesce(max(roster_language), max(language)) AS language,
+                   max(location) AS location,
+                   count(*) AS call_legs,
+                   sum(CASE WHEN handle_seconds>0 THEN 1 ELSE 0 END) AS handled_calls,
+                   sum(CASE WHEN upper(coalesce(call_direction,''))='I' THEN 1 ELSE 0 END) AS inbound_calls,
+                   sum(CASE WHEN upper(coalesce(call_direction,''))='O' THEN 1 ELSE 0 END) AS outbound_calls,
+                   sum(coalesce(talk_seconds,0)) AS talk_seconds,
+                   sum(coalesce(hold_seconds,0)) AS hold_seconds,
+                   sum(coalesce(wrap_seconds,0)) AS wrap_seconds,
+                   sum(handle_seconds) AS handle_seconds,
+                   sum(pcs_eligible) AS pcs_enabled_calls,
+                   sum(CASE WHEN pcs_eligible=1 AND survey_score IS NOT NULL THEN 1 ELSE 0 END) AS survey_responses,
+                   sum(CASE WHEN pcs_eligible=1 AND valid_q1 IS NOT NULL THEN 1 ELSE 0 END) AS q1_response_count,
+                   sum(CASE WHEN pcs_eligible=1 THEN coalesce(valid_q1,0) ELSE 0 END) AS q1_score_sum,
+                   sum(CASE WHEN pcs_eligible=1 AND valid_q2 IS NOT NULL THEN 1 ELSE 0 END) AS q2_response_count,
+                   sum(CASE WHEN pcs_eligible=1 THEN coalesce(valid_q2,0) ELSE 0 END) AS q2_score_sum,
+                   sum(CASE WHEN pcs_eligible=1 AND survey_score IS NOT NULL THEN 1 ELSE 0 END) AS pcs_score_count,
+                   sum(CASE WHEN pcs_eligible=1 THEN coalesce(survey_score,0) ELSE 0 END) AS pcs_score_sum,
+                   sum(CASE WHEN pcs_eligible=1 AND survey_score >= {config.pcs.top_box_minimum:g} THEN 1 ELSE 0 END) AS top_box_responses,
+                   sum(CASE WHEN pcs_eligible=1 AND survey_score <= {config.pcs.low_score_maximum:g} THEN 1 ELSE 0 END) AS low_score_responses,
+                   sum(CASE WHEN pcs_eligible=1 THEN has_comment ELSE 0 END) AS comments_count
+            FROM scored_calls
+            GROUP BY business_date, agent_id
+        )
+        INSERT INTO mart.agent_pcs_day (
+            agent_day_key, business_date, agent_id, agent_name, team_leader,
+            ops_manager, lob, market, language, location, call_legs,
+            handled_calls, inbound_calls, outbound_calls, talk_seconds,
+            hold_seconds, wrap_seconds, handle_seconds, average_talk_seconds,
+            average_hold_seconds, average_wrap_seconds, average_handle_seconds,
+            pcs_enabled_calls, survey_responses, response_rate,
+            q1_response_count, q1_score_sum, q1_average,
+            q2_response_count, q2_score_sum, q2_average,
+            pcs_score_count, pcs_score_sum, pcs_average,
+            top_box_responses, low_score_responses, top_box_percent,
+            low_score_percent, comments_count
+        )
+        SELECT replace(business_date,'-','') || '-' || agent_id,
+               business_date, agent_id, agent_name, team_leader, ops_manager,
+               lob, market, language, location, call_legs, handled_calls,
+               inbound_calls, outbound_calls, talk_seconds, hold_seconds,
+               wrap_seconds, handle_seconds,
+               CASE WHEN handled_calls>0 THEN 1.0*talk_seconds/handled_calls END,
+               CASE WHEN handled_calls>0 THEN 1.0*hold_seconds/handled_calls END,
+               CASE WHEN handled_calls>0 THEN 1.0*wrap_seconds/handled_calls END,
+               CASE WHEN handled_calls>0 THEN 1.0*handle_seconds/handled_calls END,
+               pcs_enabled_calls, survey_responses,
+               CASE WHEN pcs_enabled_calls>0 THEN 1.0*survey_responses/pcs_enabled_calls END,
+               q1_response_count, q1_score_sum,
+               CASE WHEN q1_response_count>0 THEN 1.0*q1_score_sum/q1_response_count END,
+               q2_response_count, q2_score_sum,
+               CASE WHEN q2_response_count>0 THEN 1.0*q2_score_sum/q2_response_count END,
+               pcs_score_count, pcs_score_sum,
+               CASE WHEN pcs_score_count>0 THEN 1.0*pcs_score_sum/pcs_score_count END,
+               top_box_responses, low_score_responses,
+               CASE WHEN survey_responses>0 THEN 1.0*top_box_responses/survey_responses END,
+               CASE WHEN survey_responses>0 THEN 1.0*low_score_responses/survey_responses END,
+               comments_count
+        FROM aggregated
+    """
+    conn.execute(sql, [config.pcs.survey_mode, start, end])
+    return conn.execute("SELECT count(*) FROM mart.agent_pcs_day").fetchone()[0]
+
+
 def _issue_id(*parts: Any) -> str:
     return hashlib.sha256("|".join(str(part or "") for part in parts).encode("utf-8")).hexdigest()
 
@@ -724,13 +844,15 @@ def _build_quality(
     for family, key in (
         ("fte", "fte_file"), ("schedule", "schedule_folder"), ("lilo", "lilo_folder"),
         ("agent_status", "agent_status_folder"), ("forecast", "forecast_folder"),
-        ("apbe", "apbe_folder"), ("apfr", "apfr_folder"),
+        ("apbe", "apbe_folder"), ("apfr", "apfr_folder"), ("calls", "call_folder"),
     ):
         if family == "agent_status" and not config.modules.get("agent_status", True):
             continue
         if family == "forecast" and not config.modules.get("forecast", True):
             continue
         if family in {"apbe", "apfr"} and not config.modules.get("intraday", True):
+            continue
+        if family == "calls" and not config.modules.get("pcs", True):
             continue
         path = config.source_path(key)
         if not path.exists():
@@ -777,10 +899,18 @@ def _build_quality(
         add("agent_status", None, row["business_date"], row["agent_id"], "Low status coverage", "REVIEW", f"Coverage={row['status_coverage_percent']:.1%}; LILO fallback used when available")
     if conn.execute("SELECT count(*) FROM mart.forecast_hour").fetchone()[0] and conn.execute("SELECT count(*) FROM mart.intraday_queue_interval").fetchone()[0]:
         add("intraday", None, None, None, "Forecast scope mapping required", "REVIEW", "Forecast and Storm actuals are intentionally not auto-mapped. Confirm queue/LOB scope before comparing them.")
+    if config.modules.get("pcs", True):
+        call_rows = conn.execute("SELECT count(*) FROM core.clean_call_leg WHERE business_date BETWEEN ? AND ?", [start, end]).fetchone()[0]
+        responses = conn.execute("SELECT coalesce(sum(survey_responses),0) FROM mart.agent_pcs_day").fetchone()[0]
+        if call_rows and not responses:
+            add(
+                "calls", None, None, None, "No in-scope PCS responses", "REVIEW",
+                f"{call_rows} clean in-scope call legs were available, but no valid configured survey score was found.",
+            )
     for family, file_name, scoped_out in conn.execute(
         """SELECT source_family, file_name, scoped_out_count
            FROM meta.source_file
-           WHERE active=true AND status='SUCCESS' AND source_family IN ('schedule','lilo','agent_status')
+           WHERE active=true AND status='SUCCESS' AND source_family IN ('schedule','lilo','agent_status','calls')
              AND row_count=0 AND scoped_out_count>0"""
     ).fetchall():
         add(
@@ -804,7 +934,7 @@ def _build_source_health(conn: DatabaseConnection, config: Config) -> None:
         ("fte", config.source_path("fte_file")), ("schedule", config.source_path("schedule_folder")),
         ("lilo", config.source_path("lilo_folder")), ("agent_status", config.source_path("agent_status_folder")),
         ("forecast", config.source_path("forecast_folder")), ("apbe", config.source_path("apbe_folder")),
-        ("apfr", config.source_path("apfr_folder")),
+        ("apfr", config.source_path("apfr_folder")), ("calls", config.source_path("call_folder")),
     ]
     for family, expected in specs:
         latest = conn.execute(
@@ -827,8 +957,9 @@ def _build_source_health(conn: DatabaseConnection, config: Config) -> None:
                 UNION ALL SELECT max(schedule_date) FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='schedule'
                 UNION ALL SELECT max(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='forecast'
                 UNION ALL SELECT max(business_date) FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE source_system=upper(?)
+                UNION ALL SELECT max(business_date) FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='calls'
             ) x
-            """, [family, family, family, family, family]
+            """, [family, family, family, family, family, family]
         ).fetchone()[0]
         if latest:
             file_name, modified, loaded, status, error = latest
@@ -860,10 +991,11 @@ def refresh_models(
     run_id: str,
     start: date | None = None,
     end: date | None = None,
+    use_config_period: bool = True,
 ) -> ModelSummary:
     conn.execute("SAVEPOINT refresh_models")
     try:
-        start, end = resolve_period(conn, config, start, end)
+        start, end = resolve_period(conn, config, start, end, use_config_period)
         schedules = _load_schedules(conn, start, end)
         events = _load_events(conn, start, end)
         events_by_agent = _events_by_agent(events)
@@ -875,12 +1007,13 @@ def refresh_models(
         corrections = _build_corrections(conn, config, attendance, conformance, exclusive)
         rta = _build_rta(conn, config, schedules, events_by_agent, statuses, agents)
         forecast, actual = _build_intraday(conn, start, end)
+        pcs = _build_pcs(conn, config, start, end)
         _build_source_health(conn, config)
         quality = _build_quality(conn, config, run_id, start, end)
         result = ModelSummary(
             start=start, end=end, attendance_rows=len(attendance), conformance_rows=len(conformance),
             correction_rows=len(corrections), rta_rows=len(rta), forecast_rows=forecast,
-            intraday_rows=actual, quality_rows=quality,
+            intraday_rows=actual, pcs_rows=pcs, quality_rows=quality,
         )
         conn.execute("RELEASE SAVEPOINT refresh_models")
         return result

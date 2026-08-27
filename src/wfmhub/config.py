@@ -24,6 +24,17 @@ class Rules:
 
 
 @dataclass(frozen=True)
+class PCSSettings:
+    scored_questions: tuple[int, ...]
+    comment_questions: tuple[int, ...]
+    survey_mode: str
+    minimum_score: float
+    maximum_score: float
+    top_box_minimum: float
+    low_score_maximum: float
+
+
+@dataclass(frozen=True)
 class Config:
     home: Path
     file: Path
@@ -34,10 +45,12 @@ class Config:
     logs: Path
     backups: Path
     input: Path
+    custom: Path
     sources: dict[str, str]
     period_start: date | None
     period_end: date | None
     rules: Rules
+    pcs: PCSSettings
     modules: dict[str, bool]
     report_limits: dict[str, int]
     report_packs: dict[str, str]
@@ -115,7 +128,11 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         logs=_portable_path(home, str(paths.get("logs", "logs"))),
         backups=_portable_path(home, str(paths.get("backups", "backups"))),
         input=_portable_path(home, str(paths.get("input", "input"))),
-        sources={str(k): str(v) for k, v in raw.get("sources", {}).items()},
+        custom=_portable_path(home, str(paths.get("custom", "custom"))),
+        sources={
+            "call_folder": "Storm/Call by Call",
+            **{str(k): str(v) for k, v in raw.get("sources", {}).items()},
+        },
         period_start=_date_or_none(period.get("start"), "period.start"),
         period_end=_date_or_none(period.get("end"), "period.end"),
         rules=Rules(
@@ -125,20 +142,44 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
             minimum_status_coverage=float(rules.get("minimum_status_coverage", 0.80)),
             rta_stale_minutes=int(rules.get("rta_stale_minutes", 30)),
         ),
-        modules={str(k): bool(v) for k, v in raw.get("modules", {}).items()},
+        pcs=PCSSettings(
+            scored_questions=tuple(int(value) for value in raw.get("pcs", {}).get("scored_questions", [1, 2])),
+            comment_questions=tuple(int(value) for value in raw.get("pcs", {}).get("comment_questions", [3])),
+            survey_mode=str(raw.get("pcs", {}).get("survey_mode", "2")),
+            minimum_score=float(raw.get("pcs", {}).get("minimum_score", 1)),
+            maximum_score=float(raw.get("pcs", {}).get("maximum_score", 5)),
+            top_box_minimum=float(raw.get("pcs", {}).get("top_box_minimum", 4)),
+            low_score_maximum=float(raw.get("pcs", {}).get("low_score_maximum", 2)),
+        ),
+        modules={"pcs": True, **{str(k): bool(v) for k, v in raw.get("modules", {}).items()}},
         report_limits={str(k): int(v) for k, v in raw.get("report", {}).items()},
-        report_packs={str(k): str(v) for k, v in raw.get("report_packs", {}).items()},
+        report_packs={
+            "operations": "operations",
+            "intraday": "intraday",
+            "quality_pcs": "quality_pcs",
+            **{str(k): str(v) for k, v in raw.get("report_packs", {}).items()},
+        },
     )
     if cfg.period_start and cfg.period_end and cfg.period_start > cfg.period_end:
         raise ConfigError("period.start cannot be after period.end")
     if not 0 <= cfg.rules.minimum_status_coverage <= 1:
         raise ConfigError("rules.minimum_status_coverage must be between 0 and 1")
+    if not cfg.pcs.scored_questions or any(question not in range(1, 11) for question in cfg.pcs.scored_questions):
+        raise ConfigError("pcs.scored_questions must contain question numbers from 1 to 10")
+    if any(question not in range(1, 11) for question in cfg.pcs.comment_questions):
+        raise ConfigError("pcs.comment_questions must contain question numbers from 1 to 10")
+    if not cfg.pcs.minimum_score < cfg.pcs.maximum_score:
+        raise ConfigError("pcs.minimum_score must be lower than pcs.maximum_score")
+    if not cfg.pcs.minimum_score <= cfg.pcs.low_score_maximum <= cfg.pcs.maximum_score:
+        raise ConfigError("pcs.low_score_maximum must be inside the configured score range")
+    if not cfg.pcs.minimum_score <= cfg.pcs.top_box_minimum <= cfg.pcs.maximum_score:
+        raise ConfigError("pcs.top_box_minimum must be inside the configured score range")
     if cfg.database.suffix.lower() == ".duckdb":
         raise ConfigError(
             "This corporate-compatible release uses SQLite. Change paths.database "
             "in config\\wfmhub.toml to database/wfm.sqlite3; the old DuckDB file is preserved."
         )
-    for path in (cfg.database.parent, cfg.output, cfg.logs, cfg.backups, cfg.input):
+    for path in (cfg.database.parent, cfg.output, cfg.logs, cfg.backups, cfg.input, cfg.custom):
         path.mkdir(parents=True, exist_ok=True)
     return cfg
 

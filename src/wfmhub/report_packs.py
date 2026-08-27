@@ -26,14 +26,19 @@ REPORT_PACKS = {
         key="operations",
         default_folder="operations",
         filename_prefix="WFMHub_Operations",
-        purpose="Attendance, corrections, RTA, intraday, data quality, and source health.",
+        purpose="Attendance, corrections, RTA, data quality, and source health.",
+    ),
+    "intraday": ReportPack(
+        key="intraday",
+        default_folder="intraday",
+        filename_prefix="WFMHub_Intraday",
+        purpose="Storm actual performance and separate Verint forecast/requirements.",
     ),
     "quality_pcs": ReportPack(
         key="quality_pcs",
         default_folder="quality_pcs",
         filename_prefix="WFMHub_Quality_PCS",
-        purpose="Future agent PCS quality metrics sourced from call-by-call data.",
-        implemented=False,
+        purpose="Agent call performance and PCS metrics sourced from call-by-call data.",
     ),
 }
 
@@ -75,4 +80,12 @@ def build_report_pack(
         from .reports import build_report
 
         return build_report(conn, config, start, end, output)
+    if key == "intraday":
+        from .intraday_reports import build_intraday_report
+
+        return build_intraday_report(conn, config, start, end, output)
+    if key == "quality_pcs":
+        from .pcs_reports import build_pcs_report
+
+        return build_pcs_report(conn, config, start, end, output)
     raise ValueError(f"Report pack {key!r} has no registered builder")

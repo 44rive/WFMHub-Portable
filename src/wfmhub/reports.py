@@ -39,6 +39,9 @@ def _display_header(name: str) -> str:
         "sl_forecast": "SL Forecast", "sl_required": "SL Required",
         "aht_seconds": "AHT Seconds", "aht_forecast_seconds": "AHT Forecast Seconds",
         "asa_seconds": "ASA Seconds", "fte_forecast": "FTE Forecast", "fte_required": "FTE Required",
+        "response_rate": "Response Rate %", "top_box_percent": "Top Box %",
+        "low_score_percent": "Low Score %", "pcs_average": "PCS Average",
+        "q1_average": "Q1 Average", "q2_average": "Q2 Average",
     }
     return custom.get(name, name.replace("_", " ").title().replace("Id", "ID"))
 
@@ -52,7 +55,7 @@ class ExcelReport:
         self.workbook = xlsxwriter.Workbook(path)
         self.workbook.set_properties({
             "title": "WFMHub Portable Report",
-            "subject": "Attendance, gaps, RTA, intraday and source health",
+            "subject": "Curated WFMHub report pack",
             "author": "WFMHub Portable",
             "company": "WFM",
         })
@@ -65,6 +68,7 @@ class ExcelReport:
         self.editable_date = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["blue"], "num_format": "yyyy-mm-dd", "bottom": 1, "bottom_color": COLORS["thin"]})
         self.error = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["red"]})
         self.integer = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "#,##0", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.decimal = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "#,##0.00", "bottom": 1, "bottom_color": COLORS["thin"]})
         self.percent = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "0.0%", "bottom": 1, "bottom_color": COLORS["thin"]})
         self.date = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "yyyy-mm-dd", "bottom": 1, "bottom_color": COLORS["thin"]})
         self.datetime = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "yyyy-mm-dd hh:mm", "bottom": 1, "bottom_color": COLORS["thin"]})
@@ -103,6 +107,8 @@ class ExcelReport:
                     fmt = self.date
                 elif header.endswith(" %") or header in {"Attendance %", "Conformance %", "Status Coverage %", "SL Forecast", "SL Required", "Service Level 20S", "Abandon Rate"}:
                     fmt = self.percent
+                elif isinstance(value, (int, float)) and not isinstance(value, bool) and "Average" in header:
+                    fmt = self.decimal
                 elif isinstance(value, (int, float)) and not isinstance(value, bool):
                     fmt = self.integer
                 worksheet.write(row_index, column, value, fmt)
@@ -148,7 +154,9 @@ def _summary_sheet(report: ExcelReport, conn: DatabaseConnection, start: date, e
         ("No-shows", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND attendance_result='No show'", [start, end]),
         ("Present", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND attendance_result='Present'", [start, end]),
         ("RTA exceptions", "SELECT count(*) FROM mart.rta_snapshot WHERE snapshot_at >= ? AND snapshot_at < ? AND rta_result='Out of adherence'", [datetime.combine(start, datetime.min.time()), datetime.combine(end + timedelta(days=1), datetime.min.time())]),
-        ("Quality errors", "SELECT count(*) FROM meta.quality_issue WHERE severity='ERROR' AND business_date BETWEEN ? AND ?", [start, end]),
+        ("Quality errors", """SELECT count(*) FROM meta.quality_issue
+             WHERE severity='ERROR' AND business_date BETWEEN ? AND ?
+               AND (source_family IS NULL OR source_family NOT IN ('calls','pcs','intraday','forecast','apbe','apfr'))""", [start, end]),
     ]
     worksheet.write("A4", "KPI", report.header)
     worksheet.write("B4", "Value", report.header)
@@ -185,7 +193,7 @@ def _start_sheet(report: ExcelReport, config: Config, start: date, end: date, ge
             "1. Put untouched exports in their normal source folders.",
             "2. Run WFMHub.cmd and choose Refresh + build report.",
             "3. Open SOURCE_HEALTH first. If it is red or ERROR, stop.",
-            "4. Review ATTENDANCE, GAPS, RTA and INTRADAY.",
+            "4. Review ATTENDANCE, GAPS and RTA.",
         ]),
         (11, "Monthly gaps", [
             "Run a custom period from the first through last day of the month.",
@@ -277,36 +285,24 @@ def build_report(
         )
         report.add_table_sheet("RTA", "RTA snapshot", "Historical/current snapshot based on the newest loaded Agent Status timestamp; check freshness before action.", headers, rows, exception_column="Severity")
 
-        headers, rows = _query(conn, """
-            SELECT 'Actual' record_type, business_date, interval_start, source_system source_or_queue,
-                   queue, business_partner, lob, language, offered, answered, abandoned,
-                   service_level_20s, aht_seconds, NULL volume_forecast, NULL fte_forecast,
-                   NULL fte_required, NULL sl_forecast, NULL sl_required, source_file
-            FROM mart.intraday_queue_interval
-            WHERE business_date BETWEEN ? AND ?
-            UNION ALL
-            SELECT 'Forecast', business_date, hour_start, queue_name, queue_name, NULL, NULL, NULL,
-                   NULL, NULL, NULL, NULL, NULL, volume_forecast, fte_forecast, fte_required,
-                   sl_forecast, sl_required, source_file
-            FROM mart.forecast_hour
-            WHERE business_date BETWEEN ? AND ?
-            ORDER BY business_date, interval_start, record_type
-            LIMIT ?
-        """, [start, end, start, end, config.report_limits.get("max_intraday_rows", 100000)])
-        report.add_table_sheet("INTRADAY", "Intraday actuals and forecast", "Forecast and actuals remain separate until an approved queue/LOB scope mapping is configured.", headers, rows)
-
         headers, rows = _query(
             conn,
             """SELECT detected_at, source_family, source_file, business_date, agent_id,
                       issue_type, severity, details
                FROM meta.quality_issue
-               WHERE business_date IS NULL OR business_date BETWEEN ? AND ?
+               WHERE (business_date IS NULL OR business_date BETWEEN ? AND ?)
+                 AND (source_family IS NULL OR source_family NOT IN ('calls','pcs','intraday','forecast','apbe','apfr'))
                ORDER BY CASE severity WHEN 'ERROR' THEN 1 ELSE 2 END, business_date, issue_type""",
             [start, end],
         )
         report.add_table_sheet("DATA_QUALITY", "Data quality", "Resolve ERROR rows before using attendance, correction or payroll results.", headers, rows, exception_column="Severity")
 
-        headers, rows = _query(conn, "SELECT source_family, expected_path, newest_file, newest_business_date, modified_at, loaded_at, row_count, rejected_count, scoped_out_count, status, details FROM mart.source_health ORDER BY source_family")
+        headers, rows = _query(conn, """SELECT source_family, expected_path, newest_file, newest_business_date,
+                                               modified_at, loaded_at, row_count, rejected_count,
+                                               scoped_out_count, status, details
+                                        FROM mart.source_health
+                                        WHERE source_family IN ('fte','schedule','lilo','agent_status')
+                                        ORDER BY source_family""")
         report.add_table_sheet("SOURCE_HEALTH", "Source health", "What was found, loaded, rejected or missing for every configured feed.", headers, rows, exception_column="Status")
     except Exception:
         report.close()

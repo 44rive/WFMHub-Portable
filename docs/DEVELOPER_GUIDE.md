@@ -21,7 +21,8 @@ and the preserved v0.1 database are not modified.
    released migration.
 5. Carry immutable file lineage and define the exact business grain.
 6. Materialize only the relevant model in `models.py`.
-7. Add curated output in `reports.py`; never export raw source rows.
+7. Add curated output through `report_packs.py`; add explicit clean export
+   datasets separately when detailed rows are needed.
 8. Test schema drift, scope, idempotency, rollback, period filtering, and the
    business rule.
 9. Update architecture and beginner documentation.
@@ -44,7 +45,7 @@ attendance, absence, correction, or payroll models.
 ## Windows portable build
 
 ```bash
-python packaging/windows/build_portable.py --version 0.2.1 --python-version 3.13.7
+python packaging/windows/build_portable.py --version 0.3.0 --python-version 3.13.7
 ```
 
 The builder always deletes and recreates stage and wheelhouse. It:
@@ -70,7 +71,9 @@ At minimum, verify:
 - source hashes/size/mtime are unchanged;
 - `PRAGMA quick_check` and `foreign_key_check` pass;
 - one active version exists per source path;
-- agent-day, forecast-hour, and actual-interval grains are unique;
+- agent-day, PCS agent-day, call-key, forecast-hour, and actual-interval grains
+  are unique;
+- multi-day sources use row dates and ambiguous blank LILO rows are rejected;
 - every no-show passes the full source/roster/boundary gate;
 - correction minutes equal displayed interval endpoints;
 - failed model/action operations restore prior state;
@@ -78,7 +81,7 @@ At minimum, verify:
 - ZIP checksum and native inventory match the builder result.
 
 The historical DuckDB CLI probe remains in the repository only as evidence of
-the rejected compatibility path. It is not part of v0.2.1 or its runtime.
+the rejected compatibility path. It is not part of v0.3.0 or its runtime.
 
 ## FTE template and report packs
 
@@ -98,12 +101,14 @@ python tools/build_fte_template.py --source /path/to/current/FTE.xlsx \
 Report-pack keys and destinations live in `report_packs.py` and
 `[report_packs]`, separate from integer row limits in `[report]`.
 `reports.build_report()` remains the Operations compatibility API. Register
-future builders through `build_report_pack`; do not import them directly in the
-CLI.
+builders through `build_report_pack`; do not import them directly in the CLI.
 
-For call-by-call PCS, define one raw interaction grain and stable deterministic
-interaction key before ingestion. Full-history extracts overlap, so newest
-active versions must deduplicate at that key. Agree numerator, denominator,
-eligible calls, exclusions, zero-denominator behavior, and business-date
-timezone before implementing `mart.agent_pcs_day`. Never export raw calls to
-Excel.
+Call-by-call uses a stable deterministic leg key. Full-history extracts may
+overlap, so `core.clean_call_leg` chooses the newest active row at that key.
+PCS numerator, denominator, eligible survey mode, scored questions, thresholds
+and zero-denominator behavior live in configuration/model code and tests.
+
+`exports.py` streams detailed clean data to CSV/XLSX only on explicit request.
+`custom_jobs.py` exposes a query-only context, but Python jobs remain trusted
+code rather than a sandbox. The portable build copies underscore templates from
+`custom`; runnable user copies must never be added to a public release.

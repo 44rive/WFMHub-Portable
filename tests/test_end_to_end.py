@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 import zipfile
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -15,7 +16,9 @@ from wfmhub.actions import import_actions
 from wfmhub.config import ensure_user_config, load_config, write_source_root
 from wfmhub.database import write_session
 from wfmhub.ingestion import ingest_all
-from wfmhub.models import refresh_models
+from wfmhub.models import refresh_models, resolve_period
+from wfmhub.exports import export_dataset
+from wfmhub.report_packs import build_report_pack
 from wfmhub.reports import build_report
 
 
@@ -99,6 +102,36 @@ def make_apfr(path: Path):
     workbook.save(path)
 
 
+def make_calls(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    headers = [
+        "[Call Date/Time]", "[Call End Date/Time]", "[Call ID]",
+        "[Call Reference Number]", "[Agent ID]", "[Agent]",
+        "[Talk Time]", "[Hold Time]", "[Total Wrap Time]",
+        "[Call Direction]", "[PostCallSurveyMode]", "[PCSStatus]",
+        "[Question 1]", "[Question 2]", "[Question 3]", "[Queue]",
+    ]
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=headers)
+        writer.writeheader()
+        writer.writerow({
+            "[Call Date/Time]": "8/1/2026 9:00", "[Call End Date/Time]": "8/1/2026 9:05",
+            "[Call ID]": "call-100", "[Call Reference Number]": "ref-100",
+            "[Agent ID]": "100", "[Agent]": "Agent 100", "[Talk Time]": "0:04:00",
+            "[Hold Time]": "0:00:30", "[Total Wrap Time]": "0:00:30",
+            "[Call Direction]": "I", "[PostCallSurveyMode]": "2", "[PCSStatus]": "1",
+            "[Question 1]": "5", "[Question 2]": "4", "[Question 3]": "Good",
+            "[Queue]": "Queue",
+        })
+        writer.writerow({
+            "[Call Date/Time]": "8/1/2026 9:00", "[Call End Date/Time]": "8/1/2026 9:02",
+            "[Call ID]": "world", "[Call Reference Number]": "world",
+            "[Agent ID]": "999", "[Agent]": "Worldwide Agent", "[Talk Time]": "0:02:00",
+            "[Hold Time]": "0:00:00", "[Total Wrap Time]": "0:00:00",
+            "[Call Direction]": "I",
+        })
+
+
 class EndToEndTests(unittest.TestCase):
     def test_refresh_builds_safe_attendance_gaps_and_excel(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -121,6 +154,8 @@ class EndToEndTests(unittest.TestCase):
             make_forecast(source / "Verint/Forecast/forecast.txt")
             make_apbe(source / "Storm/APBE ALL WFM/apbe.xlsx")
             make_apfr(source / "Storm/APFR KPI SUIVI JOUR/apfr.xlsx")
+            make_calls(source / "Storm/Call by Call/AP-Historical-Report---Call-by-Call 2026-08-01 - 2026-08-02.csv")
+            make_calls(source / "Storm/Call by Call/AP-Historical-Report---Call-by-Call full history.csv")
 
             config_file = ensure_user_config(home)
             write_source_root(config_file, source)
@@ -128,11 +163,14 @@ class EndToEndTests(unittest.TestCase):
             with write_session(config) as conn:
                 ingest = ingest_all(conn, config)
                 self.assertEqual(ingest.failed, 0)
-                self.assertEqual(ingest.loaded, 8)
-                self.assertEqual(ingest.scoped_out, 3)
-                for table in ("raw.schedule_shift", "raw.lilo", "raw.agent_status"):
+                self.assertEqual(ingest.loaded, 10)
+                self.assertEqual(ingest.scoped_out, 5)
+                for table in ("raw.schedule_shift", "raw.lilo", "raw.agent_status", "raw.call_leg"):
                     self.assertEqual(conn.execute(f"SELECT count(*) FROM {table} WHERE agent_id='999'").fetchone()[0], 0)
                 model = refresh_models(conn, config, "test", date(2026, 8, 1), date(2026, 8, 2))
+                saved_period = replace(config, period_start=date(2026, 8, 1), period_end=date(2026, 8, 1))
+                self.assertEqual(resolve_period(conn, saved_period, None, None, True), (date(2026, 8, 1), date(2026, 8, 1)))
+                self.assertEqual(resolve_period(conn, saved_period, None, None, False), (date(2026, 8, 1), date(2026, 8, 2)))
                 attendance = {row[0]: row[1] for row in conn.execute("SELECT agent_day_key, attendance_result FROM mart.attendance_agent_day").fetchall()}
                 self.assertEqual(attendance["20260801-200"], "No show")
                 self.assertEqual(attendance["20260801-300"], "Missing LILO roster row")
@@ -144,6 +182,13 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(basis, "LILO span")
                 self.assertEqual(model.forecast_rows, 1)
                 self.assertEqual(model.intraday_rows, 2)
+                self.assertEqual(model.pcs_rows, 1)
+                self.assertEqual(conn.execute("SELECT count(*) FROM raw.call_leg").fetchone()[0], 2)
+                self.assertEqual(conn.execute("SELECT count(*) FROM core.clean_call_leg").fetchone()[0], 1)
+                pcs = conn.execute("SELECT survey_responses, pcs_average, average_handle_seconds FROM mart.agent_pcs_day WHERE agent_id='100'").fetchone()
+                self.assertEqual(pcs[0], 1)
+                self.assertEqual(pcs[1], 4.5)
+                self.assertEqual(pcs[2], 300)
                 before_failure = conn.execute(
                     "SELECT agent_day_key, attendance_result FROM mart.attendance_agent_day ORDER BY agent_day_key"
                 ).fetchall()
@@ -157,6 +202,11 @@ class EndToEndTests(unittest.TestCase):
                 report = build_report(conn, config, model.start, model.end)
                 self.assertEqual(report.parent, home / "output" / "operations")
                 self.assertTrue(report.name.startswith("WFMHub_Operations_"))
+                intraday_report = build_report_pack("intraday", conn, config, model.start, model.end)
+                pcs_report = build_report_pack("quality_pcs", conn, config, model.start, model.end)
+                clean_calls = export_dataset(conn, config, "calls", model.start, model.end)
+                self.assertEqual(clean_calls.rows, 1)
+                self.assertTrue(clean_calls.manifest.exists())
 
                 filtered_report = build_report(
                     conn, config, date(2026, 8, 1), date(2026, 8, 1),
@@ -198,9 +248,21 @@ class EndToEndTests(unittest.TestCase):
             self.assertTrue(report.exists())
             workbook = load_workbook(report, read_only=True, data_only=True)
             try:
-                self.assertEqual(workbook.sheetnames, ["START_HERE", "SUMMARY", "ATTENDANCE", "GAPS", "RTA", "INTRADAY", "DATA_QUALITY", "SOURCE_HEALTH"])
+                self.assertEqual(workbook.sheetnames, ["START_HERE", "SUMMARY", "ATTENDANCE", "GAPS", "RTA", "DATA_QUALITY", "SOURCE_HEALTH"])
             finally:
                 workbook.close()
+            intraday_book = load_workbook(intraday_report, read_only=True, data_only=True)
+            try:
+                self.assertEqual(intraday_book.sheetnames, ["START_HERE", "SUMMARY", "ACTUALS", "FORECAST", "DATA_QUALITY", "SOURCE_HEALTH"])
+            finally:
+                intraday_book.close()
+            pcs_book = load_workbook(pcs_report, read_only=True, data_only=True)
+            try:
+                self.assertIn("AGENT_PCS", pcs_book.sheetnames)
+                self.assertIn("SURVEY_RESPONSES", pcs_book.sheetnames)
+                self.assertIn("PYTHON_RECIPES", pcs_book.sheetnames)
+            finally:
+                pcs_book.close()
             with zipfile.ZipFile(report) as archive:
                 self.assertFalse(any("externalLinks" in name for name in archive.namelist()))
 

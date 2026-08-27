@@ -9,7 +9,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, time
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from .config import Config, ConfigError
 
@@ -83,7 +83,7 @@ class DatabaseConnection:
     def execute(
         self,
         sql: str,
-        parameters: Sequence[Any] | None = None,
+        parameters: Sequence[Any] | Mapping[str, Any] | None = None,
     ) -> sqlite3.Cursor:
         return self.raw.execute(_rewrite_sql(sql), parameters or ())
 

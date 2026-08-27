@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -93,11 +94,11 @@ class AgentScope:
         return normalized_id or roster_id
 
 
-AGENT_SCOPED_FAMILIES = {"schedule", "lilo", "agent_status"}
+AGENT_SCOPED_FAMILIES = {"schedule", "lilo", "agent_status", "calls"}
 AGENT_SCOPE_POLICY_VERSION = "v1-id-or-unique-name-preserve-source-id"
 
 
-LILO_FILE_RE = re.compile(r"^AP-Historical-Report---Agent-Login (\d{4}-\d{2}-\d{2})\.csv$", re.I)
+FILENAME_DATE_RE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
 
 
 TABLE_COLUMNS: dict[str, list[str]] = {
@@ -108,6 +109,27 @@ TABLE_COLUMNS: dict[str, list[str]] = {
     "raw.agent_status": ["source_file_id", "source_row", "serial_number", "extract_date", "agent_id", "agent_name", "status", "actual_category", "status_start", "status_end", "duration_seconds", "queue"],
     "raw.forecast_interval": ["source_file_id", "source_row", "queue_name", "business_date", "interval_time", "interval_minutes", "interval_start", "volume_forecast", "abandons_forecast", "sl_forecast", "sl_required", "aht_forecast_seconds", "headcount_forecast", "net_staffing_forecast", "fte_forecast", "fte_required"],
     "raw.queue_actual": ["source_file_id", "source_row", "source_system", "business_date", "interval_time", "interval_start", "hour_start", "language", "queue_id", "queue", "business_partner", "lob", "offered", "answered", "abandoned", "short_calls", "answered_15s", "answered_20s", "answered_30s", "asa_seconds", "aht_seconds"],
+    "raw.call_leg": [
+        "source_file_id", "source_row", "call_key", "interaction_key", "business_date",
+        "call_start", "call_end", "communication_type", "call_direction",
+        "originating_address", "business_partner_id", "lob", "destination_address",
+        "service", "call_reference_number", "call_id", "call_progress",
+        "queue_wait_seconds", "queue_id", "queue", "call_treatment_id",
+        "call_treatment", "agent_group_id", "agent_group", "called_user_group",
+        "agent_id", "agent_name", "clearing_party", "talk_seconds", "hold_seconds",
+        "wrap_seconds", "completion_code", "transferred", "conference_at",
+        "conference_duration_seconds", "shared_call_reference", "ringing_seconds",
+        "internal", "direct", "menu_progress", "recording_mode", "recording_consent",
+        "language_ivr", "language", "voicebot_id", "voicebot_destination",
+        "voicebot_percentage_split", "voicebot_name", "routing_intent", "agent_intent",
+        "licence_plate", "ani", "post_call_survey_mode", "pcs_status",
+        "question_1", "question_2", "question_3", "question_4", "question_5",
+        "question_6", "question_7", "question_8", "question_9", "question_10",
+        "question_1_score", "question_2_score", "question_3_score", "question_4_score",
+        "question_5_score", "question_6_score", "question_7_score", "question_8_score",
+        "question_9_score", "question_10_score", "session_identifier", "callback_id",
+        "callback_at", "callback_status", "callback_offered",
+    ],
 }
 
 
@@ -146,11 +168,12 @@ def _number(value: Any) -> float | None:
         return None
 
 
-def _extract_date(name: str, pattern: re.Pattern[str], family: str) -> datetime.date:
-    match = pattern.match(name)
-    if not match:
-        raise SourceSchemaError(f"{family} filename must contain its YYYY-MM-DD date: {name}")
-    return datetime.strptime(match.group(1), "%Y-%m-%d").date()
+def _filename_date_bounds(name: str) -> tuple[date | None, date | None]:
+    """Return optional start/end hints without making filenames authoritative."""
+    values = [datetime.strptime(value, "%Y-%m-%d").date() for value in FILENAME_DATE_RE.findall(name)]
+    if not values:
+        return None, None
+    return min(values), max(values)
 
 
 def discover_sources(config: Config) -> list[SourceCandidate]:
@@ -165,6 +188,7 @@ def discover_sources(config: Config) -> list[SourceCandidate]:
         ("forecast", "forecast_folder", "*.txt"),
         ("apbe", "apbe_folder", "*.xlsx"),
         ("apfr", "apfr_folder", "*.xlsx"),
+        ("calls", "call_folder", "*.csv"),
     )
     for family, key, pattern in specs:
         if family in {"agent_status"} and not config.modules.get("agent_status", True):
@@ -172,6 +196,8 @@ def discover_sources(config: Config) -> list[SourceCandidate]:
         if family in {"forecast"} and not config.modules.get("forecast", True):
             continue
         if family in {"apbe", "apfr"} and not config.modules.get("intraday", True):
+            continue
+        if family == "calls" and not config.modules.get("pcs", True):
             continue
         folder = config.source_path(key)
         if not folder.is_dir():
@@ -366,8 +392,9 @@ def parse_schedule(path: Path, file_id: str, scope: AgentScope | None = None) ->
 
 
 def parse_lilo(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
-    extract_date = _extract_date(path.name, LILO_FILE_RE, "LILO")
+    date_field, fallback_date = _validate_lilo_header(path)
     output: list[dict[str, Any]] = []
+    rejected: list[str] = []
     scoped_out = 0
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -387,6 +414,14 @@ def parse_lilo(path: Path, file_id: str, scope: AgentScope | None = None) -> Par
                 agent_id = resolved_id
             first = parse_datetime(row.get("[First Log-on Time]"))
             raw_last = parse_datetime(row.get("[Last Log-off Time]"))
+            extract_date = (
+                parse_date(row.get(date_field)) if date_field else None
+            ) or (first.date() if first else None) or (raw_last.date() if raw_last else None) or fallback_date
+            if extract_date is None:
+                rejected.append(
+                    f"line {source_row}: no row date; a multi-day LILO row with blank login/logout needs a Date column"
+                )
+                continue
             last = raw_last
             adjusted = False
             if first and last and last < first:
@@ -399,31 +434,40 @@ def parse_lilo(path: Path, file_id: str, scope: AgentScope | None = None) -> Par
                 "raw_last_logout": raw_last, "last_logout": last,
                 "overnight_adjusted": adjusted,
             })
-    return ParseResult({"raw.lilo": output}, scoped_out=scoped_out)
+    return ParseResult({"raw.lilo": output}, rejected=rejected, scoped_out=scoped_out)
 
 
-def _validate_lilo_header(path: Path) -> datetime.date:
-    extract_date = _extract_date(path.name, LILO_FILE_RE, "LILO")
+def _validate_lilo_header(path: Path) -> tuple[str | None, datetime.date | None]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.reader(handle)
-        headers = set(next(reader, []))
+        header_row = next(reader, [])
+        headers = set(header_row)
     required = {"[Agent]", "[Agent ID]", "[First Log-on Time]", "[Last Log-off Time]"}
     missing = sorted(required - headers)
     if missing:
         raise SourceSchemaError(f"LILO missing columns: {', '.join(missing)}")
-    return extract_date
+    normalized = {normalize_header(header): header for header in header_row}
+    date_field = next(
+        (normalized[key] for key in ("BUSINESSDATE", "EXTRACTDATE", "REPORTDATE", "DATE") if key in normalized),
+        None,
+    )
+    filename_start, filename_end = _filename_date_bounds(path.name)
+    fallback_date = filename_start if filename_start is not None and filename_start == filename_end else None
+    return date_field, fallback_date
 
 
 def _insert_lilo_direct(
     conn: DatabaseConnection,
     path: Path,
     file_id: str,
-    extract_date,
+    date_field: str | None,
+    fallback_date,
     scope: AgentScope,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """Stream large LILO CSVs into bounded SQLite inserts."""
     count = 0
     scoped_out = 0
+    rejected = 0
     batch: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -436,6 +480,12 @@ def _insert_lilo_direct(
             agent_id = resolved_id
             first = parse_datetime(row.get("[First Log-on Time]"))
             raw_last = parse_datetime(row.get("[Last Log-off Time]"))
+            extract_date = (
+                parse_date(row.get(date_field)) if date_field else None
+            ) or (first.date() if first else None) or (raw_last.date() if raw_last else None) or fallback_date
+            if extract_date is None:
+                rejected += 1
+                continue
             last = raw_last
             adjusted = False
             if first and last and last < first:
@@ -459,7 +509,7 @@ def _insert_lilo_direct(
     if batch:
         _insert_rows(conn, "raw.lilo", batch)
         count += len(batch)
-    return count, scoped_out
+    return count, scoped_out, rejected
 
 
 def parse_agent_status(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
@@ -500,6 +550,181 @@ def parse_agent_status(path: Path, file_id: str, scope: AgentScope | None = None
                 "queue": _clean(row.get("[Queue]")),
             })
     return ParseResult({"raw.agent_status": output}, rejected, scoped_out)
+
+
+CALL_REQUIRED_HEADERS = {
+    "Call Date/Time", "Call ID", "Call Reference Number", "Agent ID", "Agent",
+    "Talk Time", "Hold Time", "Total Wrap Time", "Call End Date/Time",
+}
+
+
+def _boolean(value: Any) -> bool | None:
+    text = str(value or "").strip().upper()
+    if text in {"1", "TRUE", "YES", "Y"}:
+        return True
+    if text in {"0", "FALSE", "NO", "N"}:
+        return False
+    return None
+
+
+def _call_header_map(path: Path) -> dict[str, str]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        fieldnames = csv.DictReader(handle).fieldnames or []
+    mapping = {str(header or "").strip().strip("[]"): header for header in fieldnames}
+    missing = sorted(CALL_REQUIRED_HEADERS - set(mapping))
+    if missing:
+        raise SourceSchemaError(f"Call by Call missing columns: {', '.join(missing)}")
+    return mapping
+
+
+def _call_record(
+    row: dict[str, Any],
+    headers: dict[str, str],
+    file_id: str,
+    source_row: int,
+    scope: AgentScope | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    get = lambda name: row.get(headers.get(name, ""))
+    start = parse_datetime(get("Call Date/Time"))
+    if start is None:
+        return None, "invalid call date/time"
+    source_agent_id = normalize_id(get("Agent ID"))
+    agent_name = _clean(get("Agent"))
+    agent_id = source_agent_id
+    if scope is not None:
+        agent_id = scope.resolve(source_agent_id, agent_name)
+        if agent_id is None:
+            return None, "outside roster"
+    elif agent_id is None:
+        return None, "outside roster"
+    end = parse_datetime(get("Call End Date/Time"))
+    if end and end < start:
+        end += timedelta(days=1)
+    call_reference = _clean(get("Call Reference Number"))
+    call_id = _clean(get("Call ID"))
+    direction = _clean(get("Call Direction"))
+    clearing_party = _clean(get("Clearing Party"))
+    shared_reference = _clean(get("Shared Call Reference"))
+    # End time and survey answers can mature in a later overlapping export, so
+    # they are deliberately excluded from the stable leg identity.
+    key_parts = [call_reference, call_id, direction, agent_id, start, clearing_party]
+    if not any(key_parts[:2]):
+        key_parts.append(json.dumps(row, sort_keys=True, ensure_ascii=False, default=str))
+    call_key = hashlib.sha256("|".join(str(value or "") for value in key_parts).encode("utf-8")).hexdigest()
+    interaction_key = shared_reference or call_reference or call_id or call_key
+    questions = [_clean(get(f"Question {number}")) for number in range(1, 11)]
+    record: dict[str, Any] = {
+        "source_file_id": file_id,
+        "source_row": source_row,
+        "call_key": call_key,
+        "interaction_key": interaction_key,
+        "business_date": start.date(),
+        "call_start": start,
+        "call_end": end,
+        "communication_type": _clean(get("Communication Type")),
+        "call_direction": direction,
+        "originating_address": _clean(get("Originating Address")),
+        "business_partner_id": _clean(get("BusinessPartnerID")),
+        "lob": _clean(get("LineOfBusiness")),
+        "destination_address": _clean(get("Destination Address")),
+        "service": _clean(get("Service")),
+        "call_reference_number": call_reference,
+        "call_id": call_id,
+        "call_progress": _clean(get("CallProgress")),
+        "queue_wait_seconds": duration_seconds(get("Total Queue Wait Time")),
+        "queue_id": normalize_id(get("Queue ID"), reject_placeholders=False),
+        "queue": _clean(get("Queue")),
+        "call_treatment_id": normalize_id(get("Call Treatment ID"), reject_placeholders=False),
+        "call_treatment": _clean(get("Call Treatment")),
+        "agent_group_id": normalize_id(get("Agent Group ID"), reject_placeholders=False),
+        "agent_group": _clean(get("Agent Group")),
+        "called_user_group": _clean(get("Called User Group")),
+        "agent_id": agent_id,
+        "agent_name": agent_name,
+        "clearing_party": clearing_party,
+        "talk_seconds": duration_seconds(get("Talk Time")),
+        "hold_seconds": duration_seconds(get("Hold Time")),
+        "wrap_seconds": duration_seconds(get("Total Wrap Time")),
+        "completion_code": _clean(get("Call Completion Code")),
+        "transferred": _boolean(get("Transferred?")),
+        "conference_at": parse_datetime(get("Date/Time Conferenced")),
+        "conference_duration_seconds": duration_seconds(get("Call Duration Until Conferenced")),
+        "shared_call_reference": shared_reference,
+        "ringing_seconds": duration_seconds(get("Ringing Duration")),
+        "internal": _boolean(get("Internal")),
+        "direct": _boolean(get("Direct")),
+        "menu_progress": _clean(get("MenuProgress")),
+        "recording_mode": _clean(get("CallRecordingMode")),
+        "recording_consent": _clean(get("CallRecordingConsent")),
+        "language_ivr": _clean(get("LanguageIVR")),
+        "language": _clean(get("Language")),
+        "voicebot_id": normalize_id(get("VoicebotID"), reject_placeholders=False),
+        "voicebot_destination": _clean(get("VoicebotDestination")),
+        "voicebot_percentage_split": _number(get("VoicebotPercentageSplit")),
+        "voicebot_name": _clean(get("VoicebotName")),
+        "routing_intent": _clean(get("RoutingIntent")),
+        "agent_intent": _clean(get("AgentIntent")),
+        "licence_plate": _clean(get("LicencePlate")),
+        "ani": _clean(get("ANI")),
+        "post_call_survey_mode": _clean(get("PostCallSurveyMode")),
+        "pcs_status": _clean(get("PCSStatus")),
+        "session_identifier": _clean(get("SessionIdentifier")),
+        "callback_id": _clean(get("CallbackID")),
+        "callback_at": parse_datetime(get("CallbackDateTime")),
+        "callback_status": _clean(get("CallbackStatus")),
+        "callback_offered": _boolean(get("CallbackOffered")),
+    }
+    for number, value in enumerate(questions, 1):
+        record[f"question_{number}"] = value
+        record[f"question_{number}_score"] = _number(value)
+    return record, None
+
+
+def parse_calls(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
+    headers = _call_header_map(path)
+    output: list[dict[str, Any]] = []
+    rejected: list[str] = []
+    scoped_out = 0
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        for source_row, row in enumerate(csv.DictReader(handle), 2):
+            record, reason = _call_record(row, headers, file_id, source_row, scope)
+            if reason == "outside roster":
+                scoped_out += 1
+            elif reason:
+                rejected.append(f"line {source_row}: {reason}")
+            elif record is not None:
+                output.append(record)
+    return ParseResult({"raw.call_leg": output}, rejected, scoped_out)
+
+
+def _insert_calls_direct(
+    conn: DatabaseConnection,
+    path: Path,
+    file_id: str,
+    scope: AgentScope,
+) -> tuple[int, int, int]:
+    headers = _call_header_map(path)
+    count = scoped_out = rejected = 0
+    batch: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        for source_row, row in enumerate(csv.DictReader(handle), 2):
+            record, reason = _call_record(row, headers, file_id, source_row, scope)
+            if reason == "outside roster":
+                scoped_out += 1
+                continue
+            if reason:
+                rejected += 1
+                continue
+            if record is not None:
+                batch.append(record)
+            if len(batch) >= 2000:
+                _insert_rows(conn, "raw.call_leg", batch)
+                count += len(batch)
+                batch.clear()
+    if batch:
+        _insert_rows(conn, "raw.call_leg", batch)
+        count += len(batch)
+    return count, scoped_out, rejected
 
 
 FORECAST_NAMES = {
@@ -645,6 +870,7 @@ PARSERS: dict[str, Callable[[Path, str, AgentScope | None], ParseResult]] = {
     "forecast": lambda path, file_id, scope: parse_forecast(path, file_id),
     "apbe": lambda path, file_id, scope: parse_queue_actual(path, file_id, "APBE"),
     "apfr": lambda path, file_id, scope: parse_queue_actual(path, file_id, "APFR"),
+    "calls": parse_calls,
 }
 
 
@@ -693,9 +919,18 @@ def _insert_rows(conn: DatabaseConnection, table: str, rows: list[dict[str, Any]
         conn.execute(sql, params)
 
 
-def ingest_all(conn: DatabaseConnection, config: Config) -> IngestSummary:
+def ingest_all(
+    conn: DatabaseConnection,
+    config: Config,
+    families: set[str] | None = None,
+) -> IngestSummary:
     summary = IngestSummary()
+    selected = set(families or ())
+    if selected & AGENT_SCOPED_FAMILIES:
+        selected.add("fte")
     for candidate in discover_sources(config):
+        if selected and candidate.family not in selected:
+            continue
         path = candidate.path
         sha256 = file_sha256(path)
         path_text = str(path)
@@ -747,7 +982,7 @@ def ingest_all(conn: DatabaseConnection, config: Config) -> IngestSummary:
         discovered_at = datetime.now()
         modified_at = datetime.fromtimestamp(stat.st_mtime)
         try:
-            result = None if candidate.family == "lilo" else PARSERS[candidate.family](path, file_id, scope)
+            result = None if candidate.family in {"lilo", "calls"} else PARSERS[candidate.family](path, file_id, scope)
             conn.execute("BEGIN TRANSACTION")
             try:
                 conn.execute(
@@ -755,9 +990,14 @@ def ingest_all(conn: DatabaseConnection, config: Config) -> IngestSummary:
                     [candidate.family, path_text],
                 )
                 if candidate.family == "lilo":
-                    extract_date = _validate_lilo_header(path)
-                    row_count, scoped_out_count = _insert_lilo_direct(conn, path, file_id, extract_date, scope)
-                    rejected_count = 0
+                    date_field, fallback_date = _validate_lilo_header(path)
+                    row_count, scoped_out_count, rejected_count = _insert_lilo_direct(
+                        conn, path, file_id, date_field, fallback_date, scope
+                    )
+                elif candidate.family == "calls":
+                    row_count, scoped_out_count, rejected_count = _insert_calls_direct(
+                        conn, path, file_id, scope
+                    )
                 else:
                     row_count = result.row_count
                     rejected_count = len(result.rejected)

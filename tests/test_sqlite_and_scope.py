@@ -103,6 +103,38 @@ class AgentScopeTests(unittest.TestCase):
 
 
 class SQLiteLifecycleTests(unittest.TestCase):
+    def test_v02_database_upgrades_additively_to_call_pcs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            home = root / "hub"
+            (home / "config").mkdir(parents=True)
+            shutil.copy2(REPO / "config" / "default.toml", home / "config" / "default.toml")
+            migrations = home / "sql" / "migrations"
+            migrations.mkdir(parents=True)
+            shutil.copy2(REPO / "sql" / "migrations" / "001_initial.sql", migrations / "001_initial.sql")
+            shutil.copy2(REPO / "sql" / "migrations" / "002_performance_indexes.sql", migrations / "002_performance_indexes.sql")
+            config = load_config(home)
+            migrate(config)
+            conn = connect(config)
+            try:
+                conn.execute(
+                    "INSERT INTO core.correction_action VALUES (?, NULL, 'Open', NULL, NULL, NULL, ?, 'v02')",
+                    ["keep-me", datetime.now()],
+                )
+            finally:
+                conn.close()
+            shutil.copy2(REPO / "sql" / "migrations" / "003_call_pcs.sql", migrations / "003_call_pcs.sql")
+            applied = migrate(config)
+            self.assertEqual(applied, ["003_call_pcs"])
+            upgraded = connect(config, read_only=True)
+            try:
+                self.assertEqual(upgraded.execute("SELECT count(*) FROM core.correction_action WHERE correction_id='keep-me'").fetchone()[0], 1)
+                self.assertIsNotNone(upgraded.execute("SELECT name FROM sqlite_master WHERE name='raw_call_leg'").fetchone())
+                self.assertIsNotNone(upgraded.execute("SELECT name FROM sqlite_master WHERE name='core_clean_call_leg'").fetchone())
+            finally:
+                upgraded.close()
+            self.assertEqual(len(list(config.backups.glob("wfm_pre_migration_*.sqlite3"))), 1)
+
     def test_failed_file_can_retry_same_fingerprint(self):
         with tempfile.TemporaryDirectory() as folder:
             home, source = make_home(folder)

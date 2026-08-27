@@ -8,6 +8,10 @@ extracts/
 input/*.xlsx
 input/*.csv
 !input/README.md
+custom/jobs/*.py
+!custom/jobs/_paste_your_python_here.py
+custom/sql/*.sql
+!custom/sql/_paste_your_sql_here.sql
 
 # Build products
 build/

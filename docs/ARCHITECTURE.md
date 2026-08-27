@@ -27,6 +27,7 @@ WFMHub/
 ├── config/wfmhub.toml          user configuration
 ├── database/wfm.sqlite3        durable SQLite hub
 ├── input/                      persistent human inputs
+├── custom/                     Python and read-only SQL job templates
 ├── output/                     finished reports
 ├── logs/                       daily logs
 └── backups/                    SQLite online backups
@@ -60,6 +61,8 @@ details remain in one module.
 | `raw.agent_status` | One admitted status interval |
 | `raw.forecast_interval` | One queue/forecast interval; not agent-scoped |
 | `raw.queue_actual` | One queue/15-minute actual interval; not agent-scoped |
+| `raw.call_leg` | One admitted, typed Call-by-Call source leg |
+| `core.clean_call_leg` | Deduplicated active call-leg view by stable Call Key |
 | `core.dim_agent` | One operational Agent ID |
 | `core.correction_action` | One human decision per stable Correction ID |
 | `mart.attendance_agent_day` | One scheduled Agent ID/day |
@@ -68,6 +71,7 @@ details remain in one module.
 | `mart.rta_snapshot` | One scheduled agent at the newest admitted status timestamp |
 | `mart.forecast_hour` | One forecast queue/hour |
 | `mart.intraday_queue_interval` | One actual queue/15-minute interval |
+| `mart.agent_pcs_day` | One admitted Agent ID/day with call and PCS measures |
 | `mart.source_health` | One configured source family |
 
 ## Report packs
@@ -76,13 +80,13 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 
 | Pack | Folder | Scope |
 |---|---|---|
-| `operations` | `output/operations` | Attendance, GAPS, RTA, intraday, data quality, source health |
-| `quality_pcs` | `output/quality_pcs` | Reserved for Agent PCS quality from call-by-call |
+| `operations` | `output/operations` | Attendance, GAPS, RTA, operational quality/health |
+| `intraday` | `output/intraday` | APBE/APFR actuals and separate Verint forecast |
+| `quality_pcs` | `output/quality_pcs` | Agent call performance, PCS, trends and responses |
 
-Operations remains the automatic refresh report and the only workbook accepted
-for correction-action import. A future PCS builder will share dimensions and
-source health but own its raw call adapter, deduped interaction model, marts,
-limits, and workbook. Raw call-by-call rows stay in SQLite.
+Operations remains the only workbook accepted for correction-action import.
+Raw call-by-call rows stay in SQLite; PCS reports receive summaries, trends and
+bounded responses. Full clean details are explicit CSV/XLSX exports.
 
 ## Agent scope and identity
 
@@ -95,14 +99,15 @@ active raw layer:
 4. Keep it only when that name maps to exactly one FTE Agent ID.
 5. Preserve a populated operational source ID. In particular, Verint `Data
    Source IDs` remains the schedule Agent ID.
-6. Exclude everything else and count it as outside roster.
+6. Apply the same gate to Call-by-Call agent legs.
+7. Exclude everything else and count it as outside roster.
 
 A populated unmatched ID can therefore be admitted by a unique roster name,
 but an ambiguous or missing name cannot. This is a scope decision, not fuzzy
 matching.
 
 The scope has a deterministic fingerprint. If FTE changes, the same untouched
-schedule/LILO/status file is reprocessed against the new roster. This prevents
+schedule/LILO/status/call file is reprocessed against the new roster. This prevents
 both stale worldwide rows and the “new agent missing from an unchanged file”
 problem. Forecast and APBE/APFR are queue data, so they bypass the agent gate.
 
@@ -111,7 +116,7 @@ problem. Forecast and APBE/APFR are queue data, so they bypass the agent gate.
 1. Discover configured files read-only.
 2. Calculate SHA-256, size, modified time, and agent-scope fingerprint.
 3. Skip an already-active successful match.
-4. Parse a new version; stream large LILO CSVs in bounded batches.
+4. Parse a new version; stream large LILO and Call-by-Call CSVs in bounded batches.
 5. In one file transaction, append immutable raw rows, deactivate the previous
    path version, and activate the new version.
 6. If parsing fails, roll back its raw rows and leave the previous good version
@@ -121,6 +126,31 @@ problem. Forecast and APBE/APFR are queue data, so they bypass the agent gate.
 
 A same-path A→B→A change reactivates A's immutable rows rather than duplicating
 them. Deleting a physical extract does not silently erase loaded history.
+
+## Row dates and multi-day extracts
+
+Filename dates are hints, never the primary business date. Schedule, Agent
+Status, Call-by-Call, Forecast and APBE/APFR use row fields. LILO prefers a
+row-level Date field, then the first/last boundary. A single filename date may
+be used only for a boundary-blank daily LILO row. In a multi-day LILO file, a
+row with both boundaries blank and no Date is rejected because its day cannot
+be proven.
+
+## Call and PCS model
+
+Call CSVs are FTE-scoped before storage. A stable Call Key combines call
+references, direction, agent and timestamps; `core.clean_call_leg` selects the
+newest active version across overlapping history extracts. Configured numeric
+questions are averaged within each response, then response scores are averaged
+per agent/day so every respondent has equal weight. Q1/Q2 remain separately
+weighted by their own answer counts. Zero-denominator averages remain NULL.
+
+## Clean exports and Custom Lab
+
+Clean exports stream selected-period results to UTF-8 CSV or bounded XLSX with
+a manifest. Custom SQL is restricted to one SELECT/WITH statement on a
+query-only connection. Custom Python receives the same read-only query context,
+but is trusted executable local code and is not an operating-system sandbox.
 
 ## Attendance and correction gates
 
@@ -150,8 +180,7 @@ the conformance basis only above configured coverage (80% by default), else the
 explicitly labelled LILO span or `None` is used.
 
 Agent Status filenames may describe one date, a date range, or full history.
-Every row's `Status Start Date and Time` determines its business date; the
-filename is never used to date every row in a multi-day extract.
+Every row's `Status Start Date and Time` determines its business date.
 
 RTA uses the newest admitted status timestamp. If no status row passes agent
 scope, RTA is empty and source health is `ERROR`; current time is never used as
@@ -165,7 +194,7 @@ separate until a reviewed queue/LOB mapping is configured.
 
 ## Upgrades
 
-v0.2 uses SQLite and does not convert or open v0.1 DuckDB data. Install v0.2 in
+v0.3 uses SQLite and does not convert or open v0.1 DuckDB data. Install v0.3 in
 a new folder, point it at the same untouched source root, and let it rebuild
 SQLite. Preserve the entire v0.1 folder. Saved Excel reports can re-import
 correction decisions.

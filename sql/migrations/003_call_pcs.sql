@@ -1,0 +1,170 @@
+CREATE TABLE IF NOT EXISTS raw.call_leg (
+    source_file_id VARCHAR NOT NULL,
+    source_row BIGINT NOT NULL,
+    call_key VARCHAR NOT NULL,
+    interaction_key VARCHAR NOT NULL,
+    business_date DATE,
+    call_start TIMESTAMP,
+    call_end TIMESTAMP,
+    communication_type VARCHAR,
+    call_direction VARCHAR,
+    originating_address VARCHAR,
+    business_partner_id VARCHAR,
+    lob VARCHAR,
+    destination_address VARCHAR,
+    service VARCHAR,
+    call_reference_number VARCHAR,
+    call_id VARCHAR,
+    call_progress VARCHAR,
+    queue_wait_seconds BIGINT,
+    queue_id VARCHAR,
+    queue VARCHAR,
+    call_treatment_id VARCHAR,
+    call_treatment VARCHAR,
+    agent_group_id VARCHAR,
+    agent_group VARCHAR,
+    called_user_group VARCHAR,
+    agent_id VARCHAR,
+    agent_name VARCHAR,
+    clearing_party VARCHAR,
+    talk_seconds BIGINT,
+    hold_seconds BIGINT,
+    wrap_seconds BIGINT,
+    completion_code VARCHAR,
+    transferred BOOLEAN,
+    conference_at TIMESTAMP,
+    conference_duration_seconds BIGINT,
+    shared_call_reference VARCHAR,
+    ringing_seconds BIGINT,
+    internal BOOLEAN,
+    direct BOOLEAN,
+    menu_progress VARCHAR,
+    recording_mode VARCHAR,
+    recording_consent VARCHAR,
+    language_ivr VARCHAR,
+    language VARCHAR,
+    voicebot_id VARCHAR,
+    voicebot_destination VARCHAR,
+    voicebot_percentage_split DOUBLE,
+    voicebot_name VARCHAR,
+    routing_intent VARCHAR,
+    agent_intent VARCHAR,
+    licence_plate VARCHAR,
+    ani VARCHAR,
+    post_call_survey_mode VARCHAR,
+    pcs_status VARCHAR,
+    question_1 VARCHAR,
+    question_2 VARCHAR,
+    question_3 VARCHAR,
+    question_4 VARCHAR,
+    question_5 VARCHAR,
+    question_6 VARCHAR,
+    question_7 VARCHAR,
+    question_8 VARCHAR,
+    question_9 VARCHAR,
+    question_10 VARCHAR,
+    question_1_score DOUBLE,
+    question_2_score DOUBLE,
+    question_3_score DOUBLE,
+    question_4_score DOUBLE,
+    question_5_score DOUBLE,
+    question_6_score DOUBLE,
+    question_7_score DOUBLE,
+    question_8_score DOUBLE,
+    question_9_score DOUBLE,
+    question_10_score DOUBLE,
+    session_identifier VARCHAR,
+    callback_id VARCHAR,
+    callback_at TIMESTAMP,
+    callback_status VARCHAR,
+    callback_offered BOOLEAN
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_leg_date_agent
+ON raw.call_leg(business_date, agent_id, source_file_id);
+
+CREATE INDEX IF NOT EXISTS idx_call_leg_key
+ON raw.call_leg(call_key, source_file_id);
+
+CREATE VIEW IF NOT EXISTS core.clean_call_leg AS
+SELECT source_file_id, source_row, call_key, interaction_key, business_date,
+       call_start, call_end, communication_type, call_direction,
+       originating_address, business_partner_id, lob, destination_address,
+       service, call_reference_number, call_id, call_progress,
+       queue_wait_seconds, queue_id, queue, call_treatment_id, call_treatment,
+       agent_group_id, agent_group, called_user_group, agent_id, agent_name,
+       clearing_party, talk_seconds, hold_seconds, wrap_seconds,
+       completion_code, transferred, conference_at,
+       conference_duration_seconds, shared_call_reference, ringing_seconds,
+       internal, direct, menu_progress, recording_mode, recording_consent,
+       language_ivr, language, voicebot_id, voicebot_destination,
+       voicebot_percentage_split, voicebot_name, routing_intent, agent_intent,
+       licence_plate, ani, post_call_survey_mode, pcs_status,
+       question_1, question_2, question_3, question_4, question_5,
+       question_6, question_7, question_8, question_9, question_10,
+       question_1_score, question_2_score, question_3_score,
+       question_4_score, question_5_score, question_6_score,
+       question_7_score, question_8_score, question_9_score,
+       question_10_score, session_identifier, callback_id, callback_at,
+       callback_status, callback_offered, source_file
+FROM (
+    SELECT r.*, f.file_name AS source_file,
+           row_number() OVER (
+               PARTITION BY r.call_key
+               ORDER BY f.modified_at DESC, f.loaded_at DESC,
+                        f.file_name DESC, r.source_row DESC
+           ) AS row_rank
+    FROM raw.call_leg r
+    JOIN meta.source_file f ON f.file_id=r.source_file_id
+    WHERE f.active=true AND f.status='SUCCESS'
+) ranked
+WHERE row_rank=1;
+
+CREATE TABLE IF NOT EXISTS mart.agent_pcs_day (
+    agent_day_key VARCHAR PRIMARY KEY,
+    business_date DATE NOT NULL,
+    agent_id VARCHAR NOT NULL,
+    agent_name VARCHAR,
+    team_leader VARCHAR,
+    ops_manager VARCHAR,
+    lob VARCHAR,
+    market VARCHAR,
+    language VARCHAR,
+    location VARCHAR,
+    call_legs BIGINT,
+    handled_calls BIGINT,
+    inbound_calls BIGINT,
+    outbound_calls BIGINT,
+    talk_seconds BIGINT,
+    hold_seconds BIGINT,
+    wrap_seconds BIGINT,
+    handle_seconds BIGINT,
+    average_talk_seconds DOUBLE,
+    average_hold_seconds DOUBLE,
+    average_wrap_seconds DOUBLE,
+    average_handle_seconds DOUBLE,
+    pcs_enabled_calls BIGINT,
+    survey_responses BIGINT,
+    response_rate DOUBLE,
+    q1_response_count BIGINT,
+    q1_score_sum DOUBLE,
+    q1_average DOUBLE,
+    q2_response_count BIGINT,
+    q2_score_sum DOUBLE,
+    q2_average DOUBLE,
+    pcs_score_count BIGINT,
+    pcs_score_sum DOUBLE,
+    pcs_average DOUBLE,
+    top_box_responses BIGINT,
+    low_score_responses BIGINT,
+    top_box_percent DOUBLE,
+    low_score_percent DOUBLE,
+    comments_count BIGINT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_pcs_day_date_agent
+ON mart.agent_pcs_day(business_date, agent_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_agent_pcs_day_key_not_null
+BEFORE INSERT ON mart.agent_pcs_day WHEN NEW.agent_day_key IS NULL
+BEGIN SELECT RAISE(ABORT, 'mart.agent_pcs_day.agent_day_key cannot be NULL'); END;

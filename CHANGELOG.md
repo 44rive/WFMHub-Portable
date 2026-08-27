@@ -1,10 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-08-27
 
-- Fixed Agent Status ingestion for multi-day and full-history exports. Each
-  row is now dated from `Status Start Date and Time` instead of requiring or
-  applying one date from the filename.
+- Added streaming, incremental Call-by-Call ingestion with FTE scope, typed
+  durations/survey fields, stable call-leg keys and cross-file deduplication.
+- Added daily and period Agent PCS measures: calls, AHT components, survey
+  response rate, Q1/Q2 averages, response-weighted PCS average, top box, low
+  scores and comments.
+- Split generated workbooks into Operations, Intraday and Agent PCS report
+  packs with independent output folders and source-quality views.
+- Added selectable date presets and source/report choices to the daily menu.
+- Added clean CSV/XLSX exports for calls, surveys, PCS, attendance, gaps,
+  schedules, events, LILO, Agent Status, actuals, forecast and source health.
+- Added Custom Lab templates for trusted portable-Python jobs and one-statement
+  read-only SQL jobs, plus Python-in-Excel recipes in the PCS workbook.
+- Generalized multi-day handling across source families. Row dates are
+  authoritative for schedules, LILO, Agent Status, calls, forecast and queue
+  actuals; filenames are only fallback hints for daily blank LILO rows.
+- Multi-day LILO rows with blank boundaries must contain a row-level Date field;
+  otherwise they are rejected and surfaced in source health rather than dated
+  by guesswork.
 
 ## 0.2.1 — 2026-08-27
 
