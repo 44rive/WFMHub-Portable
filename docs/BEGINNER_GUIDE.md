@@ -13,7 +13,7 @@ sheets; detailed data is created only when you explicitly choose an export.
 
 ## First setup — one time
 
-1. Download `WFMHub-Portable-v0.3.1-win-x64.zip` from **Releases**.
+1. Download `WFMHub-Portable-v0.3.2-win-x64.zip` from **Releases**.
 2. Do not download GitHub's “Source code” ZIP.
 3. Right-click the downloaded ZIP and choose **Extract All**.
 4. Put the entire extracted `WFMHub` folder in a place where you can write, for
@@ -82,6 +82,26 @@ The source file itself remains untouched. `SOURCE_HEALTH` shows:
 If FTE changes, WFMHub automatically rechecks the same unchanged extracts. If
 every Agent Status row is outside roster, RTA stays empty and source health says
 `ERROR`. Do not use those status rows.
+
+## Read the dashboard status bar
+
+`WFMHub.cmd` opens with the WFMHUB logo and a status panel. It is your quick
+health check before choosing a menu action:
+
+- `READY` means the last refresh succeeded and no current error requires
+  attention.
+- `REVIEW` means the hub worked, but one or more quality checks need a human
+  look.
+- `CHECK DATA` means a source or data-quality error needs attention.
+- `SETUP REQUIRED` or `READY TO REFRESH` tells you the next safe action.
+- `DB` is the current SQLite database size, including its live WAL file.
+- `Latest data` is the newest business date actually loaded in source health.
+  The family in parentheses matters: a future date marked `(forecast)` is a
+  forecast horizon, not proof that LILO, schedules, calls or actuals are current.
+
+The status panel also shows the last refresh time, selected period, active-agent
+count, healthy source count, and current error/review totals. It redraws when
+you press Enter after an action. Menu numbers remain unchanged.
 
 ## Daily routine
 

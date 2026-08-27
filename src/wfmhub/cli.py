@@ -21,6 +21,7 @@ from .models import refresh_models
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
 from .progress import ProgressBar, ProgressCallback
 from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack
+from .ui import clear_screen, render_dashboard
 
 
 SOURCE_GROUPS = {
@@ -457,20 +458,33 @@ def _choose_custom_job(config) -> tuple[str, Path]:
     return kind, jobs[selected - 1]
 
 
+def _pause_for_dashboard() -> None:
+    try:
+        interactive = sys.stdin.isatty()
+    except (AttributeError, OSError):
+        interactive = False
+    if interactive:
+        input("\nPress Enter to return to the dashboard...")
+
+
 def menu(home: Path) -> int:
     while True:
-        print("\nWFMHUB PORTABLE")
-        print("1. Refresh hub data")
-        print("2. Build reports from existing hub data")
-        print("3. Export clean data")
-        print("4. Run custom Python or SQL analysis")
-        print("5. Show source health and date coverage")
-        print("6. Import correction decisions")
-        print("7. Create database backup")
-        print("8. Change source root")
-        print("9. Run system check")
-        print("10. Exit")
-        choice = input("Choose 1-10: ").strip()
+        clear_screen()
+        render_dashboard(home)
+        print("\n  DAILY WORK")
+        print("    [1] Refresh hub data")
+        print("    [2] Build reports from existing hub data")
+        print("    [3] Export clean data")
+        print("    [4] Run custom Python or SQL analysis")
+        print("\n  CONTROL & REVIEW")
+        print("    [5] Show source health and date coverage")
+        print("    [6] Import correction decisions")
+        print("\n  HUB TOOLS")
+        print("    [7] Create database backup")
+        print("    [8] Change source root")
+        print("    [9] Run system check")
+        print("   [10] Exit")
+        choice = input("\n  Choose 1-10: ").strip()
         try:
             if choice == "1":
                 group = _choose_source_group()
@@ -512,6 +526,7 @@ def menu(home: Path) -> int:
         except Exception as exc:
             print(f"\nERROR: {exc}")
             print("Nothing was changed in your extract files. Check the latest file in logs.")
+        _pause_for_dashboard()
 
 
 def parser() -> argparse.ArgumentParser:

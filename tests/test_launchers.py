@@ -15,6 +15,8 @@ class LauncherTests(unittest.TestCase):
             self.assertNotIn("py -3", text)
             self.assertNotIn("python -m wfmhub", text)
             self.assertIn("source code zip", text)
+            self.assertIn("title wfmhub portable", text)
+            self.assertIn("if not defined no_color color 0b", text)
 
 
 if __name__ == "__main__":

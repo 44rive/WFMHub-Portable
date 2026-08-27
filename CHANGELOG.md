@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.2 — 2026-08-27
+
+- Added a compact WFMHUB ASCII logo and `made by Anass ASSRI` credit to the
+  daily dashboard.
+- Added a fixed-width status panel showing hub readiness, version, database
+  size, roster-agent count, last refresh, selected period, source health and
+  current data-quality counts.
+- Added the latest loaded business date and its source family to the dashboard,
+  so a future Forecast horizon is clearly identified instead of looking like
+  the latest operational actual date.
+- Grouped the unchanged menu options into Daily Work, Control & Review and Hub
+  Tools, with a clean screen redraw after each action.
+- Added a native Windows CMD title and optional cyan-on-black theme. Set the
+  standard `NO_COLOR` environment variable to keep the console's existing
+  colors.
+
 ## 0.3.1 — 2026-08-27
 
 - Added a Windows CMD-safe progress bar to setup, refresh, model building,

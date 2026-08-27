@@ -1,5 +1,7 @@
 @echo off
 setlocal EnableExtensions
+title WFMHub Portable
+if not defined NO_COLOR color 0B
 for %%I in ("%~dp0.") do set "WFMHUB_HOME=%%~fI"
 set "WFMHUB_PYTHON=%WFMHUB_HOME%\runtime\python.exe"
 

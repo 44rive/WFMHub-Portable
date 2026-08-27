@@ -152,6 +152,20 @@ a manifest. Custom SQL is restricted to one SELECT/WITH statement on a
 query-only connection. Custom Python receives the same read-only query context,
 but is trusted executable local code and is not an operating-system sandbox.
 
+## Terminal dashboard
+
+The daily menu reads a small read-only dashboard snapshot from existing marts.
+It never rebuilds a model merely to draw the screen. The fixed-width ASCII
+panel reports the last refresh, selected period, database size, agent count,
+source-health counts, quality counts, and the maximum loaded source business
+date with its family. Identifying the family prevents a future Forecast date
+from being presented as the freshness date for operational actuals.
+
+The dashboard is failure-tolerant: a missing, unconfigured, or incompatible
+database produces a setup/check state rather than crashing the menu renderer.
+The launcher uses native CMD title/color commands; the application itself adds
+no terminal package and redirected output is never cleared.
+
 ## Attendance and correction gates
 
 The order is deliberate:
