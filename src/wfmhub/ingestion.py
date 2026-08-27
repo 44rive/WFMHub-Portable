@@ -5,15 +5,16 @@ from __future__ import annotations
 import csv
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
-import duckdb
 from openpyxl import load_workbook
 
 from .config import Config
+from .database import DatabaseConnection
 from .utils import (
     classify_assignment,
     classify_event,
@@ -37,6 +38,7 @@ class SourceSchemaError(RuntimeError):
 class ParseResult:
     tables: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     rejected: list[str] = field(default_factory=list)
+    scoped_out: int = 0
 
     @property
     def row_count(self) -> int:
@@ -56,7 +58,43 @@ class IngestSummary:
     skipped: int = 0
     failed: int = 0
     rows: int = 0
+    scoped_out: int = 0
     errors: list[str] = field(default_factory=list)
+
+
+def _normalize_agent_name(value: Any) -> str | None:
+    """Return a conservative, accent-insensitive key for exact name fallback."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    decomposed = unicodedata.normalize("NFKD", text).casefold()
+    words = re.findall(r"[a-z0-9]+", "".join(char for char in decomposed if not unicodedata.combining(char)))
+    return " ".join(words) or None
+
+
+@dataclass(frozen=True)
+class AgentScope:
+    """Authoritative agent scope derived from the active FTE roster."""
+
+    agent_ids: frozenset[str]
+    unique_names: dict[str, str]
+    fingerprint: str
+
+    def resolve(self, agent_id: Any, agent_name: Any) -> str | None:
+        normalized_id = normalize_id(agent_id)
+        if normalized_id in self.agent_ids:
+            return normalized_id
+        name_key = _normalize_agent_name(agent_name)
+        roster_id = self.unique_names.get(name_key) if name_key else None
+        if roster_id is None:
+            return None
+        # Preserve a populated operational source ID (especially Verint Data
+        # Source IDs) while using the unique roster name only as the scope gate.
+        return normalized_id or roster_id
+
+
+AGENT_SCOPED_FAMILIES = {"schedule", "lilo", "agent_status"}
+AGENT_SCOPE_POLICY_VERSION = "v1-id-or-unique-name-preserve-source-id"
 
 
 LILO_FILE_RE = re.compile(r"^AP-Historical-Report---Agent-Login (\d{4}-\d{2}-\d{2})\.csv$", re.I)
@@ -162,10 +200,11 @@ def parse_fte(path: Path, file_id: str) -> ParseResult:
         workbook.close()
 
 
-def parse_schedule(path: Path, file_id: str) -> ParseResult:
+def parse_schedule(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
     shifts: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     rejected: list[str] = []
+    scoped_out = 0
     marker = None
     with path.open("r", encoding="cp1252", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
@@ -186,6 +225,12 @@ def parse_schedule(path: Path, file_id: str) -> ParseResult:
                 continue
             if marker is None:
                 raise SourceSchemaError(f"Agent row before date marker at line {source_row}")
+            if scope is not None:
+                resolved_id = scope.resolve(agent_id, name)
+                if resolved_id is None:
+                    scoped_out += 1
+                    continue
+                agent_id = resolved_id
             raw_assignment = _clean(row.get("Shift Assignment"))
             assignment, start, end = parse_verint_interval(raw_assignment)
             is_off = (raw_assignment or "").strip().upper() == "OFF"
@@ -216,12 +261,13 @@ def parse_schedule(path: Path, file_id: str) -> ParseResult:
                 })
                 if not event_ok:
                     rejected.append(f"line {source_row} event {event_index}: interval could not be parsed")
-    return ParseResult({"raw.schedule_shift": shifts, "raw.schedule_event": events}, rejected)
+    return ParseResult({"raw.schedule_shift": shifts, "raw.schedule_event": events}, rejected, scoped_out)
 
 
-def parse_lilo(path: Path, file_id: str) -> ParseResult:
+def parse_lilo(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
     extract_date = _extract_date(path.name, LILO_FILE_RE, "LILO")
     output: list[dict[str, Any]] = []
+    scoped_out = 0
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         required = {"[Agent]", "[Agent ID]", "[First Log-on Time]", "[Last Log-off Time]"}
@@ -230,8 +276,14 @@ def parse_lilo(path: Path, file_id: str) -> ParseResult:
             raise SourceSchemaError(f"LILO missing columns: {', '.join(missing)}")
         for source_row, row in enumerate(reader, 2):
             agent_id = normalize_id(row.get("[Agent ID]"))
-            if not agent_id:
+            if scope is None and not agent_id:
                 continue
+            if scope is not None:
+                resolved_id = scope.resolve(agent_id, row.get("[Agent]"))
+                if resolved_id is None:
+                    scoped_out += 1
+                    continue
+                agent_id = resolved_id
             first = parse_datetime(row.get("[First Log-on Time]"))
             raw_last = parse_datetime(row.get("[Last Log-off Time]"))
             last = raw_last
@@ -246,7 +298,7 @@ def parse_lilo(path: Path, file_id: str) -> ParseResult:
                 "raw_last_logout": raw_last, "last_logout": last,
                 "overnight_adjusted": adjusted,
             })
-    return ParseResult({"raw.lilo": output})
+    return ParseResult({"raw.lilo": output}, scoped_out=scoped_out)
 
 
 def _validate_lilo_header(path: Path) -> datetime.date:
@@ -261,56 +313,59 @@ def _validate_lilo_header(path: Path) -> datetime.date:
     return extract_date
 
 
-def _insert_lilo_direct(conn: duckdb.DuckDBPyConnection, path: Path, file_id: str, extract_date) -> int:
-    """Let DuckDB scan large LILO CSVs directly instead of binding every row."""
-    conn.execute(
-        """
-        INSERT INTO raw.lilo
-        WITH source AS (
-            SELECT row_number() OVER () + 1 AS source_row,
-                   trim(CAST("[Agent ID]" AS VARCHAR)) AS agent_text,
-                   nullif(trim(CAST("[Agent]" AS VARCHAR)), '') AS agent_name,
-                   coalesce(
-                       try_strptime(nullif(trim(CAST("[First Log-on Time]" AS VARCHAR)), ''), '%Y-%m-%d %H:%M:%S'),
-                       try_strptime(nullif(trim(CAST("[First Log-on Time]" AS VARCHAR)), ''), '%m/%d/%Y %I:%M:%S %p')
-                   ) AS first_login,
-                   coalesce(
-                       try_strptime(nullif(trim(CAST("[Last Log-off Time]" AS VARCHAR)), ''), '%Y-%m-%d %H:%M:%S'),
-                       try_strptime(nullif(trim(CAST("[Last Log-off Time]" AS VARCHAR)), ''), '%m/%d/%Y %I:%M:%S %p')
-                   ) AS raw_last_logout
-            FROM read_csv(
-                ?, header=true, delim=',', quote='"', escape='"', strict_mode=false,
-                columns={
-                    '[Agent]': 'VARCHAR',
-                    '[Agent ID]': 'VARCHAR',
-                    '[First Log-on Time]': 'VARCHAR',
-                    '[Last Log-off Time]': 'VARCHAR'
-                }
-            )
-        ), cleaned AS (
-            SELECT *,
-                   CASE
-                       WHEN upper(agent_text) IN ('', '-', 'N/A', 'NA', 'NULL', 'NONE') THEN NULL
-                       WHEN regexp_matches(agent_text, '^[0-9]+\\.0$') THEN regexp_replace(agent_text, '\\.0$', '')
-                       ELSE agent_text
-                   END AS agent_id
-            FROM source
-        )
-        SELECT ?, source_row, ?, agent_id, agent_name, first_login, raw_last_logout,
-               CASE WHEN first_login IS NOT NULL AND raw_last_logout < first_login
-                    THEN raw_last_logout + INTERVAL 1 DAY ELSE raw_last_logout END,
-               first_login IS NOT NULL AND raw_last_logout IS NOT NULL AND raw_last_logout < first_login
-        FROM cleaned WHERE agent_id IS NOT NULL
-        """,
-        [str(path), file_id, extract_date],
-    )
-    return conn.execute("SELECT count(*) FROM raw.lilo WHERE source_file_id=?", [file_id]).fetchone()[0]
+def _insert_lilo_direct(
+    conn: DatabaseConnection,
+    path: Path,
+    file_id: str,
+    extract_date,
+    scope: AgentScope,
+) -> tuple[int, int]:
+    """Stream large LILO CSVs into bounded SQLite inserts."""
+    count = 0
+    scoped_out = 0
+    batch: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for source_row, row in enumerate(reader, 2):
+            agent_id = normalize_id(row.get("[Agent ID]"))
+            resolved_id = scope.resolve(agent_id, row.get("[Agent]"))
+            if resolved_id is None:
+                scoped_out += 1
+                continue
+            agent_id = resolved_id
+            first = parse_datetime(row.get("[First Log-on Time]"))
+            raw_last = parse_datetime(row.get("[Last Log-off Time]"))
+            last = raw_last
+            adjusted = False
+            if first and last and last < first:
+                last += timedelta(days=1)
+                adjusted = True
+            batch.append({
+                "source_file_id": file_id,
+                "source_row": source_row,
+                "extract_date": extract_date,
+                "agent_id": agent_id,
+                "agent_name": _clean(row.get("[Agent]")),
+                "first_login": first,
+                "raw_last_logout": raw_last,
+                "last_logout": last,
+                "overnight_adjusted": adjusted,
+            })
+            if len(batch) >= 5000:
+                _insert_rows(conn, "raw.lilo", batch)
+                count += len(batch)
+                batch.clear()
+    if batch:
+        _insert_rows(conn, "raw.lilo", batch)
+        count += len(batch)
+    return count, scoped_out
 
 
-def parse_agent_status(path: Path, file_id: str) -> ParseResult:
+def parse_agent_status(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
     extract_date = _extract_date(path.name, STATUS_FILE_RE, "Agent Status")
     output: list[dict[str, Any]] = []
     rejected: list[str] = []
+    scoped_out = 0
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         required = {"[Serial Number]", "[Status]", "[Status Start Date and Time]", "[Agent]", "[Agent ID]", "[Status Duration]", "[Queue]"}
@@ -318,6 +373,13 @@ def parse_agent_status(path: Path, file_id: str) -> ParseResult:
         if missing:
             raise SourceSchemaError(f"Agent Status missing columns: {', '.join(missing)}")
         for source_row, row in enumerate(reader, 2):
+            agent_id = normalize_id(row.get("[Agent ID]"))
+            if scope is not None:
+                resolved_id = scope.resolve(agent_id, row.get("[Agent]"))
+                if resolved_id is None:
+                    scoped_out += 1
+                    continue
+                agent_id = resolved_id
             start = parse_datetime(row.get("[Status Start Date and Time]"))
             seconds = duration_seconds(row.get("[Status Duration]"))
             end = start + timedelta(seconds=seconds) if start is not None and seconds is not None else None
@@ -329,13 +391,13 @@ def parse_agent_status(path: Path, file_id: str) -> ParseResult:
             output.append({
                 "source_file_id": file_id, "source_row": source_row,
                 "serial_number": serial, "extract_date": extract_date,
-                "agent_id": normalize_id(row.get("[Agent ID]")),
+                "agent_id": agent_id,
                 "agent_name": _clean(row.get("[Agent]")), "status": _clean(row.get("[Status]")),
                 "actual_category": classify_status(_clean(row.get("[Status]"))),
                 "status_start": start, "status_end": end, "duration_seconds": seconds,
                 "queue": _clean(row.get("[Queue]")),
             })
-    return ParseResult({"raw.agent_status": output}, rejected)
+    return ParseResult({"raw.agent_status": output}, rejected, scoped_out)
 
 
 FORECAST_NAMES = {
@@ -473,26 +535,55 @@ def parse_queue_actual(path: Path, file_id: str, source_system: str) -> ParseRes
         workbook.close()
 
 
-PARSERS: dict[str, Callable[[Path, str], ParseResult]] = {
-    "fte": parse_fte,
+PARSERS: dict[str, Callable[[Path, str, AgentScope | None], ParseResult]] = {
+    "fte": lambda path, file_id, scope: parse_fte(path, file_id),
     "schedule": parse_schedule,
     "lilo": parse_lilo,
     "agent_status": parse_agent_status,
-    "forecast": parse_forecast,
-    "apbe": lambda path, file_id: parse_queue_actual(path, file_id, "APBE"),
-    "apfr": lambda path, file_id: parse_queue_actual(path, file_id, "APFR"),
+    "forecast": lambda path, file_id, scope: parse_forecast(path, file_id),
+    "apbe": lambda path, file_id, scope: parse_queue_actual(path, file_id, "APBE"),
+    "apfr": lambda path, file_id, scope: parse_queue_actual(path, file_id, "APFR"),
 }
 
 
-def _insert_rows(conn: duckdb.DuckDBPyConnection, table: str, rows: list[dict[str, Any]]) -> None:
+def _load_agent_scope(conn: DatabaseConnection) -> AgentScope:
+    rows = conn.execute(
+        """SELECT r.agent_id, r.agent_name
+           FROM raw.fte_agent r
+           JOIN meta.source_file f ON f.file_id=r.source_file_id
+           WHERE f.active=true AND f.status='SUCCESS'"""
+    ).fetchall()
+    ids = {normalize_id(agent_id) for agent_id, _ in rows}
+    ids.discard(None)
+    if not ids:
+        raise SourceSchemaError(
+            "Agent scope is empty. Load a valid FTE roster before agent-level extracts; "
+            "no worldwide rows were admitted."
+        )
+    names: dict[str, set[str]] = {}
+    for agent_id, agent_name in rows:
+        normalized_id = normalize_id(agent_id)
+        name_key = _normalize_agent_name(agent_name)
+        if normalized_id and name_key:
+            names.setdefault(name_key, set()).add(normalized_id)
+    unique_names = {name: next(iter(matches)) for name, matches in names.items() if len(matches) == 1}
+    payload = "\n".join([
+        f"policy:{AGENT_SCOPE_POLICY_VERSION}",
+        *(f"id:{value}" for value in sorted(ids)),
+        *(f"name:{key}={value}" for key, value in sorted(unique_names.items())),
+    ])
+    fingerprint = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return AgentScope(frozenset(ids), unique_names, fingerprint)
+
+
+def _insert_rows(conn: DatabaseConnection, table: str, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
     columns = TABLE_COLUMNS[table]
     row_placeholders = "(" + ", ".join("?" for _ in columns) + ")"
-    # DuckDB's DB-API executemany performs one statement per Python row. That
-    # is unnecessarily slow for roster-heavy LILO files, so bind bounded
-    # multi-row INSERT statements instead.
-    batch_size = 500
+    # Bounded multi-row statements keep SQLite transaction overhead low while
+    # staying below its host-parameter limit.
+    batch_size = max(1, min(500, conn.max_variable_number // len(columns)))
     for offset in range(0, len(rows), batch_size):
         batch = rows[offset : offset + batch_size]
         sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES " + ", ".join(row_placeholders for _ in batch)
@@ -500,25 +591,61 @@ def _insert_rows(conn: duckdb.DuckDBPyConnection, table: str, rows: list[dict[st
         conn.execute(sql, params)
 
 
-def ingest_all(conn: duckdb.DuckDBPyConnection, config: Config) -> IngestSummary:
+def ingest_all(conn: DatabaseConnection, config: Config) -> IngestSummary:
     summary = IngestSummary()
     for candidate in discover_sources(config):
         path = candidate.path
         sha256 = file_sha256(path)
         path_text = str(path)
+        try:
+            scope = _load_agent_scope(conn) if candidate.family in AGENT_SCOPED_FAMILIES else None
+        except Exception as exc:
+            summary.failed += 1
+            summary.errors.append(f"{candidate.family}: {path.name}: {exc}")
+            continue
+        scope_fingerprint = scope.fingerprint if scope is not None else ""
         existing = conn.execute(
-            "SELECT file_id FROM meta.source_file WHERE source_family=? AND source_path=? AND sha256=? AND status='SUCCESS'",
-            [candidate.family, path_text, sha256],
+            """SELECT file_id, active, row_count, scoped_out_count FROM meta.source_file
+               WHERE source_family=? AND source_path=? AND sha256=?
+                 AND coalesce(scope_fingerprint, '')=? AND status='SUCCESS'""",
+            [candidate.family, path_text, sha256, scope_fingerprint],
         ).fetchone()
         if existing:
-            summary.skipped += 1
+            existing_id, active, existing_rows, existing_scoped_out = existing
+            if active:
+                summary.skipped += 1
+                summary.scoped_out += existing_scoped_out or 0
+                continue
+            # The path changed A -> B -> A. Its original raw rows are still
+            # immutable in the hub, so safely reactivate them without parsing
+            # or duplicating the same content fingerprint.
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                conn.execute(
+                    "UPDATE meta.source_file SET active=false WHERE source_family=? AND source_path=? AND active=true",
+                    [candidate.family, path_text],
+                )
+                conn.execute(
+                    "UPDATE meta.source_file SET active=true, loaded_at=? WHERE file_id=?",
+                    [datetime.now(), existing_id],
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+            summary.loaded += 1
+            summary.rows += existing_rows or 0
+            summary.scoped_out += existing_scoped_out or 0
             continue
         stat = path.stat()
-        file_id = hashlib.sha256(f"{candidate.family}|{path_text}|{sha256}".encode("utf-8")).hexdigest()
+        file_id = hashlib.sha256(
+            f"{candidate.family}|{path_text}|{sha256}|{scope_fingerprint}".encode("utf-8")
+        ).hexdigest()
         discovered_at = datetime.now()
         modified_at = datetime.fromtimestamp(stat.st_mtime)
         try:
-            result = None if candidate.family == "lilo" else PARSERS[candidate.family](path, file_id)
+            result = None if candidate.family == "lilo" else PARSERS[candidate.family](path, file_id, scope)
             conn.execute("BEGIN TRANSACTION")
             try:
                 conn.execute(
@@ -527,27 +654,52 @@ def ingest_all(conn: duckdb.DuckDBPyConnection, config: Config) -> IngestSummary
                 )
                 if candidate.family == "lilo":
                     extract_date = _validate_lilo_header(path)
-                    row_count = _insert_lilo_direct(conn, path, file_id, extract_date)
+                    row_count, scoped_out_count = _insert_lilo_direct(conn, path, file_id, extract_date, scope)
                     rejected_count = 0
                 else:
                     row_count = result.row_count
                     rejected_count = len(result.rejected)
+                    scoped_out_count = result.scoped_out
                     for table, rows in result.tables.items():
                         _insert_rows(conn, table, rows)
                 conn.execute(
-                    "INSERT INTO meta.source_file VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, 'SUCCESS', ?, ?, NULL)",
-                    [file_id, candidate.family, path_text, path.name, sha256, stat.st_size, modified_at, discovered_at, datetime.now(), row_count, rejected_count],
+                    """INSERT INTO meta.source_file(
+                           file_id, source_family, source_path, file_name, sha256, size_bytes,
+                           modified_at, discovered_at, loaded_at, active, status, row_count,
+                           rejected_count, error_message, scope_fingerprint, scoped_out_count
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, 'SUCCESS', ?, ?, NULL, ?, ?)
+                       ON CONFLICT(file_id) DO UPDATE SET
+                           source_family=excluded.source_family, source_path=excluded.source_path,
+                           file_name=excluded.file_name, sha256=excluded.sha256,
+                           size_bytes=excluded.size_bytes, modified_at=excluded.modified_at,
+                           discovered_at=excluded.discovered_at, loaded_at=excluded.loaded_at,
+                           active=true, status='SUCCESS', row_count=excluded.row_count,
+                           rejected_count=excluded.rejected_count, error_message=NULL,
+                           scope_fingerprint=excluded.scope_fingerprint,
+                           scoped_out_count=excluded.scoped_out_count""",
+                    [file_id, candidate.family, path_text, path.name, sha256, stat.st_size, modified_at, discovered_at, datetime.now(), row_count, rejected_count, scope_fingerprint, scoped_out_count],
                 )
                 conn.execute("COMMIT")
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
             summary.loaded += 1
             summary.rows += row_count
+            summary.scoped_out += scoped_out_count
         except Exception as exc:
             conn.execute(
-                "INSERT OR REPLACE INTO meta.source_file VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, false, 'ERROR', 0, 0, ?)",
-                [file_id, candidate.family, path_text, path.name, sha256, stat.st_size, modified_at, discovered_at, datetime.now(), str(exc)[:4000]],
+                """INSERT INTO meta.source_file(
+                       file_id, source_family, source_path, file_name, sha256, size_bytes,
+                       modified_at, discovered_at, loaded_at, active, status, row_count,
+                       rejected_count, error_message, scope_fingerprint, scoped_out_count
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, false, 'ERROR', 0, 0, ?, ?, 0)
+                   ON CONFLICT(file_id) DO UPDATE SET
+                       modified_at=excluded.modified_at, discovered_at=excluded.discovered_at,
+                       loaded_at=excluded.loaded_at, active=false, status='ERROR',
+                       row_count=0, rejected_count=0, error_message=excluded.error_message,
+                       scope_fingerprint=excluded.scope_fingerprint, scoped_out_count=0""",
+                [file_id, candidate.family, path_text, path.name, sha256, stat.st_size, modified_at, discovered_at, datetime.now(), str(exc)[:4000], scope_fingerprint],
             )
             summary.failed += 1
             summary.errors.append(f"{candidate.family}: {path.name}: {exc}")

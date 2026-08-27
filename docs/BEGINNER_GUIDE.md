@@ -1,30 +1,35 @@
 # Beginner guide — use WFMHub like a simple tool
 
-## The two buttons
+## The two files you click
 
-Think of WFMHub as a suitcase. It already contains Python, DuckDB and everything
-else it needs.
+Think of WFMHub as a suitcase. Everything it needs is already inside.
 
-- `SETUP.cmd` prepares the suitcase. Run it once.
-- `WFMHub.cmd` opens your work menu. Run it every day.
+- `SETUP.cmd` checks and prepares the suitcase. Run it once.
+- `WFMHub.cmd` opens the daily menu.
 
-You do not need administrator rights, installed Python, Power Query, Power
-Pivot, ODBC or Python in Excel. Excel only opens the finished reports.
+You do not install Python, SQLite, Power Query, Power Pivot, ODBC, or Python in
+Excel. The database stays outside Excel. Excel receives only the small finished
+report sheets.
 
 ## First setup — one time
 
-1. Download the Windows ZIP from the repository Releases page.
-2. Right-click the ZIP and choose **Extract All**.
-3. Put the entire extracted `WFMHub` folder somewhere you can write, for example:
+1. Download `WFMHub-Portable-v0.2.0-win-x64.zip` from **Releases**.
+2. Do not download GitHub's “Source code” ZIP.
+3. Right-click the downloaded ZIP and choose **Extract All**.
+4. Put the entire extracted `WFMHub` folder in a place where you can write, for
+   example:
 
    ```text
    C:\Users\YourName\Documents\WFMHub
    ```
 
-4. Do not put it in `Program Files`.
-5. Check that `runtime\python.exe` exists inside the extracted `WFMHub` folder.
-6. Double-click `SETUP.cmd`.
-7. A black window asks for your **source root**. This is the folder containing:
+5. Do not use `Program Files`, a network drive, OneDrive, or another synced
+   folder for the database.
+6. Open the folder and confirm `runtime\python.exe` exists.
+7. Double-click `SETUP.cmd`.
+8. First, the black window runs **WFMHUB SYSTEM CHECK**. Continue only when it
+   says **SYSTEM CHECK PASSED**.
+9. Paste your source-root folder. It is the folder containing:
 
    ```text
    FTE
@@ -32,64 +37,100 @@ Pivot, ODBC or Python in Excel. Excel only opens the finished reports.
    Verint
    ```
 
-8. Paste that folder path and press Enter.
-9. Wait for **Setup complete**. Press a key to close the window.
+10. Press Enter and wait for **Setup complete**.
 
-Setup creates `config\wfmhub.toml` and `database\wfm.duckdb`. It never edits an
-extract.
+Setup creates `config\wfmhub.toml` and `database\wfm.sqlite3`. It does not edit,
+move, rename, or delete an extract.
 
-## Your daily routine
+## What “our agents” means
 
-1. Put each new untouched export in its normal folder.
-2. Keep the original filename.
+The FTE `Agent` sheet is the list of people allowed into agent-level data.
+
+For every schedule, LILO, and Agent Status row, WFMHub asks:
+
+1. Does its Agent ID exist in FTE? Keep it.
+2. If not, does its cleaned name match exactly one FTE person? Keep it.
+3. Otherwise, exclude it as outside roster.
+
+“Cleaned name” only ignores case, accents, punctuation, and extra spaces. It is
+not a fuzzy guess. A populated Verint `Data Source IDs` value stays the
+operational Agent ID.
+
+The source file itself remains untouched. `SOURCE_HEALTH` shows:
+
+- `Row Count`: rows kept for the hub.
+- `Scoped Out Count`: worldwide/outside-roster rows excluded.
+- `Rejected Count`: malformed or flagged rows.
+
+If FTE changes, WFMHub automatically rechecks the same unchanged extracts. If
+every Agent Status row is outside roster, RTA stays empty and source health says
+`ERROR`. Do not use those status rows.
+
+## Daily routine
+
+1. Put new untouched exports in their normal folders.
+2. Keep their original filenames.
 3. Double-click `WFMHub.cmd`.
 4. Choose **1. Refresh all available data + build report**.
 5. Wait for **Refresh complete**.
-6. Copy the displayed report path or open the newest file in `output`.
+6. Open the newest workbook in `output`.
 7. Open `SOURCE_HEALTH` first.
-8. If any required source says `ERROR` or `MISSING`, stop and fix it before using
-   attendance, Verint corrections or payroll numbers.
-9. Review `ATTENDANCE`, `GAPS`, `RTA` and `INTRADAY`.
+8. Stop if a required source says `ERROR` or `MISSING`.
+9. Then review `ATTENDANCE`, `GAPS`, `RTA`, and `INTRADAY`.
 
-Unchanged files are skipped. Adding one daily file does not reload every raw
-file into the database.
+Unchanged files are fingerprinted and skipped. Their already-active kept and
+outside-roster counts still appear in the report.
 
-## Run the whole current month
+## Run the current month or another date range
 
-From `WFMHub.cmd` choose **3. Refresh a custom period + build report**.
+For the current month, choose **2. Refresh current month + build report**.
 
-Type dates exactly like this:
+For any dates, choose **3. Refresh a custom period + build report** and type:
 
 ```text
 Start date YYYY-MM-DD: 2026-08-01
 End date YYYY-MM-DD:   2026-08-31
 ```
 
-Dates may also be fixed in `config\wfmhub.toml` under `[period]`. Leave them
-blank to let the hub use every available database date. A custom menu date
-temporarily overrides the file; it does not change the extracts or config.
+You can set default dates in `config\wfmhub.toml`:
 
-Before trusting the monthly gaps, check:
+```toml
+[period]
+start = "2026-08-01"
+end = "2026-08-31"
+```
 
-- Every daily LILO date is present.
-- The authoritative Verint schedule is loaded.
-- Invalid Agent IDs and missing roster rows are understood.
-- Agent Status coverage passes before using mid-shift gaps.
+Use straight quotation marks. Leave both blank to use all available dates:
 
-Remember the difference:
+```toml
+start = ""
+end = ""
+```
 
-- **No show:** the daily LILO file exists, the agent row exists, and both times
-  are blank on a work schedule.
-- **Missing LILO roster row:** the file exists but that Agent ID row does not.
-- **Data not loaded:** the required daily file is missing.
+Menu dates temporarily override setup dates. Report-only dates truly filter
+every dated KPI and sheet; they are not labels only.
 
-Only the first one is a no-show.
+## No-show versus missing data
 
-## Save correction decisions
+- **No show:** LILO file loaded, agent row present, both login/logout blank, and
+  the schedule says Work.
+- **Missing LILO roster row:** LILO file loaded, but that agent row is absent.
+- **Data not loaded:** the needed daily LILO file is missing.
+- **Identity not in LILO:** the scheduled Agent ID was never found in admitted
+  LILO history.
+- **Incomplete LILO:** only one boundary is present.
 
-1. Open the finished report.
-2. Go to `GAPS`.
-3. Edit only the blue columns:
+Only the first result is a no-show.
+
+## Monthly Verint correction exercise
+
+1. Refresh the first through last day of the month.
+2. Confirm all expected LILO dates and the authoritative Verint schedule in
+   `SOURCE_HEALTH`.
+3. Check `DATA_QUALITY`; resolve `ERROR` before payroll or injection work.
+4. Open `GAPS`.
+5. Review the detected interval, reason, confidence, and suggested activity.
+6. Edit only the blue columns:
 
    - Confirmed Activity
    - Validation Status
@@ -97,65 +138,78 @@ Only the first one is a no-show.
    - Comment
    - Injected Date
 
-4. Save the workbook.
-5. Open `WFMHub.cmd`.
-6. Choose **5. Import correction decisions**.
-7. Paste the saved report path.
-8. The hub stores the decisions in DuckDB by stable `Correction ID`.
-9. Build another report to confirm they survived.
+7. Save the workbook.
+8. In `WFMHub.cmd`, choose **5. Import correction decisions** and paste the saved
+   workbook path.
 
-Do not type decisions into raw extracts. Do not use an `Open` or unreviewed
-candidate directly for payroll.
+The whole import is atomic: one invalid later row cancels the entire import.
+WFMHub stores accepted decisions in SQLite by stable `Correction ID`; a later
+refresh does not erase them.
 
-## What each report sheet means
+## Report sheets
 
-| Sheet | Question it answers |
+| Sheet | Meaning |
 |---|---|
-| `START_HERE` | What should I do and which period/config was used? |
-| `SUMMARY` | What are the main numbers? |
-| `ATTENDANCE` | Did each scheduled agent arrive and leave around the plan? |
-| `GAPS` | What should a human review or inject in Verint? |
-| `RTA` | At the newest status snapshot, who matched the plan? |
-| `INTRADAY` | What do Storm actuals and Verint forecast say? |
-| `DATA_QUALITY` | What is unsafe or incomplete? |
-| `SOURCE_HEALTH` | Which files were found and loaded? |
+| `START_HERE` | Period and daily instructions |
+| `SUMMARY` | Main period-filtered KPIs |
+| `ATTENDANCE` | One scheduled admitted Agent ID/day |
+| `GAPS` | Reviewable Verint correction candidates |
+| `RTA` | Adherence at newest admitted status timestamp |
+| `INTRADAY` | Storm actuals and Verint forecast, still separate |
+| `DATA_QUALITY` | Unsafe, incomplete, or review conditions |
+| `SOURCE_HEALTH` | Files, kept rows, excluded rows, and failures |
 
-The workbook contains curated results, not raw extracts and not the complete raw
-database.
+The workbook contains no raw extract sheet, Power Query connection, or embedded
+Data Model.
 
-## Forecast later
+## Forecast and future features
 
-Forecast support is already present but isolated. Add Verint forecast files to
-`Verint\Forecast` and APBE/APFR actual files to their Storm folders. The report
-shows them separately. Before comparing variance, define which Storm queues,
-LOBs and partners equal the Verint forecast queue. WFMHub will not guess.
+Verint Forecast is used only for forecast and required staffing. APBE/APFR is
+used only for actual queue results. WFMHub does not guess how a forecast queue
+maps to actual queue/LOB data.
 
-Future forecast reports or KPIs are easy to add because Forecast has its own raw
-table and mart. It cannot change Attendance, absence or corrections.
+New KPIs or reports can be added later without replacing the source extracts or
+attendance rules because forecast, actuals, agent facts, and report marts are
+separate layers.
 
-## Backup
+## Backup and restore
 
-1. Close any running refresh.
-2. Open `WFMHub.cmd`.
-3. Choose **7. Create database backup**.
-4. The dated copy appears in `backups`.
+1. Open `WFMHub.cmd`.
+2. Choose **7. Create database backup**.
+3. Find the dated `.sqlite3` copy in `backups`.
 
-Back up before a software upgrade or important month-end run. Never delete the
-original database first when restoring; rename the damaged file and copy the
-known-good backup into `database\wfm.duckdb`.
+SQLite uses companion WAL files while running, so do not make a database backup
+with ordinary copy/paste during refresh. Use menu option 7.
 
-## Quick troubleshooting
+To restore, close WFMHub, preserve/rename the current database, copy the chosen
+backup to `database\wfm.sqlite3`, and rerun **9. Run system check**. Never delete
+the only copy first.
 
-| Problem | Check |
+## Upgrade from v0.1
+
+v0.1 used a database extension blocked by the work computer. v0.2 starts a new
+SQLite database.
+
+1. Extract v0.2 into a new folder. Do not paste it over v0.1.
+2. Run v0.2 `SETUP.cmd` and select the same untouched source root.
+3. Run a full refresh so SQLite rebuilds from the extracts.
+4. Keep the complete v0.1 folder and its `wfm.duckdb`; v0.2 never opens or
+   deletes it.
+5. If correction decisions exist only in an old Excel report, import that saved
+   report into v0.2.
+
+## Troubleshooting
+
+| Problem | What to do |
 |---|---|
-| The black window closes | Run `SETUP.cmd`, then read the newest file in `logs` |
-| Embedded Python is missing | Download the portable release ZIP, choose **Extract All**, and verify `runtime\python.exe`; do not use GitHub's Source code ZIP |
-| Source says MISSING | Open `config\wfmhub.toml` and correct `source_root` |
-| Report is empty | Check the selected dates and `SOURCE_HEALTH` |
-| RTA is old | RTA is only as fresh as the newest Agent Status export |
-| Employee is unmatched | Verify the Agent ID; do not force a name match |
-| Database is locked | Close the other WFMHub refresh and try again |
-| A decision disappeared | Import the edited report; editing an output alone does not update DuckDB |
-| A runtime DLL cannot load | Re-extract the complete ZIP; do not move DLLs out of `runtime` |
+| System check fails | Copy the exact FAIL line; setup stopped before database creation |
+| `py` is not recognized | Ignore `py`; the release uses `runtime\python.exe` only |
+| A DLL/application-control error appears | Re-extract the complete v0.2 ZIP; do not overlay v0.1 or move runtime files |
+| Source is `MISSING` | Correct `source_root` in `config\wfmhub.toml` |
+| Agent Status is `ERROR`, 0 kept | The export does not match FTE IDs/unique names; obtain the correct scoped export |
+| RTA is empty | Fix Agent Status scope/freshness first; WFMHub will not invent RTA |
+| Report is empty | Check selected dates, `SOURCE_HEALTH`, and FTE scope |
+| Database is locked | Close the other WFMHub refresh and retry |
+| Decision disappeared | Import the edited report; editing Excel alone does not update SQLite |
 
 Golden rule: if Source Health or Data Quality is red, stop and understand it.

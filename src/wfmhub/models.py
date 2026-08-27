@@ -1,4 +1,4 @@
-"""Materialize clean DuckDB dimensions and WFM report marts."""
+"""Materialize clean dimensions and WFM report marts."""
 
 from __future__ import annotations
 
@@ -9,9 +9,8 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
-import duckdb
-
 from .config import Config
+from .database import DatabaseConnection, DatabaseCursor
 from .utils import clip_intervals, interval_minutes, merge_intervals, subtract_intervals
 
 
@@ -28,13 +27,13 @@ class ModelSummary:
     quality_rows: int = 0
 
 
-def _dicts(cursor: duckdb.DuckDBPyConnection) -> list[dict[str, Any]]:
+def _dicts(cursor: DatabaseCursor) -> list[dict[str, Any]]:
     columns = [item[0] for item in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def resolve_period(
-    conn: duckdb.DuckDBPyConnection,
+    conn: DatabaseConnection,
     config: Config,
     start: date | None,
     end: date | None,
@@ -47,7 +46,7 @@ def resolve_period(
         return start, end
     row = conn.execute(
         """
-        SELECT min(d), max(d) FROM (
+        SELECT min(d) AS "start_date [DATE]", max(d) AS "end_date [DATE]" FROM (
             SELECT min(schedule_date) AS d FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
             UNION ALL SELECT max(schedule_date) FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
             UNION ALL SELECT min(business_date) FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
@@ -65,7 +64,7 @@ def resolve_period(
     return start, end
 
 
-def _load_schedules(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> list[dict[str, Any]]:
+def _load_schedules(conn: DatabaseConnection, start: date, end: date) -> list[dict[str, Any]]:
     return _dicts(conn.execute(
         """
         WITH source_choice AS (
@@ -87,7 +86,10 @@ def _load_schedules(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> 
             ) AS row_rank
             FROM source_choice WHERE source_rank=1
         )
-        SELECT * EXCLUDE(source_rank, row_rank, modified_at)
+        SELECT source_file_id, source_row, schedule_date, agent_id_raw, agent_id,
+               agent_name, scheduling_period, shift_assignment, assignment,
+               assignment_type, scheduled_start, scheduled_end, shift_events,
+               parse_ok, source_file
         FROM dedup WHERE row_rank=1
         ORDER BY schedule_date, agent_id, scheduled_start
         """,
@@ -95,10 +97,15 @@ def _load_schedules(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> 
     ))
 
 
-def _load_events(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> list[dict[str, Any]]:
+def _load_events(conn: DatabaseConnection, start: date, end: date) -> list[dict[str, Any]]:
+    window_start = datetime.combine(start - timedelta(days=1), time.min)
+    window_end = datetime.combine(end + timedelta(days=2), time.min)
     return _dicts(conn.execute(
         """
-        SELECT * EXCLUDE(row_rank, modified_at) FROM (
+        SELECT source_file_id, source_row, event_index, schedule_date, agent_id,
+               agent_name, activity, activity_type, event_start, event_end,
+               parse_ok, source_file
+        FROM (
             SELECT r.*, f.file_name AS source_file, f.modified_at,
                    row_number() OVER (
                        PARTITION BY r.agent_id, upper(coalesce(r.activity,'')), r.event_start, r.event_end
@@ -106,22 +113,22 @@ def _load_events(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> lis
                    ) AS row_rank
             FROM raw.schedule_event r
             JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
-            WHERE r.parse_ok AND r.event_end >= ?::DATE - INTERVAL 1 DAY
-              AND r.event_start < ?::DATE + INTERVAL 2 DAY
+            WHERE r.parse_ok AND r.event_end >= ?
+              AND r.event_start < ?
         ) x WHERE row_rank=1
         """,
-        [start, end],
+        [window_start, window_end],
     ))
 
 
-def _load_lilo(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> tuple[dict[tuple[date, str], list[dict[str, Any]]], set[date], set[str]]:
+def _load_lilo(conn: DatabaseConnection, start: date, end: date) -> tuple[dict[tuple[date, str], list[dict[str, Any]]], set[date], set[str]]:
     rows = _dicts(conn.execute(
         """
         SELECT r.*, f.file_name AS source_file
         FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
-        WHERE r.extract_date BETWEEN ?::DATE - INTERVAL 1 DAY AND ?::DATE + INTERVAL 1 DAY
+        WHERE r.extract_date BETWEEN ? AND ?
         """,
-        [start, end],
+        [start - timedelta(days=1), end + timedelta(days=1)],
     ))
     grouped: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
     loaded_dates: set[date] = set()
@@ -134,10 +141,15 @@ def _load_lilo(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> tuple
     return grouped, loaded_dates, seen
 
 
-def _load_statuses(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> dict[str, list[dict[str, Any]]]:
+def _load_statuses(conn: DatabaseConnection, start: date, end: date) -> dict[str, list[dict[str, Any]]]:
+    window_start = datetime.combine(start - timedelta(days=1), time.min)
+    window_end = datetime.combine(end + timedelta(days=2), time.min)
     rows = _dicts(conn.execute(
         """
-        SELECT * EXCLUDE(row_rank, modified_at) FROM (
+        SELECT source_file_id, source_row, serial_number, extract_date, agent_id,
+               agent_name, status, actual_category, status_start, status_end,
+               duration_seconds, queue, source_file
+        FROM (
             SELECT r.*, f.file_name AS source_file, f.modified_at,
                    row_number() OVER (
                        PARTITION BY r.serial_number
@@ -145,12 +157,12 @@ def _load_statuses(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> d
                    ) AS row_rank
             FROM raw.agent_status r
             JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
-            WHERE r.status_start < ?::DATE + INTERVAL 2 DAY
-              AND r.status_end >= ?::DATE - INTERVAL 1 DAY
+            WHERE r.status_start < ?
+              AND r.status_end >= ?
         ) x WHERE row_rank=1 AND agent_id IS NOT NULL AND status_end > status_start
         ORDER BY agent_id, status_start
         """,
-        [end, start],
+        [window_end, window_start],
     ))
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -158,34 +170,53 @@ def _load_statuses(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> d
     return grouped
 
 
-def _build_agents(conn: duckdb.DuckDBPyConnection) -> dict[str, dict[str, Any]]:
+def _build_agents(conn: DatabaseConnection) -> dict[str, dict[str, Any]]:
     conn.execute("DELETE FROM core.dim_agent")
     conn.execute(
         """
-        INSERT INTO core.dim_agent
-        WITH roster AS (
-            SELECT agent_id, arg_max(agent_name, f.modified_at) AS agent_name
-            FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
-            WHERE agent_id IS NOT NULL GROUP BY agent_id
+        WITH roster_ranked AS (
+            SELECT r.agent_id, r.agent_name,
+                   row_number() OVER (
+                       PARTITION BY r.agent_id
+                       ORDER BY f.modified_at DESC NULLS LAST, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.schedule_shift r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            WHERE r.agent_id IS NOT NULL AND r.agent_name IS NOT NULL
+        ), roster AS (
+            SELECT agent_id, agent_name FROM roster_ranked WHERE row_rank=1
+        ), actual_ranked AS (
+            SELECT r.agent_id, r.agent_name,
+                   row_number() OVER (
+                       PARTITION BY r.agent_id
+                       ORDER BY f.modified_at DESC NULLS LAST, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.lilo r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            WHERE r.agent_id IS NOT NULL AND r.agent_name IS NOT NULL
         ), actual_names AS (
-            SELECT agent_id, arg_max(agent_name, f.modified_at) AS agent_name
-            FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
-            WHERE agent_id IS NOT NULL GROUP BY agent_id
+            SELECT agent_id, agent_name FROM actual_ranked WHERE row_rank=1
         ), ids AS (
             SELECT agent_id FROM roster UNION SELECT agent_id FROM actual_names
             UNION SELECT agent_id FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
             UNION SELECT agent_id FROM raw.fte_agent r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
-        ), fte AS (
-            SELECT * EXCLUDE(row_rank) FROM (
-                SELECT r.*, row_number() OVER (
-                    PARTITION BY agent_id
+        ), fte_ranked AS (
+                SELECT r.agent_id, r.agent_name, r.employment_status, r.team_leader,
+                       r.ops_manager, r.lob, r.market, r.language, r.location,
+                       r.city, r.fte, r.end_date,
+                       row_number() OVER (
+                    PARTITION BY r.agent_id
                     ORDER BY CASE WHEN upper(coalesce(employment_status,''))='ACTIVE' THEN 0 ELSE 1 END,
                              end_date DESC NULLS LAST, f.modified_at DESC NULLS LAST, source_row DESC
                 ) row_rank
                 FROM raw.fte_agent r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
-                WHERE agent_id IS NOT NULL
-            ) x WHERE row_rank=1
+                WHERE r.agent_id IS NOT NULL
+        ), fte AS (
+            SELECT agent_id, agent_name, employment_status, team_leader, ops_manager,
+                   lob, market, language, location, city, fte
+            FROM fte_ranked WHERE row_rank=1
         )
+        INSERT INTO core.dim_agent
         SELECT ids.agent_id,
                coalesce(fte.agent_name, roster.agent_name, actual_names.agent_name) AS canonical_name,
                fte.employment_status, fte.team_leader, fte.ops_manager, fte.lob, fte.market,
@@ -262,11 +293,11 @@ ATTENDANCE_COLUMNS = [
 ]
 
 
-def _insert_dicts(conn: duckdb.DuckDBPyConnection, table: str, columns: list[str], rows: list[dict[str, Any]]) -> None:
+def _insert_dicts(conn: DatabaseConnection, table: str, columns: list[str], rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
     row_placeholders = "(" + ", ".join("?" for _ in columns) + ")"
-    batch_size = 500
+    batch_size = max(1, min(500, conn.max_variable_number // len(columns)))
     for offset in range(0, len(rows), batch_size):
         batch = rows[offset : offset + batch_size]
         sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES " + ", ".join(row_placeholders for _ in batch)
@@ -275,7 +306,7 @@ def _insert_dicts(conn: duckdb.DuckDBPyConnection, table: str, columns: list[str
 
 
 def _build_attendance(
-    conn: duckdb.DuckDBPyConnection,
+    conn: DatabaseConnection,
     config: Config,
     schedules: list[dict[str, Any]],
     events_by_agent: dict[str, list[dict[str, Any]]],
@@ -401,7 +432,7 @@ CONFORMANCE_COLUMNS = [
 
 
 def _build_conformance(
-    conn: duckdb.DuckDBPyConnection,
+    conn: DatabaseConnection,
     config: Config,
     attendance: list[dict[str, Any]],
     statuses_by_agent: dict[str, list[dict[str, Any]]],
@@ -487,7 +518,7 @@ def _correction_id(row: dict[str, Any], issue: str, start: datetime | None, end:
 
 
 def _build_corrections(
-    conn: duckdb.DuckDBPyConnection,
+    conn: DatabaseConnection,
     config: Config,
     attendance: list[dict[str, Any]],
     conformance: list[dict[str, Any]],
@@ -573,7 +604,7 @@ RTA_COLUMNS = [
 
 
 def _build_rta(
-    conn: duckdb.DuckDBPyConnection,
+    conn: DatabaseConnection,
     config: Config,
     schedules: list[dict[str, Any]],
     events_by_agent: dict[str, list[dict[str, Any]]],
@@ -581,7 +612,10 @@ def _build_rta(
     agents: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     all_statuses = [row for rows in statuses_by_agent.values() for row in rows]
-    snapshot = max((row["status_start"] for row in all_statuses), default=datetime.now().replace(second=0, microsecond=0))
+    if not all_statuses:
+        conn.execute("DELETE FROM mart.rta_snapshot")
+        return []
+    snapshot = max(row["status_start"] for row in all_statuses)
     output: list[dict[str, Any]] = []
     for shift in schedules:
         if not shift["agent_id"] or not shift["scheduled_start"] or not shift["scheduled_end"]:
@@ -623,12 +657,12 @@ def _build_rta(
     return output
 
 
-def _build_intraday(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> tuple[int, int]:
+def _build_intraday(conn: DatabaseConnection, start: date, end: date) -> tuple[int, int]:
     conn.execute("DELETE FROM mart.forecast_hour")
     conn.execute(
         """
         INSERT INTO mart.forecast_hour
-        SELECT business_date, date_trunc('hour', interval_start), queue_name, volume_forecast,
+        SELECT business_date, strftime('%Y-%m-%d %H:00:00', interval_start), queue_name, volume_forecast,
                fte_forecast, fte_required, sl_forecast, sl_required, aht_forecast_seconds, source_file
         FROM (
             SELECT r.*, f.file_name AS source_file,
@@ -648,8 +682,8 @@ def _build_intraday(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> 
         INSERT INTO mart.intraday_queue_interval
         SELECT business_date, interval_start, hour_start, source_system, queue, business_partner, lob, language,
                offered, answered, abandoned, short_calls, answered_20s,
-               CASE WHEN offered IS NULL OR offered=0 THEN NULL ELSE coalesce(answered_20s,0)/offered END,
-               CASE WHEN offered IS NULL OR offered=0 THEN NULL ELSE coalesce(abandoned,0)/offered END,
+               CASE WHEN offered IS NULL OR offered=0 THEN NULL ELSE 1.0*coalesce(answered_20s,0)/offered END,
+               CASE WHEN offered IS NULL OR offered=0 THEN NULL ELSE 1.0*coalesce(abandoned,0)/offered END,
                asa_seconds, aht_seconds, source_file
         FROM (
             SELECT r.*, f.file_name AS source_file,
@@ -674,7 +708,7 @@ def _issue_id(*parts: Any) -> str:
 
 
 def _build_quality(
-    conn: duckdb.DuckDBPyConnection,
+    conn: DatabaseConnection,
     config: Config,
     run_id: str,
     start: date,
@@ -743,6 +777,16 @@ def _build_quality(
         add("agent_status", None, row["business_date"], row["agent_id"], "Low status coverage", "REVIEW", f"Coverage={row['status_coverage_percent']:.1%}; LILO fallback used when available")
     if conn.execute("SELECT count(*) FROM mart.forecast_hour").fetchone()[0] and conn.execute("SELECT count(*) FROM mart.intraday_queue_interval").fetchone()[0]:
         add("intraday", None, None, None, "Forecast scope mapping required", "REVIEW", "Forecast and Storm actuals are intentionally not auto-mapped. Confirm queue/LOB scope before comparing them.")
+    for family, file_name, scoped_out in conn.execute(
+        """SELECT source_family, file_name, scoped_out_count
+           FROM meta.source_file
+           WHERE active=true AND status='SUCCESS' AND source_family IN ('schedule','lilo','agent_status')
+             AND row_count=0 AND scoped_out_count>0"""
+    ).fetchall():
+        add(
+            family, file_name, None, None, "Agent scope mismatch", "ERROR",
+            f"All {scoped_out} source rows were outside the active FTE roster; no rows were used.",
+        )
     if issues:
         row_placeholders = "(" + ", ".join("?" for _ in range(10)) + ")"
         for offset in range(0, len(issues), 500):
@@ -754,7 +798,7 @@ def _build_quality(
     return len(issues)
 
 
-def _build_source_health(conn: duckdb.DuckDBPyConnection, config: Config) -> None:
+def _build_source_health(conn: DatabaseConnection, config: Config) -> None:
     conn.execute("DELETE FROM mart.source_health")
     specs = [
         ("fte", config.source_path("fte_file")), ("schedule", config.source_path("schedule_folder")),
@@ -764,9 +808,16 @@ def _build_source_health(conn: duckdb.DuckDBPyConnection, config: Config) -> Non
     ]
     for family, expected in specs:
         latest = conn.execute(
-            """SELECT file_name, modified_at, loaded_at, row_count, rejected_count, status, error_message
+            """SELECT file_name, modified_at, loaded_at, status, error_message
                FROM meta.source_file WHERE source_family=?
                ORDER BY loaded_at DESC NULLS LAST, modified_at DESC NULLS LAST LIMIT 1""", [family]
+        ).fetchone()
+        rows, rejected, scoped_out = conn.execute(
+            """SELECT coalesce(sum(row_count),0), coalesce(sum(rejected_count),0),
+                      coalesce(sum(scoped_out_count),0)
+               FROM meta.source_file
+               WHERE source_family=? AND active=true AND status='SUCCESS'""",
+            [family],
         ).fetchone()
         business_date = conn.execute(
             """
@@ -780,39 +831,60 @@ def _build_source_health(conn: duckdb.DuckDBPyConnection, config: Config) -> Non
             """, [family, family, family, family, family]
         ).fetchone()[0]
         if latest:
-            file_name, modified, loaded, rows, rejected, status, error = latest
-            details = error or (f"{rejected} rejected/flagged rows" if rejected else "Loaded successfully")
+            file_name, modified, loaded, status, error = latest
+            if error:
+                details = error
+            elif not rows and scoped_out:
+                status = "ERROR"
+                details = f"All {scoped_out} rows were outside the active FTE roster; no rows were used"
+            else:
+                notes = []
+                if rejected:
+                    notes.append(f"{rejected} rejected/flagged")
+                if scoped_out:
+                    notes.append(f"{scoped_out} outside roster excluded")
+                details = "Loaded successfully" + (f"; {', '.join(notes)} rows" if notes else "")
         else:
             file_name = modified = loaded = business_date = None
-            rows = rejected = 0
             status = "MISSING" if not expected.exists() else "EMPTY"
             details = "Path not found" if status == "MISSING" else "No matching files loaded"
-        conn.execute("INSERT INTO mart.source_health VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [family, str(expected), file_name, business_date, modified, loaded, rows, rejected, status, details])
+        conn.execute(
+            "INSERT INTO mart.source_health VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [family, str(expected), file_name, business_date, modified, loaded, rows, rejected, status, details, scoped_out],
+        )
 
 
 def refresh_models(
-    conn: duckdb.DuckDBPyConnection,
+    conn: DatabaseConnection,
     config: Config,
     run_id: str,
     start: date | None = None,
     end: date | None = None,
 ) -> ModelSummary:
-    start, end = resolve_period(conn, config, start, end)
-    schedules = _load_schedules(conn, start, end)
-    events = _load_events(conn, start, end)
-    events_by_agent = _events_by_agent(events)
-    lilo, loaded_dates, seen_ids = _load_lilo(conn, start, end)
-    statuses = _load_statuses(conn, start, end)
-    agents = _build_agents(conn)
-    attendance = _build_attendance(conn, config, schedules, events_by_agent, lilo, loaded_dates, seen_ids, agents)
-    conformance, exclusive = _build_conformance(conn, config, attendance, statuses)
-    corrections = _build_corrections(conn, config, attendance, conformance, exclusive)
-    rta = _build_rta(conn, config, schedules, events_by_agent, statuses, agents)
-    forecast, actual = _build_intraday(conn, start, end)
-    _build_source_health(conn, config)
-    quality = _build_quality(conn, config, run_id, start, end)
-    return ModelSummary(
-        start=start, end=end, attendance_rows=len(attendance), conformance_rows=len(conformance),
-        correction_rows=len(corrections), rta_rows=len(rta), forecast_rows=forecast,
-        intraday_rows=actual, quality_rows=quality,
-    )
+    conn.execute("SAVEPOINT refresh_models")
+    try:
+        start, end = resolve_period(conn, config, start, end)
+        schedules = _load_schedules(conn, start, end)
+        events = _load_events(conn, start, end)
+        events_by_agent = _events_by_agent(events)
+        lilo, loaded_dates, seen_ids = _load_lilo(conn, start, end)
+        statuses = _load_statuses(conn, start, end)
+        agents = _build_agents(conn)
+        attendance = _build_attendance(conn, config, schedules, events_by_agent, lilo, loaded_dates, seen_ids, agents)
+        conformance, exclusive = _build_conformance(conn, config, attendance, statuses)
+        corrections = _build_corrections(conn, config, attendance, conformance, exclusive)
+        rta = _build_rta(conn, config, schedules, events_by_agent, statuses, agents)
+        forecast, actual = _build_intraday(conn, start, end)
+        _build_source_health(conn, config)
+        quality = _build_quality(conn, config, run_id, start, end)
+        result = ModelSummary(
+            start=start, end=end, attendance_rows=len(attendance), conformance_rows=len(conformance),
+            correction_rows=len(corrections), rta_rows=len(rta), forecast_rows=forecast,
+            intraday_rows=actual, quality_rows=quality,
+        )
+        conn.execute("RELEASE SAVEPOINT refresh_models")
+        return result
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT refresh_models")
+        conn.execute("RELEASE SAVEPOINT refresh_models")
+        raise

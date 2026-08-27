@@ -4,13 +4,16 @@ timezone = "Europe/Berlin"
 [paths]
 # Relative paths are resolved from the WFMHub folder.
 source_root = "extracts"
-database = "database/wfm.duckdb"
+database = "database/wfm.sqlite3"
 output = "output"
 logs = "logs"
 backups = "backups"
 input = "input"
 
 [sources]
+# FTE Agent is the authoritative "our agents" roster. Schedule, LILO, and
+# Agent Status rows are admitted by exact Agent ID or one unique normalized
+# roster-name match. Source files are never changed.
 fte_file = "FTE/FTE Count.xlsx"
 lilo_folder = "Storm/LILO"
 agent_status_folder = "Storm/Agent Status"

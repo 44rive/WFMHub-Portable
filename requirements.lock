@@ -1,3 +1,3 @@
-duckdb==1.4.5
-openpyxl==3.1.5
-XlsxWriter==3.2.5
+openpyxl==3.1.5 --hash=sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2
+XlsxWriter==3.2.5 --hash=sha256:4f4824234e1eaf9d95df9a8fe974585ff91d0f5e3d3f12ace5b71e443c1c6abd
+et_xmlfile==2.0.0 --hash=sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa

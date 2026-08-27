@@ -1,134 +1,156 @@
 # Architecture
 
-## The stable extension seam
+## Stable extension seam
 
-Every feature follows the same four layers:
+Every feature follows the same layers:
 
 ```text
-source adapter  ->  raw table  ->  core model  ->  report mart / Excel sheet
+untouched source -> parser/scope gate -> raw table -> core model -> mart -> Excel
 ```
 
-Adding a forecast KPI, a new queue feed, or another attendance rule does not
-require rebuilding the whole hub. Add or extend one adapter, write a versioned
-migration, materialize the relevant mart and add its report columns. Existing
-extracts, decisions and database history remain intact.
+A new forecast KPI, queue feed, or attendance rule adds an adapter, a numbered
+migration, a focused model, tests, and curated report output. Existing extract
+files are never edited.
 
 ## Portable installation
 
 ```text
 WFMHub/
-├── WFMHub.cmd                 interactive daily menu
-├── SETUP.cmd                  first-run setup
-├── runtime/                   embedded CPython and vendored packages
-├── app/wfmhub/                application code
-├── app/sql/migrations/        versioned DuckDB schema
-├── config/default.toml        shipped defaults
-├── config/wfmhub.toml         user configuration; preserved on upgrade
-├── database/wfm.duckdb        durable local database; preserved on upgrade
-├── input/                     persistent human inputs
-├── output/                    finished reports
-├── logs/                      daily logs
-└── backups/                   recoverable database copies
+├── WFMHub.cmd                  daily menu
+├── SETUP.cmd                   system check and first setup
+├── runtime/                    official embedded CPython + pure-Python packages
+├── RUNTIME_MANIFEST.sha256     reviewed native-file hashes
+├── app/wfmhub/                 application code
+├── app/sql/migrations/         versioned SQL schema
+├── config/default.toml         shipped defaults
+├── config/wfmhub.toml          user configuration
+├── database/wfm.sqlite3        durable SQLite hub
+├── input/                      persistent human inputs
+├── output/                     finished reports
+├── logs/                       daily logs
+└── backups/                    SQLite online backups
 ```
 
-The release builder packages CPython 3.13 x64, DuckDB 1.4.5 LTS, all Python
-dependencies and the required Microsoft C++ runtime DLLs app-local beside
-Python. The work machine does not run `pip`, does not require an installed
-Python and does not need an administrator install. WFMHub is a single-writer
-application: only one refresh may write to the DuckDB file at a time. A lock
-file prevents accidental concurrent writes.
+The work computer runs no installer or `pip`. SQLite is Python's standard
+`sqlite3` module. Only pure-Python `openpyxl`, `XlsxWriter`, and `et_xmlfile`
+packages are added. The release builder rejects any unexpected `.dll`, `.pyd`,
+or `.exe` and any path containing DuckDB or `msvc_runtime`.
 
-## Schemas and grains
+SQLite uses WAL, `synchronous=FULL`, integrity checks, a 30-second busy timeout,
+and online backups. WFMHub must stay on a local writable disk, not a network or
+sync-managed folder. A process lock permits one writer; report-only readers are
+opened read-only.
 
-| Schema/table | Grain |
+Logical names such as `raw.lilo` are translated by the database facade into
+SQLite tables such as `raw_lilo`. Business code stays readable and backend
+details remain in one module.
+
+## Tables and grains
+
+| Logical table | Grain |
 |---|---|
-| `meta.source_file` | One immutable content fingerprint per discovered file version |
+| `meta.source_file` | One immutable file-content + roster-scope version |
 | `meta.refresh_run` | One refresh attempt |
-| `meta.quality_issue` | One current detected issue |
+| `meta.quality_issue` | One issue detected by the current model run |
 | `raw.fte_agent` | One FTE Agent-sheet row |
-| `raw.schedule_shift` | One Verint schedule row/interval |
-| `raw.schedule_event` | One parsed Verint event interval |
-| `raw.lilo` | One Storm LILO roster row |
-| `raw.agent_status` | One Storm status interval |
-| `raw.forecast_interval` | One forecast queue and interval |
-| `raw.queue_actual` | One Storm queue and 15-minute interval |
+| `raw.schedule_shift` | One admitted Verint schedule row |
+| `raw.schedule_event` | One parsed event interval belonging to an admitted shift |
+| `raw.lilo` | One admitted Storm LILO row |
+| `raw.agent_status` | One admitted status interval |
+| `raw.forecast_interval` | One queue/forecast interval; not agent-scoped |
+| `raw.queue_actual` | One queue/15-minute actual interval; not agent-scoped |
 | `core.dim_agent` | One operational Agent ID |
-| `core.correction_action` | One persistent human decision per Correction ID |
-| `mart.attendance_agent_day` | One scheduled Agent ID and day |
-| `mart.conformance_agent_day` | One worked-time result per scheduled Agent ID and day |
-| `mart.correction_candidate` | One stable, non-overlapping detected interval or day review |
-| `mart.rta_snapshot` | One scheduled agent at the newest status snapshot |
-| `mart.forecast_hour` | One Verint forecast queue/hour |
-| `mart.intraday_queue_interval` | One Storm actual queue/15-minute interval |
+| `core.correction_action` | One human decision per stable Correction ID |
+| `mart.attendance_agent_day` | One scheduled Agent ID/day |
+| `mart.conformance_agent_day` | One conformance result per scheduled Agent ID/day |
+| `mart.correction_candidate` | One non-overlapping candidate interval/day review |
+| `mart.rta_snapshot` | One scheduled agent at the newest admitted status timestamp |
+| `mart.forecast_hour` | One forecast queue/hour |
+| `mart.intraday_queue_interval` | One actual queue/15-minute interval |
+| `mart.source_health` | One configured source family |
 
-## File registry and incremental refresh
+## Agent scope and identity
 
-1. Discover configured files without modifying them.
-2. Calculate SHA-256, file size and modified time.
-3. If the same path and hash already loaded successfully, skip it.
-4. Parse and validate a changed/new file completely.
-5. In one transaction, deactivate the older version of that path, register the
-   new version, and append its raw rows.
-6. If parsing fails, record the failed version and leave the prior successful
-   version active.
-7. Rebuild the selected-period marts from active source versions.
+FTE is the authority for “our agents.” Before an agent-level row enters the
+active raw layer:
 
-Deleting an extract from its folder does not silently delete its already-loaded
-database rows. Replacing a file at the same path creates an audited new version.
-Overlapping schedule, forecast and queue snapshots choose the newest file at
-their business grain.
+1. Normalize the source Agent ID.
+2. Keep it when the ID exists in active FTE `Client ID` values.
+3. Otherwise normalize accents, case, punctuation, and whitespace in the name.
+4. Keep it only when that name maps to exactly one FTE Agent ID.
+5. Preserve a populated operational source ID. In particular, Verint `Data
+   Source IDs` remains the schedule Agent ID.
+6. Exclude everything else and count it as outside roster.
 
-## Identity
+A populated unmatched ID can therefore be admitted by a unique roster name,
+but an ambiguous or missing name cannot. This is a scope decision, not fuzzy
+matching.
 
-Verint `Data Source IDs` and Storm `Agent ID` are the operational Agent ID.
-Blank, dash and placeholder IDs are quarantined as quality issues. FTE enriches
-an Agent ID with organisation fields when its `Client ID` matches directly.
-Names are never used as a silent production join.
+The scope has a deterministic fingerprint. If FTE changes, the same untouched
+schedule/LILO/status file is reprocessed against the new roster. This prevents
+both stale worldwide rows and the “new agent missing from an unchanged file”
+problem. Forecast and APBE/APFR are queue data, so they bypass the agent gate.
 
-## Attendance gates
+## Incremental and atomic refresh
+
+1. Discover configured files read-only.
+2. Calculate SHA-256, size, modified time, and agent-scope fingerprint.
+3. Skip an already-active successful match.
+4. Parse a new version; stream large LILO CSVs in bounded batches.
+5. In one file transaction, append immutable raw rows, deactivate the previous
+   path version, and activate the new version.
+6. If parsing fails, roll back its raw rows and leave the previous good version
+   active. Retrying the same fingerprint is supported.
+7. Rebuild all selected-period models inside one savepoint. Any failure restores
+   every previous mart.
+
+A same-path A→B→A change reactivates A's immutable rows rather than duplicating
+them. Deleting a physical extract does not silently erase loaded history.
+
+## Attendance and correction gates
 
 The order is deliberate:
 
-1. Required LILO source date(s) loaded?
-2. Schedule parsed and Agent ID valid?
-3. Off, planned absence or non-phone plan?
-4. Agent ID ever present in LILO?
+1. Required LILO date(s) loaded?
+2. Schedule and Agent ID valid?
+3. Off, planned absence, or non-phone plan?
+4. Agent identity ever seen in admitted LILO?
 5. Daily LILO roster row present?
-6. Both boundaries blank, one boundary blank, or usable boundaries?
-7. Compare the usable first login/last logout with the scheduled interval.
+6. Both boundaries blank, one blank, or usable pair?
+7. Compare the usable first/last boundary with schedule.
 
-A no-show therefore means: the required file exists, the Agent ID row exists,
-both timestamps are blank, the assignment is work, and a planned absence does
-not cover it. A missing file, missing roster row, identity issue or incomplete
-punch is never promoted into a no-show.
+“No show” requires a loaded daily LILO file, the admitted agent row, both times
+blank, a Work assignment, and no covering planned absence. Missing file,
+missing roster row, identity mismatch, or incomplete LILO is never a no-show.
 
-Overnight shifts require every calendar-date LILO file touched by the shift.
-Candidate first/last boundaries use a four-hour window around the shift. Planned
-absence and planned adjustment intervals are physically subtracted from late and
-early corrections, so displayed correction endpoints equal their gap minutes.
+Overnight shifts require every touched LILO date. Planned absence/adjustment is
+physically subtracted from late and early intervals, so displayed endpoints and
+gap minutes agree.
 
-## Agent Status and conformance
+## Status, conformance, and RTA
 
-Status intervals are clipped to the scheduled shift. Overlapping minute-rounded
-transitions form one exclusive timeline: the newest state wins the overlap, so
-category totals cannot exceed covered time. Agent Status becomes the conformance
-basis only when the union covers the configured percentage of the shift (80% by
-default). Otherwise the hub uses the explicitly labelled LILO span or `None`.
+Status intervals are clipped to the scheduled shift. When overlaps exist, the
+newest state wins; category totals cannot exceed covered time. Agent Status is
+the conformance basis only above configured coverage (80% by default), else the
+explicitly labelled LILO span or `None` is used.
 
-Mid-shift Logged Off and Unavailable candidates are produced only with passing
-status coverage and only inside first-login to last-logout. Planned absence,
-adjustment, lunch and break intervals are subtracted before a candidate is kept.
+RTA uses the newest admitted status timestamp. If no status row passes agent
+scope, RTA is empty and source health is `ERROR`; current time is never used as
+a fake snapshot.
 
-## Forecast and intraday boundary
+## Forecast boundary
 
-Verint Forecast contributes only `For` and `Req` fields. Its exported `Act`
-fields are intentionally discarded. Storm APBE/APFR contributes actual queue
-performance. The two are shown separately until an approved queue/LOB scope
-mapping is configured; the hub never invents that mapping.
+Verint Forecast contributes only forecast/required values. Exported actual
+fields are discarded. APBE/APFR contributes actual performance. Both remain
+separate until a reviewed queue/LOB mapping is configured.
 
 ## Upgrades
 
-Release upgrades replace `runtime/`, `app/`, launchers and documentation. They
-preserve `config/`, `database/`, `input/`, `output/`, `logs/` and `backups/`.
-Schema changes are additive versioned SQL migrations. Create a database backup
-before applying a release with new migrations.
+v0.2 uses SQLite and does not convert or open v0.1 DuckDB data. Install v0.2 in
+a new folder, point it at the same untouched source root, and let it rebuild
+SQLite. Preserve the entire v0.1 folder. Saved Excel reports can re-import
+correction decisions.
+
+Within the SQLite generation, migrations are additive and never edited after
+release. Config upgrades create a timestamped TOML backup. Database upgrades
+use an online pre-migration backup and integrity checks.

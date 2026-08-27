@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.0 — 2026-08-27
+
+- Replaced the blocked DuckDB extension with Python's standard SQLite runtime.
+- Added WAL, full synchronous durability, application/storage markers,
+  integrity checks, read-only connections, process locking, and online backups.
+- Added atomic mart rebuilds and correction-action imports.
+- Added an FTE-authoritative agent scope gate using exact Agent ID or unique
+  normalized name, while preserving populated operational source IDs.
+- Added roster fingerprints so unchanged agent extracts are re-evaluated when
+  FTE changes; exposed kept and outside-roster counts in source health.
+- Prevented empty/out-of-scope Agent Status from creating synthetic RTA rows.
+- Fixed failed-file retry, same-path A→B→A reactivation, and custom report date
+  filtering.
+- Added a pre-setup system doctor and a deterministic corporate-runtime
+  manifest.
+- Removed DuckDB and app-local MSVC packages from the release. Only official
+  CPython native files and hash-pinned pure-Python Excel libraries are shipped.
+- Preserved v0.1 databases/config through side-by-side upgrade guidance; no
+  automatic DuckDB conversion is attempted.
+
 ## 0.1.1 — 2026-08-27
 
 - Windows launchers now require and invoke the bundled `runtime\python.exe`.

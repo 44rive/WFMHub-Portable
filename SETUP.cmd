@@ -5,6 +5,9 @@ set "WFMHUB_PYTHON=%WFMHUB_HOME%\runtime\python.exe"
 
 if not exist "%WFMHUB_PYTHON%" goto :missing_runtime
 
+"%WFMHUB_PYTHON%" -m wfmhub --home "%WFMHUB_HOME%" doctor
+if errorlevel 1 goto :doctor_failed
+
 "%WFMHUB_PYTHON%" -m wfmhub --home "%WFMHUB_HOME%" setup
 set "EXIT_CODE=%ERRORLEVEL%"
 pause
@@ -21,3 +24,12 @@ echo Do not use GitHub's Source code ZIP and do not copy SETUP.cmd by itself.
 echo.
 pause
 exit /b 9009
+
+:doctor_failed
+echo.
+echo SETUP STOPPED: the system check failed before creating the WFMHub database.
+echo Read the FAIL line above or send it to your WFM support contact.
+echo Your extracts and old database were not changed.
+echo.
+pause
+exit /b 1

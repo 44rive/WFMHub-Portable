@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import duckdb
 import xlsxwriter
 
 from .config import Config
+from .database import DatabaseConnection
 
 
 COLORS = {
@@ -25,7 +25,7 @@ COLORS = {
 }
 
 
-def _query(conn: duckdb.DuckDBPyConnection, sql: str, params: list[Any] | None = None) -> tuple[list[str], list[tuple[Any, ...]]]:
+def _query(conn: DatabaseConnection, sql: str, params: list[Any] | None = None) -> tuple[list[str], list[tuple[Any, ...]]]:
     cursor = conn.execute(sql, params or [])
     return [item[0] for item in cursor.description], cursor.fetchall()
 
@@ -134,29 +134,32 @@ class ExcelReport:
         self.workbook.close()
 
 
-def _summary_sheet(report: ExcelReport, conn: duckdb.DuckDBPyConnection, start: date, end: date) -> None:
+def _summary_sheet(report: ExcelReport, conn: DatabaseConnection, start: date, end: date) -> None:
     worksheet = report.workbook.add_worksheet("SUMMARY")
     worksheet.hide_gridlines(2)
     worksheet.merge_range("A1:F1", "WFMHub summary", report.title)
     worksheet.merge_range("A2:F2", f"Curated results for {start:%Y-%m-%d} through {end:%Y-%m-%d}. No raw extracts are stored in this workbook.", report.subtitle)
     metrics = [
-        ("Scheduled agent-days", "SELECT count(*) FROM mart.attendance_agent_day WHERE assignment_type <> 'Off'"),
-        ("Scheduled hours", "SELECT coalesce(sum(scheduled_minutes),0)/60.0 FROM mart.attendance_agent_day WHERE assignment_type <> 'Off'"),
-        ("Detected gap hours", "SELECT coalesce(sum(gap_minutes),0)/60.0 FROM mart.correction_candidate"),
-        ("Open corrections", "SELECT count(*) FROM mart.correction_candidate WHERE validation_status='Open'"),
-        ("No-shows", "SELECT count(*) FROM mart.attendance_agent_day WHERE attendance_result='No show'"),
-        ("Present", "SELECT count(*) FROM mart.attendance_agent_day WHERE attendance_result='Present'"),
-        ("RTA exceptions", "SELECT count(*) FROM mart.rta_snapshot WHERE rta_result='Out of adherence'"),
-        ("Quality errors", "SELECT count(*) FROM meta.quality_issue WHERE severity='ERROR'"),
+        ("Scheduled agent-days", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND assignment_type <> 'Off'", [start, end]),
+        ("Scheduled hours", "SELECT coalesce(sum(scheduled_minutes),0)/60.0 FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND assignment_type <> 'Off'", [start, end]),
+        ("Detected gap hours", "SELECT coalesce(sum(gap_minutes),0)/60.0 FROM mart.correction_candidate WHERE business_date BETWEEN ? AND ?", [start, end]),
+        ("Open corrections", "SELECT count(*) FROM mart.correction_candidate WHERE business_date BETWEEN ? AND ? AND validation_status='Open'", [start, end]),
+        ("No-shows", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND attendance_result='No show'", [start, end]),
+        ("Present", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND attendance_result='Present'", [start, end]),
+        ("RTA exceptions", "SELECT count(*) FROM mart.rta_snapshot WHERE snapshot_at >= ? AND snapshot_at < ? AND rta_result='Out of adherence'", [datetime.combine(start, datetime.min.time()), datetime.combine(end + timedelta(days=1), datetime.min.time())]),
+        ("Quality errors", "SELECT count(*) FROM meta.quality_issue WHERE severity='ERROR' AND business_date BETWEEN ? AND ?", [start, end]),
     ]
     worksheet.write("A4", "KPI", report.header)
     worksheet.write("B4", "Value", report.header)
-    for index, (label, sql) in enumerate(metrics, 4):
-        value = conn.execute(sql).fetchone()[0]
+    for index, (label, sql, params) in enumerate(metrics, 4):
+        value = conn.execute(sql, params).fetchone()[0]
         worksheet.write(index, 0, label, report.body)
         worksheet.write(index, 1, value, report.integer)
     issue_rows = conn.execute(
-        "SELECT attendance_result, count(*) FROM mart.attendance_agent_day GROUP BY 1 ORDER BY count(*) DESC"
+        """SELECT attendance_result, count(*) FROM mart.attendance_agent_day
+           WHERE business_date BETWEEN ? AND ?
+           GROUP BY 1 ORDER BY count(*) DESC""",
+        [start, end],
     ).fetchall()
     worksheet.write("D4", "Attendance result", report.header)
     worksheet.write("E4", "Rows", report.header)
@@ -197,6 +200,7 @@ def _start_sheet(report: ExcelReport, config: Config, start: date, end: date, ge
             f"Source root: {config.source_root}",
             f"Database: {config.database}",
             f"Tolerance: {config.rules.tolerance_minutes} minutes; status coverage gate: {config.rules.minimum_status_coverage:.0%}",
+            "Agent scope: FTE roster ID or one unique normalized-name match; operational source IDs are preserved.",
         ]),
     ]
     for row, heading, lines in sections:
@@ -208,16 +212,17 @@ def _start_sheet(report: ExcelReport, config: Config, start: date, end: date, ge
 
 
 def build_report(
-    conn: duckdb.DuckDBPyConnection,
+    conn: DatabaseConnection,
     config: Config,
     start: date,
     end: date,
     output: Path | None = None,
 ) -> Path:
     generated = datetime.now()
-    output = output or config.output / f"WFMHub_{start:%Y-%m-%d}_to_{end:%Y-%m-%d}_{generated:%H%M%S}.xlsx"
+    output = (output or config.output / f"WFMHub_{start:%Y-%m-%d}_to_{end:%Y-%m-%d}_{generated:%H%M%S_%f}.xlsx").resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    report = ExcelReport(output)
+    partial = output.with_name(f"{output.stem}.partial{output.suffix}")
+    report = ExcelReport(partial)
     try:
         _start_sheet(report, config, start, end, generated)
         _summary_sheet(report, conn, start, end)
@@ -231,9 +236,10 @@ def build_report(
                    c.status_coverage_percent, c.worked_minutes, c.conformance_percent,
                    a.schedule_source, a.lilo_source
             FROM mart.attendance_agent_day a LEFT JOIN mart.conformance_agent_day c USING(agent_day_key)
+            WHERE a.business_date BETWEEN ? AND ?
             ORDER BY a.business_date, CASE a.attendance_result WHEN 'No show' THEN 1 WHEN 'Data not loaded' THEN 2 ELSE 5 END, a.agent_name
             LIMIT ?
-        """, [config.report_limits.get("max_attendance_rows", 100000)])
+        """, [start, end, config.report_limits.get("max_attendance_rows", 100000)])
         report.add_table_sheet("ATTENDANCE", "Attendance detail", "One derived row per scheduled Agent ID and day. Raw extracts are not copied here.", headers, rows, exception_column="Attendance Result")
 
         headers, rows = _query(conn, """
@@ -242,10 +248,11 @@ def build_report(
                    gap_start, gap_end, gap_minutes, confidence, suggested_activity, source_file,
                    confirmed_activity, validation_status, owner, comment, injected_date
             FROM mart.correction_candidate
+            WHERE business_date BETWEEN ? AND ?
             ORDER BY CASE validation_status WHEN 'Open' THEN 1 WHEN 'Validated' THEN 2 ELSE 5 END,
                      business_date, priority, gap_minutes DESC
             LIMIT ?
-        """, [config.report_limits.get("max_gap_rows", 100000)])
+        """, [start, end, config.report_limits.get("max_gap_rows", 100000)])
         report.add_table_sheet(
             "GAPS", "Detected correction gaps",
             "Derived candidates. Edit only the blue decision columns, save, then import the workbook through WFMHub.cmd.",
@@ -254,7 +261,14 @@ def build_report(
             exception_column="Confidence",
         )
 
-        headers, rows = _query(conn, "SELECT * FROM mart.rta_snapshot ORDER BY CASE severity WHEN 'High' THEN 1 WHEN 'Review' THEN 2 ELSE 3 END, agent_name LIMIT ?", [config.report_limits.get("max_rta_rows", 10000)])
+        headers, rows = _query(
+            conn,
+            """SELECT * FROM mart.rta_snapshot
+               WHERE snapshot_at >= ? AND snapshot_at < ?
+               ORDER BY CASE severity WHEN 'High' THEN 1 WHEN 'Review' THEN 2 ELSE 3 END, agent_name
+               LIMIT ?""",
+            [datetime.combine(start, datetime.min.time()), datetime.combine(end + timedelta(days=1), datetime.min.time()), config.report_limits.get("max_rta_rows", 10000)],
+        )
         report.add_table_sheet("RTA", "RTA snapshot", "Historical/current snapshot based on the newest loaded Agent Status timestamp; check freshness before action.", headers, rows, exception_column="Severity")
 
         headers, rows = _query(conn, """
@@ -263,21 +277,36 @@ def build_report(
                    service_level_20s, aht_seconds, NULL volume_forecast, NULL fte_forecast,
                    NULL fte_required, NULL sl_forecast, NULL sl_required, source_file
             FROM mart.intraday_queue_interval
+            WHERE business_date BETWEEN ? AND ?
             UNION ALL
             SELECT 'Forecast', business_date, hour_start, queue_name, queue_name, NULL, NULL, NULL,
                    NULL, NULL, NULL, NULL, NULL, volume_forecast, fte_forecast, fte_required,
                    sl_forecast, sl_required, source_file
             FROM mart.forecast_hour
+            WHERE business_date BETWEEN ? AND ?
             ORDER BY business_date, interval_start, record_type
             LIMIT ?
-        """, [config.report_limits.get("max_intraday_rows", 100000)])
+        """, [start, end, start, end, config.report_limits.get("max_intraday_rows", 100000)])
         report.add_table_sheet("INTRADAY", "Intraday actuals and forecast", "Forecast and actuals remain separate until an approved queue/LOB scope mapping is configured.", headers, rows)
 
-        headers, rows = _query(conn, "SELECT detected_at, source_family, source_file, business_date, agent_id, issue_type, severity, details FROM meta.quality_issue ORDER BY CASE severity WHEN 'ERROR' THEN 1 ELSE 2 END, business_date, issue_type")
+        headers, rows = _query(
+            conn,
+            """SELECT detected_at, source_family, source_file, business_date, agent_id,
+                      issue_type, severity, details
+               FROM meta.quality_issue
+               WHERE business_date IS NULL OR business_date BETWEEN ? AND ?
+               ORDER BY CASE severity WHEN 'ERROR' THEN 1 ELSE 2 END, business_date, issue_type""",
+            [start, end],
+        )
         report.add_table_sheet("DATA_QUALITY", "Data quality", "Resolve ERROR rows before using attendance, correction or payroll results.", headers, rows, exception_column="Severity")
 
-        headers, rows = _query(conn, "SELECT source_family, expected_path, newest_file, newest_business_date, modified_at, loaded_at, row_count, rejected_count, status, details FROM mart.source_health ORDER BY source_family")
+        headers, rows = _query(conn, "SELECT source_family, expected_path, newest_file, newest_business_date, modified_at, loaded_at, row_count, rejected_count, scoped_out_count, status, details FROM mart.source_health ORDER BY source_family")
         report.add_table_sheet("SOURCE_HEALTH", "Source health", "What was found, loaded, rejected or missing for every configured feed.", headers, rows, exception_column="Status")
-    finally:
+    except Exception:
         report.close()
+        partial.unlink(missing_ok=True)
+        raise
+    else:
+        report.close()
+        partial.replace(output)
     return output

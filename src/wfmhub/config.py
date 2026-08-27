@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 import tomllib
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +72,23 @@ def ensure_user_config(home: Path) -> Path:
     config_dir.mkdir(parents=True, exist_ok=True)
     if not target.exists():
         shutil.copy2(source, target)
+    else:
+        # v0.1 used DuckDB. Preserve that database file and move the standard
+        # configuration to a new SQLite file without changing any source path
+        # or user-selected reporting period.
+        text = target.read_text(encoding="utf-8")
+        legacy = 'database = "database/wfm.duckdb"'
+        if legacy in text:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            backup = config_dir / f"wfmhub_pre_sqlite_{stamp}.toml"
+            shutil.copy2(target, backup)
+            target.write_text(
+                text.replace(legacy, 'database = "database/wfm.sqlite3"', 1),
+                encoding="utf-8",
+            )
+            print("WFMHub upgraded the standard database setting to database/wfm.sqlite3.")
+            print(f"Previous config backup: {backup}")
+            print(f"Old DuckDB remains untouched: {home / 'database' / 'wfm.duckdb'}")
     return target
 
 
@@ -92,7 +109,7 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         file=file,
         timezone=str(raw.get("app", {}).get("timezone", "Europe/Berlin")),
         source_root=_portable_path(home, str(paths.get("source_root", "extracts"))),
-        database=_portable_path(home, str(paths.get("database", "database/wfm.duckdb"))),
+        database=_portable_path(home, str(paths.get("database", "database/wfm.sqlite3"))),
         output=_portable_path(home, str(paths.get("output", "output"))),
         logs=_portable_path(home, str(paths.get("logs", "logs"))),
         backups=_portable_path(home, str(paths.get("backups", "backups"))),
@@ -114,6 +131,11 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         raise ConfigError("period.start cannot be after period.end")
     if not 0 <= cfg.rules.minimum_status_coverage <= 1:
         raise ConfigError("rules.minimum_status_coverage must be between 0 and 1")
+    if cfg.database.suffix.lower() == ".duckdb":
+        raise ConfigError(
+            "This corporate-compatible release uses SQLite. Change paths.database "
+            "in config\\wfmhub.toml to database/wfm.sqlite3; the old DuckDB file is preserved."
+        )
     for path in (cfg.database.parent, cfg.output, cfg.logs, cfg.backups, cfg.input):
         path.mkdir(parents=True, exist_ok=True)
     return cfg

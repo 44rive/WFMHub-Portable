@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wfmhub-portable"
-version = "0.1.1"
-description = "Portable DuckDB WFM data hub and Excel report generator"
+version = "0.2.0"
+description = "Corporate-compatible portable SQLite WFM data hub and Excel report generator"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 license = {text = "Proprietary"}
 authors = [{name = "44rive"}]
 dependencies = [
-  "duckdb==1.4.5",
   "openpyxl==3.1.5",
   "XlsxWriter==3.2.5",
+  "et_xmlfile==2.0.0",
 ]
 
 [project.scripts]

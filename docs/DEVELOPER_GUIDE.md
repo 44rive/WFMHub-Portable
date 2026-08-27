@@ -4,55 +4,78 @@
 
 ```bash
 python -m pip install -e .
+python -m wfmhub --home . doctor
 python -m unittest discover -s tests -v
 python -m compileall -q src tests packaging
 ```
 
-Run an end-to-end refresh against a source root:
-
-```bash
-python -m wfmhub --home . setup --source-root /path/to/source/root --non-interactive
-python -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31
-```
-
-Local config, extracts, DuckDB, reports, logs and portable build products are
-gitignored.
+Use an isolated `--home` for real-source acceptance so local user configuration
+and the preserved v0.1 database are not modified.
 
 ## Add a source or feature
 
-1. Add its default path and module flag in `config/default.toml`.
-2. Add a source parser and strict schema contract in `ingestion.py`.
-3. Add raw/core/mart tables through a new numbered migration. Never edit an
-   already-released migration.
-4. Materialize the model in `models.py`; carry file lineage and enforce the
-   correct grain.
-5. Add only curated report output in `reports.py`.
-6. Add synthetic tests for schema drift, dedupe and the business rule.
-7. Update both architecture and beginner documentation.
+1. Add its default source path/module flag when needed.
+2. Add a strict parser in `ingestion.py`.
+3. Decide whether the feed is agent-scoped or queue-scoped.
+4. Add raw/core/mart tables through a new numbered migration. Never edit a
+   released migration.
+5. Carry immutable file lineage and define the exact business grain.
+6. Materialize only the relevant model in `models.py`.
+7. Add curated output in `reports.py`; never export raw source rows.
+8. Test schema drift, scope, idempotency, rollback, period filtering, and the
+   business rule.
+9. Update architecture and beginner documentation.
 
-Forecast fields must stay forecast-only. Do not join forecast into employee
-attendance or correction models.
+Forecast fields must remain forecast-only. Do not join forecast into employee
+attendance, absence, correction, or payroll models.
 
-## Build Windows portable ZIP
+## SQLite rules
 
-The builder needs internet and a build-machine Python with `pip`. The output
-does not need Python or internet:
+- Use logical `meta.`, `raw.`, `core.`, and `mart.` names through
+  `DatabaseConnection`; the facade maps them to SQLite prefixes.
+- Use `?` parameters and standard SQL supported by the shipped SQLite.
+- Keep source-file changes transactional and model refreshes inside one
+  savepoint.
+- Use the online backup API; never copy a live WAL database with `shutil`.
+- Preserve leading-zero Agent IDs as text.
+- Size multi-value inserts from SQLite's runtime host-variable limit.
+- Add indexes only for measured query paths; marts are rebuilt.
+
+## Windows portable build
 
 ```bash
-python packaging/windows/build_portable.py --clean
+python packaging/windows/build_portable.py --version 0.2.0 --python-version 3.13.7
 ```
 
-It downloads the official CPython embeddable ZIP, downloads Windows wheels,
-extracts them into `runtime/site-packages`, copies the application and produces
-`dist/WFMHub-Portable-v<version>-win-x64.zip` plus its SHA-256 file.
+The builder always deletes and recreates stage and wheelhouse. It:
 
-## Build the DuckDB CLI policy probe
+- verifies the reviewed official CPython embeddable SHA-256;
+- downloads all explicit dependencies with `--require-hashes --no-deps`;
+- accepts only `none-any` pure-Python wheels;
+- rejects native content in wheels;
+- verifies that the final native inventory exactly equals the CPython ZIP;
+- rejects DuckDB/MSVC-runtime paths and user config/database files;
+- writes `RUNTIME_MANIFEST.sha256`, the ZIP, and the ZIP SHA-256.
 
-```bash
-python packaging/windows/build_cli_probe.py
-```
+An unknown Python version intentionally fails until its official archive hash
+is reviewed and registered. Do not upgrade the runtime casually on a machine
+with strict Application Control.
 
-The builder pins the official DuckDB Windows CLI asset and SHA-256, verifies
-that `duckdb.exe` contains a PE Authenticode certificate table, and packages
-only the signed executable, the test launcher and its readme. The probe does
-not include WFMHub, extracts, configuration or databases.
+## Acceptance gates
+
+At minimum, verify:
+
+- unit/end-to-end suite passes;
+- all discovered real files load or produce an understood source error;
+- source hashes/size/mtime are unchanged;
+- `PRAGMA quick_check` and `foreign_key_check` pass;
+- one active version exists per source path;
+- agent-day, forecast-hour, and actual-interval grains are unique;
+- every no-show passes the full source/roster/boundary gate;
+- correction minutes equal displayed interval endpoints;
+- failed model/action operations restore prior state;
+- unchanged refresh creates no raw/source-registry growth;
+- ZIP checksum and native inventory match the builder result.
+
+The historical DuckDB CLI probe remains in the repository only as evidence of
+the rejected compatibility path. It is not part of v0.2.0 or its runtime.
