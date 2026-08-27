@@ -1,0 +1,44 @@
+[app]
+timezone = "Europe/Berlin"
+
+[paths]
+# Relative paths are resolved from the WFMHub folder.
+source_root = "extracts"
+database = "database/wfm.duckdb"
+output = "output"
+logs = "logs"
+backups = "backups"
+input = "input"
+
+[sources]
+fte_file = "FTE/FTE Count.xlsx"
+lilo_folder = "Storm/LILO"
+agent_status_folder = "Storm/Agent Status"
+schedule_folder = "Verint/Schedules & Activities"
+forecast_folder = "Verint/Forecast"
+apbe_folder = "Storm/APBE ALL WFM"
+apfr_folder = "Storm/APFR KPI SUIVI JOUR"
+
+[period]
+# Leave blank to use every date currently available in the database.
+start = ""
+end = ""
+
+[rules]
+tolerance_minutes = 5
+break_minutes = 30
+lunch_minutes = 45
+minimum_status_coverage = 0.80
+rta_stale_minutes = 30
+
+[modules]
+attendance = true
+agent_status = true
+intraday = true
+forecast = true
+
+[report]
+max_attendance_rows = 100000
+max_gap_rows = 100000
+max_rta_rows = 10000
+max_intraday_rows = 100000

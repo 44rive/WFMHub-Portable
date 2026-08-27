@@ -1,0 +1,283 @@
+"""Create a restrained, curated Excel workbook; never export raw source rows."""
+
+from __future__ import annotations
+
+from collections import Counter
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+import duckdb
+import xlsxwriter
+
+from .config import Config
+
+
+COLORS = {
+    "dark": "#1F2933",
+    "muted": "#7B8794",
+    "teal": "#0F3B42",
+    "rule": "#9AA5B1",
+    "thin": "#D5DADD",
+    "blue": "#0563C1",
+    "red": "#C00000",
+    "white": "#FFFFFF",
+}
+
+
+def _query(conn: duckdb.DuckDBPyConnection, sql: str, params: list[Any] | None = None) -> tuple[list[str], list[tuple[Any, ...]]]:
+    cursor = conn.execute(sql, params or [])
+    return [item[0] for item in cursor.description], cursor.fetchall()
+
+
+def _display_header(name: str) -> str:
+    custom = {
+        "agent_id": "Agent ID", "agent_name": "Agent", "business_date": "Date",
+        "lob": "LOB", "rta_result": "RTA Result", "status_coverage_percent": "Status Coverage %",
+        "conformance_percent": "Conformance %", "attendance_percent": "Attendance %",
+        "sl_forecast": "SL Forecast", "sl_required": "SL Required",
+        "aht_seconds": "AHT Seconds", "aht_forecast_seconds": "AHT Forecast Seconds",
+        "asa_seconds": "ASA Seconds", "fte_forecast": "FTE Forecast", "fte_required": "FTE Required",
+    }
+    return custom.get(name, name.replace("_", " ").title().replace("Id", "ID"))
+
+
+class ExcelReport:
+    def __init__(self, path: Path):
+        self.path = path
+        # Tables are intentional: filters and decision columns must expand and
+        # remain easy to use. XlsxWriter's constant-memory mode cannot create
+        # real Excel Tables, so report row limits are enforced in configuration.
+        self.workbook = xlsxwriter.Workbook(path)
+        self.workbook.set_properties({
+            "title": "WFMHub Portable Report",
+            "subject": "Attendance, gaps, RTA, intraday and source health",
+            "author": "WFMHub Portable",
+            "company": "WFM",
+        })
+        self.title = self.workbook.add_format({"font_name": "Calibri", "font_size": 15, "bold": True, "font_color": COLORS["dark"]})
+        self.subtitle = self.workbook.add_format({"font_name": "Calibri", "font_size": 9, "font_color": COLORS["muted"]})
+        self.section = self.workbook.add_format({"font_name": "Calibri", "font_size": 11, "bold": True, "font_color": COLORS["teal"]})
+        self.body = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.header = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "bold": True, "font_color": COLORS["dark"], "text_wrap": True, "top": 2, "bottom": 2, "top_color": COLORS["rule"], "bottom_color": COLORS["rule"], "bg_color": COLORS["white"]})
+        self.editable = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["blue"], "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.editable_date = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["blue"], "num_format": "yyyy-mm-dd", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.error = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["red"]})
+        self.integer = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "#,##0", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.percent = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "0.0%", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.date = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "yyyy-mm-dd", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.datetime = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "yyyy-mm-dd hh:mm", "bottom": 1, "bottom_color": COLORS["thin"]})
+
+    def add_table_sheet(
+        self,
+        name: str,
+        title: str,
+        subtitle: str,
+        headers: list[str],
+        rows: list[tuple[Any, ...]],
+        editable_headers: set[str] | None = None,
+        exception_column: str | None = None,
+    ) -> None:
+        editable_headers = editable_headers or set()
+        worksheet = self.workbook.add_worksheet(name)
+        worksheet.hide_gridlines(2)
+        worksheet.freeze_panes(4, 0)
+        last_col = max(0, len(headers) - 1)
+        worksheet.merge_range(0, 0, 0, last_col, title, self.title)
+        worksheet.merge_range(1, 0, 1, last_col, subtitle, self.subtitle)
+        worksheet.set_row(0, 23)
+        worksheet.set_row(1, 17)
+        worksheet.set_row(3, 30)
+        display = [_display_header(header) for header in headers]
+        for column, header in enumerate(display):
+            worksheet.write(3, column, header, self.header)
+        for row_index, values in enumerate(rows, 4):
+            worksheet.set_row(row_index, 20)
+            for column, value in enumerate(values):
+                header = display[column]
+                fmt = self.editable_date if header == "Injected Date" and header in editable_headers else self.editable if header in editable_headers else self.body
+                if isinstance(value, datetime):
+                    fmt = self.datetime
+                elif isinstance(value, date):
+                    fmt = self.date
+                elif header.endswith(" %") or header in {"Attendance %", "Conformance %", "Status Coverage %", "SL Forecast", "SL Required", "Service Level 20S", "Abandon Rate"}:
+                    fmt = self.percent
+                elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                    fmt = self.integer
+                worksheet.write(row_index, column, value, fmt)
+        if rows:
+            columns = [{"header": header, "header_format": self.header} for header in display]
+            worksheet.add_table(3, 0, 3 + len(rows), last_col, {
+                "name": "tbl" + "".join(char for char in name.title() if char.isalnum()),
+                "style": "Table Style Light 1",
+                "columns": columns,
+            })
+        else:
+            worksheet.autofilter(3, 0, 3, last_col)
+            worksheet.write(4, 0, "No rows for this period.", self.subtitle)
+        for column, header in enumerate(display):
+            width = 16
+            if any(token in header for token in ("Comment", "Details", "Source", "Path", "Assignment")):
+                width = 32
+            elif any(token in header for token in ("Agent", "Activity", "Result", "Issue", "Status")):
+                width = 22
+            elif any(token in header for token in ("Start", "End", "At", "Modified", "Loaded")):
+                width = 19
+            worksheet.set_column(column, column, width)
+        if exception_column and exception_column in display and rows:
+            col = display.index(exception_column)
+            worksheet.conditional_format(4, col, 3 + len(rows), col, {
+                "type": "text", "criteria": "containing", "value": "ERROR", "format": self.error,
+            })
+
+    def close(self) -> None:
+        self.workbook.close()
+
+
+def _summary_sheet(report: ExcelReport, conn: duckdb.DuckDBPyConnection, start: date, end: date) -> None:
+    worksheet = report.workbook.add_worksheet("SUMMARY")
+    worksheet.hide_gridlines(2)
+    worksheet.merge_range("A1:F1", "WFMHub summary", report.title)
+    worksheet.merge_range("A2:F2", f"Curated results for {start:%Y-%m-%d} through {end:%Y-%m-%d}. No raw extracts are stored in this workbook.", report.subtitle)
+    metrics = [
+        ("Scheduled agent-days", "SELECT count(*) FROM mart.attendance_agent_day WHERE assignment_type <> 'Off'"),
+        ("Scheduled hours", "SELECT coalesce(sum(scheduled_minutes),0)/60.0 FROM mart.attendance_agent_day WHERE assignment_type <> 'Off'"),
+        ("Detected gap hours", "SELECT coalesce(sum(gap_minutes),0)/60.0 FROM mart.correction_candidate"),
+        ("Open corrections", "SELECT count(*) FROM mart.correction_candidate WHERE validation_status='Open'"),
+        ("No-shows", "SELECT count(*) FROM mart.attendance_agent_day WHERE attendance_result='No show'"),
+        ("Present", "SELECT count(*) FROM mart.attendance_agent_day WHERE attendance_result='Present'"),
+        ("RTA exceptions", "SELECT count(*) FROM mart.rta_snapshot WHERE rta_result='Out of adherence'"),
+        ("Quality errors", "SELECT count(*) FROM meta.quality_issue WHERE severity='ERROR'"),
+    ]
+    worksheet.write("A4", "KPI", report.header)
+    worksheet.write("B4", "Value", report.header)
+    for index, (label, sql) in enumerate(metrics, 4):
+        value = conn.execute(sql).fetchone()[0]
+        worksheet.write(index, 0, label, report.body)
+        worksheet.write(index, 1, value, report.integer)
+    issue_rows = conn.execute(
+        "SELECT attendance_result, count(*) FROM mart.attendance_agent_day GROUP BY 1 ORDER BY count(*) DESC"
+    ).fetchall()
+    worksheet.write("D4", "Attendance result", report.header)
+    worksheet.write("E4", "Rows", report.header)
+    for index, (label, count) in enumerate(issue_rows, 4):
+        worksheet.write(index, 3, label, report.body)
+        worksheet.write(index, 4, count, report.integer)
+    worksheet.set_column("A:A", 28)
+    worksheet.set_column("B:B", 16)
+    worksheet.set_column("C:C", 4)
+    worksheet.set_column("D:D", 28)
+    worksheet.set_column("E:E", 14)
+    worksheet.freeze_panes(4, 0)
+
+
+def _start_sheet(report: ExcelReport, config: Config, start: date, end: date, generated: datetime) -> None:
+    ws = report.workbook.add_worksheet("START_HERE")
+    ws.hide_gridlines(2)
+    ws.merge_range("A1:H1", "WFMHub Portable", report.title)
+    ws.merge_range("A2:H2", f"Generated {generated:%Y-%m-%d %H:%M}; period {start:%Y-%m-%d} to {end:%Y-%m-%d}", report.subtitle)
+    sections = [
+        (4, "Daily routine", [
+            "1. Put untouched exports in their normal source folders.",
+            "2. Run WFMHub.cmd and choose Refresh + build report.",
+            "3. Open SOURCE_HEALTH first. If it is red or ERROR, stop.",
+            "4. Review ATTENDANCE, GAPS, RTA and INTRADAY.",
+        ]),
+        (11, "Monthly gaps", [
+            "Run a custom period from the first through last day of the month.",
+            "Missing source date is not a no-show. Missing roster row is not a no-show.",
+            "A no-show requires a loaded LILO file, the agent row, and both times blank.",
+        ]),
+        (17, "Correction decisions", [
+            "Blue columns on GAPS may be edited: activity, status, owner, comment and injected date.",
+            "Save the report, then choose Import correction decisions in WFMHub.cmd.",
+            "Only Validated or Injected decisions should be used operationally.",
+        ]),
+        (23, "Configuration", [
+            f"Source root: {config.source_root}",
+            f"Database: {config.database}",
+            f"Tolerance: {config.rules.tolerance_minutes} minutes; status coverage gate: {config.rules.minimum_status_coverage:.0%}",
+        ]),
+    ]
+    for row, heading, lines in sections:
+        ws.write(row - 1, 0, heading, report.section)
+        for offset, line in enumerate(lines, 1):
+            ws.write(row - 1 + offset, 0, line, report.body)
+    ws.set_column("A:A", 100)
+    ws.set_column("B:H", 3)
+
+
+def build_report(
+    conn: duckdb.DuckDBPyConnection,
+    config: Config,
+    start: date,
+    end: date,
+    output: Path | None = None,
+) -> Path:
+    generated = datetime.now()
+    output = output or config.output / f"WFMHub_{start:%Y-%m-%d}_to_{end:%Y-%m-%d}_{generated:%H%M%S}.xlsx"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    report = ExcelReport(output)
+    try:
+        _start_sheet(report, config, start, end, generated)
+        _summary_sheet(report, conn, start, end)
+
+        headers, rows = _query(conn, """
+            SELECT a.business_date, a.agent_id, a.agent_name, a.team_leader, a.ops_manager, a.lob,
+                   a.scheduled_start, a.scheduled_end, a.scheduled_minutes, a.assignment_type,
+                   a.first_login, a.last_logout, a.raw_late_minutes, a.raw_early_leave_minutes,
+                   a.uncoded_late_minutes, a.uncoded_early_leave_minutes, a.no_show_minutes,
+                   a.attendance_result, a.attendance_percent, c.measurement_basis,
+                   c.status_coverage_percent, c.worked_minutes, c.conformance_percent,
+                   a.schedule_source, a.lilo_source
+            FROM mart.attendance_agent_day a LEFT JOIN mart.conformance_agent_day c USING(agent_day_key)
+            ORDER BY a.business_date, CASE a.attendance_result WHEN 'No show' THEN 1 WHEN 'Data not loaded' THEN 2 ELSE 5 END, a.agent_name
+            LIMIT ?
+        """, [config.report_limits.get("max_attendance_rows", 100000)])
+        report.add_table_sheet("ATTENDANCE", "Attendance detail", "One derived row per scheduled Agent ID and day. Raw extracts are not copied here.", headers, rows, exception_column="Attendance Result")
+
+        headers, rows = _query(conn, """
+            SELECT correction_id, business_date, agent_id, agent_name, team_leader, ops_manager, lob,
+                   scheduled_start, scheduled_end, first_login, last_logout, priority, detected_issue,
+                   gap_start, gap_end, gap_minutes, confidence, suggested_activity, source_file,
+                   confirmed_activity, validation_status, owner, comment, injected_date
+            FROM mart.correction_candidate
+            ORDER BY CASE validation_status WHEN 'Open' THEN 1 WHEN 'Validated' THEN 2 ELSE 5 END,
+                     business_date, priority, gap_minutes DESC
+            LIMIT ?
+        """, [config.report_limits.get("max_gap_rows", 100000)])
+        report.add_table_sheet(
+            "GAPS", "Detected correction gaps",
+            "Derived candidates. Edit only the blue decision columns, save, then import the workbook through WFMHub.cmd.",
+            headers, rows,
+            editable_headers={"Confirmed Activity", "Validation Status", "Owner", "Comment", "Injected Date"},
+            exception_column="Confidence",
+        )
+
+        headers, rows = _query(conn, "SELECT * FROM mart.rta_snapshot ORDER BY CASE severity WHEN 'High' THEN 1 WHEN 'Review' THEN 2 ELSE 3 END, agent_name LIMIT ?", [config.report_limits.get("max_rta_rows", 10000)])
+        report.add_table_sheet("RTA", "RTA snapshot", "Historical/current snapshot based on the newest loaded Agent Status timestamp; check freshness before action.", headers, rows, exception_column="Severity")
+
+        headers, rows = _query(conn, """
+            SELECT 'Actual' record_type, business_date, interval_start, source_system source_or_queue,
+                   queue, business_partner, lob, language, offered, answered, abandoned,
+                   service_level_20s, aht_seconds, NULL volume_forecast, NULL fte_forecast,
+                   NULL fte_required, NULL sl_forecast, NULL sl_required, source_file
+            FROM mart.intraday_queue_interval
+            UNION ALL
+            SELECT 'Forecast', business_date, hour_start, queue_name, queue_name, NULL, NULL, NULL,
+                   NULL, NULL, NULL, NULL, NULL, volume_forecast, fte_forecast, fte_required,
+                   sl_forecast, sl_required, source_file
+            FROM mart.forecast_hour
+            ORDER BY business_date, interval_start, record_type
+            LIMIT ?
+        """, [config.report_limits.get("max_intraday_rows", 100000)])
+        report.add_table_sheet("INTRADAY", "Intraday actuals and forecast", "Forecast and actuals remain separate until an approved queue/LOB scope mapping is configured.", headers, rows)
+
+        headers, rows = _query(conn, "SELECT detected_at, source_family, source_file, business_date, agent_id, issue_type, severity, details FROM meta.quality_issue ORDER BY CASE severity WHEN 'ERROR' THEN 1 ELSE 2 END, business_date, issue_type")
+        report.add_table_sheet("DATA_QUALITY", "Data quality", "Resolve ERROR rows before using attendance, correction or payroll results.", headers, rows, exception_column="Severity")
+
+        headers, rows = _query(conn, "SELECT source_family, expected_path, newest_file, newest_business_date, modified_at, loaded_at, row_count, rejected_count, status, details FROM mart.source_health ORDER BY source_family")
+        report.add_table_sheet("SOURCE_HEALTH", "Source health", "What was found, loaded, rejected or missing for every configured feed.", headers, rows, exception_column="Status")
+    finally:
+        report.close()
+    return output

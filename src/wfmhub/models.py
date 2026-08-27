@@ -1,0 +1,818 @@
+"""Materialize clean DuckDB dimensions and WFM report marts."""
+
+from __future__ import annotations
+
+import hashlib
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
+from typing import Any, Iterable
+
+import duckdb
+
+from .config import Config
+from .utils import clip_intervals, interval_minutes, merge_intervals, subtract_intervals
+
+
+@dataclass
+class ModelSummary:
+    start: date
+    end: date
+    attendance_rows: int = 0
+    conformance_rows: int = 0
+    correction_rows: int = 0
+    rta_rows: int = 0
+    forecast_rows: int = 0
+    intraday_rows: int = 0
+    quality_rows: int = 0
+
+
+def _dicts(cursor: duckdb.DuckDBPyConnection) -> list[dict[str, Any]]:
+    columns = [item[0] for item in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def resolve_period(
+    conn: duckdb.DuckDBPyConnection,
+    config: Config,
+    start: date | None,
+    end: date | None,
+) -> tuple[date, date]:
+    start = start or config.period_start
+    end = end or config.period_end
+    if start and end:
+        if start > end:
+            raise ValueError("Start date cannot be after end date")
+        return start, end
+    row = conn.execute(
+        """
+        SELECT min(d), max(d) FROM (
+            SELECT min(schedule_date) AS d FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(schedule_date) FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(business_date) FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(business_date) FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+        ) x WHERE d IS NOT NULL
+        """
+    ).fetchone()
+    auto_start, auto_end = row if row else (None, None)
+    start = start or auto_start
+    end = end or auto_end
+    if not start or not end:
+        raise RuntimeError("No business dates were found. Load extracts first or supply --start and --end.")
+    return start, end
+
+
+def _load_schedules(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> list[dict[str, Any]]:
+    return _dicts(conn.execute(
+        """
+        WITH source_choice AS (
+            SELECT r.*,
+                   f.file_name AS source_file,
+                   f.modified_at,
+                   dense_rank() OVER (
+                       PARTITION BY r.schedule_date, coalesce(r.agent_id, 'NAME|' || upper(coalesce(r.agent_name,'')))
+                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC
+                   ) AS source_rank
+            FROM raw.schedule_shift r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+            WHERE r.schedule_date BETWEEN ? AND ?
+        ), dedup AS (
+            SELECT *, row_number() OVER (
+                PARTITION BY schedule_date, coalesce(agent_id, 'NAME|' || upper(coalesce(agent_name,''))),
+                             scheduled_start, scheduled_end, coalesce(assignment,'')
+                ORDER BY source_row DESC
+            ) AS row_rank
+            FROM source_choice WHERE source_rank=1
+        )
+        SELECT * EXCLUDE(source_rank, row_rank, modified_at)
+        FROM dedup WHERE row_rank=1
+        ORDER BY schedule_date, agent_id, scheduled_start
+        """,
+        [start, end],
+    ))
+
+
+def _load_events(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> list[dict[str, Any]]:
+    return _dicts(conn.execute(
+        """
+        SELECT * EXCLUDE(row_rank, modified_at) FROM (
+            SELECT r.*, f.file_name AS source_file, f.modified_at,
+                   row_number() OVER (
+                       PARTITION BY r.agent_id, upper(coalesce(r.activity,'')), r.event_start, r.event_end
+                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.schedule_event r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+            WHERE r.parse_ok AND r.event_end >= ?::DATE - INTERVAL 1 DAY
+              AND r.event_start < ?::DATE + INTERVAL 2 DAY
+        ) x WHERE row_rank=1
+        """,
+        [start, end],
+    ))
+
+
+def _load_lilo(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> tuple[dict[tuple[date, str], list[dict[str, Any]]], set[date], set[str]]:
+    rows = _dicts(conn.execute(
+        """
+        SELECT r.*, f.file_name AS source_file
+        FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+        WHERE r.extract_date BETWEEN ?::DATE - INTERVAL 1 DAY AND ?::DATE + INTERVAL 1 DAY
+        """,
+        [start, end],
+    ))
+    grouped: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
+    loaded_dates: set[date] = set()
+    seen: set[str] = set()
+    for row in rows:
+        loaded_dates.add(row["extract_date"])
+        if row["agent_id"]:
+            grouped[(row["extract_date"], row["agent_id"])].append(row)
+            seen.add(row["agent_id"])
+    return grouped, loaded_dates, seen
+
+
+def _load_statuses(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> dict[str, list[dict[str, Any]]]:
+    rows = _dicts(conn.execute(
+        """
+        SELECT * EXCLUDE(row_rank, modified_at) FROM (
+            SELECT r.*, f.file_name AS source_file, f.modified_at,
+                   row_number() OVER (
+                       PARTITION BY r.serial_number
+                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.agent_status r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+            WHERE r.status_start < ?::DATE + INTERVAL 2 DAY
+              AND r.status_end >= ?::DATE - INTERVAL 1 DAY
+        ) x WHERE row_rank=1 AND agent_id IS NOT NULL AND status_end > status_start
+        ORDER BY agent_id, status_start
+        """,
+        [end, start],
+    ))
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[row["agent_id"]].append(row)
+    return grouped
+
+
+def _build_agents(conn: duckdb.DuckDBPyConnection) -> dict[str, dict[str, Any]]:
+    conn.execute("DELETE FROM core.dim_agent")
+    conn.execute(
+        """
+        INSERT INTO core.dim_agent
+        WITH roster AS (
+            SELECT agent_id, arg_max(agent_name, f.modified_at) AS agent_name
+            FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            WHERE agent_id IS NOT NULL GROUP BY agent_id
+        ), actual_names AS (
+            SELECT agent_id, arg_max(agent_name, f.modified_at) AS agent_name
+            FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            WHERE agent_id IS NOT NULL GROUP BY agent_id
+        ), ids AS (
+            SELECT agent_id FROM roster UNION SELECT agent_id FROM actual_names
+            UNION SELECT agent_id FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
+            UNION SELECT agent_id FROM raw.fte_agent r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
+        ), fte AS (
+            SELECT * EXCLUDE(row_rank) FROM (
+                SELECT r.*, row_number() OVER (
+                    PARTITION BY agent_id
+                    ORDER BY CASE WHEN upper(coalesce(employment_status,''))='ACTIVE' THEN 0 ELSE 1 END,
+                             end_date DESC NULLS LAST, f.modified_at DESC NULLS LAST, source_row DESC
+                ) row_rank
+                FROM raw.fte_agent r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+                WHERE agent_id IS NOT NULL
+            ) x WHERE row_rank=1
+        )
+        SELECT ids.agent_id,
+               coalesce(fte.agent_name, roster.agent_name, actual_names.agent_name) AS canonical_name,
+               fte.employment_status, fte.team_leader, fte.ops_manager, fte.lob, fte.market,
+               fte.language, fte.location, fte.city, fte.fte,
+               CASE WHEN fte.agent_id IS NOT NULL THEN 'Agent ID' ELSE 'Unmatched to FTE' END AS match_method
+        FROM ids LEFT JOIN roster USING(agent_id) LEFT JOIN actual_names USING(agent_id) LEFT JOIN fte USING(agent_id)
+        """
+    )
+    return {row["agent_id"]: row for row in _dicts(conn.execute("SELECT * FROM core.dim_agent"))}
+
+
+def _events_by_agent(events: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for event in events:
+        if event["agent_id"]:
+            grouped[event["agent_id"]].append(event)
+    return grouped
+
+
+def _shift_events(shift: dict[str, Any], events_by_agent: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    if not shift["scheduled_start"] or not shift["scheduled_end"] or not shift["agent_id"]:
+        return []
+    return [
+        event for event in events_by_agent.get(shift["agent_id"], [])
+        if event["event_start"] < shift["scheduled_end"] and event["event_end"] > shift["scheduled_start"]
+    ]
+
+
+def _planned_intervals(events: list[dict[str, Any]], categories: set[str]) -> list[tuple[datetime, datetime]]:
+    return merge_intervals(
+        (event["event_start"], event["event_end"])
+        for event in events if event["activity_type"] in categories
+    )
+
+
+def _lilo_boundaries(
+    shift: dict[str, Any],
+    lilo: dict[tuple[date, str], list[dict[str, Any]]],
+    loaded_dates: set[date],
+) -> tuple[datetime | None, datetime | None, bool, bool, str | None]:
+    agent_id = shift["agent_id"]
+    start = shift["scheduled_start"]
+    end = shift["scheduled_end"]
+    if start and end:
+        required = {start.date() + timedelta(days=n) for n in range((end.date() - start.date()).days + 1)}
+    else:
+        required = {shift["schedule_date"]}
+    rows = [row for day in sorted(required) for row in lilo.get((day, agent_id), [])]
+    source_loaded = required <= loaded_dates
+    row_present = bool(rows)
+    files = "; ".join(sorted({row["source_file"] for row in rows})) or None
+    first_candidates = sorted({row["first_login"] for row in rows if row["first_login"]})
+    last_candidates = sorted({value for row in rows for value in (row["raw_last_logout"], row["last_logout"]) if value})
+    if not start or not end:
+        first = min(first_candidates) if first_candidates else None
+        last = max(last_candidates) if last_candidates else None
+        return first, last, source_loaded, row_present, files
+    first_match = [value for value in first_candidates if start - timedelta(hours=4) <= value <= end]
+    last_match = [value for value in last_candidates if start <= value <= end + timedelta(hours=4)]
+    return (
+        min(first_match) if first_match else None,
+        max(last_match) if last_match else None,
+        source_loaded,
+        row_present,
+        files,
+    )
+
+
+ATTENDANCE_COLUMNS = [
+    "agent_day_key", "business_date", "agent_id", "agent_name", "team_leader", "ops_manager", "lob", "market", "language", "location",
+    "scheduled_start", "scheduled_end", "scheduled_minutes", "assignment", "assignment_type", "planned_absence_minutes", "first_login", "last_logout",
+    "source_loaded", "lilo_row_present", "seen_in_lilo", "raw_late_minutes", "raw_early_leave_minutes", "uncoded_late_minutes", "uncoded_early_leave_minutes",
+    "no_show_minutes", "worked_span_minutes", "attendance_result", "attendance_percent", "schedule_source", "lilo_source",
+]
+
+
+def _insert_dicts(conn: duckdb.DuckDBPyConnection, table: str, columns: list[str], rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    row_placeholders = "(" + ", ".join("?" for _ in columns) + ")"
+    batch_size = 500
+    for offset in range(0, len(rows), batch_size):
+        batch = rows[offset : offset + batch_size]
+        sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES " + ", ".join(row_placeholders for _ in batch)
+        params = [row.get(column) for row in batch for column in columns]
+        conn.execute(sql, params)
+
+
+def _build_attendance(
+    conn: duckdb.DuckDBPyConnection,
+    config: Config,
+    schedules: list[dict[str, Any]],
+    events_by_agent: dict[str, list[dict[str, Any]]],
+    lilo: dict[tuple[date, str], list[dict[str, Any]]],
+    loaded_dates: set[date],
+    seen_ids: set[str],
+    agents: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    tolerance = config.rules.tolerance_minutes
+    for shift in schedules:
+        agent_id = shift["agent_id"]
+        if not agent_id:
+            continue
+        start, end = shift["scheduled_start"], shift["scheduled_end"]
+        scheduled_minutes = int((end - start).total_seconds() // 60) if start and end and end > start else 0
+        events = _shift_events(shift, events_by_agent)
+        planned = _planned_intervals(events, {"Planned absence", "Planned adjustment"})
+        planned_absence = scheduled_minutes if shift["assignment_type"] == "Planned absence" else (interval_minutes(start, end, planned) if start and end else 0)
+        first, last, source_loaded, row_present, lilo_source = _lilo_boundaries(shift, lilo, loaded_dates)
+        raw_late = max(0, int((first - start).total_seconds() // 60)) if first and start else 0
+        raw_early = max(0, int((end - last).total_seconds() // 60)) if last and end else 0
+        usable_pair = bool(first and last and start and end and last >= first and last > start and first < end)
+        late_segments = subtract_intervals(start, first, planned) if usable_pair and first > start else []
+        early_segments = subtract_intervals(last, end, planned) if usable_pair and end > last else []
+        late = sum(int((b - a).total_seconds() // 60) for a, b in late_segments)
+        early = sum(int((b - a).total_seconds() // 60) for a, b in early_segments)
+        late = 0 if late <= tolerance else late
+        early = 0 if early <= tolerance else early
+        no_show = max(0, scheduled_minutes - planned_absence) if (
+            source_loaded and row_present and first is None and last is None and shift["assignment_type"] == "Work"
+        ) else 0
+        worked_span = int((last - first).total_seconds() // 60) if first and last and last >= first else 0
+        parse_ok = bool(shift["parse_ok"])
+        if not source_loaded:
+            result = "Data not loaded"
+        elif not parse_ok and shift["assignment_type"] != "Off":
+            result = "Schedule parse error"
+        elif shift["assignment_type"] == "Off":
+            result = "Off"
+        elif shift["assignment_type"] == "Planned absence" or (scheduled_minutes and planned_absence >= scheduled_minutes - tolerance):
+            result = "Planned absence"
+        elif shift["assignment_type"] == "Non-phone planned":
+            result = "Non-phone planned"
+        elif agent_id not in seen_ids:
+            result = "Identity not in LILO"
+        elif not row_present:
+            result = "Missing LILO roster row"
+        elif first is None and last is None:
+            result = "No show"
+        elif first is None or last is None:
+            result = "Incomplete LILO"
+        elif not usable_pair:
+            result = "No schedule overlap"
+        elif late and early:
+            result = "Late + early leave"
+        elif late:
+            result = "Late"
+        elif early:
+            result = "Early leave"
+        else:
+            result = "Present"
+        attendance_pct = None
+        trusted_results = {"No show", "Present", "Late", "Early leave", "Late + early leave"}
+        if shift["assignment_type"] == "Work" and source_loaded and scheduled_minutes and result in trusted_results:
+            attendance_pct = max(0.0, 1 - (no_show + late + early) / scheduled_minutes)
+        agent = agents.get(agent_id, {})
+        rows.append({
+            "agent_day_key": f"{shift['schedule_date']:%Y%m%d}-{agent_id}",
+            "business_date": shift["schedule_date"], "agent_id": agent_id,
+            "agent_name": agent.get("canonical_name") or shift["agent_name"],
+            "team_leader": agent.get("team_leader"), "ops_manager": agent.get("ops_manager"),
+            "lob": agent.get("lob"), "market": agent.get("market"), "language": agent.get("language"), "location": agent.get("location"),
+            "scheduled_start": start, "scheduled_end": end, "scheduled_minutes": scheduled_minutes,
+            "assignment": shift["assignment"], "assignment_type": shift["assignment_type"], "planned_absence_minutes": planned_absence,
+            "first_login": first, "last_logout": last, "source_loaded": source_loaded, "lilo_row_present": row_present,
+            "seen_in_lilo": agent_id in seen_ids, "raw_late_minutes": raw_late, "raw_early_leave_minutes": raw_early,
+            "uncoded_late_minutes": late, "uncoded_early_leave_minutes": early, "no_show_minutes": no_show,
+            "worked_span_minutes": worked_span, "attendance_result": result, "attendance_percent": attendance_pct,
+            "schedule_source": shift["source_file"], "lilo_source": lilo_source,
+            "_events": events, "_late_segments": late_segments, "_early_segments": early_segments,
+        })
+    conn.execute("DELETE FROM mart.attendance_agent_day")
+    _insert_dicts(conn, "mart.attendance_agent_day", ATTENDANCE_COLUMNS, rows)
+    return rows
+
+
+def _exclusive_category_minutes(
+    shift_start: datetime,
+    shift_end: datetime,
+    statuses: list[dict[str, Any]],
+) -> tuple[dict[str, int], int, list[dict[str, Any]]]:
+    clipped: list[dict[str, Any]] = []
+    for status in statuses:
+        start, end = max(shift_start, status["status_start"]), min(shift_end, status["status_end"])
+        if end > start:
+            clipped.append({**status, "clip_start": start, "clip_end": end})
+    boundaries = sorted({shift_start, shift_end, *(row["clip_start"] for row in clipped), *(row["clip_end"] for row in clipped)})
+    minutes: dict[str, int] = defaultdict(int)
+    covered_segments: list[tuple[datetime, datetime]] = []
+    exclusive: list[dict[str, Any]] = []
+    for left, right in zip(boundaries, boundaries[1:]):
+        active = [row for row in clipped if row["clip_start"] < right and row["clip_end"] > left]
+        if not active:
+            continue
+        # During minute-rounded transitions, the newest starting state wins.
+        chosen = max(active, key=lambda row: (row["status_start"], row["source_row"]))
+        segment_minutes = int((right - left).total_seconds() // 60)
+        if segment_minutes <= 0:
+            continue
+        minutes[chosen["actual_category"]] += segment_minutes
+        covered_segments.append((left, right))
+        exclusive.append({**chosen, "interval_start": left, "interval_end": right})
+    covered = int(sum((b - a).total_seconds() for a, b in merge_intervals(covered_segments)) // 60)
+    return dict(minutes), covered, exclusive
+
+
+CONFORMANCE_COLUMNS = [
+    "agent_day_key", "business_date", "agent_id", "scheduled_minutes", "scheduled_net_minutes", "planned_absence_minutes", "planned_lunch_minutes", "planned_break_minutes",
+    "productive_minutes", "auxiliary_minutes", "break_minutes", "lunch_minutes", "unavailable_minutes", "logged_off_minutes", "status_covered_minutes",
+    "status_coverage_percent", "login_span_minutes", "measurement_basis", "worked_minutes", "conformance_percent", "break_overrun_minutes", "lunch_overrun_minutes", "unexplained_minutes",
+]
+
+
+def _build_conformance(
+    conn: duckdb.DuckDBPyConnection,
+    config: Config,
+    attendance: list[dict[str, Any]],
+    statuses_by_agent: dict[str, list[dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    output: list[dict[str, Any]] = []
+    exclusive_by_key: dict[str, list[dict[str, Any]]] = {}
+    for row in attendance:
+        start, end = row["scheduled_start"], row["scheduled_end"]
+        if not start or not end or end <= start or row["assignment_type"] == "Off":
+            continue
+        events = row["_events"]
+        planned_absence = row["planned_absence_minutes"]
+        lunch_intervals = _planned_intervals(events, {"Lunch"})
+        break_intervals = _planned_intervals(events, {"Break"})
+        planned_lunch = interval_minutes(start, end, lunch_intervals)
+        planned_break = interval_minutes(start, end, break_intervals)
+        scheduled_net = max(0, row["scheduled_minutes"] - planned_absence - planned_lunch)
+        category, covered, exclusive = _exclusive_category_minutes(start, end, statuses_by_agent.get(row["agent_id"], []))
+        coverage = min(1.0, covered / row["scheduled_minutes"]) if row["scheduled_minutes"] else None
+        login_span = interval_minutes(start, end, [(row["first_login"], row["last_logout"])]) if row["first_login"] and row["last_logout"] and row["last_logout"] > row["first_login"] else 0
+        if coverage is not None and coverage >= config.rules.minimum_status_coverage:
+            basis = "Agent Status"
+        elif login_span > 0:
+            basis = "LILO span"
+        else:
+            basis = "None"
+        productive = category.get("Productive", 0)
+        auxiliary = category.get("Auxiliary", 0)
+        break_minutes = category.get("Break", 0)
+        lunch_minutes = category.get("Lunch", 0)
+        unavailable = category.get("Unavailable", 0)
+        logged_off = category.get("Logged Off", 0)
+        if basis == "Agent Status":
+            worked = productive + auxiliary + min(break_minutes, config.rules.break_minutes)
+        elif basis == "LILO span":
+            worked = max(0, login_span - planned_lunch - planned_absence)
+        else:
+            worked = None
+        conformance = min(1.0, worked / scheduled_net) if worked is not None and scheduled_net else None
+        item = {
+            "agent_day_key": row["agent_day_key"], "business_date": row["business_date"], "agent_id": row["agent_id"],
+            "scheduled_minutes": row["scheduled_minutes"], "scheduled_net_minutes": scheduled_net,
+            "planned_absence_minutes": planned_absence, "planned_lunch_minutes": planned_lunch, "planned_break_minutes": planned_break,
+            "productive_minutes": productive, "auxiliary_minutes": auxiliary, "break_minutes": break_minutes,
+            "lunch_minutes": lunch_minutes, "unavailable_minutes": unavailable, "logged_off_minutes": logged_off,
+            "status_covered_minutes": covered, "status_coverage_percent": coverage, "login_span_minutes": login_span,
+            "measurement_basis": basis, "worked_minutes": worked, "conformance_percent": conformance,
+            "break_overrun_minutes": max(0, break_minutes - config.rules.break_minutes) if basis == "Agent Status" else 0,
+            "lunch_overrun_minutes": max(0, lunch_minutes - max(planned_lunch, config.rules.lunch_minutes)) if basis == "Agent Status" else 0,
+            "unexplained_minutes": max(0, scheduled_net - covered) if basis == "Agent Status" else 0,
+        }
+        output.append(item)
+        exclusive_by_key[row["agent_day_key"]] = exclusive
+    conn.execute("DELETE FROM mart.conformance_agent_day")
+    _insert_dicts(conn, "mart.conformance_agent_day", CONFORMANCE_COLUMNS, output)
+    return output, exclusive_by_key
+
+
+def _nearby_merge(intervals: Iterable[tuple[datetime, datetime]], tolerance_minutes: int) -> list[tuple[datetime, datetime]]:
+    ordered = sorted(intervals)
+    merged: list[list[datetime]] = []
+    tolerance = timedelta(minutes=tolerance_minutes)
+    for start, end in ordered:
+        if not merged or start > merged[-1][1] + tolerance:
+            merged.append([start, end])
+        else:
+            merged[-1][1] = max(merged[-1][1], end)
+    return [(a, b) for a, b in merged]
+
+
+CORRECTION_COLUMNS = [
+    "correction_id", "business_date", "agent_id", "agent_name", "team_leader", "ops_manager", "lob", "scheduled_start", "scheduled_end", "first_login", "last_logout",
+    "priority", "detected_issue", "gap_start", "gap_end", "gap_minutes", "confidence", "suggested_activity", "source_file",
+    "confirmed_activity", "validation_status", "owner", "comment", "injected_date",
+]
+
+
+def _correction_id(row: dict[str, Any], issue: str, start: datetime | None, end: datetime | None) -> str:
+    clean = "".join(char for char in issue.upper() if char.isalnum())
+    start_key = start.strftime("%H%M") if start else "DAY"
+    end_key = end.strftime("%H%M") if end else "DAY"
+    return f"{row['business_date']:%Y%m%d}-{row['agent_id']}-{start_key}-{end_key}-{clean}"
+
+
+def _build_corrections(
+    conn: duckdb.DuckDBPyConnection,
+    config: Config,
+    attendance: list[dict[str, Any]],
+    conformance: list[dict[str, Any]],
+    exclusive_by_key: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    conformance_by_key = {row["agent_day_key"]: row for row in conformance}
+    output: list[dict[str, Any]] = []
+
+    def add(base: dict[str, Any], issue: str, start: datetime | None, end: datetime | None, minutes: int, priority: int, confidence: str, activity: str, source: str | None = None) -> None:
+        output.append({
+            "correction_id": _correction_id(base, issue, start, end), "business_date": base["business_date"], "agent_id": base["agent_id"],
+            "agent_name": base["agent_name"], "team_leader": base["team_leader"], "ops_manager": base["ops_manager"], "lob": base["lob"],
+            "scheduled_start": base["scheduled_start"], "scheduled_end": base["scheduled_end"], "first_login": base["first_login"], "last_logout": base["last_logout"],
+            "priority": priority, "detected_issue": issue, "gap_start": start, "gap_end": end, "gap_minutes": minutes,
+            "confidence": confidence, "suggested_activity": activity, "source_file": source or base["schedule_source"],
+        })
+
+    tolerance = config.rules.tolerance_minutes
+    for row in attendance:
+        start, end = row["scheduled_start"], row["scheduled_end"]
+        planned = _planned_intervals(row["_events"], {"Planned absence", "Planned adjustment"})
+        if row["attendance_result"] == "No show" and start and end:
+            segments = subtract_intervals(start, end, planned)
+            for gap_start, gap_end in segments:
+                minutes = int((gap_end - gap_start).total_seconds() // 60)
+                if minutes > 0:
+                    add(row, "No show", gap_start, gap_end, minutes, 1, "Review" if planned else "High", "No-show")
+        if row["uncoded_late_minutes"] > 0:
+            for gap_start, gap_end in row["_late_segments"]:
+                minutes = int((gap_end - gap_start).total_seconds() // 60)
+                if minutes > 0:
+                    add(row, "Late", gap_start, gap_end, minutes, 2, "Review" if planned else "High", "Late")
+        if row["uncoded_early_leave_minutes"] > 0:
+            for gap_start, gap_end in row["_early_segments"]:
+                minutes = int((gap_end - gap_start).total_seconds() // 60)
+                if minutes > 0:
+                    add(row, "Early leave", gap_start, gap_end, minutes, 3, "Review" if planned else "High", "Early Leaving")
+        if row["attendance_result"] == "Incomplete LILO":
+            add(row, "Incomplete LILO", None, None, 0, 9, "Review", "Schedule Correction", row["lilo_source"])
+
+        conf = conformance_by_key.get(row["agent_day_key"])
+        if not conf or conf["measurement_basis"] != "Agent Status" or not row["first_login"] or not row["last_logout"]:
+            continue
+        coded = _planned_intervals(row["_events"], {"Planned absence", "Planned adjustment", "Lunch", "Break"})
+        exclusive = exclusive_by_key.get(row["agent_day_key"], [])
+        for category, issue, priority in (("Logged Off", "Mid-shift logged off", 4), ("Unavailable", "Unavailable in shift", 7)):
+            raw = [(item["interval_start"], item["interval_end"]) for item in exclusive if item["actual_category"] == category]
+            for gap_start, gap_end in subtract_intervals(row["first_login"], row["last_logout"], coded):
+                hits = clip_intervals(gap_start, gap_end, _nearby_merge(raw, tolerance))
+                for hit_start, hit_end in hits:
+                    minutes = int((hit_end - hit_start).total_seconds() // 60)
+                    if minutes > tolerance:
+                        add(row, issue, hit_start, hit_end, minutes, priority, "High", "General Unavailability")
+        for field, issue, priority, activity in (
+            ("lunch_overrun_minutes", "Lunch overrun", 5, "Lunch"),
+            ("break_overrun_minutes", "Break overrun", 6, "Break"),
+            ("unexplained_minutes", "Unexplained status coverage", 9, "Schedule Correction"),
+        ):
+            minutes = int(conf[field])
+            if minutes > tolerance:
+                add(row, issue, None, None, minutes, priority, "Review", activity)
+
+    actions = {row["correction_id"]: row for row in _dicts(conn.execute("SELECT * FROM core.correction_action"))}
+    deduped: dict[str, dict[str, Any]] = {}
+    for item in output:
+        action = actions.get(item["correction_id"], {})
+        item.update({
+            "confirmed_activity": action.get("confirmed_activity"),
+            "validation_status": action.get("validation_status") or "Open",
+            "owner": action.get("owner"), "comment": action.get("comment"), "injected_date": action.get("injected_date"),
+        })
+        deduped[item["correction_id"]] = item
+    output = sorted(deduped.values(), key=lambda item: (item["business_date"], item["priority"], -item["gap_minutes"], item["agent_id"]))
+    conn.execute("DELETE FROM mart.correction_candidate")
+    _insert_dicts(conn, "mart.correction_candidate", CORRECTION_COLUMNS, output)
+    return output
+
+
+RTA_COLUMNS = [
+    "snapshot_at", "agent_id", "agent_name", "team_leader", "lob", "scheduled_start", "scheduled_end", "planned_activity", "actual_status", "actual_category",
+    "status_start", "minutes_in_status", "rta_result", "severity", "freshness", "source_file",
+]
+
+
+def _build_rta(
+    conn: duckdb.DuckDBPyConnection,
+    config: Config,
+    schedules: list[dict[str, Any]],
+    events_by_agent: dict[str, list[dict[str, Any]]],
+    statuses_by_agent: dict[str, list[dict[str, Any]]],
+    agents: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    all_statuses = [row for rows in statuses_by_agent.values() for row in rows]
+    snapshot = max((row["status_start"] for row in all_statuses), default=datetime.now().replace(second=0, microsecond=0))
+    output: list[dict[str, Any]] = []
+    for shift in schedules:
+        if not shift["agent_id"] or not shift["scheduled_start"] or not shift["scheduled_end"]:
+            continue
+        if not (shift["scheduled_start"] <= snapshot < shift["scheduled_end"]):
+            continue
+        events = _shift_events(shift, events_by_agent)
+        active_event = next((event for event in events if event["event_start"] <= snapshot < event["event_end"]), None)
+        planned = active_event["activity_type"] if active_event else shift["assignment_type"]
+        history = [row for row in statuses_by_agent.get(shift["agent_id"], []) if row["status_start"] <= snapshot]
+        latest = max(history, key=lambda row: row["status_start"]) if history else None
+        minutes = int((snapshot - latest["status_start"]).total_seconds() // 60) if latest else None
+        stale = latest is None or minutes is None or minutes > config.rules.rta_stale_minutes
+        actual = latest["actual_category"] if latest else None
+        expected = {
+            "Lunch": {"Lunch"}, "Break": {"Break"}, "Planned absence": {"Logged Off"},
+            "Planned adjustment": {"Logged Off", "Unavailable"}, "Work": {"Productive", "Auxiliary"},
+            "Non-phone planned": {"Auxiliary", "Productive"}, "Other planned": {"Auxiliary", "Productive"},
+        }.get(planned, {"Productive", "Auxiliary"})
+        if stale:
+            result, severity, freshness = "Stale data", "Review", "Stale"
+        elif actual in expected:
+            result, severity, freshness = "In adherence", "OK", "Current"
+        elif planned == "Planned absence" and actual in {"Productive", "Auxiliary"}:
+            result, severity, freshness = "Review", "Review", "Current"
+        else:
+            result, severity, freshness = "Out of adherence", "High", "Current"
+        agent = agents.get(shift["agent_id"], {})
+        output.append({
+            "snapshot_at": snapshot, "agent_id": shift["agent_id"], "agent_name": agent.get("canonical_name") or shift["agent_name"],
+            "team_leader": agent.get("team_leader"), "lob": agent.get("lob"), "scheduled_start": shift["scheduled_start"], "scheduled_end": shift["scheduled_end"],
+            "planned_activity": planned, "actual_status": latest["status"] if latest else None, "actual_category": actual,
+            "status_start": latest["status_start"] if latest else None, "minutes_in_status": minutes, "rta_result": result,
+            "severity": severity, "freshness": freshness, "source_file": latest["source_file"] if latest else None,
+        })
+    output.sort(key=lambda item: ({"High": 0, "Review": 1, "OK": 2}.get(item["severity"], 9), item["agent_name"] or ""))
+    conn.execute("DELETE FROM mart.rta_snapshot")
+    _insert_dicts(conn, "mart.rta_snapshot", RTA_COLUMNS, output)
+    return output
+
+
+def _build_intraday(conn: duckdb.DuckDBPyConnection, start: date, end: date) -> tuple[int, int]:
+    conn.execute("DELETE FROM mart.forecast_hour")
+    conn.execute(
+        """
+        INSERT INTO mart.forecast_hour
+        SELECT business_date, date_trunc('hour', interval_start), queue_name, volume_forecast,
+               fte_forecast, fte_required, sl_forecast, sl_required, aht_forecast_seconds, source_file
+        FROM (
+            SELECT r.*, f.file_name AS source_file,
+                   row_number() OVER (
+                       PARTITION BY queue_name, interval_start, interval_minutes
+                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, source_row DESC
+                   ) row_rank
+            FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+            WHERE business_date BETWEEN ? AND ?
+        ) x WHERE row_rank=1
+        """,
+        [start, end],
+    )
+    conn.execute("DELETE FROM mart.intraday_queue_interval")
+    conn.execute(
+        """
+        INSERT INTO mart.intraday_queue_interval
+        SELECT business_date, interval_start, hour_start, source_system, queue, business_partner, lob, language,
+               offered, answered, abandoned, short_calls, answered_20s,
+               CASE WHEN offered IS NULL OR offered=0 THEN NULL ELSE coalesce(answered_20s,0)/offered END,
+               CASE WHEN offered IS NULL OR offered=0 THEN NULL ELSE coalesce(abandoned,0)/offered END,
+               asa_seconds, aht_seconds, source_file
+        FROM (
+            SELECT r.*, f.file_name AS source_file,
+                   row_number() OVER (
+                       PARTITION BY source_system, business_date, interval_time, coalesce(queue,''),
+                                    coalesce(business_partner,''), coalesce(lob,''), coalesce(language,'')
+                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, source_row DESC
+                   ) row_rank
+            FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+            WHERE business_date BETWEEN ? AND ?
+        ) x WHERE row_rank=1
+        """,
+        [start, end],
+    )
+    forecast = conn.execute("SELECT count(*) FROM mart.forecast_hour").fetchone()[0]
+    actual = conn.execute("SELECT count(*) FROM mart.intraday_queue_interval").fetchone()[0]
+    return forecast, actual
+
+
+def _issue_id(*parts: Any) -> str:
+    return hashlib.sha256("|".join(str(part or "") for part in parts).encode("utf-8")).hexdigest()
+
+
+def _build_quality(
+    conn: duckdb.DuckDBPyConnection,
+    config: Config,
+    run_id: str,
+    start: date,
+    end: date,
+) -> int:
+    conn.execute("DELETE FROM meta.quality_issue")
+    now = datetime.now()
+    issues: list[list[Any]] = []
+
+    def add(family: str | None, source_file: str | None, business_date: date | None, agent_id: str | None, issue: str, severity: str, details: str) -> None:
+        issues.append([_issue_id(run_id, family, source_file, business_date, agent_id, issue, details), run_id, now, family, source_file, business_date, agent_id, issue, severity, details])
+
+    for family, key in (
+        ("fte", "fte_file"), ("schedule", "schedule_folder"), ("lilo", "lilo_folder"),
+        ("agent_status", "agent_status_folder"), ("forecast", "forecast_folder"),
+        ("apbe", "apbe_folder"), ("apfr", "apfr_folder"),
+    ):
+        if family == "agent_status" and not config.modules.get("agent_status", True):
+            continue
+        if family == "forecast" and not config.modules.get("forecast", True):
+            continue
+        if family in {"apbe", "apfr"} and not config.modules.get("intraday", True):
+            continue
+        path = config.source_path(key)
+        if not path.exists():
+            add(family, str(path), None, None, "Missing source", "ERROR", f"Expected path does not exist: {path}")
+    for row in _dicts(conn.execute("SELECT * FROM meta.source_file WHERE status='ERROR'")):
+        add(row["source_family"], row["file_name"], None, None, "Source load error", "ERROR", row["error_message"] or "Unknown load error")
+    for row in _dicts(conn.execute(
+        """SELECT schedule_date, agent_id_raw, agent_name, parse_ok, f.file_name
+           FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+           WHERE schedule_date BETWEEN ? AND ? AND (agent_id IS NULL OR NOT parse_ok)""", [start, end]
+    )):
+        issue = "Invalid schedule Agent ID" if row["agent_id_raw"] in {None, "", "-", "N/A", "NA", "NULL"} else "Schedule parse error"
+        add("schedule", row["file_name"], row["schedule_date"], row["agent_id_raw"], issue, "ERROR", f"Agent={row['agent_name'] or ''}; parse_ok={row['parse_ok']}")
+    for business_date, count in conn.execute(
+        """SELECT business_date, count(*) FROM mart.attendance_agent_day
+           WHERE attendance_result='Data not loaded' GROUP BY business_date ORDER BY business_date"""
+    ).fetchall():
+        add("lilo", None, business_date, None, "LILO date not loaded", "ERROR", f"{count} scheduled Agent ID rows cannot be judged")
+    for row in _dicts(conn.execute(
+        """SELECT business_date, agent_id, attendance_result, schedule_source
+           FROM mart.attendance_agent_day
+           WHERE attendance_result IN ('Schedule parse error','Identity not in LILO','Missing LILO roster row','Incomplete LILO','No schedule overlap')"""
+    )):
+        severity = "ERROR" if row["attendance_result"] in {"Data not loaded", "Schedule parse error"} else "REVIEW"
+        add("attendance", row["schedule_source"], row["business_date"], row["agent_id"], row["attendance_result"], severity, "Attendance result requires review before payroll use")
+    for business_date, count in conn.execute(
+        """SELECT s.business_date, count(*)
+           FROM (SELECT DISTINCT business_date FROM mart.conformance_agent_day) s
+           WHERE NOT EXISTS (
+               SELECT 1 FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+               WHERE r.extract_date=s.business_date
+           ) GROUP BY s.business_date ORDER BY s.business_date"""
+    ).fetchall():
+        add("agent_status", None, business_date, None, "Agent Status date not loaded", "REVIEW", "Mid-shift conformance is unavailable; LILO fallback is used when possible")
+    for row in _dicts(conn.execute(
+        """SELECT c.business_date, c.agent_id, c.status_coverage_percent
+           FROM mart.conformance_agent_day c
+           WHERE c.status_coverage_percent IS NOT NULL AND c.status_coverage_percent < ?
+             AND EXISTS (
+                 SELECT 1 FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+                 WHERE r.extract_date=c.business_date
+             )""", [config.rules.minimum_status_coverage]
+    )):
+        add("agent_status", None, row["business_date"], row["agent_id"], "Low status coverage", "REVIEW", f"Coverage={row['status_coverage_percent']:.1%}; LILO fallback used when available")
+    if conn.execute("SELECT count(*) FROM mart.forecast_hour").fetchone()[0] and conn.execute("SELECT count(*) FROM mart.intraday_queue_interval").fetchone()[0]:
+        add("intraday", None, None, None, "Forecast scope mapping required", "REVIEW", "Forecast and Storm actuals are intentionally not auto-mapped. Confirm queue/LOB scope before comparing them.")
+    if issues:
+        row_placeholders = "(" + ", ".join("?" for _ in range(10)) + ")"
+        for offset in range(0, len(issues), 500):
+            batch = issues[offset : offset + 500]
+            conn.execute(
+                "INSERT INTO meta.quality_issue VALUES " + ", ".join(row_placeholders for _ in batch),
+                [value for row in batch for value in row],
+            )
+    return len(issues)
+
+
+def _build_source_health(conn: duckdb.DuckDBPyConnection, config: Config) -> None:
+    conn.execute("DELETE FROM mart.source_health")
+    specs = [
+        ("fte", config.source_path("fte_file")), ("schedule", config.source_path("schedule_folder")),
+        ("lilo", config.source_path("lilo_folder")), ("agent_status", config.source_path("agent_status_folder")),
+        ("forecast", config.source_path("forecast_folder")), ("apbe", config.source_path("apbe_folder")),
+        ("apfr", config.source_path("apfr_folder")),
+    ]
+    for family, expected in specs:
+        latest = conn.execute(
+            """SELECT file_name, modified_at, loaded_at, row_count, rejected_count, status, error_message
+               FROM meta.source_file WHERE source_family=?
+               ORDER BY loaded_at DESC NULLS LAST, modified_at DESC NULLS LAST LIMIT 1""", [family]
+        ).fetchone()
+        business_date = conn.execute(
+            """
+            SELECT max(d) FROM (
+                SELECT max(extract_date) d FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='lilo'
+                UNION ALL SELECT max(extract_date) FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='agent_status'
+                UNION ALL SELECT max(schedule_date) FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='schedule'
+                UNION ALL SELECT max(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='forecast'
+                UNION ALL SELECT max(business_date) FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE source_system=upper(?)
+            ) x
+            """, [family, family, family, family, family]
+        ).fetchone()[0]
+        if latest:
+            file_name, modified, loaded, rows, rejected, status, error = latest
+            details = error or (f"{rejected} rejected/flagged rows" if rejected else "Loaded successfully")
+        else:
+            file_name = modified = loaded = business_date = None
+            rows = rejected = 0
+            status = "MISSING" if not expected.exists() else "EMPTY"
+            details = "Path not found" if status == "MISSING" else "No matching files loaded"
+        conn.execute("INSERT INTO mart.source_health VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [family, str(expected), file_name, business_date, modified, loaded, rows, rejected, status, details])
+
+
+def refresh_models(
+    conn: duckdb.DuckDBPyConnection,
+    config: Config,
+    run_id: str,
+    start: date | None = None,
+    end: date | None = None,
+) -> ModelSummary:
+    start, end = resolve_period(conn, config, start, end)
+    schedules = _load_schedules(conn, start, end)
+    events = _load_events(conn, start, end)
+    events_by_agent = _events_by_agent(events)
+    lilo, loaded_dates, seen_ids = _load_lilo(conn, start, end)
+    statuses = _load_statuses(conn, start, end)
+    agents = _build_agents(conn)
+    attendance = _build_attendance(conn, config, schedules, events_by_agent, lilo, loaded_dates, seen_ids, agents)
+    conformance, exclusive = _build_conformance(conn, config, attendance, statuses)
+    corrections = _build_corrections(conn, config, attendance, conformance, exclusive)
+    rta = _build_rta(conn, config, schedules, events_by_agent, statuses, agents)
+    forecast, actual = _build_intraday(conn, start, end)
+    _build_source_health(conn, config)
+    quality = _build_quality(conn, config, run_id, start, end)
+    return ModelSummary(
+        start=start, end=end, attendance_rows=len(attendance), conformance_rows=len(conformance),
+        correction_rows=len(corrections), rta_rows=len(rta), forecast_rows=forecast,
+        intraday_rows=actual, quality_rows=quality,
+    )

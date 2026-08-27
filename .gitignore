@@ -1,0 +1,34 @@
+# Local data and generated state
+config/wfmhub.toml
+database/
+backups/
+logs/
+output/
+extracts/
+input/*.xlsx
+input/*.csv
+!input/README.md
+
+# Build products
+build/
+dist/
+wheelhouse/
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.venv/
+venv/
+*.egg-info/
+
+# Editors / operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local orchestration handoffs
+.codex/
