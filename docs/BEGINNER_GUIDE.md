@@ -22,8 +22,9 @@ Pivot, ODBC or Python in Excel. Excel only opens the finished reports.
    ```
 
 4. Do not put it in `Program Files`.
-5. Double-click `SETUP.cmd`.
-6. A black window asks for your **source root**. This is the folder containing:
+5. Check that `runtime\python.exe` exists inside the extracted `WFMHub` folder.
+6. Double-click `SETUP.cmd`.
+7. A black window asks for your **source root**. This is the folder containing:
 
    ```text
    FTE
@@ -31,8 +32,8 @@ Pivot, ODBC or Python in Excel. Excel only opens the finished reports.
    Verint
    ```
 
-7. Paste that folder path and press Enter.
-8. Wait for **Setup complete**. Press a key to close the window.
+8. Paste that folder path and press Enter.
+9. Wait for **Setup complete**. Press a key to close the window.
 
 Setup creates `config\wfmhub.toml` and `database\wfm.duckdb`. It never edits an
 extract.
@@ -148,6 +149,7 @@ known-good backup into `database\wfm.duckdb`.
 | Problem | Check |
 |---|---|
 | The black window closes | Run `SETUP.cmd`, then read the newest file in `logs` |
+| Embedded Python is missing | Download the portable release ZIP, choose **Extract All**, and verify `runtime\python.exe`; do not use GitHub's Source code ZIP |
 | Source says MISSING | Open `config\wfmhub.toml` and correct `source_root` |
 | Report is empty | Check the selected dates and `SOURCE_HEALTH` |
 | RTA is old | RTA is only as fresh as the newest Agent Status export |

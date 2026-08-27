@@ -30,8 +30,10 @@ python -m unittest discover -s tests -v
 
 ## Windows user
 
-Download the portable ZIP from Releases, extract the whole `WFMHub` folder,
-run `SETUP.cmd` once, then run `WFMHub.cmd` every day. Read
+Download the `WFMHub-Portable-...-win-x64.zip` asset from Releases--not the
+automatically generated GitHub "Source code" ZIP. Choose **Extract All**, keep
+the whole `WFMHub` folder together, run `SETUP.cmd` once, then run `WFMHub.cmd`
+every day. Read
 [`docs/BEGINNER_GUIDE.md`](docs/BEGINNER_GUIDE.md) for click-by-click help.
 
 ## Data boundaries

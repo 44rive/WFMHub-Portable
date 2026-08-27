@@ -44,4 +44,4 @@ python packaging/windows/build_portable.py --clean
 
 It downloads the official CPython embeddable ZIP, downloads Windows wheels,
 extracts them into `runtime/site-packages`, copies the application and produces
-`dist/WFMHub-Portable-v0.1.0-win-x64.zip` plus its SHA-256 file.
+`dist/WFMHub-Portable-v<version>-win-x64.zip` plus its SHA-256 file.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 — 2026-08-27
+
+- Windows launchers now require and invoke the bundled `runtime\python.exe`.
+- Removed the fallback to a separately installed `py` command.
+- Added a clear recovery message for incomplete extraction, the GitHub source
+  archive, or a launcher copied away from the portable folder.
+- Normalized the application home path before passing it to Python.
+
 ## 0.1.0 — 2026-08-26
 
 - First portable Windows x64 release.
