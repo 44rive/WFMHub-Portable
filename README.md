@@ -8,7 +8,7 @@ Normal report workbooks contain curated summaries only and no Excel Data Model.
 Detailed clean rows appear in Excel only when the user explicitly chooses an
 XLSX clean-data export; CSV remains the standard for large call datasets.
 
-## What v0.3.0 does
+## What v0.3.1 does
 
 - Ingests FTE, Verint Schedules & Activities, Storm LILO, Storm Agent Status,
   Verint Forecast, APBE/APFR queue actuals, and Storm Call by Call.
@@ -28,12 +28,15 @@ XLSX clean-data export; CSV remains the standard for large call datasets.
 - Runs trusted custom portable-Python jobs and read-only custom SQL jobs.
 - Lets the user choose the source group, report pack and date period from the
   daily menu.
+- Shows an in-place progress bar for loading, models, reports, exports, custom
+  jobs, imports and backups. Large LILO, Call-by-Call and export streams show
+  their processed row count.
 - Keeps Verint Forecast isolated from attendance, absence, corrections, and
   payroll logic.
 
 ## Windows quick start
 
-Download `WFMHub-Portable-v0.3.0-win-x64.zip` from GitHub Releases—not GitHub's
+Download `WFMHub-Portable-v0.3.1-win-x64.zip` from GitHub Releases—not GitHub's
 automatic “Source code” ZIP. Choose **Extract All**, keep the complete `WFMHub`
 folder together, double-click `SETUP.cmd` once, then use `WFMHub.cmd` each day.
 

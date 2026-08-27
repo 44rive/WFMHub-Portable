@@ -16,6 +16,7 @@ from openpyxl import load_workbook
 
 from .config import Config
 from .database import DatabaseConnection
+from .progress import ProgressCallback
 from .utils import (
     classify_assignment,
     classify_event,
@@ -463,15 +464,20 @@ def _insert_lilo_direct(
     date_field: str | None,
     fallback_date,
     scope: AgentScope,
+    progress: ProgressCallback | None = None,
 ) -> tuple[int, int, int]:
     """Stream large LILO CSVs into bounded SQLite inserts."""
     count = 0
     scoped_out = 0
     rejected = 0
+    processed = 0
     batch: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         for source_row, row in enumerate(reader, 2):
+            processed += 1
+            if progress is not None and processed % 5000 == 0:
+                progress(processed, 0, f"LILO: {processed:,} rows scanned")
             agent_id = normalize_id(row.get("[Agent ID]"))
             resolved_id = scope.resolve(agent_id, row.get("[Agent]"))
             if resolved_id is None:
@@ -509,6 +515,8 @@ def _insert_lilo_direct(
     if batch:
         _insert_rows(conn, "raw.lilo", batch)
         count += len(batch)
+    if progress is not None and processed:
+        progress(processed, 0, f"LILO: {processed:,} rows scanned")
     return count, scoped_out, rejected
 
 
@@ -702,12 +710,16 @@ def _insert_calls_direct(
     path: Path,
     file_id: str,
     scope: AgentScope,
+    progress: ProgressCallback | None = None,
 ) -> tuple[int, int, int]:
     headers = _call_header_map(path)
-    count = scoped_out = rejected = 0
+    count = scoped_out = rejected = processed = 0
     batch: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         for source_row, row in enumerate(csv.DictReader(handle), 2):
+            processed += 1
+            if progress is not None and processed % 2000 == 0:
+                progress(processed, 0, f"Call by Call: {processed:,} rows scanned")
             record, reason = _call_record(row, headers, file_id, source_row, scope)
             if reason == "outside roster":
                 scoped_out += 1
@@ -724,6 +736,8 @@ def _insert_calls_direct(
     if batch:
         _insert_rows(conn, "raw.call_leg", batch)
         count += len(batch)
+    if progress is not None and processed:
+        progress(processed, 0, f"Call by Call: {processed:,} rows scanned")
     return count, scoped_out, rejected
 
 
@@ -923,15 +937,23 @@ def ingest_all(
     conn: DatabaseConnection,
     config: Config,
     families: set[str] | None = None,
+    progress: ProgressCallback | None = None,
 ) -> IngestSummary:
     summary = IngestSummary()
     selected = set(families or ())
     if selected & AGENT_SCOPED_FAMILIES:
         selected.add("fte")
-    for candidate in discover_sources(config):
-        if selected and candidate.family not in selected:
-            continue
+    candidates = [
+        candidate for candidate in discover_sources(config)
+        if not selected or candidate.family in selected
+    ]
+    total = len(candidates)
+    if progress is not None:
+        progress(0, total, "Scanning source files")
+    for index, candidate in enumerate(candidates, 1):
         path = candidate.path
+        if progress is not None:
+            progress(index - 1, total, f"Loading {candidate.family}: {path.name}")
         sha256 = file_sha256(path)
         path_text = str(path)
         try:
@@ -939,6 +961,8 @@ def ingest_all(
         except Exception as exc:
             summary.failed += 1
             summary.errors.append(f"{candidate.family}: {path.name}: {exc}")
+            if progress is not None:
+                progress(index, total, f"Failed {candidate.family}: {path.name}")
             continue
         scope_fingerprint = scope.fingerprint if scope is not None else ""
         existing = conn.execute(
@@ -952,6 +976,8 @@ def ingest_all(
             if active:
                 summary.skipped += 1
                 summary.scoped_out += existing_scoped_out or 0
+                if progress is not None:
+                    progress(index, total, f"Unchanged {candidate.family}: {path.name}")
                 continue
             # The path changed A -> B -> A. Its original raw rows are still
             # immutable in the hub, so safely reactivate them without parsing
@@ -974,6 +1000,8 @@ def ingest_all(
             summary.loaded += 1
             summary.rows += existing_rows or 0
             summary.scoped_out += existing_scoped_out or 0
+            if progress is not None:
+                progress(index, total, f"Reactivated {candidate.family}: {path.name}")
             continue
         stat = path.stat()
         file_id = hashlib.sha256(
@@ -992,11 +1020,11 @@ def ingest_all(
                 if candidate.family == "lilo":
                     date_field, fallback_date = _validate_lilo_header(path)
                     row_count, scoped_out_count, rejected_count = _insert_lilo_direct(
-                        conn, path, file_id, date_field, fallback_date, scope
+                        conn, path, file_id, date_field, fallback_date, scope, progress
                     )
                 elif candidate.family == "calls":
                     row_count, scoped_out_count, rejected_count = _insert_calls_direct(
-                        conn, path, file_id, scope
+                        conn, path, file_id, scope, progress
                     )
                 else:
                     row_count = result.row_count
@@ -1045,4 +1073,6 @@ def ingest_all(
             )
             summary.failed += 1
             summary.errors.append(f"{candidate.family}: {path.name}: {exc}")
+        if progress is not None:
+            progress(index, total, f"Processed {candidate.family}: {path.name}")
     return summary

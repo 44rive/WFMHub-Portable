@@ -12,6 +12,7 @@ import xlsxwriter
 
 from .config import Config
 from .database import DatabaseConnection
+from .progress import ProgressCallback
 
 
 @dataclass(frozen=True)
@@ -151,7 +152,12 @@ def _safe_name(value: str) -> str:
     return "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value).strip("_")
 
 
-def _write_csv(cursor, path: Path) -> int:
+def _write_csv(
+    cursor,
+    path: Path,
+    dataset_key: str,
+    progress: ProgressCallback | None = None,
+) -> int:
     partial = path.with_name(path.name + ".partial")
     headers = [item[0] for item in cursor.description]
     count = 0
@@ -165,6 +171,8 @@ def _write_csv(cursor, path: Path) -> int:
                     break
                 writer.writerows(rows)
                 count += len(rows)
+                if progress is not None:
+                    progress(count, 0, f"Exporting {dataset_key}: {count:,} rows")
         partial.replace(path)
     except Exception:
         partial.unlink(missing_ok=True)
@@ -172,7 +180,12 @@ def _write_csv(cursor, path: Path) -> int:
     return count
 
 
-def _write_xlsx(cursor, path: Path) -> int:
+def _write_xlsx(
+    cursor,
+    path: Path,
+    dataset_key: str,
+    progress: ProgressCallback | None = None,
+) -> int:
     partial = path.with_name(f"{path.stem}.partial{path.suffix}")
     headers = [item[0] for item in cursor.description]
     workbook = xlsxwriter.Workbook(partial, {"constant_memory": True})
@@ -196,6 +209,8 @@ def _write_xlsx(cursor, path: Path) -> int:
                     fmt = datetime_fmt if isinstance(value, datetime) else date_fmt if isinstance(value, date) else None
                     worksheet.write(count + 1, column, value, fmt)
                 count += 1
+            if progress is not None:
+                progress(count, 0, f"Exporting {dataset_key}: {count:,} rows")
         worksheet.freeze_panes(1, 0)
         worksheet.autofilter(0, 0, max(0, count), max(0, len(headers) - 1))
         workbook.close()
@@ -217,6 +232,7 @@ def export_dataset(
     end: date,
     file_format: str = "csv",
     output: Path | None = None,
+    progress: ProgressCallback | None = None,
 ) -> ExportResult:
     try:
         dataset = DATASETS[dataset_key]
@@ -233,8 +249,16 @@ def export_dataset(
         / f"{_safe_name(dataset.key)}_{period}_{stamp}.{file_format}"
     ).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
+    if progress is not None:
+        progress(0, 0, f"Preparing {dataset.key} export")
     cursor = conn.execute(dataset.sql, [start, end] if dataset.dated else [])
-    rows = _write_csv(cursor, output) if file_format == "csv" else _write_xlsx(cursor, output)
+    rows = (
+        _write_csv(cursor, output, dataset.key, progress)
+        if file_format == "csv"
+        else _write_xlsx(cursor, output, dataset.key, progress)
+    )
+    if progress is not None:
+        progress(rows, 0, f"Exported {dataset.key}: {rows:,} rows")
     manifest = output.with_name(output.name + ".manifest.txt")
     manifest.write_text(
         "\n".join([

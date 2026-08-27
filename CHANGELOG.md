@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1 — 2026-08-27
+
+- Added a Windows CMD-safe progress bar to setup, refresh, model building,
+  report generation, clean exports, Custom Lab jobs, correction imports and
+  database backups.
+- Added named progress phases for schedules, activities, LILO, Agent Status,
+  attendance, conformance, correction gaps, RTA, intraday, PCS, source health
+  and data quality.
+- Added live scanned-row counts for streaming LILO and Call-by-Call ingestion
+  and live written-row counts for CSV/XLSX clean-data exports.
+- Kept redirected logs clean by showing progress only in an interactive
+  terminal; `WFMHUB_PROGRESS=1` forces it and `WFMHUB_PROGRESS=0` disables it.
+
 ## 0.3.0 — 2026-08-27
 
 - Added streaming, incremental Call-by-Call ingestion with FTE scope, typed

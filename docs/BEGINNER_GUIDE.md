@@ -13,7 +13,7 @@ sheets; detailed data is created only when you explicitly choose an export.
 
 ## First setup — one time
 
-1. Download `WFMHub-Portable-v0.3.0-win-x64.zip` from **Releases**.
+1. Download `WFMHub-Portable-v0.3.1-win-x64.zip` from **Releases**.
 2. Do not download GitHub's “Source code” ZIP.
 3. Right-click the downloaded ZIP and choose **Extract All**.
 4. Put the entire extracted `WFMHub` folder in a place where you can write, for
@@ -98,6 +98,26 @@ every Agent Status row is outside roster, RTA stays empty and source health says
 
 Unchanged files are fingerprinted and skipped. Their already-active kept and
 outside-roster counts still appear in the report.
+
+### Understand the progress bar
+
+While WFMHub works, the same line in the black window changes, for example:
+
+```text
+WFMHub [############----------------]  43% Building attendance
+```
+
+The words tell you exactly what it is doing. The percentage covers the whole
+job, not one source file. Very large LILO and Call-by-Call files temporarily
+show `working` plus the number of rows scanned. Large clean exports show the
+number of rows written. Do not close the window while the line is moving or its
+row count is increasing. A completed job reaches `100%`; an error changes the
+line to `FAILED` and then prints the normal error explanation.
+
+The bar uses plain Windows CMD characters and needs no installation. It is
+normally hidden when output is sent to a log or automation file. For support,
+run `set WFMHUB_PROGRESS=1` before the command to force the bar, or
+`set WFMHUB_PROGRESS=0` to hide it.
 
 ## Run the current month or another date range
 

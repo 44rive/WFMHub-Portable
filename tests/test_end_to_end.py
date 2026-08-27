@@ -161,13 +161,24 @@ class EndToEndTests(unittest.TestCase):
             write_source_root(config_file, source)
             config = load_config(home)
             with write_session(config) as conn:
-                ingest = ingest_all(conn, config)
+                ingest_progress = []
+                ingest = ingest_all(
+                    conn, config,
+                    progress=lambda current, total, label: ingest_progress.append((current, total, label)),
+                )
                 self.assertEqual(ingest.failed, 0)
                 self.assertEqual(ingest.loaded, 10)
                 self.assertEqual(ingest.scoped_out, 5)
+                self.assertEqual(ingest_progress[-1][:2], (10, 10))
+                self.assertTrue(any(total == 0 and "Call by Call" in label for _, total, label in ingest_progress))
                 for table in ("raw.schedule_shift", "raw.lilo", "raw.agent_status", "raw.call_leg"):
                     self.assertEqual(conn.execute(f"SELECT count(*) FROM {table} WHERE agent_id='999'").fetchone()[0], 0)
-                model = refresh_models(conn, config, "test", date(2026, 8, 1), date(2026, 8, 2))
+                model_progress = []
+                model = refresh_models(
+                    conn, config, "test", date(2026, 8, 1), date(2026, 8, 2),
+                    progress=lambda current, total, label: model_progress.append((current, total, label)),
+                )
+                self.assertEqual(model_progress[-1], (14, 14, "Models ready"))
                 saved_period = replace(config, period_start=date(2026, 8, 1), period_end=date(2026, 8, 1))
                 self.assertEqual(resolve_period(conn, saved_period, None, None, True), (date(2026, 8, 1), date(2026, 8, 1)))
                 self.assertEqual(resolve_period(conn, saved_period, None, None, False), (date(2026, 8, 1), date(2026, 8, 2)))
@@ -204,9 +215,14 @@ class EndToEndTests(unittest.TestCase):
                 self.assertTrue(report.name.startswith("WFMHub_Operations_"))
                 intraday_report = build_report_pack("intraday", conn, config, model.start, model.end)
                 pcs_report = build_report_pack("quality_pcs", conn, config, model.start, model.end)
-                clean_calls = export_dataset(conn, config, "calls", model.start, model.end)
+                export_progress = []
+                clean_calls = export_dataset(
+                    conn, config, "calls", model.start, model.end,
+                    progress=lambda current, total, label: export_progress.append((current, total, label)),
+                )
                 self.assertEqual(clean_calls.rows, 1)
                 self.assertTrue(clean_calls.manifest.exists())
+                self.assertEqual(export_progress[-1], (1, 0, "Exported calls: 1 rows"))
 
                 filtered_report = build_report(
                     conn, config, date(2026, 8, 1), date(2026, 8, 1),

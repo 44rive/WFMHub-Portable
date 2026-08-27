@@ -19,6 +19,7 @@ from .exports import DATASETS, export_dataset
 from .ingestion import ingest_all
 from .models import refresh_models
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
+from .progress import ProgressBar, ProgressCallback
 from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack
 
 
@@ -28,6 +29,19 @@ SOURCE_GROUPS = {
     "intraday": {"forecast", "apbe", "apfr"},
     "pcs": {"fte", "calls"},
 }
+
+
+def _phase_progress(bar: ProgressBar, start: float, end: float) -> ProgressCallback:
+    """Map a component's progress into its part of the overall bar."""
+
+    def report(current: int, total: int, label: str) -> None:
+        if total > 0:
+            fraction = min(1.0, max(0.0, current / total))
+            bar.update(start + (end - start) * fraction, label)
+        else:
+            bar.pulse(label)
+
+    return report
 
 
 def _home(value: str | None) -> Path:
@@ -68,9 +82,17 @@ def setup(home: Path, source_root: Path | None, non_interactive: bool) -> int:
         source_root = Path(entered) if entered else None
     if source_root:
         write_source_root(config_file, source_root)
-    config = load_config(home, config_file)
-    log = _logging(config)
-    migrations = migrate(config)
+    bar = ProgressBar()
+    try:
+        bar.update(0.1, "Reading configuration")
+        config = load_config(home, config_file)
+        log = _logging(config)
+        bar.update(0.4, "Preparing folders and database")
+        migrations = migrate(config)
+        bar.finish("Setup ready")
+    except Exception as exc:
+        bar.fail(str(exc))
+        raise
     print("\nSetup complete.")
     print(f"Source root : {config.source_root}")
     print(f"Database    : {config.database}")
@@ -92,22 +114,39 @@ def refresh(
     config = load_config(home)
     _logging(config)
     run_id = uuid.uuid4().hex
-    with write_session(config) as conn:
-        conn.execute("INSERT INTO meta.refresh_run(run_id, started_at, requested_start, requested_end, status) VALUES (?, ?, ?, ?, 'RUNNING')", [run_id, datetime.now(), start, end])
-        try:
-            ingested = ingest_all(conn, config, SOURCE_GROUPS[source_group])
-            model = refresh_models(conn, config, run_id, start, end, use_config_period)
-            report_paths = [
-                build_report_pack(pack, conn, config, model.start, model.end)
-                for pack in packs
-            ]
-            conn.execute(
-                """UPDATE meta.refresh_run SET finished_at=?, status='SUCCESS', files_loaded=?, files_skipped=?, files_failed=?, details=? WHERE run_id=?""",
-                [datetime.now(), ingested.loaded, ingested.skipped, ingested.failed, f"attendance={model.attendance_rows}; gaps={model.correction_rows}; quality={model.quality_rows}; scoped_out={ingested.scoped_out}", run_id],
-            )
-        except Exception as exc:
-            conn.execute("UPDATE meta.refresh_run SET finished_at=?, status='ERROR', details=? WHERE run_id=?", [datetime.now(), str(exc)[:4000], run_id])
-            raise
+    bar = ProgressBar()
+    bar.update(0.01, "Opening hub database")
+    try:
+        with write_session(config) as conn:
+            conn.execute("INSERT INTO meta.refresh_run(run_id, started_at, requested_start, requested_end, status) VALUES (?, ?, ?, ?, 'RUNNING')", [run_id, datetime.now(), start, end])
+            try:
+                ingested = ingest_all(
+                    conn, config, SOURCE_GROUPS[source_group],
+                    _phase_progress(bar, 0.03, 0.55),
+                )
+                model = refresh_models(
+                    conn, config, run_id, start, end, use_config_period,
+                    _phase_progress(bar, 0.55, 0.85),
+                )
+                report_paths = []
+                total_packs = len(packs)
+                for index, pack in enumerate(packs):
+                    report_start = 0.85 + (0.14 * index / max(1, total_packs))
+                    report_end = 0.85 + (0.14 * (index + 1) / max(1, total_packs))
+                    bar.update(report_start, f"Writing {pack} report")
+                    report_paths.append(build_report_pack(pack, conn, config, model.start, model.end))
+                    bar.update(report_end, f"Created {pack} report")
+                conn.execute(
+                    """UPDATE meta.refresh_run SET finished_at=?, status='SUCCESS', files_loaded=?, files_skipped=?, files_failed=?, details=? WHERE run_id=?""",
+                    [datetime.now(), ingested.loaded, ingested.skipped, ingested.failed, f"attendance={model.attendance_rows}; gaps={model.correction_rows}; quality={model.quality_rows}; scoped_out={ingested.scoped_out}", run_id],
+                )
+            except Exception as exc:
+                conn.execute("UPDATE meta.refresh_run SET finished_at=?, status='ERROR', details=? WHERE run_id=?", [datetime.now(), str(exc)[:4000], run_id])
+                raise
+        bar.finish("Refresh complete")
+    except Exception as exc:
+        bar.fail(str(exc))
+        raise
     print("\nRefresh complete.")
     print(f"Period      : {model.start} to {model.end}")
     print(f"Files       : {ingested.loaded} loaded, {ingested.skipped} unchanged, {ingested.failed} failed")
@@ -152,13 +191,26 @@ def build_reports(
     _logging(config)
     if output is not None and len(packs) != 1:
         raise ValueError("An explicit output path can be used with only one report pack")
-    with write_session(config) as conn:
-        model = refresh_models(conn, config, f"report-{uuid.uuid4().hex}", start, end, use_config_period)
-        paths = [
-            build_report_pack(pack, conn, config, model.start, model.end, output)
-            for pack in packs
-        ]
-    return paths
+    bar = ProgressBar()
+    bar.update(0.02, "Opening hub database")
+    try:
+        with write_session(config) as conn:
+            model = refresh_models(
+                conn, config, f"report-{uuid.uuid4().hex}", start, end,
+                use_config_period, _phase_progress(bar, 0.05, 0.70),
+            )
+            paths = []
+            for index, pack in enumerate(packs):
+                report_start = 0.70 + (0.29 * index / max(1, len(packs)))
+                report_end = 0.70 + (0.29 * (index + 1) / max(1, len(packs)))
+                bar.update(report_start, f"Writing {pack} report")
+                paths.append(build_report_pack(pack, conn, config, model.start, model.end, output))
+                bar.update(report_end, f"Created {pack} report")
+        bar.finish("Reports complete")
+        return paths
+    except Exception as exc:
+        bar.fail(str(exc))
+        raise
 
 
 def export_clean(
@@ -172,9 +224,23 @@ def export_clean(
 ) -> int:
     config = load_config(home)
     _logging(config)
-    with write_session(config) as conn:
-        model = refresh_models(conn, config, f"export-{uuid.uuid4().hex}", start, end, use_config_period)
-        result = export_dataset(conn, config, dataset, model.start, model.end, file_format, output)
+    bar = ProgressBar()
+    bar.update(0.02, "Opening hub database")
+    try:
+        with write_session(config) as conn:
+            model = refresh_models(
+                conn, config, f"export-{uuid.uuid4().hex}", start, end,
+                use_config_period, _phase_progress(bar, 0.05, 0.48),
+            )
+            bar.update(0.50, f"Preparing {dataset} export")
+            result = export_dataset(
+                conn, config, dataset, model.start, model.end, file_format, output,
+                _phase_progress(bar, 0.50, 0.99),
+            )
+        bar.finish("Export complete")
+    except Exception as exc:
+        bar.fail(str(exc))
+        raise
     print(f"Clean export : {result.path}")
     print(f"Rows         : {result.rows:,}")
     print(f"Manifest     : {result.manifest}")
@@ -191,17 +257,28 @@ def run_custom(
 ) -> int:
     config = load_config(home)
     _logging(config)
-    with write_session(config) as conn:
-        model = refresh_models(conn, config, f"custom-{uuid.uuid4().hex}", start, end, use_config_period)
-    conn = connect(config, read_only=True)
+    bar = ProgressBar()
+    bar.update(0.02, "Opening hub database")
     try:
-        result = (
-            run_python_job(conn, config, job, model.start, model.end)
-            if kind == "python"
-            else run_sql_job(conn, config, job, model.start, model.end)
-        )
-    finally:
-        conn.close()
+        with write_session(config) as conn:
+            model = refresh_models(
+                conn, config, f"custom-{uuid.uuid4().hex}", start, end,
+                use_config_period, _phase_progress(bar, 0.05, 0.65),
+            )
+        bar.pulse(f"Running custom {kind}: {job.name}")
+        conn = connect(config, read_only=True)
+        try:
+            result = (
+                run_python_job(conn, config, job, model.start, model.end)
+                if kind == "python"
+                else run_sql_job(conn, config, job, model.start, model.end)
+            )
+        finally:
+            conn.close()
+        bar.finish("Custom job complete")
+    except Exception as exc:
+        bar.fail(str(exc))
+        raise
     print(f"Custom job  : {result.job}")
     print(f"Output      : {result.output_dir}")
     if result.result is not None:
@@ -212,8 +289,15 @@ def run_custom(
 def import_decisions(home: Path, workbook: Path) -> int:
     config = load_config(home)
     _logging(config)
-    with write_session(config) as conn:
-        count = import_actions(conn, workbook)
+    bar = ProgressBar()
+    bar.update(0.1, "Reading correction decisions")
+    try:
+        with write_session(config) as conn:
+            count = import_actions(conn, workbook)
+        bar.finish("Decisions imported")
+    except Exception as exc:
+        bar.fail(str(exc))
+        raise
     print(f"Imported {count} correction decision(s).")
     return 0
 
@@ -255,7 +339,14 @@ def show_coverage(home: Path) -> int:
 
 def create_backup(home: Path) -> int:
     config = load_config(home)
-    path = backup_database(config)
+    bar = ProgressBar()
+    bar.update(0.1, "Copying and verifying database")
+    try:
+        path = backup_database(config)
+        bar.finish("Backup complete")
+    except Exception as exc:
+        bar.fail(str(exc))
+        raise
     print(f"Backup created: {path}")
     return 0
 

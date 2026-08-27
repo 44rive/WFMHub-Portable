@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 from .config import Config
 from .database import DatabaseConnection, DatabaseCursor
+from .progress import ProgressCallback
 from .utils import clip_intervals, interval_minutes, merge_intervals, subtract_intervals
 
 
@@ -992,23 +993,44 @@ def refresh_models(
     start: date | None = None,
     end: date | None = None,
     use_config_period: bool = True,
+    progress: ProgressCallback | None = None,
 ) -> ModelSummary:
+    total_stages = 14
+
+    def stage(completed: int, label: str) -> None:
+        if progress is not None:
+            progress(completed, total_stages, label)
+
     conn.execute("SAVEPOINT refresh_models")
     try:
+        stage(0, "Selecting reporting period")
         start, end = resolve_period(conn, config, start, end, use_config_period)
+        stage(1, "Loading schedules")
         schedules = _load_schedules(conn, start, end)
+        stage(2, "Loading schedule activities")
         events = _load_events(conn, start, end)
         events_by_agent = _events_by_agent(events)
+        stage(3, "Loading LILO")
         lilo, loaded_dates, seen_ids = _load_lilo(conn, start, end)
+        stage(4, "Loading Agent Status")
         statuses = _load_statuses(conn, start, end)
+        stage(5, "Building employee dimension")
         agents = _build_agents(conn)
+        stage(6, "Building attendance")
         attendance = _build_attendance(conn, config, schedules, events_by_agent, lilo, loaded_dates, seen_ids, agents)
+        stage(7, "Building conformance")
         conformance, exclusive = _build_conformance(conn, config, attendance, statuses)
+        stage(8, "Finding correction gaps")
         corrections = _build_corrections(conn, config, attendance, conformance, exclusive)
+        stage(9, "Building real-time adherence")
         rta = _build_rta(conn, config, schedules, events_by_agent, statuses, agents)
+        stage(10, "Building intraday actual and forecast")
         forecast, actual = _build_intraday(conn, start, end)
+        stage(11, "Building Agent PCS")
         pcs = _build_pcs(conn, config, start, end)
+        stage(12, "Checking source health")
         _build_source_health(conn, config)
+        stage(13, "Running data-quality checks")
         quality = _build_quality(conn, config, run_id, start, end)
         result = ModelSummary(
             start=start, end=end, attendance_rows=len(attendance), conformance_rows=len(conformance),
@@ -1016,6 +1038,7 @@ def refresh_models(
             intraday_rows=actual, pcs_rows=pcs, quality_rows=quality,
         )
         conn.execute("RELEASE SAVEPOINT refresh_models")
+        stage(total_stages, "Models ready")
         return result
     except Exception:
         conn.execute("ROLLBACK TO SAVEPOINT refresh_models")
