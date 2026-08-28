@@ -48,7 +48,7 @@ def make_schedule(path: Path):
         writer.writerow(["Agent 300", "300", "August", "", "", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ""])
         writer.writerow(["Worldwide Agent", "999", "August", "", "", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ""])
         writer.writerow(["08/02/2026", "", "", "", "", "", ""])
-        writer.writerow(["Agent 300", "300", "August", "", "", ".ORG | Work 08/02/2026 8:00 AM-08/02/2026 4:00 PM", ""])
+        writer.writerow(["Agent 300", "300", "August", "", "", ".ORG | Work 08/02/2026 8:00 AM-08/02/2026 4:00 PM", ".ORG | Late 08/02/2026 8:00 AM-08/02/2026 8:10 AM;"])
 
 
 def make_lilo(path: Path, rows):
@@ -65,6 +65,7 @@ def make_status(path: Path):
         writer = csv.writer(handle)
         writer.writerow(["[Serial Number]", "[Status]", "[Status Start Date and Time]", "[Agent]", "[Agent ID]", "[Status Duration]", "[Queue]"])
         writer.writerow(["one", "Available", "8/1/2026 9:00", "Agent 100", "100", "1:00:00", "Queue"])
+        writer.writerow(["two", "Logged Off", "8/1/2026 12:00", "Agent 100", "100", "0:15:00", "Queue"])
         writer.writerow(["world", "Available", "8/1/2026 9:00", "Worldwide Agent", "999", "1:00:00", "Queue"])
 
 
@@ -168,9 +169,9 @@ class EndToEndTests(unittest.TestCase):
                     progress=lambda current, total, label: ingest_progress.append((current, total, label)),
                 )
                 self.assertEqual(ingest.failed, 0)
-                self.assertEqual(ingest.loaded, 9)
-                self.assertEqual(ingest.scoped_out, 4)
-                self.assertEqual(ingest_progress[-1][:2], (9, 9))
+                self.assertEqual(ingest.loaded, 10)
+                self.assertEqual(ingest.scoped_out, 5)
+                self.assertEqual(ingest_progress[-1][:2], (10, 10))
                 self.assertTrue(any(total == 0 and "Call by Call" in label for _, total, label in ingest_progress))
                 for table in ("raw.schedule_shift", "raw.lilo", "raw.agent_status", "raw.call_leg"):
                     self.assertEqual(conn.execute(f"SELECT count(*) FROM {table} WHERE agent_id='999'").fetchone()[0], 0)
@@ -185,11 +186,19 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(resolve_period(conn, saved_period, None, None, False), (date(2026, 8, 1), date(2026, 8, 2)))
                 attendance = {row[0]: row[1] for row in conn.execute("SELECT agent_day_key, attendance_result FROM mart.attendance_agent_day").fetchall()}
                 self.assertEqual(attendance["20260801-200"], "No show")
-                self.assertEqual(attendance["20260801-300"], "Missing LILO roster row")
+                self.assertEqual(attendance["20260801-300"], "Missing actual evidence")
                 late = conn.execute("SELECT gap_start, gap_end, gap_minutes FROM mart.correction_candidate WHERE agent_id='100' AND detected_issue='Late'").fetchone()
-                self.assertEqual(str(late[0]), "2026-08-01 08:10:00")
+                self.assertEqual(str(late[0]), "2026-08-01 08:00:00")
                 self.assertEqual(str(late[1]), "2026-08-01 08:20:00")
-                self.assertEqual(late[2], 10)
+                self.assertEqual(late[2], 20)
+                self.assertEqual(
+                    conn.execute("SELECT verint_reconciliation FROM mart.correction_candidate WHERE agent_id='100' AND detected_issue='Late'").fetchone()[0],
+                    "PARTIAL",
+                )
+                status_gap = conn.execute(
+                    "SELECT gap_minutes, observed_source, verint_reconciliation FROM mart.correction_candidate WHERE agent_id='100' AND detected_issue='Mid-shift logged off'"
+                ).fetchone()
+                self.assertEqual(status_gap, (15, "AGENT_STATUS", "NOT_CORRECTED"))
                 self.assertEqual(conn.execute("SELECT count(*) FROM mart.conformance_agent_day").fetchone()[0], 0)
                 self.assertEqual(model.forecast_rows, 1)
                 self.assertEqual(model.intraday_rows, 2)
@@ -200,8 +209,20 @@ class EndToEndTests(unittest.TestCase):
                 absence_100 = conn.execute(
                     "SELECT absence_minutes, absence_rate FROM mart.absence_agent_day WHERE agent_day_key='20260801-100'"
                 ).fetchone()
-                self.assertEqual(absence_100[0], 20)
-                self.assertAlmostEqual(absence_100[1], 20 / 480)
+                self.assertEqual(absence_100[0], 35)
+                self.assertAlmostEqual(absence_100[1], 35 / 480)
+                self.assertEqual(
+                    conn.execute("SELECT count(*) FROM mart.absence_event WHERE evidence_type IN ('SHIFT_EVENT','SHIFT_ASSIGNMENT')").fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    conn.execute("SELECT absence_minutes FROM mart.absence_agent_day WHERE agent_day_key='20260802-300'").fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    conn.execute("SELECT exception_type FROM mart.verint_final_exception WHERE agent_id='300'").fetchone()[0],
+                    "VERINT_FINAL_WITHOUT_OBSERVED_GAP",
+                )
                 service = conn.execute(
                     "SELECT sum(answered), sum(offered), sum(handled_seconds) FROM mart.service_interval"
                 ).fetchone()
@@ -279,12 +300,12 @@ class EndToEndTests(unittest.TestCase):
             self.assertTrue(report.exists())
             workbook = load_workbook(report, read_only=True, data_only=True)
             try:
-                self.assertEqual(workbook.sheetnames, ["START_HERE", "SUMMARY", "ATTENDANCE", "GAPS", "DATA_QUALITY", "SOURCE_HEALTH"])
+                self.assertEqual(workbook.sheetnames, ["START_HERE", "SUMMARY", "ATTENDANCE", "GAPS", "VERINT_FINAL_CHECK", "DATA_QUALITY", "SOURCE_HEALTH"])
             finally:
                 workbook.close()
             intraday_book = load_workbook(intraday_report, read_only=True, data_only=True)
             try:
-                self.assertEqual(intraday_book.sheetnames, ["START_HERE", "SUMMARY", "ACTUALS", "FORECAST", "DATA_QUALITY", "SOURCE_HEALTH"])
+                self.assertEqual(intraday_book.sheetnames, ["START_HERE", "SUMMARY", "ACTUALS", "FORECAST", "PIVOT_SCOPE_HOUR", "QUEUE_MAPPING", "DATA_QUALITY", "SOURCE_HEALTH"])
             finally:
                 intraday_book.close()
             pcs_book = load_workbook(pcs_report, read_only=True, data_only=True)

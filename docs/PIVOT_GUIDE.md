@@ -96,4 +96,4 @@ PivotTable for Service, Absence, Forecast, and PCS.
   is the correct one.
 - Missing agents: check FTE scope and `SOURCE_HEALTH`.
 - Missing dates: check the latest source date and selected report period.
-- Unexplained absence: check `ABSENCE_EVENTS`, `UNMAPPED`, and the rule version.
+- Unexplained absence: check `ABSENCE_EVENTS`, `NOT_CORRECTED`, `VERINT_ONLY`, and the rule version.

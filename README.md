@@ -8,13 +8,19 @@ Pivot, ODBC, DuckDB, or Python in Excel.
 Raw extracts are never edited and are never copied into normal report sheets.
 The SQLite hub remains the source of truth.
 
-## What v0.4 adds
+## What v0.5 adds
 
 - One editable, validated business rulebook: `config\wfm_rules.toml`.
-- Rule-versioned payroll absence, vacation, unpaid leave, shrinkage, late,
-  early-leave, no-show, spell, and Bradford calculations.
+- Attendance and absence detected from LILO boundaries plus Agent Status
+  intervals, without calculating adherence.
+- Automatic `CORRECTED`, `PARTIAL`, and `NOT_CORRECTED` reconciliation against
+  the post-day Verint Activities/final schedule export.
+- Rule-versioned absence, vacation, unpaid leave, shrinkage, late, early-leave,
+  no-show, spell, and Bradford calculations.
 - Automatic support for both Verint Activities and wide StartEndTimes extracts.
-- APBE, APFR, and APDE service actuals plus separate Verint forecast.
+- APBE/APFR/APDE XLSX or CSV service actuals plus volume-only or full Verint
+  forecast extracts.
+- Editable `config\queue_mapping.csv` with detailed and comparison scopes.
 - Two named SL definitions: gross and short-abandon-adjusted.
 - Service availability defined only as `answered / offered`; it is never agent
   availability or adherence.
@@ -24,9 +30,8 @@ The SQLite hub remains the source of truth.
   and rulebook SHA-256.
 - A safer Rules tool that validates formulas before any refresh.
 - A redesigned CMD dashboard showing the active rule version.
-- Agent Status and adherence disabled by default. The legacy database tables
-  remain readable for backward compatibility, but new reports contain no
-  adherence KPI.
+- Streamed Agent Status enabled as attendance evidence. Legacy conformance/RTA
+  tables remain empty; reports contain no adherence KPI.
 
 ## Existing capabilities
 
@@ -34,7 +39,8 @@ The SQLite hub remains the source of truth.
   admits a row; populated Verint `Data Source IDs` remain the operational ID.
 - Immutable, fingerprinted ingestion with safe reprocessing after roster changes.
 - Multi-day and overlapping-file support using row dates rather than filenames.
-- Attendance and correction gaps from Verint schedules plus Storm LILO.
+- Attendance and correction gaps from Verint schedule boundaries, Storm LILO,
+  and Storm Agent Status.
 - Forecast and staffing requirements from Verint only.
 - Agent call performance and PCS from FTE-scoped Call-by-Call extracts.
 - Clean CSV/XLSX exports and trusted custom portable-Python/read-only SQL jobs.
@@ -42,7 +48,7 @@ The SQLite hub remains the source of truth.
 
 ## Windows quick start
 
-1. Download `WFMHub-Portable-v0.4.0-win-x64.zip` from GitHub Releases. Do not
+1. Download `WFMHub-Portable-v0.5.0-win-x64.zip` from GitHub Releases. Do not
    use GitHub's automatic Source code ZIP.
 2. Choose **Extract All** and keep the complete `WFMHub` folder together.
 3. Double-click `SETUP.cmd` once and select the folder containing `FTE`,
@@ -76,13 +82,13 @@ curated Excel Tables designed as PivotTable sources. They are not raw extracts.
 | Source | Used for |
 |---|---|
 | FTE Agent sheet | Agent scope and organisation context |
-| Verint Activities | Schedule assignments and detailed activity intervals |
-| Verint StartEndTimes | Schedule start/end and assignment by agent/day |
-| Storm LILO | Actual first login and last logout for attendance evidence |
+| Verint StartEndTimes | Planned start/end boundary and final assignment reference |
+| Storm LILO | Observed daily presence, first login, and last logout |
+| Storm Agent Status | Observed within-shift working/non-working intervals; no adherence |
+| Verint Activities | Post-day final correction ledger used only for reconciliation |
 | Verint Forecast | Forecast and staffing requirements only |
 | Storm APBE/APFR/APDE | Service actuals only |
 | Storm Call by Call | Agent performance and PCS |
-| Storm Agent Status | Optional legacy compatibility only; disabled by default |
 
 Filename dates are hints. Each dated row or Verint date column determines its
 business date. Missing files and missing LILO roster rows are never invented as
@@ -103,6 +109,10 @@ elements are rejected.
 
 Every modeled row stores the rule version and SHA-256 so a result can be traced
 back to its exact definitions.
+
+Queue/file mappings live separately in `config\queue_mapping.csv`. Change the
+mapping there and refresh: the hub remaps existing raw data without changing or
+reloading the extracts.
 
 ## Developer start
 

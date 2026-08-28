@@ -49,6 +49,9 @@ def _display_header(name: str) -> str:
         "abandon_rate": "Abandon Rate %", "absence_rate": "Absence Rate %",
         "vacation_rate": "Vacation Rate %", "shrinkage_rate": "Shrinkage Rate %",
         "rule_sha256": "Rule SHA-256", "rule_version": "Rule Version",
+        "forecast_attainment": "Forecast Attainment %",
+        "gross_sl_20s": "Gross SL 20s %", "adjusted_sl_20s": "Adjusted SL 20s %",
+        "verint_reconciliation": "Verint Final Check",
     }
     return custom.get(name, name.replace("_", " ").title().replace("Id", "ID"))
 
@@ -158,7 +161,8 @@ def _summary_sheet(report: ExcelReport, conn: DatabaseConnection, start: date, e
         ("Scheduled agent-days", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND assignment_type <> 'Off'", [start, end]),
         ("Scheduled hours", "SELECT coalesce(sum(scheduled_minutes),0)/60.0 FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND assignment_type <> 'Off'", [start, end]),
         ("Detected gap hours", "SELECT coalesce(sum(gap_minutes),0)/60.0 FROM mart.correction_candidate WHERE business_date BETWEEN ? AND ?", [start, end]),
-        ("Open corrections", "SELECT count(*) FROM mart.correction_candidate WHERE business_date BETWEEN ? AND ? AND validation_status='Open'", [start, end]),
+        ("Not corrected in Verint", "SELECT count(*) FROM mart.correction_candidate WHERE business_date BETWEEN ? AND ? AND verint_reconciliation='NOT_CORRECTED'", [start, end]),
+        ("Corrected in Verint", "SELECT count(*) FROM mart.correction_candidate WHERE business_date BETWEEN ? AND ? AND verint_reconciliation='CORRECTED'", [start, end]),
         ("No-shows", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND attendance_result='No show'", [start, end]),
         ("Present", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND attendance_result='Present'", [start, end]),
         ("Absence hours", "SELECT coalesce(sum(absence_minutes),0)/60.0 FROM mart.absence_agent_day WHERE business_date BETWEEN ? AND ?", [start, end]),
@@ -201,15 +205,15 @@ def _start_sheet(report: ExcelReport, config: Config, start: date, end: date, ge
             "1. Put untouched exports in their normal source folders.",
             "2. Run WFMHub.cmd and choose Refresh + build report.",
             "3. Open SOURCE_HEALTH first. If it is red or ERROR, stop.",
-            "4. Review ATTENDANCE and GAPS. Adherence is intentionally not calculated in this report.",
+            "4. Review ATTENDANCE, GAPS and VERINT_FINAL_CHECK. Adherence is intentionally not calculated.",
         ]),
         (11, "Monthly gaps", [
             "Run a custom period from the first through last day of the month.",
-            "Missing source date is not a no-show. Missing roster row is not a no-show.",
-            "A no-show requires a loaded LILO file, the agent row, and both times blank.",
+            "LILO and Agent Status are the observed evidence. Verint Activities never create an initial gap.",
+            "A no-show requires a loaded LILO row with both times blank and no active Agent Status evidence.",
         ]),
         (17, "Correction decisions", [
-            "Blue columns on GAPS may be edited: activity, status, owner, comment and injected date.",
+            "Blue columns on GAPS may be edited. Verint Final Check is automatic from the latest Activities export.",
             "Save the report, then choose Import correction decisions in WFMHub.cmd.",
             "Only Validated or Injected decisions should be used operationally.",
         ]),
@@ -254,7 +258,9 @@ def build_report(
                    a.scheduled_start, a.scheduled_end, a.scheduled_minutes, a.assignment_type,
                    a.first_login, a.last_logout, a.raw_late_minutes, a.raw_early_leave_minutes,
                    a.uncoded_late_minutes, a.uncoded_early_leave_minutes, a.no_show_minutes,
-                   a.attendance_result, a.attendance_percent, a.schedule_source, a.lilo_source
+                   a.actual_first_seen, a.actual_last_seen, a.actual_evidence,
+                   a.status_covered_minutes, a.attendance_result, a.attendance_percent,
+                   a.schedule_source, a.lilo_source, a.status_source
             FROM mart.attendance_agent_day a
             WHERE a.business_date BETWEEN ? AND ?
             ORDER BY a.business_date, CASE a.attendance_result WHEN 'No show' THEN 1 WHEN 'Data not loaded' THEN 2 ELSE 5 END, a.agent_name
@@ -265,7 +271,9 @@ def build_report(
         headers, rows = _query(conn, """
             SELECT correction_id, business_date, agent_id, agent_name, team_leader, ops_manager, lob,
                    scheduled_start, scheduled_end, first_login, last_logout, priority, detected_issue,
-                   gap_start, gap_end, gap_minutes, confidence, suggested_activity, source_file,
+                   gap_start, gap_end, gap_minutes, confidence, observed_source,
+                   suggested_activity, source_file, verint_reconciliation,
+                   verint_activity, verint_category, verint_overlap_minutes, verint_source_file,
                    confirmed_activity, validation_status, owner, comment, injected_date
             FROM mart.correction_candidate
             WHERE business_date BETWEEN ? AND ?
@@ -279,6 +287,19 @@ def build_report(
             headers, rows,
             editable_headers={"Confirmed Activity", "Validation Status", "Owner", "Comment", "Injected Date"},
             exception_column="Confidence",
+        )
+
+        headers, rows = _query(conn, """
+            SELECT business_date, agent_id, agent_name, activity, category,
+                   event_start, event_end, minutes, exception_type, source_file
+            FROM mart.verint_final_exception
+            WHERE business_date BETWEEN ? AND ?
+            ORDER BY business_date, agent_name, event_start
+        """, [start, end])
+        report.add_table_sheet(
+            "VERINT_FINAL_CHECK", "Verint final activities without observed gaps",
+            "These final Verint codes were not supported by a LILO/Agent Status gap. Review source coverage or the correction.",
+            headers, rows, exception_column="Exception Type",
         )
 
         headers, rows = _query(
@@ -297,7 +318,7 @@ def build_report(
                                                modified_at, loaded_at, row_count, rejected_count,
                                                scoped_out_count, status, details
                                         FROM mart.source_health
-                                        WHERE source_family IN ('fte','schedule','lilo')
+                                        WHERE source_family IN ('fte','schedule','lilo','agent_status')
                                         ORDER BY source_family""")
         report.add_table_sheet("SOURCE_HEALTH", "Source health", "What was found, loaded, rejected or missing for every configured feed.", headers, rows, exception_column="Status")
     except Exception:

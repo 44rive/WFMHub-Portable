@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 — 2026-08-28
+
+- Changed the attendance/absence source of truth to StartEndTimes schedule
+  boundaries plus observed LILO and Agent Status evidence.
+- Made Verint Activities a post-day reconciliation ledger only; every observed
+  gap is labelled `CORRECTED`, `PARTIAL`, or `NOT_CORRECTED`, and Verint-only
+  intervals are surfaced separately.
+- Enabled Agent Status by default for gap evidence while keeping adherence,
+  conformance, and RTA disabled; added bounded streaming and date indexing for
+  large multi-day status files.
+- Added the editable, hashed `config/queue_mapping.csv`, detailed/comparison
+  scopes, and hourly mapped actual-versus-forecast output.
+- Added support for the supplied volume-only Verint forecasts and bracketed
+  APDE CSV export while preserving missing measures as NULL.
+- Corrected the supplied Ford NL queue mappings so they roll up to Ford NL.
+
 ## 0.4.0 — 2026-08-28
 
 - Added `config/wfm_rules.toml`, a safe, editable, versioned source of truth for

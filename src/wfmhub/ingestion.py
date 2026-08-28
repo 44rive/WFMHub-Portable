@@ -183,16 +183,16 @@ def discover_sources(config: Config) -> list[SourceCandidate]:
     if single.is_file() and not single.name.startswith("~$"):
         candidates.append(SourceCandidate("fte", single))
     specs = (
-        ("schedule", "schedule_folder", "*.txt"),
-        ("lilo", "lilo_folder", "*.csv"),
-        ("agent_status", "agent_status_folder", "*.csv"),
-        ("forecast", "forecast_folder", "*.txt"),
-        ("apbe", "apbe_folder", "*.xlsx"),
-        ("apfr", "apfr_folder", "*.xlsx"),
-        ("apde", "apde_folder", "*.xlsx"),
-        ("calls", "call_folder", "*.csv"),
+        ("schedule", "schedule_folder", ("*.txt",)),
+        ("lilo", "lilo_folder", ("*.csv",)),
+        ("agent_status", "agent_status_folder", ("*.csv",)),
+        ("forecast", "forecast_folder", ("*.txt",)),
+        ("apbe", "apbe_folder", ("*.xlsx", "*.csv")),
+        ("apfr", "apfr_folder", ("*.xlsx", "*.csv")),
+        ("apde", "apde_folder", ("*.xlsx", "*.csv")),
+        ("calls", "call_folder", ("*.csv",)),
     )
-    for family, key, pattern in specs:
+    for family, key, patterns in specs:
         if family in {"agent_status"} and not config.modules.get("agent_status", True):
             continue
         if family in {"forecast"} and not config.modules.get("forecast", True):
@@ -204,9 +204,10 @@ def discover_sources(config: Config) -> list[SourceCandidate]:
         folder = config.source_path(key)
         if not folder.is_dir():
             continue
-        for path in sorted(folder.glob(pattern)):
-            if path.is_file() and not path.name.startswith("~$"):
-                candidates.append(SourceCandidate(family, path.resolve()))
+        for pattern in patterns:
+            for path in sorted(folder.glob(pattern)):
+                if path.is_file() and not path.name.startswith("~$"):
+                    candidates.append(SourceCandidate(family, path.resolve()))
     return candidates
 
 
@@ -586,44 +587,105 @@ def _insert_lilo_direct(
     return count, scoped_out, rejected
 
 
+STATUS_REQUIRED_HEADERS = {
+    "[Serial Number]", "[Status]", "[Status Start Date and Time]", "[Agent]",
+    "[Agent ID]", "[Status Duration]", "[Queue]",
+}
+
+
+def _status_reader(path: Path):
+    handle = path.open("r", encoding="utf-8-sig", newline="")
+    reader = csv.DictReader(handle)
+    missing = sorted(STATUS_REQUIRED_HEADERS - set(reader.fieldnames or []))
+    if missing:
+        handle.close()
+        raise SourceSchemaError(f"Agent Status missing columns: {', '.join(missing)}")
+    return handle, reader
+
+
+def _status_record(
+    row: dict[str, Any], file_id: str, source_row: int, scope: AgentScope | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    agent_id = normalize_id(row.get("[Agent ID]"))
+    if scope is not None:
+        resolved_id = scope.resolve(agent_id, row.get("[Agent]"))
+        if resolved_id is None:
+            return None, "outside roster"
+        agent_id = resolved_id
+    start = parse_datetime(row.get("[Status Start Date and Time]"))
+    seconds = duration_seconds(row.get("[Status Duration]"))
+    end = start + timedelta(seconds=seconds) if start is not None and seconds is not None else None
+    if not start or not end or end <= start:
+        return None, "invalid status interval"
+    serial = _clean(row.get("[Serial Number]"))
+    if not serial:
+        serial = hashlib.sha256(repr(sorted(row.items())).encode("utf-8")).hexdigest()
+    status = _clean(row.get("[Status]"))
+    return {
+        "source_file_id": file_id, "source_row": source_row,
+        # A range filename is only a label; every row timestamp is authoritative.
+        "serial_number": serial, "extract_date": start.date(), "agent_id": agent_id,
+        "agent_name": _clean(row.get("[Agent]")), "status": status,
+        "actual_category": classify_status(status), "status_start": start,
+        "status_end": end, "duration_seconds": seconds, "queue": _clean(row.get("[Queue]")),
+    }, None
+
+
 def parse_agent_status(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
     output: list[dict[str, Any]] = []
     rejected: list[str] = []
     scoped_out = 0
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        required = {"[Serial Number]", "[Status]", "[Status Start Date and Time]", "[Agent]", "[Agent ID]", "[Status Duration]", "[Queue]"}
-        missing = sorted(required - set(reader.fieldnames or []))
-        if missing:
-            raise SourceSchemaError(f"Agent Status missing columns: {', '.join(missing)}")
+    handle, reader = _status_reader(path)
+    try:
         for source_row, row in enumerate(reader, 2):
-            agent_id = normalize_id(row.get("[Agent ID]"))
-            if scope is not None:
-                resolved_id = scope.resolve(agent_id, row.get("[Agent]"))
-                if resolved_id is None:
-                    scoped_out += 1
-                    continue
-                agent_id = resolved_id
-            start = parse_datetime(row.get("[Status Start Date and Time]"))
-            seconds = duration_seconds(row.get("[Status Duration]"))
-            end = start + timedelta(seconds=seconds) if start is not None and seconds is not None else None
-            serial = _clean(row.get("[Serial Number]"))
-            if not serial:
-                serial = hashlib.sha256(repr(sorted(row.items())).encode("utf-8")).hexdigest()
-            if not start or not end or end <= start:
-                rejected.append(f"line {source_row}: invalid status interval")
-            output.append({
-                "source_file_id": file_id, "source_row": source_row,
-                # Agent Status exports can contain one day or a date range. The
-                # row timestamp is the authority; the filename is only a label.
-                "serial_number": serial, "extract_date": start.date() if start else None,
-                "agent_id": agent_id,
-                "agent_name": _clean(row.get("[Agent]")), "status": _clean(row.get("[Status]")),
-                "actual_category": classify_status(_clean(row.get("[Status]"))),
-                "status_start": start, "status_end": end, "duration_seconds": seconds,
-                "queue": _clean(row.get("[Queue]")),
-            })
+            record, reason = _status_record(row, file_id, source_row, scope)
+            if reason == "outside roster":
+                scoped_out += 1
+            elif reason:
+                rejected.append(f"line {source_row}: {reason}")
+            elif record is not None:
+                output.append(record)
+    finally:
+        handle.close()
     return ParseResult({"raw.agent_status": output}, rejected, scoped_out)
+
+
+def _insert_status_direct(
+    conn: DatabaseConnection,
+    path: Path,
+    file_id: str,
+    scope: AgentScope,
+    progress: ProgressCallback | None = None,
+) -> tuple[int, int, int]:
+    count = scoped_out = rejected = processed = 0
+    batch: list[dict[str, Any]] = []
+    handle, reader = _status_reader(path)
+    try:
+        for source_row, row in enumerate(reader, 2):
+            processed += 1
+            if progress is not None and processed % 5000 == 0:
+                progress(processed, 0, f"Agent Status: {processed:,} rows scanned")
+            record, reason = _status_record(row, file_id, source_row, scope)
+            if reason == "outside roster":
+                scoped_out += 1
+                continue
+            if reason:
+                rejected += 1
+                continue
+            if record is not None:
+                batch.append(record)
+            if len(batch) >= 5000:
+                _insert_rows(conn, "raw.agent_status", batch)
+                count += len(batch)
+                batch.clear()
+    finally:
+        handle.close()
+    if batch:
+        _insert_rows(conn, "raw.agent_status", batch)
+        count += len(batch)
+    if progress is not None and processed:
+        progress(processed, 0, f"Agent Status: {processed:,} rows scanned")
+    return count, scoped_out, rejected
 
 
 CALL_REQUIRED_HEADERS = {
@@ -827,7 +889,9 @@ def parse_forecast(path: Path, file_id: str) -> ParseResult:
     if header_index is None:
         raise SourceSchemaError("Forecast Queue Name / Date / Time header was not found")
     reader = csv.DictReader(lines[header_index:], delimiter="\t")
-    required = {"Queue Name", "Date", "Time", "Time Interval", *FORECAST_NAMES.values()}
+    # Some reviewed Verint exports intentionally contain volume only. The
+    # remaining forecast measures are optional and stay NULL, never invented.
+    required = {"Queue Name", "Date", "Time", "Time Interval", FORECAST_NAMES["volume_forecast"]}
     missing = sorted(required - set(reader.fieldnames or []))
     if missing:
         raise SourceSchemaError(f"Forecast missing columns: {', '.join(missing)}")
@@ -864,11 +928,12 @@ def _find_excel_header(workbook, path: Path) -> tuple[Any, list[str], Any]:
     raise SourceSchemaError(f"Could not find the queue-actual header row in {path.name}")
 
 
-def parse_queue_actual(path: Path, file_id: str, source_system: str) -> ParseResult:
-    workbook = load_workbook(path, read_only=True, data_only=True, keep_links=False)
-    try:
-        sheet, headers, state = _find_excel_header(workbook, path)
-        header_row, rows = state
+def _parse_queue_actual_rows(
+    headers: list[str],
+    rows,
+    file_id: str,
+    source_system: str,
+) -> ParseResult:
         normalized = {normalize_header(name): index for index, name in enumerate(headers) if name}
 
         def require(*names: str) -> int:
@@ -889,7 +954,7 @@ def parse_queue_actual(path: Path, file_id: str, source_system: str) -> ParseRes
         ans20_i = require("Answered_Calls <= 20s", "APPELS RÉP <= 20s", "APPELS REP <= 20s", "Answered Calls <= 20s")
         ans30_i = require("Answered_Calls <= 30s", "APPELS RÉP <= 30s", "APPELS REP <= 30s", "Answered Calls <= 30s")
         abandoned20_i = next((normalized.get(normalize_header(name)) for name in (
-            "Abandoned_Calls <= 20s", "Abandoned Calls <= 20s",
+            "Abandoned_Calls <= 20s", "Abandoned_Calls (w/o s.c.) <= 20s", "Abandoned Calls <= 20s",
             "APPELS ABAN <= 20s", "Abandoned <= 20s",
         ) if normalized.get(normalize_header(name)) is not None), None)
         short_i = require("Short_calls < 5s", "Short Calls < 5s")
@@ -897,12 +962,15 @@ def parse_queue_actual(path: Path, file_id: str, source_system: str) -> ParseRes
         talk_i = require("Average_Talk_Time", "Average Talk Time")
         hold_i = require("Average_Hold_Time", "Average Hold Time")
         wrap_i = require("Average Total Wrap Time", "Average_Total_Wrap_Time")
+        handled_i = next((normalized.get(normalize_header(name)) for name in (
+            "Average_Handled_Time", "Average Handled Time", "Average Handle Time",
+        ) if normalized.get(normalize_header(name)) is not None), None)
         queue_i = normalized.get("QUEUE")
         queue_id_i = normalized.get("QUEUEID")
         language_i = normalized.get("LANGUAGE")
         output: list[dict[str, Any]] = []
         rejected: list[str] = []
-        for source_row, values in enumerate(rows, header_row + 1):
+        for source_row, values in rows:
             get = lambda index: values[index] if index is not None and index < len(values) else None
             business_date = parse_date(get(date_i))
             if business_date is None:
@@ -931,10 +999,26 @@ def parse_queue_actual(path: Path, file_id: str, source_system: str) -> ParseRes
                 "abandoned": _number(get(abandoned_i)), "short_calls": _number(get(short_i)),
                 "answered_15s": _number(get(ans15_i)), "answered_20s": _number(get(ans20_i)),
                 "answered_30s": _number(get(ans30_i)), "asa_seconds": duration_seconds(get(asa_i)),
-                "aht_seconds": sum(parts) if parts else None,
+                "aht_seconds": duration_seconds(get(handled_i)) if handled_i is not None else (sum(parts) if parts else None),
                 "abandoned_20s": _number(get(abandoned20_i)) if abandoned20_i is not None else None,
             })
         return ParseResult({"raw.queue_actual": output}, rejected)
+
+
+def parse_queue_actual(path: Path, file_id: str, source_system: str) -> ParseResult:
+    if path.suffix.lower() == ".csv":
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.reader(handle)
+            try:
+                headers = [str(value or "").strip() for value in next(reader)]
+            except StopIteration as exc:
+                raise SourceSchemaError(f"{source_system} file is empty") from exc
+            return _parse_queue_actual_rows(headers, enumerate(reader, 2), file_id, source_system)
+    workbook = load_workbook(path, read_only=True, data_only=True, keep_links=False)
+    try:
+        _, headers, state = _find_excel_header(workbook, path)
+        header_row, rows = state
+        return _parse_queue_actual_rows(headers, enumerate(rows, header_row + 1), file_id, source_system)
     finally:
         workbook.close()
 
@@ -1074,7 +1158,7 @@ def ingest_all(
         discovered_at = datetime.now()
         modified_at = datetime.fromtimestamp(stat.st_mtime)
         try:
-            result = None if candidate.family in {"lilo", "calls"} else PARSERS[candidate.family](path, file_id, scope)
+            result = None if candidate.family in {"lilo", "agent_status", "calls"} else PARSERS[candidate.family](path, file_id, scope)
             conn.execute("BEGIN TRANSACTION")
             try:
                 conn.execute(
@@ -1085,6 +1169,10 @@ def ingest_all(
                     date_field, fallback_date = _validate_lilo_header(path)
                     row_count, scoped_out_count, rejected_count = _insert_lilo_direct(
                         conn, path, file_id, date_field, fallback_date, scope, progress
+                    )
+                elif candidate.family == "agent_status":
+                    row_count, scoped_out_count, rejected_count = _insert_status_direct(
+                        conn, path, file_id, scope, progress
                     )
                 elif candidate.family == "calls":
                     row_count, scoped_out_count, rejected_count = _insert_calls_direct(

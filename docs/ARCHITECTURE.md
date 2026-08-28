@@ -27,6 +27,8 @@ WFMHub/
 ├── config/wfmhub.toml          user configuration
 ├── config/default_rules.toml   shipped calculation defaults
 ├── config/wfm_rules.toml       editable/versioned business rulebook
+├── config/default_queue_mapping.csv shipped mapping defaults
+├── config/queue_mapping.csv    editable queue/file/scope mapping
 ├── database/wfm.sqlite3        durable SQLite hub
 ├── input/                      persistent human inputs
 ├── custom/                     Python and read-only SQL job templates
@@ -57,6 +59,7 @@ details remain in one module.
 | `meta.refresh_run` | One refresh attempt |
 | `meta.quality_issue` | One issue detected by the current model run |
 | `meta.rule_application` | Exact rule version/hash applied by one model run |
+| `meta.mapping_application` | Exact queue-mapping hash applied by one model run |
 | `raw.fte_agent` | One FTE Agent-sheet row |
 | `raw.schedule_shift` | One admitted Verint schedule row |
 | `raw.schedule_event` | One parsed event interval belonging to an admitted shift |
@@ -69,13 +72,14 @@ details remain in one module.
 | `core.dim_agent` | One operational Agent ID |
 | `core.correction_action` | One human decision per stable Correction ID |
 | `mart.attendance_agent_day` | One scheduled Agent ID/day |
-| `mart.conformance_agent_day` | One conformance result per scheduled Agent ID/day |
-| `mart.correction_candidate` | One non-overlapping candidate interval/day review |
-| `mart.rta_snapshot` | One scheduled agent at the newest admitted status timestamp |
-| `mart.forecast_hour` | One forecast queue/hour |
+| `mart.conformance_agent_day` | Legacy compatibility table; empty in v0.5 |
+| `mart.correction_candidate` | One observed LILO/status gap plus Verint-final check |
+| `mart.rta_snapshot` | Legacy compatibility table; empty in v0.5 |
+| `mart.verint_final_exception` | One final Verint interval with no observed supporting gap |
+| `mart.forecast_hour` | One raw forecast queue/hour plus mapped scopes |
 | `mart.intraday_queue_interval` | One actual queue/15-minute interval |
 | `mart.agent_pcs_day` | One admitted Agent ID/day with call and PCS measures |
-| `mart.absence_event` | One classified, schedule-clipped Verint/LILO evidence interval |
+| `mart.absence_event` | One observed, schedule-clipped LILO/status gap with final label |
 | `mart.absence_agent_day` | One payroll absence/vacation/shrinkage result per Agent ID/day |
 | `mart.service_interval` | One rule-versioned APBE/APFR/APDE service interval |
 | `mart.source_health` | One configured source family |
@@ -124,7 +128,7 @@ problem. Forecast and APBE/APFR/APDE are queue data, so they bypass the agent ga
 1. Discover configured files read-only.
 2. Calculate SHA-256, size, modified time, and agent-scope fingerprint.
 3. Skip an already-active successful match.
-4. Parse a new version; stream large LILO and Call-by-Call CSVs in bounded batches.
+4. Parse a new version; stream large LILO, Agent Status and Call-by-Call CSVs in bounded batches.
 5. In one file transaction, append immutable raw rows, deactivate the previous
    path version, and activate the new version.
 6. If parsing fails, roll back its raw rows and leave the previous good version
@@ -174,25 +178,27 @@ database produces a setup/check state rather than crashing the menu renderer.
 The launcher uses native CMD title/color commands; the application itself adds
 no terminal package and redirected output is never cleared.
 
-## Attendance and correction gates
+## Attendance, absence and correction gates
 
 The order is deliberate:
 
-1. Required LILO date(s) loaded?
-2. Schedule and Agent ID valid?
-3. Off, planned absence, or non-phone plan?
-4. Agent identity ever seen in admitted LILO?
-5. Daily LILO roster row present?
-6. Both boundaries blank, one blank, or usable pair?
-7. Compare the usable first/last boundary with schedule.
+1. Select the Verint StartEndTimes schedule boundary for Agent ID/day.
+2. Collect LILO and Agent Status evidence clipped to that boundary.
+3. Use the earliest/last active evidence for late and early-leave detection.
+4. Use exclusive Agent Status `Logged Off`/`Unavailable` intervals between those
+   boundaries for mid-shift gap detection.
+5. Build gaps before reading any final Verint activity.
+6. Match each observed gap against the final Activities/assignment ledger.
+7. Label it `CORRECTED`, `PARTIAL`, or `NOT_CORRECTED` without changing the
+   observed interval.
 
-“No show” requires a loaded daily LILO file, the admitted agent row, both times
-blank, a Work assignment, and no covering planned absence. Missing file,
-missing roster row, identity mismatch, or incomplete LILO is never a no-show.
+“No show” requires a loaded daily LILO row with both boundaries blank, a
+scheduled non-Off shift, and no active Agent Status evidence. Missing files,
+missing rows, and incomplete evidence are never a no-show.
 
-Overnight shifts require every touched LILO date. Planned absence/adjustment is
-physically subtracted from late and early intervals, so displayed endpoints and
-gap minutes agree.
+Final Verint activities are deliberately not subtracted from late, early or
+status gaps. Doing so would hide the original problem immediately after it was
+corrected, destroying the audit trail.
 
 ## Central rulebook and calculation audit
 
@@ -214,23 +220,24 @@ spell grouping remain tested engine primitives rather than editable formulas.
 
 Activities and wide StartEndTimes both normalize into `raw.schedule_shift`;
 Activities also produces `raw.schedule_event`. Data Source IDs is the primary
-operational Agent ID.
+operational Agent ID. Start/end is the plan boundary. LILO and Agent Status are
+the actual evidence. Activities is the final correction ledger.
 
 The absence engine:
 
 1. selects the active schedule version per Agent ID/day;
-2. classifies the shift assignment and every detailed event through the
-   first-match activity rulebook;
-3. clips event intervals to the scheduled shift;
-4. adds proven LILO no-show/late/early evidence;
-5. unions intervals separately for absence, vacation, unpaid and shrinkage;
-6. caps planned net minutes at the configured standard day;
-7. groups consecutive absence days into spells and calculates Bradford;
-8. surfaces unmapped and `NO_ACTIVITY` evidence for review.
+2. derives no-show/late/early from LILO plus active status evidence;
+3. derives mid-shift logged-off/unavailable gaps from exclusive status states;
+4. clips and unions only those observed gaps within the schedule;
+5. uses the matching final Verint activity only to classify/reconcile the gap;
+6. unions intervals separately for absence, vacation, unpaid and shrinkage;
+7. caps planned net minutes at the configured standard day;
+8. groups consecutive absence days into spells and calculates Bradford;
+9. surfaces uncorrected gaps and Verint-only activities for review.
 
-Planned absence and observed no-show remain distinct evidence types. Overlaps
-may be visible as multiple evidence rows, but never double-count within a daily
-KPI.
+An uncorrected observed gap is never silently assigned a sickness/vacation
+reason. A corrected Verint activity can supply that final business category,
+but it cannot create the underlying attendance gap.
 
 ## Service model
 
@@ -246,32 +253,30 @@ choose the reported profile, while both variants remain available for audit.
 AHT is weighted from handled seconds divided by answered contacts. Higher-grain
 reports use ratios of summed components, never averages of interval percentages.
 
-## Optional legacy Agent Status compatibility
+## Agent Status without adherence
 
-Agent Status and the former conformance/RTA tables are disabled by default in
-v0.4 because adherence is not part of the approved SOTA reporting scope. They
-remain as compatibility tables for an existing SQLite hub. If explicitly
-enabled, status intervals are clipped to the scheduled shift. When overlaps exist, the
-newest state wins; category totals cannot exceed covered time. Agent Status is
-the conformance basis only above configured coverage (80% by default), else the
-explicitly labelled LILO span or `None` is used.
+Agent Status is enabled by default because it is observed attendance evidence.
+It is streamed in bounded batches and indexed by agent/date so a monthly file
+does not require repeated full scans. Overlapping states are clipped to the
+shift; the newest starting state wins for each exclusive segment.
+
+No conformance percentage, out-of-adherence result, or RTA result is built.
+Those legacy tables stay empty for database compatibility.
 
 Agent Status filenames may describe one date, a date range, or full history.
 Every row's `Status Start Date and Time` determines its business date.
-
-Legacy RTA uses the newest admitted status timestamp. If no status row passes agent
-scope, RTA is empty and source health is `ERROR`; current time is never used as
-a fake snapshot.
 
 ## Forecast boundary
 
 Verint Forecast contributes only forecast/required values. Exported actual
 fields are discarded. APBE/APFR/APDE contributes actual performance. Both remain
-separate until a reviewed queue/LOB mapping is configured.
+joined only through the reviewed `config/queue_mapping.csv`. The raw source
+queue/LOB and the mapped detailed/comparison scopes are all retained. Volume-only
+forecast exports are valid; absent forecast measures remain NULL.
 
 ## Upgrades
 
-v0.4 uses SQLite and does not convert or open v0.1 DuckDB data. Install v0.4 in
+v0.5 uses SQLite and does not convert or open v0.1 DuckDB data. Install v0.5 in
 a new folder, point it at the same untouched source root, and let it rebuild
 SQLite. Preserve the entire old folder. Saved Excel reports can re-import
 correction decisions.

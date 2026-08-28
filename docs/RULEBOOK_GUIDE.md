@@ -13,6 +13,15 @@ config\wfm_rules.toml
 Do not edit `config\default_rules.toml`. That file is the factory copy used for
 new installations.
 
+Queue/file names are not calculation rules. Edit them in the separate:
+
+```text
+config\queue_mapping.csv
+```
+
+This separation lets you change a queue name without changing payroll formulas
+or touching the source extract. The Validate Rules menu checks both files.
+
 Before editing, copy `wfm_rules.toml` somewhere safe. WFMHub also keeps the raw
 extracts untouched, so changing a rule never changes a Verint or Storm file.
 
@@ -106,13 +115,15 @@ not counted twice within one KPI.
 ## Adding a new Verint activity
 
 1. Open the Attendance & Absence report.
-2. Open `UNMAPPED`.
+2. Open `NOT_CORRECTED` for observed gaps awaiting Verint correction, or
+   `VERINT_ONLY` for a final activity without supporting actual evidence.
 3. Copy the activity wording exactly.
 4. Add a new `[[activity_rules]]` block above broad rules such as Production.
 5. Choose the flags carefully.
 6. Increase the rule version, validate, and rebuild the same dates.
-7. Confirm that `UNMAPPED` is empty or contains only items still awaiting a
-   business decision.
+7. Confirm the gap becomes `CORRECTED` after exporting final Verint Activities
+   and refreshing. Activity rules classify a matched final reason; they never
+   create the observed gap.
 
 `NO_ACTIVITY` is mapped but remains a review warning. Decide whether it is true
 shrinkage or a schedule defect before payroll use.

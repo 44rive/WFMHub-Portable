@@ -62,12 +62,16 @@ DATASETS: dict[str, ExportDataset] = {
         "SELECT * FROM mart.absence_agent_day WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id",
     ),
     "absence_events": ExportDataset(
-        "absence_events", "Classified, schedule-clipped Verint and LILO absence evidence.",
+        "absence_events", "Observed LILO/status gaps with Verint-final reconciliation.",
         "SELECT * FROM mart.absence_event WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start",
     ),
     "gaps": ExportDataset(
-        "gaps", "Correction candidates and saved decisions.",
+        "gaps", "Observed correction candidates, Verint checks and saved decisions.",
         "SELECT * FROM mart.correction_candidate WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, gap_start",
+    ),
+    "verint_final_exceptions": ExportDataset(
+        "verint_final_exceptions", "Final Verint activities with no supporting observed gap.",
+        "SELECT * FROM mart.verint_final_exception WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start",
     ),
     "schedules": ExportDataset(
         "schedules", "Parsed, FTE-scoped schedule shifts.",

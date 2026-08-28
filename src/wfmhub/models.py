@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 from .config import Config
 from .database import DatabaseConnection, DatabaseCursor
+from .mapping import QueueMapping, load_queue_mapping
 from .progress import ProgressCallback
 from .rules import Rulebook, evaluate_formula, load_rulebook
 from .utils import clip_intervals, interval_minutes, merge_intervals, subtract_intervals
@@ -154,7 +155,9 @@ def _load_lilo(conn: DatabaseConnection, start: date, end: date) -> tuple[dict[t
     return grouped, loaded_dates, seen
 
 
-def _load_statuses(conn: DatabaseConnection, start: date, end: date) -> dict[str, list[dict[str, Any]]]:
+def _load_statuses(
+    conn: DatabaseConnection, start: date, end: date,
+) -> tuple[dict[tuple[date, str], list[dict[str, Any]]], set[date]]:
     window_start = datetime.combine(start - timedelta(days=1), time.min)
     window_end = datetime.combine(end + timedelta(days=2), time.min)
     rows = _dicts(conn.execute(
@@ -177,10 +180,34 @@ def _load_statuses(conn: DatabaseConnection, start: date, end: date) -> dict[str
         """,
         [window_end, window_start],
     ))
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
+    loaded_dates: set[date] = set()
     for row in rows:
-        grouped[row["agent_id"]].append(row)
-    return grouped
+        first_day = row["status_start"].date()
+        last_day = (row["status_end"] - timedelta(microseconds=1)).date()
+        for offset in range((last_day - first_day).days + 1):
+            status_day = first_day + timedelta(days=offset)
+            loaded_dates.add(status_day)
+            grouped[(status_day, row["agent_id"])].append(row)
+    return grouped, loaded_dates
+
+
+def _statuses_for_shift(
+    agent_id: str,
+    start: datetime | None,
+    end: datetime | None,
+    statuses_by_day: dict[tuple[date, str], list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    if not start or not end:
+        return []
+    rows: dict[tuple[Any, ...], dict[str, Any]] = {}
+    first_day = start.date()
+    last_day = (end - timedelta(microseconds=1)).date()
+    for offset in range((last_day - first_day).days + 1):
+        for row in statuses_by_day.get((first_day + timedelta(days=offset), agent_id), []):
+            key = (row["serial_number"], row["status_start"], row["status_end"], row["source_file_id"])
+            rows[key] = row
+    return sorted(rows.values(), key=lambda row: (row["status_start"], row["source_row"]))
 
 
 def _build_agents(conn: DatabaseConnection) -> dict[str, dict[str, Any]]:
@@ -304,6 +331,7 @@ ATTENDANCE_COLUMNS = [
     "scheduled_start", "scheduled_end", "scheduled_minutes", "assignment", "assignment_type", "planned_absence_minutes", "first_login", "last_logout",
     "source_loaded", "lilo_row_present", "seen_in_lilo", "raw_late_minutes", "raw_early_leave_minutes", "uncoded_late_minutes", "uncoded_early_leave_minutes",
     "no_show_minutes", "worked_span_minutes", "attendance_result", "attendance_percent", "schedule_source", "lilo_source",
+    "actual_first_seen", "actual_last_seen", "actual_evidence", "status_covered_minutes", "status_source",
 ]
 
 
@@ -328,6 +356,8 @@ def _build_attendance(
     loaded_dates: set[date],
     seen_ids: set[str],
     agents: dict[str, dict[str, Any]],
+    statuses_by_day: dict[tuple[date, str], list[dict[str, Any]]],
+    status_loaded_dates: set[date],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     tolerance = rulebook.late_tolerance_minutes
@@ -338,41 +368,64 @@ def _build_attendance(
         start, end = shift["scheduled_start"], shift["scheduled_end"]
         scheduled_minutes = int((end - start).total_seconds() // 60) if start and end and end > start else 0
         events = _shift_events(shift, events_by_agent)
+        # Verint activities are the corrected final ledger. They remain useful
+        # context, but they must never erase a gap observed in LILO/status.
         planned = _planned_intervals(events, {"Planned absence", "Planned adjustment"})
         planned_absence = scheduled_minutes if shift["assignment_type"] == "Planned absence" else (interval_minutes(start, end, planned) if start and end else 0)
         first, last, source_loaded, row_present, lilo_source = _lilo_boundaries(shift, lilo, loaded_dates)
+        statuses = _statuses_for_shift(agent_id, start, end, statuses_by_day)
+        if start and end and end > start:
+            status_category, status_covered, status_exclusive = _exclusive_category_minutes(start, end, statuses)
+            required_status_dates = {
+                start.date() + timedelta(days=offset)
+                for offset in range(((end - timedelta(microseconds=1)).date() - start.date()).days + 1)
+            }
+        else:
+            status_category, status_covered, status_exclusive = {}, 0, []
+            required_status_dates = {shift["schedule_date"]}
+        status_source_loaded = required_status_dates <= status_loaded_dates
+        status_sources = "; ".join(sorted({row["source_file"] for row in statuses})) or None
+        active_status = [
+            row for row in status_exclusive
+            if row["actual_category"] in {"Productive", "Auxiliary", "Lunch", "Break"}
+        ]
+        status_first = min((row["interval_start"] for row in active_status), default=None)
+        status_last = max((row["interval_end"] for row in active_status), default=None)
+        actual_first = min((value for value in (first, status_first) if value is not None), default=None)
+        actual_last = max((value for value in (last, status_last) if value is not None), default=None)
+        evidence_parts = []
+        if first is not None or last is not None or row_present:
+            evidence_parts.append("LILO")
+        if statuses:
+            evidence_parts.append("AGENT_STATUS")
+        actual_evidence = "+".join(evidence_parts) or "NONE"
         raw_late = max(0, int((first - start).total_seconds() // 60)) if first and start else 0
         raw_early = max(0, int((end - last).total_seconds() // 60)) if last and end else 0
-        usable_pair = bool(first and last and start and end and last >= first and last > start and first < end)
-        late_segments = subtract_intervals(start, first, planned) if usable_pair and first > start else []
-        early_segments = subtract_intervals(last, end, planned) if usable_pair and end > last else []
+        usable_pair = bool(actual_first and actual_last and start and end and actual_last >= actual_first and actual_last > start and actual_first < end)
+        late_segments = [(start, min(actual_first, end))] if usable_pair and actual_first > start else []
+        early_segments = [(max(actual_last, start), end)] if usable_pair and end > actual_last else []
         late = sum(int((b - a).total_seconds() // 60) for a, b in late_segments)
         early = sum(int((b - a).total_seconds() // 60) for a, b in early_segments)
         late = 0 if late <= tolerance else late
         early = 0 if early <= tolerance else early
-        no_show = max(0, scheduled_minutes - planned_absence) if (
-            source_loaded and row_present and first is None and last is None and shift["assignment_type"] == "Work"
+        no_show = scheduled_minutes if (
+            source_loaded and row_present and first is None and last is None
+            and not active_status and shift["assignment_type"] != "Off"
         ) else 0
-        worked_span = int((last - first).total_seconds() // 60) if first and last and last >= first else 0
+        worked_span = int((actual_last - actual_first).total_seconds() // 60) if actual_first and actual_last and actual_last >= actual_first else 0
         parse_ok = bool(shift["parse_ok"])
-        if not source_loaded:
-            result = "Data not loaded"
-        elif not parse_ok and shift["assignment_type"] != "Off":
+        if not parse_ok and shift["assignment_type"] != "Off":
             result = "Schedule parse error"
         elif shift["assignment_type"] == "Off":
             result = "Off"
-        elif shift["assignment_type"] == "Planned absence" or (scheduled_minutes and planned_absence >= scheduled_minutes - tolerance):
-            result = "Planned absence"
-        elif shift["assignment_type"] == "Non-phone planned":
-            result = "Non-phone planned"
-        elif agent_id not in seen_ids:
-            result = "Identity not in LILO"
-        elif not row_present:
-            result = "Missing LILO roster row"
-        elif first is None and last is None:
+        elif not source_loaded and not status_source_loaded:
+            result = "Data not loaded"
+        elif no_show:
             result = "No show"
-        elif first is None or last is None:
-            result = "Incomplete LILO"
+        elif actual_first is None and actual_last is None:
+            result = "Missing actual evidence"
+        elif actual_first is None or actual_last is None:
+            result = "Incomplete actual evidence"
         elif not usable_pair:
             result = "No schedule overlap"
         elif late and early:
@@ -385,7 +438,7 @@ def _build_attendance(
             result = "Present"
         attendance_pct = None
         trusted_results = {"No show", "Present", "Late", "Early leave", "Late + early leave"}
-        if shift["assignment_type"] == "Work" and source_loaded and scheduled_minutes and result in trusted_results:
+        if shift["assignment_type"] != "Off" and scheduled_minutes and result in trusted_results:
             attendance_pct = max(0.0, 1 - (no_show + late + early) / scheduled_minutes)
         agent = agents.get(agent_id, {})
         rows.append({
@@ -396,12 +449,16 @@ def _build_attendance(
             "lob": agent.get("lob"), "market": agent.get("market"), "language": agent.get("language"), "location": agent.get("location"),
             "scheduled_start": start, "scheduled_end": end, "scheduled_minutes": scheduled_minutes,
             "assignment": shift["assignment"], "assignment_type": shift["assignment_type"], "planned_absence_minutes": planned_absence,
-            "first_login": first, "last_logout": last, "source_loaded": source_loaded, "lilo_row_present": row_present,
+            "first_login": first, "last_logout": last, "source_loaded": source_loaded or status_source_loaded, "lilo_row_present": row_present,
             "seen_in_lilo": agent_id in seen_ids, "raw_late_minutes": raw_late, "raw_early_leave_minutes": raw_early,
             "uncoded_late_minutes": late, "uncoded_early_leave_minutes": early, "no_show_minutes": no_show,
             "worked_span_minutes": worked_span, "attendance_result": result, "attendance_percent": attendance_pct,
             "schedule_source": shift["source_file"], "lilo_source": lilo_source,
+            "actual_first_seen": actual_first, "actual_last_seen": actual_last,
+            "actual_evidence": actual_evidence, "status_covered_minutes": status_covered,
+            "status_source": status_sources,
             "_events": events, "_late_segments": late_segments, "_early_segments": early_segments,
+            "_status_exclusive": status_exclusive, "_status_category": status_category,
         })
     conn.execute("DELETE FROM mart.attendance_agent_day")
     _insert_dicts(conn, "mart.attendance_agent_day", ATTENDANCE_COLUMNS, rows)
@@ -521,6 +578,14 @@ CORRECTION_COLUMNS = [
     "correction_id", "business_date", "agent_id", "agent_name", "team_leader", "ops_manager", "lob", "scheduled_start", "scheduled_end", "first_login", "last_logout",
     "priority", "detected_issue", "gap_start", "gap_end", "gap_minutes", "confidence", "suggested_activity", "source_file",
     "confirmed_activity", "validation_status", "owner", "comment", "injected_date",
+    "observed_source", "verint_reconciliation", "verint_activity", "verint_category",
+    "verint_overlap_minutes", "verint_source_file",
+]
+
+VERINT_EXCEPTION_COLUMNS = [
+    "exception_key", "agent_day_key", "business_date", "agent_id", "agent_name",
+    "activity", "category", "event_start", "event_end", "minutes",
+    "exception_type", "source_file", "rule_version", "rule_sha256",
 ]
 
 
@@ -531,69 +596,115 @@ def _correction_id(row: dict[str, Any], issue: str, start: datetime | None, end:
     return f"{row['business_date']:%Y%m%d}-{row['agent_id']}-{start_key}-{end_key}-{clean}"
 
 
+def _final_verint_events(base: dict[str, Any], rulebook: Rulebook) -> list[dict[str, Any]]:
+    """Return post-day Verint activities that can explain an observed gap."""
+    candidates: list[dict[str, Any]] = []
+    assignment_rule = rulebook.classify_activity(base.get("assignment"))
+    if assignment_rule is not None and not assignment_rule.working and assignment_rule.category != "OFF":
+        candidates.append({
+            "activity": base.get("assignment"), "category": assignment_rule.category,
+            "start": base.get("scheduled_start"), "end": base.get("scheduled_end"),
+            "source_file": base.get("schedule_source"), "rule": assignment_rule,
+        })
+    ignored = {"OFF", "LUNCH", "BREAK", "NO_ACTIVITY", "PRODUCTION"}
+    for event in base.get("_events", []):
+        rule = rulebook.classify_activity(event.get("activity"))
+        if rule is None or rule.working or rule.category in ignored:
+            continue
+        candidates.append({
+            "activity": event.get("activity"), "category": rule.category,
+            "start": event.get("event_start"), "end": event.get("event_end"),
+            "source_file": event.get("source_file"), "rule": rule,
+        })
+    deduped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for item in candidates:
+        if item["start"] and item["end"] and item["end"] > item["start"]:
+            deduped[(item["activity"], item["start"], item["end"], item["source_file"])] = item
+    return list(deduped.values())
+
+
 def _build_corrections(
     conn: DatabaseConnection,
     rulebook: Rulebook,
     attendance: list[dict[str, Any]],
-    conformance: list[dict[str, Any]],
-    exclusive_by_key: dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
-    conformance_by_key = {row["agent_day_key"]: row for row in conformance}
     output: list[dict[str, Any]] = []
 
-    def add(base: dict[str, Any], issue: str, start: datetime | None, end: datetime | None, minutes: int, priority: int, confidence: str, activity: str, source: str | None = None) -> None:
+    def add(
+        base: dict[str, Any], issue: str, start: datetime | None, end: datetime | None,
+        minutes: int, priority: int, confidence: str, activity: str,
+        observed_source: str, source: str | None = None,
+    ) -> None:
         output.append({
             "correction_id": _correction_id(base, issue, start, end), "business_date": base["business_date"], "agent_id": base["agent_id"],
             "agent_name": base["agent_name"], "team_leader": base["team_leader"], "ops_manager": base["ops_manager"], "lob": base["lob"],
             "scheduled_start": base["scheduled_start"], "scheduled_end": base["scheduled_end"], "first_login": base["first_login"], "last_logout": base["last_logout"],
             "priority": priority, "detected_issue": issue, "gap_start": start, "gap_end": end, "gap_minutes": minutes,
             "confidence": confidence, "suggested_activity": activity, "source_file": source or base["schedule_source"],
+            "observed_source": observed_source,
         })
 
-    tolerance = rulebook.late_tolerance_minutes
+    status_tolerance = rulebook.status_gap_tolerance_minutes
+    match_tolerance = rulebook.verint_match_tolerance_minutes
     for row in attendance:
         start, end = row["scheduled_start"], row["scheduled_end"]
-        planned = _planned_intervals(row["_events"], {"Planned absence", "Planned adjustment"})
         if row["attendance_result"] == "No show" and start and end:
-            segments = subtract_intervals(start, end, planned)
-            for gap_start, gap_end in segments:
-                minutes = int((gap_end - gap_start).total_seconds() // 60)
-                if minutes > 0:
-                    add(row, "No show", gap_start, gap_end, minutes, 1, "Review" if planned else "High", "No-show")
+            minutes = int((end - start).total_seconds() // 60)
+            if minutes > 0:
+                source = "; ".join(value for value in (row["lilo_source"], row["status_source"]) if value) or row["schedule_source"]
+                add(row, "No show", start, end, minutes, 1, "High", "Review absence reason", row["actual_evidence"], source)
         if row["uncoded_late_minutes"] > 0:
             for gap_start, gap_end in row["_late_segments"]:
                 minutes = int((gap_end - gap_start).total_seconds() // 60)
                 if minutes > 0:
-                    add(row, "Late", gap_start, gap_end, minutes, 2, "Review" if planned else "High", "Late")
+                    source = "; ".join(value for value in (row["lilo_source"], row["status_source"]) if value) or row["schedule_source"]
+                    add(row, "Late", gap_start, gap_end, minutes, 2, "High", "Late", row["actual_evidence"], source)
         if row["uncoded_early_leave_minutes"] > 0:
             for gap_start, gap_end in row["_early_segments"]:
                 minutes = int((gap_end - gap_start).total_seconds() // 60)
                 if minutes > 0:
-                    add(row, "Early leave", gap_start, gap_end, minutes, 3, "Review" if planned else "High", "Early Leaving")
-        if row["attendance_result"] == "Incomplete LILO":
-            add(row, "Incomplete LILO", None, None, 0, 9, "Review", "Schedule Correction", row["lilo_source"])
+                    source = "; ".join(value for value in (row["lilo_source"], row["status_source"]) if value) or row["schedule_source"]
+                    add(row, "Early leave", gap_start, gap_end, minutes, 3, "High", "Early Leaving", row["actual_evidence"], source)
+        if row["attendance_result"] == "Incomplete actual evidence":
+            source = "; ".join(value for value in (row["lilo_source"], row["status_source"]) if value) or row["schedule_source"]
+            add(row, "Incomplete actual evidence", None, None, 0, 9, "Review", "Schedule Correction", row["actual_evidence"], source)
 
-        conf = conformance_by_key.get(row["agent_day_key"])
-        if not conf or conf["measurement_basis"] != "Agent Status" or not row["first_login"] or not row["last_logout"]:
+        actual_first, actual_last = row["actual_first_seen"], row["actual_last_seen"]
+        if not actual_first or not actual_last or actual_last <= actual_first:
             continue
-        coded = _planned_intervals(row["_events"], {"Planned absence", "Planned adjustment", "Lunch", "Break"})
-        exclusive = exclusive_by_key.get(row["agent_day_key"], [])
+        exclusive = row.get("_status_exclusive", [])
         for category, issue, priority in (("Logged Off", "Mid-shift logged off", 4), ("Unavailable", "Unavailable in shift", 7)):
             raw = [(item["interval_start"], item["interval_end"]) for item in exclusive if item["actual_category"] == category]
-            for gap_start, gap_end in subtract_intervals(row["first_login"], row["last_logout"], coded):
-                hits = clip_intervals(gap_start, gap_end, _nearby_merge(raw, tolerance))
-                for hit_start, hit_end in hits:
-                    minutes = int((hit_end - hit_start).total_seconds() // 60)
-                    if minutes > tolerance:
-                        add(row, issue, hit_start, hit_end, minutes, priority, "High", "General Unavailability")
-        for field, issue, priority, activity in (
-            ("lunch_overrun_minutes", "Lunch overrun", 5, "Lunch"),
-            ("break_overrun_minutes", "Break overrun", 6, "Break"),
-            ("unexplained_minutes", "Unexplained status coverage", 9, "Schedule Correction"),
-        ):
-            minutes = int(conf[field])
-            if minutes > tolerance:
-                add(row, issue, None, None, minutes, priority, "Review", activity)
+            for hit_start, hit_end in clip_intervals(actual_first, actual_last, _nearby_merge(raw, status_tolerance)):
+                minutes = int((hit_end - hit_start).total_seconds() // 60)
+                if minutes > status_tolerance:
+                    confidence = "High" if category == "Logged Off" else "Review"
+                    add(row, issue, hit_start, hit_end, minutes, priority, confidence, "General Unavailability", "AGENT_STATUS", row["status_source"])
+
+    by_key = {row["agent_day_key"]: row for row in attendance}
+    for item in output:
+        base = by_key[item["business_date"].strftime("%Y%m%d") + "-" + item["agent_id"]]
+        gap_start, gap_end = item["gap_start"], item["gap_end"]
+        matches: list[tuple[int, dict[str, Any]]] = []
+        if gap_start and gap_end:
+            for event in _final_verint_events(base, rulebook):
+                overlap = interval_minutes(gap_start, gap_end, [(event["start"], event["end"])])
+                if overlap > 0:
+                    matches.append((overlap, event))
+        if matches:
+            overlap, event = max(matches, key=lambda pair: (pair[0], pair[1]["start"]))
+            status = "CORRECTED" if overlap >= max(1, item["gap_minutes"] - match_tolerance) else "PARTIAL"
+            item.update({
+                "verint_reconciliation": status, "verint_activity": event["activity"],
+                "verint_category": event["category"], "verint_overlap_minutes": overlap,
+                "verint_source_file": event["source_file"],
+            })
+        else:
+            item.update({
+                "verint_reconciliation": "NOT_APPLICABLE" if not gap_start or not gap_end else "NOT_CORRECTED",
+                "verint_activity": None, "verint_category": None, "verint_overlap_minutes": 0,
+                "verint_source_file": None,
+            })
 
     actions = {row["correction_id"]: row for row in _dicts(conn.execute("SELECT * FROM core.correction_action"))}
     deduped: dict[str, dict[str, Any]] = {}
@@ -608,6 +719,38 @@ def _build_corrections(
     output = sorted(deduped.values(), key=lambda item: (item["business_date"], item["priority"], -item["gap_minutes"], item["agent_id"]))
     conn.execute("DELETE FROM mart.correction_candidate")
     _insert_dicts(conn, "mart.correction_candidate", CORRECTION_COLUMNS, output)
+
+    exceptions: list[dict[str, Any]] = []
+    gaps_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in output:
+        gaps_by_key[f"{item['business_date']:%Y%m%d}-{item['agent_id']}"].append(item)
+    for base in attendance:
+        for event in _final_verint_events(base, rulebook):
+            has_observed_overlap = any(
+                gap["gap_start"] and gap["gap_end"]
+                and interval_minutes(gap["gap_start"], gap["gap_end"], [(event["start"], event["end"])]) > 0
+                for gap in gaps_by_key.get(base["agent_day_key"], [])
+            )
+            if has_observed_overlap:
+                continue
+            minutes = interval_minutes(base["scheduled_start"], base["scheduled_end"], [(event["start"], event["end"])])
+            if minutes <= 0:
+                continue
+            key = hashlib.sha256(
+                f"{base['agent_day_key']}|{event['activity']}|{event['start']}|{event['end']}".encode("utf-8")
+            ).hexdigest()
+            exceptions.append({
+                "exception_key": key, "agent_day_key": base["agent_day_key"],
+                "business_date": base["business_date"], "agent_id": base["agent_id"],
+                "agent_name": base["agent_name"], "activity": event["activity"],
+                "category": event["category"], "event_start": event["start"],
+                "event_end": event["end"], "minutes": minutes,
+                "exception_type": "VERINT_FINAL_WITHOUT_OBSERVED_GAP",
+                "source_file": event["source_file"], "rule_version": rulebook.version,
+                "rule_sha256": rulebook.sha256,
+            })
+    conn.execute("DELETE FROM mart.verint_final_exception")
+    _insert_dicts(conn, "mart.verint_final_exception", VERINT_EXCEPTION_COLUMNS, exceptions)
     return output
 
 
@@ -671,17 +814,34 @@ def _build_rta(
     return output
 
 
-def _build_intraday(conn: DatabaseConnection, start: date, end: date) -> tuple[int, int]:
+FORECAST_HOUR_COLUMNS = [
+    "business_date", "hour_start", "queue_name", "volume_forecast", "fte_forecast",
+    "fte_required", "sl_forecast", "sl_required", "aht_forecast_seconds", "source_file",
+    "service_scope", "comparison_scope", "mapping_status", "mapping_sha256",
+]
+
+INTRADAY_COLUMNS = [
+    "business_date", "interval_start", "hour_start", "source_system", "queue",
+    "business_partner", "lob", "language", "offered", "answered", "abandoned",
+    "short_calls", "answered_20s", "service_level_20s", "abandon_rate", "asa_seconds",
+    "aht_seconds", "source_file", "service_scope", "comparison_scope", "designation", "mapping_status",
+    "mapping_sha256",
+]
+
+
+def _build_intraday(
+    conn: DatabaseConnection, start: date, end: date, mapping: QueueMapping,
+) -> tuple[int, int]:
     conn.execute("DELETE FROM mart.forecast_hour")
-    conn.execute(
+    forecast_source = _dicts(conn.execute(
         """
-        INSERT INTO mart.forecast_hour
-        SELECT business_date, strftime('%Y-%m-%d %H:00:00', interval_start), queue_name, volume_forecast,
-               fte_forecast, fte_required, sl_forecast, sl_required, aht_forecast_seconds, source_file
+        SELECT business_date, interval_start, queue_name, volume_forecast,
+               fte_forecast, fte_required, sl_forecast, sl_required,
+               aht_forecast_seconds, source_file
         FROM (
-            SELECT r.*, f.file_name AS source_file,
+            SELECT r.*, f.file_name AS source_file, f.source_path,
                    row_number() OVER (
-                       PARTITION BY queue_name, interval_start, interval_minutes
+                       PARTITION BY f.source_path, queue_name, interval_start, interval_minutes
                        ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, source_row DESC
                    ) row_rank
             FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
@@ -689,15 +849,26 @@ def _build_intraday(conn: DatabaseConnection, start: date, end: date) -> tuple[i
         ) x WHERE row_rank=1
         """,
         [start, end],
-    )
+    ))
+    forecast_rows: list[dict[str, Any]] = []
+    for row in forecast_source:
+        mapped = mapping.map_forecast(row["source_file"], row["queue_name"])
+        forecast_rows.append({
+            **{key: row[key] for key in (
+                "business_date", "queue_name", "volume_forecast", "fte_forecast",
+                "fte_required", "sl_forecast", "sl_required", "aht_forecast_seconds", "source_file",
+            )},
+            "hour_start": row["interval_start"].replace(minute=0, second=0, microsecond=0),
+            "service_scope": mapped.service_scope, "comparison_scope": mapped.comparison_scope,
+            "mapping_status": mapped.status,
+            "mapping_sha256": mapping.sha256,
+        })
+    _insert_dicts(conn, "mart.forecast_hour", FORECAST_HOUR_COLUMNS, forecast_rows)
     conn.execute("DELETE FROM mart.intraday_queue_interval")
-    conn.execute(
+    actual_source = _dicts(conn.execute(
         """
-        INSERT INTO mart.intraday_queue_interval
         SELECT business_date, interval_start, hour_start, source_system, queue, business_partner, lob, language,
                offered, answered, abandoned, short_calls, answered_20s,
-               CASE WHEN offered IS NULL OR offered=0 THEN NULL ELSE 1.0*coalesce(answered_20s,0)/offered END,
-               CASE WHEN offered IS NULL OR offered=0 THEN NULL ELSE 1.0*coalesce(abandoned,0)/offered END,
                asa_seconds, aht_seconds, source_file
         FROM (
             SELECT r.*, f.file_name AS source_file,
@@ -711,10 +882,21 @@ def _build_intraday(conn: DatabaseConnection, start: date, end: date) -> tuple[i
         ) x WHERE row_rank=1
         """,
         [start, end],
-    )
-    forecast = conn.execute("SELECT count(*) FROM mart.forecast_hour").fetchone()[0]
-    actual = conn.execute("SELECT count(*) FROM mart.intraday_queue_interval").fetchone()[0]
-    return forecast, actual
+    ))
+    actual_rows: list[dict[str, Any]] = []
+    for row in actual_source:
+        mapped = mapping.map_actual(row["source_system"], row["queue"], row["business_partner"], row["lob"])
+        offered, answered, abandoned = row["offered"], row["answered"], row["abandoned"]
+        actual_rows.append({
+            **row,
+            "service_level_20s": None if not offered else (row["answered_20s"] or 0) / offered,
+            "abandon_rate": None if not offered else (abandoned or 0) / offered,
+            "service_scope": mapped.service_scope, "comparison_scope": mapped.comparison_scope,
+            "designation": mapped.designation,
+            "mapping_status": mapped.status, "mapping_sha256": mapping.sha256,
+        })
+    _insert_dicts(conn, "mart.intraday_queue_interval", INTRADAY_COLUMNS, actual_rows)
+    return len(forecast_rows), len(actual_rows)
 
 
 def _build_pcs(conn: DatabaseConnection, config: Config, start: date, end: date) -> int:
@@ -835,6 +1017,8 @@ ABSENCE_EVENT_COLUMNS = [
     "planned", "working", "counts_as_absence", "counts_as_vacation",
     "counts_as_unpaid", "counts_as_shrinkage", "mapped", "evidence_type",
     "source_file", "rule_version", "rule_sha256",
+    "reconciliation_status", "verint_activity", "verint_category",
+    "verint_overlap_minutes", "verint_source_file",
 ]
 
 ABSENCE_DAY_COLUMNS = [
@@ -846,6 +1030,7 @@ ABSENCE_DAY_COLUMNS = [
     "absence_rate", "vacation_rate", "shrinkage_rate", "absence_day",
     "absence_spell", "absence_spells", "absence_days", "bradford_factor",
     "rule_version", "rule_sha256",
+    "unverified_minutes", "corrected_minutes",
 ]
 
 
@@ -869,8 +1054,9 @@ def _build_absence(
     config: Config,
     rulebook: Rulebook,
     attendance: list[dict[str, Any]],
+    corrections: list[dict[str, Any]],
 ) -> tuple[int, int]:
-    """Build payroll absence and shrinkage facts from Verint plus LILO evidence."""
+    """Build absence only from observed LILO/status gaps, then attach Verint final labels."""
     conn.execute("DELETE FROM mart.absence_event")
     conn.execute("DELETE FROM mart.absence_agent_day")
     if not config.modules.get("absence", True):
@@ -878,33 +1064,43 @@ def _build_absence(
     event_rows: list[dict[str, Any]] = []
     day_rows: list[dict[str, Any]] = []
     standard_day_minutes = max(1, int(round(rulebook.standard_day_hours * 60)))
+    corrections_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for correction in corrections:
+        corrections_by_key[f"{correction['business_date']:%Y%m%d}-{correction['agent_id']}"].append(correction)
 
     for base in attendance:
         shift_start, shift_end = base["scheduled_start"], base["scheduled_end"]
         scheduled_minutes = base["scheduled_minutes"] if shift_start and shift_end else 0
         intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
 
-        def add_event(
-            activity: str,
-            event_start: datetime | None,
-            event_end: datetime | None,
-            evidence_type: str,
-            source_file: str | None,
-            fallback_category: str,
-            **fallback: bool,
-        ) -> None:
+        issue_intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+        corrected_overlap_minutes = 0
+
+        def add_event(correction: dict[str, Any]) -> None:
+            nonlocal corrected_overlap_minutes
+            event_start, event_end = correction["gap_start"], correction["gap_end"]
             if not shift_start or not shift_end or not event_start or not event_end:
                 return
             if rulebook.cap_event_to_schedule:
                 event_start, event_end = max(event_start, shift_start), min(event_end, shift_end)
             if event_end <= event_start:
                 return
-            flags = _rule_flags(rulebook.classify_activity(activity), fallback_category, **fallback)
+            activity = correction.get("verint_activity") or correction.get("suggested_activity") or correction["detected_issue"]
+            final_rule = rulebook.classify_activity(correction.get("verint_activity")) if correction.get("verint_activity") else None
+            fallback_category = {
+                "No show": "NO_SHOW", "Late": "LATE", "Early leave": "EARLY_LEAVE",
+                "Mid-shift logged off": "STATUS_LOGGED_OFF",
+                "Unavailable in shift": "STATUS_UNAVAILABLE",
+            }.get(correction["detected_issue"], "UNEXPLAINED_ABSENCE")
+            flags = _rule_flags(
+                final_rule, fallback_category,
+                absence=True, unpaid=False, shrinkage=True, working=False, planned=False,
+            )
             minutes = int((event_end - event_start).total_seconds() // 60)
             if minutes <= 0:
                 return
             event_key = hashlib.sha256(
-                f"{base['agent_day_key']}|{evidence_type}|{activity}|{event_start}|{event_end}".encode("utf-8")
+                f"{base['agent_day_key']}|{correction['correction_id']}|{event_start}|{event_end}".encode("utf-8")
             ).hexdigest()
             event_rows.append({
                 "event_key": event_key, "agent_day_key": base["agent_day_key"],
@@ -917,9 +1113,14 @@ def _build_absence(
                 "planned": flags["planned"], "working": flags["working"],
                 "counts_as_absence": flags["absence"], "counts_as_vacation": flags["vacation"],
                 "counts_as_unpaid": flags["unpaid"], "counts_as_shrinkage": flags["shrinkage"],
-                "mapped": flags["mapped"], "evidence_type": evidence_type,
-                "source_file": source_file, "rule_version": rulebook.version,
+                "mapped": flags["mapped"], "evidence_type": correction["observed_source"],
+                "source_file": correction["source_file"], "rule_version": rulebook.version,
                 "rule_sha256": rulebook.sha256,
+                "reconciliation_status": correction["verint_reconciliation"],
+                "verint_activity": correction.get("verint_activity"),
+                "verint_category": correction.get("verint_category"),
+                "verint_overlap_minutes": correction.get("verint_overlap_minutes") or 0,
+                "verint_source_file": correction.get("verint_source_file"),
             })
             intervals["all"].append((event_start, event_end))
             intervals[flags["category"]].append((event_start, event_end))
@@ -930,54 +1131,36 @@ def _build_absence(
                     intervals[key].append((event_start, event_end))
             if not flags["mapped"]:
                 intervals["unmapped"].append((event_start, event_end))
+            issue_intervals[correction["detected_issue"]].append((event_start, event_end))
+            corrected_overlap_minutes += min(minutes, int(correction.get("verint_overlap_minutes") or 0))
 
-        if shift_start and shift_end and base["assignment_type"] != "Off":
-            add_event(
-                base["assignment"] or "Scheduled work", shift_start, shift_end,
-                "SHIFT_ASSIGNMENT", base["schedule_source"],
-                "PRODUCTION_UNMAPPED" if base["assignment_type"] == "Work" else "PLANNED_ABSENCE_UNMAPPED",
-                planned=base["assignment_type"] != "Work", working=base["assignment_type"] == "Work",
-                absence=base["assignment_type"] == "Planned absence",
-                shrinkage=base["assignment_type"] != "Work",
-            )
-        for event in base["_events"]:
-            legacy = event.get("activity_type")
-            fallback = {
-                "Lunch": ("LUNCH_UNMAPPED", {"planned": True}),
-                "Break": ("BREAK_UNMAPPED", {"planned": True}),
-                "Planned absence": ("PLANNED_ABSENCE_UNMAPPED", {"planned": True, "absence": True, "shrinkage": True}),
-                "Planned adjustment": ("PLANNED_ADJUSTMENT_UNMAPPED", {"shrinkage": True}),
-                "Non-phone planned": ("NON_PHONE_UNMAPPED", {"planned": True, "shrinkage": True}),
-            }.get(legacy, ("OTHER_UNMAPPED", {"planned": True, "shrinkage": True}))
-            add_event(
-                event.get("activity") or "Unknown activity", event.get("event_start"), event.get("event_end"),
-                "SHIFT_EVENT", event.get("source_file"), fallback[0], **fallback[1],
-            )
-
-        no_show_rule = rulebook.classify_activity("NO SHOW")
-        for start_gap, end_gap in (subtract_intervals(shift_start, shift_end, _planned_intervals(base["_events"], {"Planned absence", "Planned adjustment"})) if base["no_show_minutes"] and shift_start and shift_end else []):
-            add_event("NO SHOW", start_gap, end_gap, "LILO_GAP", base["lilo_source"], "NO_SHOW", absence=True, unpaid=True, shrinkage=True)
-        for start_gap, end_gap in base["_late_segments"] if base["uncoded_late_minutes"] else []:
-            add_event("LATE", start_gap, end_gap, "LILO_GAP", base["lilo_source"], "LATE", absence=True, shrinkage=True)
-        for start_gap, end_gap in base["_early_segments"] if base["uncoded_early_leave_minutes"] else []:
-            add_event("EARLY LEAVE", start_gap, end_gap, "LILO_GAP", base["lilo_source"], "EARLY_LEAVE", absence=True, shrinkage=True)
+        for correction in corrections_by_key.get(base["agent_day_key"], []):
+            add_event(correction)
 
         def minutes_for(key: str) -> int:
             if not shift_start or not shift_end:
                 return 0
             return interval_minutes(shift_start, shift_end, intervals.get(key, []))
 
-        lunch = minutes_for("LUNCH") + minutes_for("LUNCH_UNMAPPED")
-        breaks = minutes_for("BREAK") + minutes_for("BREAK_UNMAPPED")
-        planned_net = 0 if base["assignment_type"] == "Off" else min(
-            standard_day_minutes, max(0, scheduled_minutes - lunch)
-        )
+        status_exclusive = base.get("_status_exclusive", [])
+        lunch = interval_minutes(shift_start, shift_end, [
+            (row["interval_start"], row["interval_end"])
+            for row in status_exclusive if row["actual_category"] == "Lunch"
+        ]) if shift_start and shift_end else 0
+        breaks = interval_minutes(shift_start, shift_end, [
+            (row["interval_start"], row["interval_end"])
+            for row in status_exclusive if row["actual_category"] == "Break"
+        ]) if shift_start and shift_end else 0
+        # Standard-day hours are already net. Actual lunch/break statuses are
+        # descriptive evidence and are not subtracted from the denominator.
+        planned_net = 0 if base["assignment_type"] == "Off" else min(standard_day_minutes, scheduled_minutes)
         absence = min(planned_net, minutes_for("absence"))
         vacation = min(planned_net, minutes_for("vacation"))
         unpaid = min(planned_net, minutes_for("unpaid"))
         shrinkage = min(planned_net, minutes_for("shrinkage"))
-        non_working = minutes_for("non_working")
-        production = min(planned_net, max(0, scheduled_minutes - non_working))
+        production = max(0, planned_net - min(planned_net, minutes_for("all")))
+        corrected = min(minutes_for("all"), corrected_overlap_minutes)
+        unverified = max(0, minutes_for("all") - corrected)
         values = {
             "absence_hours": absence / 60.0, "vacation_hours": vacation / 60.0,
             "shrinkage_hours": shrinkage / 60.0, "planned_net_hours": planned_net / 60.0,
@@ -991,15 +1174,18 @@ def _build_absence(
             "lunch_minutes": lunch, "planned_net_minutes": planned_net,
             "production_minutes": production, "absence_minutes": absence,
             "vacation_minutes": vacation, "unpaid_minutes": unpaid,
-            "shrinkage_minutes": shrinkage, "late_minutes": minutes_for("LATE"),
-            "early_leave_minutes": minutes_for("EARLY_LEAVE"),
-            "no_show_minutes": minutes_for("NO_SHOW"), "unmapped_minutes": minutes_for("unmapped"),
+            "shrinkage_minutes": shrinkage,
+            "late_minutes": interval_minutes(shift_start, shift_end, issue_intervals["Late"]) if shift_start and shift_end else 0,
+            "early_leave_minutes": interval_minutes(shift_start, shift_end, issue_intervals["Early leave"]) if shift_start and shift_end else 0,
+            "no_show_minutes": interval_minutes(shift_start, shift_end, issue_intervals["No show"]) if shift_start and shift_end else 0,
+            "unmapped_minutes": unverified,
             "absence_rate": evaluate_formula(rulebook.formulas["absence_rate"].formula, values),
             "vacation_rate": evaluate_formula(rulebook.formulas["vacation_rate"].formula, values),
             "shrinkage_rate": evaluate_formula(rulebook.formulas["shrinkage_rate"].formula, values),
             "absence_day": absence > 0, "absence_spell": None, "absence_spells": 0,
             "absence_days": 0.0, "bradford_factor": 0.0,
             "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
+            "unverified_minutes": unverified, "corrected_minutes": corrected,
         })
 
     by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -1032,10 +1218,13 @@ SERVICE_COLUMNS = [
     "short_abandoned", "answered_within_target", "handled_seconds", "sl_gross",
     "sl_adjusted", "sl_profile", "service_level", "service_availability",
     "abandon_rate", "aht_seconds", "source_file", "rule_version", "rule_sha256",
+    "service_scope", "comparison_scope", "designation", "mapping_status", "mapping_sha256",
 ]
 
 
-def _build_service(conn: DatabaseConnection, rulebook: Rulebook, start: date, end: date) -> int:
+def _build_service(
+    conn: DatabaseConnection, rulebook: Rulebook, mapping: QueueMapping, start: date, end: date,
+) -> int:
     conn.execute("DELETE FROM mart.service_interval")
     rows = _dicts(conn.execute(
         """
@@ -1070,6 +1259,7 @@ def _build_service(conn: DatabaseConnection, rulebook: Rulebook, start: date, en
             "answered_within_target": row["answered_20s"], "handled_seconds": handled_seconds,
         }
         profile = rulebook.service_profile_for(row["source_system"], row["lob"], row["language"])
+        mapped = mapping.map_actual(row["source_system"], row["queue"], row["business_partner"], row["lob"])
         output.append({
             **{key: row[key] for key in (
                 "business_date", "interval_start", "hour_start", "source_system", "queue",
@@ -1085,6 +1275,9 @@ def _build_service(conn: DatabaseConnection, rulebook: Rulebook, start: date, en
             "abandon_rate": evaluate_formula(rulebook.formulas["abandon_rate"].formula, values),
             "aht_seconds": evaluate_formula(rulebook.formulas["aht_seconds"].formula, values),
             "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
+            "service_scope": mapped.service_scope, "comparison_scope": mapped.comparison_scope,
+            "designation": mapped.designation,
+            "mapping_status": mapped.status, "mapping_sha256": mapping.sha256,
         })
     _insert_dicts(conn, "mart.service_interval", SERVICE_COLUMNS, output)
     return len(output)
@@ -1100,6 +1293,18 @@ def _record_rule_application(conn: DatabaseConnection, run_id: str, rulebook: Ru
                rule_file=excluded.rule_file, effective_from=excluded.effective_from,
                applied_at=excluded.applied_at""",
         [run_id, rulebook.version, rulebook.sha256, str(rulebook.file), rulebook.effective_from, datetime.now()],
+    )
+
+
+def _record_mapping_application(conn: DatabaseConnection, run_id: str, mapping: QueueMapping) -> None:
+    conn.execute(
+        """INSERT INTO meta.mapping_application(run_id, mapping_sha256, mapping_file, applied_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(run_id) DO UPDATE SET
+               mapping_sha256=excluded.mapping_sha256,
+               mapping_file=excluded.mapping_file,
+               applied_at=excluded.applied_at""",
+        [run_id, mapping.sha256, str(mapping.file), datetime.now()],
     )
 
 
@@ -1153,36 +1358,34 @@ def _build_quality(
         """SELECT business_date, count(*) FROM mart.attendance_agent_day
            WHERE attendance_result='Data not loaded' GROUP BY business_date ORDER BY business_date"""
     ).fetchall():
-        add("lilo", None, business_date, None, "LILO date not loaded", "ERROR", f"{count} scheduled Agent ID rows cannot be judged")
+        add("attendance", None, business_date, None, "Actual evidence date not loaded", "ERROR", f"{count} scheduled Agent ID rows cannot be judged from LILO or Agent Status")
     for row in _dicts(conn.execute(
         """SELECT business_date, agent_id, attendance_result, schedule_source
            FROM mart.attendance_agent_day
-           WHERE attendance_result IN ('Schedule parse error','Identity not in LILO','Missing LILO roster row','Incomplete LILO','No schedule overlap')"""
+           WHERE attendance_result IN ('Schedule parse error','Missing actual evidence','Incomplete actual evidence','No schedule overlap')"""
     )):
         severity = "ERROR" if row["attendance_result"] in {"Data not loaded", "Schedule parse error"} else "REVIEW"
         add("attendance", row["schedule_source"], row["business_date"], row["agent_id"], row["attendance_result"], severity, "Attendance result requires review before payroll use")
-    if config.modules.get("agent_status", False):
-        for business_date, count in conn.execute(
-            """SELECT s.business_date, count(*)
-               FROM (SELECT DISTINCT business_date FROM mart.conformance_agent_day) s
-               WHERE NOT EXISTS (
-                   SELECT 1 FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
-                   WHERE r.extract_date=s.business_date
-               ) GROUP BY s.business_date ORDER BY s.business_date"""
+    if config.modules.get("agent_status", True):
+        for business_date, low_rows in conn.execute(
+            """SELECT business_date, count(*)
+               FROM mart.attendance_agent_day
+               WHERE scheduled_minutes>0 AND status_source IS NOT NULL
+                 AND 1.0*status_covered_minutes/scheduled_minutes < ?
+               GROUP BY business_date ORDER BY business_date""",
+            [config.rules.minimum_status_coverage],
         ).fetchall():
-            add("agent_status", None, business_date, None, "Agent Status date not loaded", "REVIEW", "Legacy status compatibility is unavailable")
-        for row in _dicts(conn.execute(
-            """SELECT c.business_date, c.agent_id, c.status_coverage_percent
-               FROM mart.conformance_agent_day c
-               WHERE c.status_coverage_percent IS NOT NULL AND c.status_coverage_percent < ?
-                 AND EXISTS (
-                     SELECT 1 FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
-                     WHERE r.extract_date=c.business_date
-                 )""", [config.rules.minimum_status_coverage]
-        )):
-            add("agent_status", None, row["business_date"], row["agent_id"], "Low status coverage", "REVIEW", f"Coverage={row['status_coverage_percent']:.1%}; legacy compatibility uses LILO fallback when available")
-    if conn.execute("SELECT count(*) FROM mart.forecast_hour").fetchone()[0] and conn.execute("SELECT count(*) FROM mart.intraday_queue_interval").fetchone()[0]:
-        add("intraday", None, None, None, "Forecast scope mapping required", "REVIEW", "Forecast and Storm actuals are intentionally not auto-mapped. Confirm queue/LOB scope before comparing them.")
+            add(
+                "agent_status", None, business_date, None, "Low Agent Status coverage", "REVIEW",
+                f"{low_rows} agent-day rows have less than {config.rules.minimum_status_coverage:.0%} status coverage; LILO boundaries still remain usable.",
+            )
+    forecast_unmapped = conn.execute("SELECT count(*) FROM mart.forecast_hour WHERE mapping_status='UNMAPPED'").fetchone()[0]
+    actual_unmapped = conn.execute("SELECT count(*) FROM mart.intraday_queue_interval WHERE mapping_status='UNMAPPED'").fetchone()[0]
+    if forecast_unmapped or actual_unmapped:
+        add(
+            "intraday", str(config.queue_mapping), None, None, "Unmapped service scope", "REVIEW",
+            f"{forecast_unmapped} forecast and {actual_unmapped} actual rows are unmapped. Edit config/queue_mapping.csv and refresh; extracts stay untouched.",
+        )
     if config.modules.get("pcs", True):
         call_rows = conn.execute("SELECT count(*) FROM core.clean_call_leg WHERE business_date BETWEEN ? AND ?", [start, end]).fetchone()[0]
         responses = conn.execute("SELECT coalesce(sum(survey_responses),0) FROM mart.agent_pcs_day").fetchone()[0]
@@ -1198,11 +1401,20 @@ def _build_quality(
            GROUP BY business_date, agent_id, activity, category, source_file
            ORDER BY business_date, agent_id, activity""", [start, end]
     )):
-        severity = "ERROR" if rulebook.unmapped_activity_is_error else "REVIEW"
+        severity = "REVIEW"
         add(
             "absence", row["source_file"], row["business_date"], row["agent_id"],
-            "Unmapped Verint activity", severity,
-            f"{row['activity']} -> {row['category']} ({row['minutes']} minutes). Add a rule in config/wfm_rules.toml.",
+            "Observed gap not verified in Verint", severity,
+            f"{row['activity']} -> {row['category']} ({row['minutes']} minutes). Correct it in Verint, then export Activities and refresh.",
+        )
+    for row in _dicts(conn.execute(
+        """SELECT business_date, agent_id, agent_name, activity, category, minutes, source_file
+           FROM mart.verint_final_exception WHERE business_date BETWEEN ? AND ?""", [start, end]
+    )):
+        add(
+            "schedule", row["source_file"], row["business_date"], row["agent_id"],
+            "Verint final activity without observed gap", "REVIEW",
+            f"{row['activity']} / {row['category']} covers {row['minutes']} minutes for {row['agent_name'] or row['agent_id']}; compare LILO and Agent Status.",
         )
     for row in _dicts(conn.execute(
         """SELECT business_date, source_system, queue, offered, answered, source_file
@@ -1347,6 +1559,7 @@ def refresh_models(
     try:
         stage(0, "Validating business rules")
         rulebook = load_rulebook(config.home, config.business_rules)
+        mapping = load_queue_mapping(config.queue_mapping)
         stage(1, "Selecting reporting period")
         start, end = resolve_period(conn, config, start, end, use_config_period)
         stage(2, "Loading schedules")
@@ -1356,35 +1569,36 @@ def refresh_models(
         events_by_agent = _events_by_agent(events)
         stage(4, "Loading LILO")
         lilo, loaded_dates, seen_ids = _load_lilo(conn, start, end)
-        stage(5, "Checking optional legacy status")
-        statuses = _load_statuses(conn, start, end) if config.modules.get("agent_status", False) else {}
+        stage(5, "Loading Agent Status attendance evidence")
+        if config.modules.get("agent_status", True):
+            statuses, status_loaded_dates = _load_statuses(conn, start, end)
+        else:
+            statuses, status_loaded_dates = {}, set()
         stage(6, "Building employee dimension")
         agents = _build_agents(conn)
         stage(7, "Building attendance")
-        attendance = _build_attendance(conn, rulebook, schedules, events_by_agent, lilo, loaded_dates, seen_ids, agents)
-        stage(8, "Legacy status compatibility")
-        if config.modules.get("agent_status", False):
-            conformance, exclusive = _build_conformance(conn, config, attendance, statuses)
-        else:
-            conn.execute("DELETE FROM mart.conformance_agent_day")
-            conformance, exclusive = [], {}
-        stage(9, "Finding correction gaps")
-        corrections = _build_corrections(conn, rulebook, attendance, conformance, exclusive)
-        stage(10, "Legacy RTA compatibility")
-        if config.modules.get("agent_status", False):
-            rta = _build_rta(conn, config, schedules, events_by_agent, statuses, agents)
-        else:
-            conn.execute("DELETE FROM mart.rta_snapshot")
-            rta = []
+        attendance = _build_attendance(
+            conn, rulebook, schedules, events_by_agent, lilo, loaded_dates, seen_ids,
+            agents, statuses, status_loaded_dates,
+        )
+        stage(8, "Keeping adherence disabled")
+        conn.execute("DELETE FROM mart.conformance_agent_day")
+        conformance = []
+        stage(9, "Finding observed LILO and status gaps")
+        corrections = _build_corrections(conn, rulebook, attendance)
+        stage(10, "Keeping legacy RTA disabled")
+        conn.execute("DELETE FROM mart.rta_snapshot")
+        rta = []
         stage(11, "Building intraday actual and forecast")
-        forecast, actual = _build_intraday(conn, start, end)
+        forecast, actual = _build_intraday(conn, start, end, mapping)
         stage(12, "Building Agent PCS")
         pcs = _build_pcs(conn, config, start, end)
         stage(13, "Building absence and shrinkage")
-        absence, absence_events = _build_absence(conn, config, rulebook, attendance)
+        absence, absence_events = _build_absence(conn, config, rulebook, attendance, corrections)
         stage(14, "Building service performance")
-        service = _build_service(conn, rulebook, start, end)
+        service = _build_service(conn, rulebook, mapping, start, end)
         _record_rule_application(conn, run_id, rulebook)
+        _record_mapping_application(conn, run_id, mapping)
         stage(15, "Checking source health")
         _build_source_health(conn, config)
         stage(16, "Running data-quality checks")

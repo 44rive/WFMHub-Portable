@@ -98,6 +98,7 @@ def _start_sheet(
     )
     lines = [
         "This workbook contains curated model facts only. Raw extracts remain untouched and stay in SQLite.",
+        "Attendance and absence are observed from LILO plus Agent Status; Verint Activities only verify the final correction.",
         "No adherence KPI is included. Availability always means service availability: answered / offered.",
         "Create your PivotTable: select a cell in a PIVOT_* sheet, then Insert > PivotTable > From Table/Range.",
         f"Recommended PivotTable sources: {', '.join(pivot_tables)}.",
@@ -146,23 +147,23 @@ def build_absence_report(
     report = ExcelReport(partial)
     try:
         _start_sheet(report, "WFMHub Attendance & Absence", rulebook, config, start, end, ("PIVOT_ABSENCE", "ABSENCE_EVENTS", "AGENT_SPELLS"))
-        planned, absence, vacation, shrinkage, absence_days, unmapped_days = conn.execute("""
+        planned, absence, vacation, shrinkage, corrected, unverified, absence_days = conn.execute("""
             SELECT coalesce(sum(planned_net_minutes),0), coalesce(sum(absence_minutes),0),
                    coalesce(sum(vacation_minutes),0), coalesce(sum(shrinkage_minutes),0),
-                   count(DISTINCT CASE WHEN absence_day THEN agent_day_key END),
-                   count(DISTINCT CASE WHEN unmapped_minutes>0 THEN agent_day_key END)
+                   coalesce(sum(corrected_minutes),0), coalesce(sum(unverified_minutes),0),
+                   count(DISTINCT CASE WHEN absence_day THEN agent_day_key END)
             FROM mart.absence_agent_day WHERE business_date BETWEEN ? AND ?
         """, [start, end]).fetchone()
         calculated = _absence_values(rulebook, planned, absence, vacation, shrinkage)
         headers = [
             "planned_net_hours", "absence_hours", "absence_rate", "vacation_hours",
             "vacation_rate", "shrinkage_hours", "shrinkage_rate", "absence_agent_days",
-            "days_with_unmapped_activity",
+            "corrected_in_verint_hours", "not_corrected_in_verint_hours",
         ]
         rows = [(
             calculated["planned_net_hours"], calculated["absence_hours"], calculated["absence_rate"],
             calculated["vacation_hours"], calculated["vacation_rate"], calculated["shrinkage_hours"],
-            calculated["shrinkage_rate"], absence_days, unmapped_days,
+            calculated["shrinkage_rate"], absence_days, corrected / 60.0, unverified / 60.0,
         )]
         report.add_table_sheet(
             "SUMMARY", "Absence summary",
@@ -183,7 +184,8 @@ def build_absence_report(
                    late_minutes/60.0 AS late_hours,
                    early_leave_minutes/60.0 AS early_leave_hours,
                    no_show_minutes/60.0 AS no_show_hours,
-                   unmapped_minutes/60.0 AS unmapped_hours,
+                   corrected_minutes/60.0 AS corrected_in_verint_hours,
+                   unverified_minutes/60.0 AS not_corrected_in_verint_hours,
                    absence_rate, vacation_rate, shrinkage_rate, absence_day,
                    absence_spell, absence_spells, absence_days, bradford_factor,
                    rule_version, rule_sha256
@@ -201,15 +203,16 @@ def build_absence_report(
                    language, location, activity, category, event_start, event_end,
                    hours, planned, working, counts_as_absence, counts_as_vacation,
                    counts_as_unpaid, counts_as_shrinkage, mapped, evidence_type,
-                   source_file, rule_version
+                   reconciliation_status, verint_activity, verint_category,
+                   verint_overlap_minutes, source_file, verint_source_file, rule_version
             FROM mart.absence_event
             WHERE business_date BETWEEN ? AND ?
             ORDER BY business_date, agent_name, event_start
             LIMIT ?
         """, [start, end, config.report_limits.get("max_absence_rows", 100000)])
         report.add_table_sheet(
-            "ABSENCE_EVENTS", "Classified Verint and LILO evidence",
-            "Event intervals are clipped to the scheduled shift. Daily totals union overlaps, so minutes are not double-counted.", headers, rows,
+            "ABSENCE_EVENTS", "Observed LILO and Agent Status gaps",
+            "Verint columns are reconciliation labels only. Daily totals union observed overlaps, so minutes are not double-counted.", headers, rows,
         )
         headers, rows = _query(conn, """
             SELECT agent_id, max(agent_name) AS agent_name, max(team_leader) AS team_leader,
@@ -229,19 +232,32 @@ def build_absence_report(
         )
         headers, rows = _query(conn, """
             SELECT business_date, agent_id, agent_name, activity, category, hours,
-                   evidence_type, source_file
-            FROM mart.absence_event WHERE mapped=false AND business_date BETWEEN ? AND ?
+                   evidence_type, reconciliation_status, source_file
+            FROM mart.absence_event
+            WHERE reconciliation_status IN ('NOT_CORRECTED','PARTIAL') AND business_date BETWEEN ? AND ?
             ORDER BY business_date, agent_name, activity
         """, [start, end])
         report.add_table_sheet(
-            "UNMAPPED", "Unmapped Verint activities",
-            "Review every row, then add or adjust an activity rule before payroll use.", headers, rows,
+            "NOT_CORRECTED", "Observed gaps not fully corrected in Verint",
+            "Correct or complete these in Verint, export Activities again, and refresh.", headers, rows,
+        )
+        headers, rows = _query(conn, """
+            SELECT business_date, agent_id, agent_name, activity, category,
+                   event_start, event_end, minutes, exception_type, source_file
+            FROM mart.verint_final_exception
+            WHERE business_date BETWEEN ? AND ?
+            ORDER BY business_date, agent_name, event_start
+        """, [start, end])
+        report.add_table_sheet(
+            "VERINT_ONLY", "Verint final activities without observed gaps",
+            "Review source coverage and the injected activity. These rows do not create absence by themselves.",
+            headers, rows,
         )
         _add_rule_sheets(report, rulebook)
         headers, rows = _query(conn, """
             SELECT source_family, expected_path, newest_file, newest_business_date, modified_at,
                    loaded_at, row_count, rejected_count, scoped_out_count, status, details
-            FROM mart.source_health WHERE source_family IN ('fte','schedule','lilo')
+            FROM mart.source_health WHERE source_family IN ('fte','schedule','lilo','agent_status')
             ORDER BY source_family
         """)
         report.add_table_sheet("SOURCE_HEALTH", "Absence source health", "Check this before payroll use.", headers, rows, exception_column="Status")
@@ -280,12 +296,12 @@ def _kpi_row(
 def _scorecard_rows(conn: DatabaseConnection, rulebook: Rulebook, start: date, end: date) -> list[tuple[Any, ...]]:
     output: list[tuple[Any, ...]] = []
     service_rows = _query(conn, """
-        SELECT business_date, source_system, lob, language,
+        SELECT business_date, source_system, comparison_scope, language,
                sum(offered), sum(answered), sum(abandoned), sum(short_abandoned),
                sum(answered_within_target), sum(handled_seconds)
         FROM mart.service_interval WHERE business_date BETWEEN ? AND ?
-        GROUP BY business_date, source_system, lob, language
-        ORDER BY business_date, source_system, lob, language
+        GROUP BY business_date, source_system, comparison_scope, language
+        ORDER BY business_date, source_system, comparison_scope, language
     """, [start, end])[1]
     gross = rulebook.service_profiles["gross_20"]
     adjusted = rulebook.service_profiles["adjusted_20"]
@@ -332,13 +348,13 @@ def _scorecard_rows(conn: DatabaseConnection, rulebook: Rulebook, start: date, e
         for key, amount in (("absence_rate", absence), ("vacation_rate", vacation), ("shrinkage_rate", shrinkage)):
             formula = rulebook.formulas[key]
             output.append(_kpi_row(
-                day, "ABSENCE", "VERINT", lob, language, key, formula.label,
+                day, "ABSENCE", "LILO_STATUS", lob, language, key, formula.label,
                 amount, planned, evaluate_formula(formula.formula, values), formula.unit, "rulebook", rulebook,
             ))
         output.extend([
-            _kpi_row(day, "ABSENCE", "VERINT", lob, language, "planned_net_hours", "Planned net hours", planned, None, planned, "hours", "sum", rulebook),
-            _kpi_row(day, "ABSENCE", "VERINT", lob, language, "absence_hours", "Absence hours", absence, None, absence, "hours", "sum", rulebook),
-            _kpi_row(day, "ABSENCE", "VERINT", lob, language, "vacation_hours", "Vacation hours", vacation, None, vacation, "hours", "sum", rulebook),
+            _kpi_row(day, "ABSENCE", "LILO_STATUS", lob, language, "planned_net_hours", "Planned net hours", planned, None, planned, "hours", "sum", rulebook),
+            _kpi_row(day, "ABSENCE", "LILO_STATUS", lob, language, "absence_hours", "Absence hours", absence, None, absence, "hours", "sum", rulebook),
+            _kpi_row(day, "ABSENCE", "LILO_STATUS", lob, language, "vacation_hours", "Vacation hours", vacation, None, vacation, "hours", "sum", rulebook),
         ])
     pcs_rows = _query(conn, """
         SELECT business_date, lob, language, sum(pcs_score_sum), sum(pcs_score_count),
@@ -356,10 +372,10 @@ def _scorecard_rows(conn: DatabaseConnection, rulebook: Rulebook, start: date, e
                      evaluate_formula(rulebook.formulas["agent_aht_seconds"].formula, {"handle_seconds": handle_seconds, "handled_calls": handled_calls}), "seconds", "weighted", rulebook),
         ])
     forecast_rows = _query(conn, """
-        SELECT business_date, queue_name, sum(volume_forecast),
+        SELECT business_date, comparison_scope, sum(volume_forecast),
                CASE WHEN sum(volume_forecast)>0 THEN sum(volume_forecast*aht_forecast_seconds)/sum(volume_forecast) END
         FROM mart.forecast_hour WHERE business_date BETWEEN ? AND ?
-        GROUP BY business_date, queue_name ORDER BY business_date, queue_name
+        GROUP BY business_date, comparison_scope ORDER BY business_date, comparison_scope
     """, [start, end])[1]
     for day, queue, volume, aht in forecast_rows:
         output.extend([
@@ -400,7 +416,8 @@ def build_scorecard_report(
             headers, kpi_rows,
         )
         headers, rows = _query(conn, """
-            SELECT business_date, interval_start, source_system, queue, business_partner, lob,
+            SELECT business_date, interval_start, source_system, service_scope,
+                   comparison_scope, mapping_status, queue, business_partner, lob,
                    language, offered, answered, abandoned, short_abandoned,
                    answered_within_target, sl_gross, sl_adjusted, sl_profile,
                    service_level, service_availability, abandon_rate, aht_seconds,

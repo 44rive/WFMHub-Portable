@@ -104,6 +104,47 @@ class AgentScopeTests(unittest.TestCase):
 
 
 class SQLiteLifecycleTests(unittest.TestCase):
+    def test_v040_database_upgrades_to_observed_reconciliation_and_mapping(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder) / "hub"
+            (home / "config").mkdir(parents=True)
+            for name in ("default.toml", "default_rules.toml", "default_queue_mapping.csv"):
+                shutil.copy2(REPO / "config" / name, home / "config" / name)
+            migrations = home / "sql" / "migrations"
+            migrations.mkdir(parents=True)
+            for name in (
+                "001_initial.sql", "002_performance_indexes.sql",
+                "003_call_pcs.sql", "004_sota_rules_absence_service.sql",
+            ):
+                shutil.copy2(REPO / "sql" / "migrations" / name, migrations / name)
+            config = load_config(home)
+            migrate(config)
+            conn = connect(config)
+            try:
+                conn.execute(
+                    "INSERT INTO core.correction_action VALUES (?, NULL, 'Open', NULL, NULL, NULL, ?, 'v040')",
+                    ["keep-v040", datetime.now()],
+                )
+            finally:
+                conn.close()
+            shutil.copy2(
+                REPO / "sql" / "migrations" / "005_observed_attendance_mapping_reconciliation.sql",
+                migrations / "005_observed_attendance_mapping_reconciliation.sql",
+            )
+            self.assertEqual(migrate(config), ["005_observed_attendance_mapping_reconciliation"])
+            upgraded = connect(config, read_only=True)
+            try:
+                self.assertEqual(upgraded.execute("SELECT count(*) FROM core.correction_action WHERE correction_id='keep-v040'").fetchone()[0], 1)
+                correction_columns = {row[1] for row in upgraded.execute("PRAGMA table_info(mart_correction_candidate)").fetchall()}
+                self.assertIn("verint_reconciliation", correction_columns)
+                self.assertIsNotNone(upgraded.execute("SELECT name FROM sqlite_master WHERE name='mart_verint_final_exception'").fetchone())
+                indexes = {row[1] for row in upgraded.execute("PRAGMA index_list(mart_forecast_hour)").fetchall()}
+                self.assertIn("idx_forecast_hour_grain_v050", indexes)
+                self.assertNotIn("idx_forecast_hour_grain", indexes)
+            finally:
+                upgraded.close()
+            self.assertEqual(len(list(config.backups.glob("wfm_pre_migration_*.sqlite3"))), 1)
+
     def test_v02_database_upgrades_additively_to_call_pcs(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

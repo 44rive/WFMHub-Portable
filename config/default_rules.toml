@@ -5,16 +5,18 @@
 # every change. All percentages are stored as decimals (0.80 = 80%).
 
 [rulebook]
-version = "2026.08.1"
+version = "2026.08.2"
 effective_from = "2026-01-01"
 description = "Canonical WFM rules learned from the August Verint, Storm, PCS and reporting references."
 
 [absence]
 standard_day_hours = 8.75
 late_tolerance_minutes = 5
+status_gap_tolerance_minutes = 5
+verint_match_tolerance_minutes = 5
 spell_gap_days = 1
 cap_event_to_schedule = true
-unmapped_activity_is_error = true
+unmapped_activity_is_error = false
 
 [pcs]
 scored_questions = [1, 2]

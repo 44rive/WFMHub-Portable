@@ -18,6 +18,7 @@ from .doctor import run_doctor
 from .exports import DATASETS, export_dataset
 from .ingestion import ingest_all
 from .models import refresh_models
+from .mapping import load_queue_mapping
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
 from .progress import ProgressBar, ProgressCallback
 from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack
@@ -28,7 +29,7 @@ from .ui import clear_screen, render_dashboard
 
 SOURCE_GROUPS = {
     "all": None,
-    "operations": {"fte", "schedule", "lilo"},
+    "operations": {"fte", "schedule", "lilo", "agent_status"},
     "intraday": {"forecast", "apbe", "apfr", "apde"},
     "pcs": {"fte", "calls"},
 }
@@ -100,6 +101,7 @@ def setup(home: Path, source_root: Path | None, non_interactive: bool) -> int:
     print(f"Source root : {config.source_root}")
     print(f"Database    : {config.database}")
     print(f"Rules       : {config.business_rules}")
+    print(f"Queue map   : {config.queue_mapping}")
     print(f"Log         : {log}")
     if migrations:
         print(f"Database migrations applied: {', '.join(migrations)}")
@@ -162,7 +164,9 @@ def refresh(
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
     print(f"Quality     : {model.quality_rows:,} issues")
     business = load_rulebook(home, config.business_rules)
+    mapping = load_queue_mapping(config.queue_mapping)
     print(f"Rules       : {business.version} ({business.sha256[:12]})")
+    print(f"Queue map   : {mapping.sha256[:12]}")
     if ingested.errors:
         print("\nFiles with errors:")
         for error in ingested.errors:
@@ -362,6 +366,9 @@ def rules_tool(home: Path, action: str = "validate") -> int:
     rulebook = load_rulebook(home, config.business_rules)
     for line in validate_rulebook(rulebook):
         print(line)
+    mapping = load_queue_mapping(config.queue_mapping)
+    print(f"Queue mapping is valid: {mapping.file}")
+    print(f"Queue mapping SHA-256: {mapping.sha256}")
     if action == "catalog":
         path = build_kpi_catalog(config)
         print(f"KPI catalog: {path}")
@@ -410,7 +417,7 @@ def _choose_period() -> tuple[date | None, date | None, bool]:
 def _choose_source_group() -> str:
     print("\nDATA TO REFRESH")
     print("1. All sources")
-    print("2. Attendance/absence: FTE, Verint schedule and LILO")
+    print("2. Attendance/absence: FTE, Verint schedule, LILO and Agent Status")
     print("3. Service: APBE, APFR, APDE and Verint Forecast")
     print("4. Agent PCS: FTE and Call by Call")
     choice = input("Choose 1-4: ").strip()

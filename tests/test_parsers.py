@@ -8,7 +8,7 @@ from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 
-from wfmhub.ingestion import AgentScope, SourceSchemaError, parse_agent_status, parse_calls, parse_forecast, parse_fte, parse_lilo, parse_schedule
+from wfmhub.ingestion import AgentScope, SourceSchemaError, parse_agent_status, parse_calls, parse_forecast, parse_fte, parse_lilo, parse_queue_actual, parse_schedule
 
 
 class ParserTests(unittest.TestCase):
@@ -217,6 +217,39 @@ class ParserTests(unittest.TestCase):
             self.assertEqual(row["interval_minutes"], 60)
             self.assertEqual(row["sl_forecast"], 0.79)
             self.assertEqual(row["net_staffing_forecast"], -1)
+
+    def test_forecast_accepts_reviewed_volume_only_extract(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "FORD_FR_08-2026.txt"
+            path.write_text(
+                "DATE_TIME_FORMAT\nMM/DD/YYYY hh:mm A\n"
+                "Queue Name\tDate\tTime\tTime Interval\tVolume (Absolute For)\n"
+                "Combined - All Media\t08/01/2026\t12:00 AM\t1:00\t8\n",
+                encoding="cp1252",
+            )
+            row = parse_forecast(path, "file").tables["raw.forecast_interval"][0]
+            self.assertEqual(row["volume_forecast"], 8)
+            self.assertIsNone(row["fte_forecast"])
+            self.assertIsNone(row["sl_forecast"])
+
+    def test_apde_bracketed_csv_is_supported(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "APDE-Standard-KPIs---Inbound-Calls 2026-08-01.csv"
+            path.write_text(
+                "[Date],[BusinessPartnerID],[LineOfBusiness],[15 Minute Periods of Day],"
+                "[Offered_calls (w/o short calls)],[Answered_Calls],[Abandoned_Calls (w/o short calls)],"
+                "[Short_calls < 5s],[Answered_Calls <= 15s],[Answered_Calls <= 20s],"
+                "[Answered_Calls <= 30s],[Abandoned_Calls (w/o s.c.) <= 20s],"
+                "[Average_Speed_of_Answer],[Average_Handled_Time],[Average_Talk_Time],"
+                "[Average_Hold_Time],[Average Total Wrap Time]\n"
+                "2026/08/01,Ford,FORD,09:15,10,8,2,1,6,7,8,1,0:00:10,0:02:30,0:02:00,0:00:10,0:00:20\n",
+                encoding="utf-8-sig",
+            )
+            row = parse_queue_actual(path, "file", "APDE").tables["raw.queue_actual"][0]
+            self.assertEqual(row["language"], "DE")
+            self.assertEqual(row["answered_20s"], 7)
+            self.assertEqual(row["abandoned_20s"], 1)
+            self.assertEqual(row["aht_seconds"], 150)
 
     def test_call_by_call_uses_row_dates_scores_and_fte_scope(self):
         with tempfile.TemporaryDirectory() as folder:

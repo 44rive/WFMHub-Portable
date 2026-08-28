@@ -9,6 +9,7 @@ import shutil
 import tomllib
 from dataclasses import dataclass
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -67,6 +68,8 @@ class Rulebook:
     sha256: str
     standard_day_hours: float
     late_tolerance_minutes: int
+    status_gap_tolerance_minutes: int
+    verint_match_tolerance_minutes: int
     spell_gap_days: int
     cap_event_to_schedule: bool
     unmapped_activity_is_error: bool
@@ -122,6 +125,7 @@ _ALLOWED_CMPOPS = (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 _FUNCTIONS = {"min", "max", "coalesce", "nullif", "ifelse", "abs", "round"}
 
 
+@lru_cache(maxsize=256)
 def _validate_expression(expression: str, label: str) -> ast.Expression:
     try:
         tree = ast.parse(expression, mode="eval")
@@ -284,6 +288,9 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
         raise RulebookError("rulebook.version cannot be blank")
     if not 0 < standard_day_hours <= 24:
         raise RulebookError("absence.standard_day_hours must be greater than 0 and at most 24")
+    for key in ("late_tolerance_minutes", "status_gap_tolerance_minutes", "verint_match_tolerance_minutes"):
+        if not 0 <= int(absence.get(key, 5)) <= 120:
+            raise RulebookError(f"absence.{key} must be between 0 and 120")
     if not 1 <= target_seconds <= 600:
         raise RulebookError("service.target_seconds must be between 1 and 600")
 
@@ -387,6 +394,8 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
         description=str(meta.get("description", "")), sha256=hashlib.sha256(content).hexdigest(),
         standard_day_hours=standard_day_hours,
         late_tolerance_minutes=int(absence.get("late_tolerance_minutes", 5)),
+        status_gap_tolerance_minutes=int(absence.get("status_gap_tolerance_minutes", 5)),
+        verint_match_tolerance_minutes=int(absence.get("verint_match_tolerance_minutes", 5)),
         spell_gap_days=int(absence.get("spell_gap_days", 1)),
         cap_event_to_schedule=bool(absence.get("cap_event_to_schedule", True)),
         unmapped_activity_is_error=bool(absence.get("unmapped_activity_is_error", True)),

@@ -14,7 +14,7 @@ export.
 
 ## First setup — one time
 
-1. Download `WFMHub-Portable-v0.4.0-win-x64.zip` from **Releases**.
+1. Download `WFMHub-Portable-v0.5.0-win-x64.zip` from **Releases**.
 2. Do not download GitHub's “Source code” ZIP.
 3. Right-click the downloaded ZIP and choose **Extract All**.
 4. Put the entire extracted `WFMHub` folder in a place where you can write, for
@@ -82,7 +82,7 @@ The source file itself remains untouched. `SOURCE_HEALTH` shows:
 - `Rejected Count`: malformed or flagged rows.
 
 If FTE changes, WFMHub automatically rechecks the same unchanged extracts.
-Agent Status and adherence are disabled by default in v0.4.
+Agent Status is enabled as attendance evidence. Adherence remains disabled.
 
 ## Read the dashboard status bar
 
@@ -129,7 +129,7 @@ WFMHub [############----------------]  43% Building attendance
 ```
 
 The words tell you exactly what it is doing. The percentage covers the whole
-job, not one source file. Very large LILO and Call-by-Call files temporarily
+job, not one source file. Very large LILO, Agent Status and Call-by-Call files temporarily
 show `working` plus the number of rows scanned. Large clean exports show the
 number of rows written. Do not close the window while the line is moving or its
 row count is increasing. A completed job reaches `100%`; an error changes the
@@ -200,25 +200,30 @@ the row instead of inventing a no-show day.
 
 ## No-show versus missing data
 
-- **No show:** LILO file loaded, agent row present, both login/logout blank, and
-  the schedule says Work.
-- **Missing LILO roster row:** LILO file loaded, but that agent row is absent.
-- **Data not loaded:** the needed daily LILO file is missing.
-- **Identity not in LILO:** the scheduled Agent ID was never found in admitted
-  LILO history.
-- **Incomplete LILO:** only one boundary is present.
+- **No show:** LILO row loaded with both login/logout blank, a non-Off schedule,
+  and no active Agent Status evidence.
+- **Missing actual evidence:** the schedule exists but neither source proves an
+  active boundary for that agent/day.
+- **Data not loaded:** neither required LILO nor Agent Status date is loaded.
+- **Incomplete actual evidence:** only one usable boundary is available.
 
 Only the first result is a no-show.
 
 ## Monthly Verint correction exercise
 
 1. Refresh the first through last day of the month.
-2. Confirm all expected LILO dates and the authoritative Verint schedule in
+2. Confirm all expected LILO, Agent Status and authoritative Verint schedule dates in
    `SOURCE_HEALTH`.
 3. Check `DATA_QUALITY`; resolve `ERROR` before payroll or injection work.
 4. Open `GAPS`.
 5. Review the detected interval, reason, confidence, and suggested activity.
-6. Edit only the blue columns:
+6. Read **Verint Final Check**:
+
+   - `CORRECTED`: the final activity covers the observed gap.
+   - `PARTIAL`: only part of the observed gap is in Verint.
+   - `NOT_CORRECTED`: no final activity covers it yet.
+
+7. Edit only the blue columns:
 
    - Confirmed Activity
    - Validation Status
@@ -226,13 +231,14 @@ Only the first result is a no-show.
    - Comment
    - Injected Date
 
-7. Save the workbook.
-8. In `WFMHub.cmd`, choose **7. Import correction decisions** and paste the saved
+8. Save the workbook.
+9. In `WFMHub.cmd`, choose **7. Import correction decisions** and paste the saved
    workbook path.
 
 The whole import is atomic: one invalid later row cancels the entire import.
 WFMHub stores accepted decisions in SQLite by stable `Correction ID`; a later
-refresh does not erase them.
+refresh does not erase them. Export Activities after Verint correction and
+refresh again to update the automatic final check.
 
 ## Separate report packs
 
@@ -294,8 +300,17 @@ libraries. Custom output goes to `output\custom`.
 ## Forecast and future features
 
 Verint Forecast is used only for forecast and required staffing. APBE/APFR/APDE
-is used only for actual service results. WFMHub does not guess how a forecast
-queue maps to actual queue/LOB data.
+is used only for actual service results. The reviewed mapping lives in:
+
+```text
+config\queue_mapping.csv
+```
+
+Open it in Excel or Notepad. `queue` rows map operational queues, `forecast_file`
+rows map forecast filename prefixes, and `scope_rollup` rows connect detailed
+scopes to a comparison scope. Save as CSV, run rule validation, and refresh.
+The extracts are untouched. The Intraday `QUEUE_MAPPING` sheet shows the exact
+mapping used, and `PIVOT_SCOPE_HOUR` compares mapped hourly actual versus forecast.
 
 New KPIs or reports can be added later without replacing the source extracts or
 attendance rules because forecast, actuals, agent facts, and report marts are
@@ -314,19 +329,19 @@ To restore, close WFMHub, preserve/rename the current database, copy the chosen
 backup to `database\wfm.sqlite3`, and rerun **10. Run system check**. Never delete
 the only copy first.
 
-## Upgrade to v0.4
+## Upgrade to v0.5
 
-v0.1 used a database extension blocked by the work computer. v0.2 through v0.4
-use SQLite. v0.4 upgrades an older SQLite hub with an automatic pre-migration
+v0.1 used a database extension blocked by the work computer. v0.2 through v0.5
+use SQLite. v0.5 upgrades an older SQLite hub with an automatic pre-migration
 backup and additive migration.
 
-1. Extract v0.4 into a new folder. Do not paste it over v0.1.
-2. Run v0.4 `SETUP.cmd` and select the same untouched source root.
+1. Extract v0.5 into a new folder. Do not paste it over v0.1.
+2. Run v0.5 `SETUP.cmd` and select the same untouched source root.
 3. Run a full refresh so SQLite rebuilds from the extracts.
-4. Keep the complete v0.1 folder and its `wfm.duckdb`; v0.4 never opens or
+4. Keep the complete v0.1 folder and its `wfm.duckdb`; v0.5 never opens or
    deletes it.
 5. If correction decisions exist only in an old Excel report, import that saved
-   report into v0.4.
+   report into v0.5.
 
 ## Troubleshooting
 
@@ -334,10 +349,11 @@ backup and additive migration.
 |---|---|
 | System check fails | Copy the exact FAIL line; setup stopped before database creation |
 | `py` is not recognized | Ignore `py`; the release uses `runtime\python.exe` only |
-| A DLL/application-control error appears | Re-extract the complete v0.4 ZIP; do not overlay v0.1 or move runtime files |
+| A DLL/application-control error appears | Re-extract the complete v0.5 ZIP; do not overlay v0.1 or move runtime files |
 | Source is `MISSING` | Correct `source_root` in `config\wfmhub.toml` |
 | Rule validation fails | Read the named formula/section, restore the backup rule file, and validate again |
-| `UNMAPPED` has rows | Add/review an activity rule before payroll use |
+| `NOT_CORRECTED` has rows | Correct/complete the activity in Verint, re-export Activities, then refresh |
+| Intraday mapping is `UNMAPPED` | Add the queue or forecast filename prefix to `config\queue_mapping.csv` |
 | PCS average is blank | No valid configured survey response exists for the FTE-scoped calls and dates |
 | Multi-day LILO rejects blank rows | Add a row-level Date column; filename range cannot identify a blank row's day |
 | Report is empty | Check selected dates, `SOURCE_HEALTH`, and FTE scope |

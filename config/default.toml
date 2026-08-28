@@ -11,6 +11,7 @@ backups = "backups"
 input = "input"
 custom = "custom"
 business_rules = "config/wfm_rules.toml"
+queue_mapping = "config/queue_mapping.csv"
 
 [sources]
 # FTE Agent is the authoritative "our agents" roster. Schedule, LILO, and
@@ -42,16 +43,16 @@ rta_stale_minutes = 30
 
 [modules]
 attendance = true
-# Disabled by default: the SOTA hub does not calculate adherence. Enable only
-# if you still need the legacy RTA/status compatibility output.
-agent_status = false
+# Agent Status is actual attendance evidence. It does not enable or calculate
+# adherence/conformance; it finds observed gaps inside the LILO boundaries.
+agent_status = true
 intraday = true
 forecast = true
 pcs = true
 absence = true
 
 [pcs]
-# Legacy compatibility copy. v0.4 reads the authoritative PCS calculation
+# Legacy compatibility copy. v0.5 reads the authoritative PCS calculation
 # settings from config/wfm_rules.toml so every business rule is cataloged.
 scored_questions = [1, 2]
 comment_questions = [3]
