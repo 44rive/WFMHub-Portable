@@ -1321,10 +1321,19 @@ def _build_quality(
 ) -> int:
     conn.execute("DELETE FROM meta.quality_issue")
     now = datetime.now()
-    issues: list[list[Any]] = []
+    # A single underlying problem can be discovered through more than one
+    # metadata row (for example, repeated failed attempts for the same file).
+    # Keep one row per deterministic issue_id before touching SQLite so one
+    # noisy source can never abort the whole model refresh.
+    issues: dict[str, list[Any]] = {}
 
     def add(family: str | None, source_file: str | None, business_date: date | None, agent_id: str | None, issue: str, severity: str, details: str) -> None:
-        issues.append([_issue_id(run_id, family, source_file, business_date, agent_id, issue, details), run_id, now, family, source_file, business_date, agent_id, issue, severity, details])
+        issue_id = _issue_id(run_id, family, source_file, business_date, agent_id, issue, details)
+        candidate = [issue_id, run_id, now, family, source_file, business_date, agent_id, issue, severity, details]
+        existing = issues.get(issue_id)
+        severity_rank = {"INFO": 0, "REVIEW": 1, "ERROR": 2}
+        if existing is None or severity_rank.get(severity, 0) > severity_rank.get(existing[8], 0):
+            issues[issue_id] = candidate
 
     for family, key in (
         ("fte", "fte_file"), ("schedule", "schedule_folder"), ("lilo", "lilo_folder"),
@@ -1464,15 +1473,16 @@ def _build_quality(
             family, file_name, None, None, "Agent scope mismatch", "ERROR",
             f"All {scoped_out} source rows were outside the active FTE roster; no rows were used.",
         )
-    if issues:
+    issue_rows = list(issues.values())
+    if issue_rows:
         row_placeholders = "(" + ", ".join("?" for _ in range(10)) + ")"
-        for offset in range(0, len(issues), 500):
-            batch = issues[offset : offset + 500]
+        for offset in range(0, len(issue_rows), 500):
+            batch = issue_rows[offset : offset + 500]
             conn.execute(
                 "INSERT INTO meta.quality_issue VALUES " + ", ".join(row_placeholders for _ in batch),
                 [value for row in batch for value in row],
             )
-    return len(issues)
+    return len(issue_rows)
 
 
 def _build_source_health(conn: DatabaseConnection, config: Config) -> None:

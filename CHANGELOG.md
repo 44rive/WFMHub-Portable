@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 — 2026-08-28
+
+- Prevented repeated source-load findings from generating the same deterministic
+  quality-issue key and aborting a refresh with a SQLite unique-constraint error.
+- Preserved the highest severity when identical quality findings are combined;
+  extract files and existing databases require no changes.
+
 ## 0.5.0 — 2026-08-28
 
 - Changed the attendance/absence source of truth to StartEndTimes schedule
