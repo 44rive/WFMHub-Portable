@@ -109,6 +109,7 @@ class ParserTests(unittest.TestCase):
                 writer.writerow(["08/01/2026", "", "", "", "", "", ""])
                 writer.writerow(["Doe,\tJane", "123456", "August", "", "", "Off", ""])
             result = parse_schedule(path, "file")
+            self.assertEqual(result.source_variant, "ACTIVITIES")
             self.assertEqual(len(result.tables["raw.schedule_shift"]), 1)
             self.assertEqual(result.tables["raw.schedule_shift"][0]["agent_id"], "123456")
             self.assertEqual(result.tables["raw.schedule_shift"][0]["agent_name"], "Doe,\tJane")
@@ -124,6 +125,7 @@ class ParserTests(unittest.TestCase):
                     "Off", ".AP | Front-office 08/03/2026 9:00 AM-08/03/2026 6:30 PM",
                 ])
             result = parse_schedule(path, "file")
+            self.assertEqual(result.source_variant, "START_END")
             shifts = result.tables["raw.schedule_shift"]
             self.assertEqual(len(shifts), 3)
             self.assertEqual([str(row["schedule_date"]) for row in shifts], ["2026-08-01", "2026-08-02", "2026-08-03"])
@@ -131,6 +133,13 @@ class ParserTests(unittest.TestCase):
             self.assertEqual(shifts[0]["assignment_type"], "Planned absence")
             self.assertEqual(shifts[1]["assignment_type"], "Off")
             self.assertEqual(result.tables["raw.schedule_event"], [])
+
+    def test_schedule_rejects_an_unrecognized_tsv_in_schedule_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "not-a-schedule.txt"
+            path.write_text("Queue\tDate\tValue\nA\t2026-08-01\t1\n", encoding="cp1252")
+            with self.assertRaisesRegex(SourceSchemaError, "neither a StartEndTimes export nor an Activities export"):
+                parse_schedule(path, "file")
 
     def test_lilo_preserves_and_adjusts_overnight_boundary(self):
         with tempfile.TemporaryDirectory() as folder:

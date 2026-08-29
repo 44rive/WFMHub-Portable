@@ -104,6 +104,57 @@ class AgentScopeTests(unittest.TestCase):
 
 
 class SQLiteLifecycleTests(unittest.TestCase):
+    def test_v051_database_upgrades_additively_to_governed_exports(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder) / "hub"
+            (home / "config").mkdir(parents=True)
+            for name in ("default.toml", "default_rules.toml", "default_queue_mapping.csv"):
+                shutil.copy2(REPO / "config" / name, home / "config" / name)
+            migrations = home / "sql" / "migrations"
+            migrations.mkdir(parents=True)
+            for name in (
+                "001_initial.sql", "002_performance_indexes.sql",
+                "003_call_pcs.sql", "004_sota_rules_absence_service.sql",
+                "005_observed_attendance_mapping_reconciliation.sql",
+            ):
+                shutil.copy2(REPO / "sql" / "migrations" / name, migrations / name)
+            config = load_config(home)
+            migrate(config)
+            conn = connect(config)
+            try:
+                conn.execute(
+                    "INSERT INTO core.correction_action VALUES (?, NULL, 'Open', NULL, NULL, NULL, ?, 'v051')",
+                    ["keep-v051", datetime.now()],
+                )
+            finally:
+                conn.close()
+            shutil.copy2(
+                REPO / "sql" / "migrations" / "006_governed_operations_exports.sql",
+                migrations / "006_governed_operations_exports.sql",
+            )
+            self.assertEqual(migrate(config), ["006_governed_operations_exports"])
+            upgraded = connect(config, read_only=True)
+            try:
+                self.assertEqual(
+                    upgraded.execute("SELECT count(*) FROM core.correction_action WHERE correction_id='keep-v051'").fetchone()[0],
+                    1,
+                )
+                source_columns = {row[1] for row in upgraded.execute("PRAGMA table_info(meta_source_file)").fetchall()}
+                attendance_columns = {row[1] for row in upgraded.execute("PRAGMA table_info(mart_attendance_agent_day)").fetchall()}
+                self.assertIn("source_variant", source_columns)
+                self.assertIn("call_action", attendance_columns)
+                for table in (
+                    "mart_staffing_interval", "mart_shift_timeline_segment",
+                    "mart_correction_residual_segment",
+                    "mart_verint_final_absence_agent_day",
+                ):
+                    self.assertIsNotNone(
+                        upgraded.execute("SELECT name FROM sqlite_master WHERE name=?", [table]).fetchone()
+                    )
+            finally:
+                upgraded.close()
+            self.assertEqual(len(list(config.backups.glob("wfm_pre_migration_*.sqlite3"))), 1)
+
     def test_v040_database_upgrades_to_observed_reconciliation_and_mapping(self):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "hub"

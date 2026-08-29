@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import zipfile
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -49,6 +49,16 @@ def make_schedule(path: Path):
         writer.writerow(["Worldwide Agent", "999", "August", "", "", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ""])
         writer.writerow(["08/02/2026", "", "", "", "", "", ""])
         writer.writerow(["Agent 300", "300", "August", "", "", ".ORG | Work 08/02/2026 8:00 AM-08/02/2026 4:00 PM", ".ORG | Late 08/02/2026 8:00 AM-08/02/2026 8:10 AM;"])
+
+
+def make_start_end_schedule(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="cp1252", newline="") as handle:
+        writer = csv.writer(handle, delimiter="\t")
+        writer.writerow(["Name", "Data Source IDs", "08/01/2026", "08/02/2026"])
+        writer.writerow(["Agent 100", "100", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ""])
+        writer.writerow(["Agent 200", "200", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ""])
+        writer.writerow(["Agent 300", "300", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ".ORG | Work 08/02/2026 8:00 AM-08/02/2026 4:00 PM"])
 
 
 def make_lilo(path: Path, rows):
@@ -131,6 +141,22 @@ def make_calls(path: Path):
             "[Hold Time]": "0:00:00", "[Total Wrap Time]": "0:00:00",
             "[Call Direction]": "I",
         })
+        for call_id, direction, status, q1, q2 in (
+            ("half-score", "I", "1", "4.5", "5"),
+            ("outbound-score", "O", "1", "1", ""),
+            ("q2-only", "I", "1", "", "1"),
+            ("answer-no-status", "I", "0", "*", ""),
+            ("zero-score", "I", "1", "0", ""),
+        ):
+            writer.writerow({
+                "[Call Date/Time]": "8/1/2026 10:00",
+                "[Call End Date/Time]": "8/1/2026 10:00",
+                "[Call ID]": call_id, "[Call Reference Number]": call_id,
+                "[Agent ID]": "100", "[Agent]": "Agent 100",
+                "[Call Direction]": direction, "[PostCallSurveyMode]": "2",
+                "[PCSStatus]": status, "[Question 1]": q1,
+                "[Question 2]": q2, "[Queue]": "Queue",
+            })
 
 
 class EndToEndTests(unittest.TestCase):
@@ -143,7 +169,8 @@ class EndToEndTests(unittest.TestCase):
             shutil.copy2(REPO / "config" / "default_rules.toml", home / "config" / "default_rules.toml")
             shutil.copytree(REPO / "sql", home / "sql")
             make_fte(source / "FTE/FTE Count.xlsx")
-            make_schedule(source / "Verint/Schedules & Activities/schedule.txt")
+            make_start_end_schedule(source / "Verint/Schedules & Activities/StartEndTimes.txt")
+            make_schedule(source / "Verint/Schedules & Activities/Activities.txt")
             make_lilo(source / "Storm/LILO/AP-Historical-Report---Agent-Login 2026-08-01.csv", [
                 ["Agent 100", "100", "2026-08-01 08:20:00", "2026-08-01 16:00:00"],
                 ["Agent 200", "200", "", ""],
@@ -169,9 +196,9 @@ class EndToEndTests(unittest.TestCase):
                     progress=lambda current, total, label: ingest_progress.append((current, total, label)),
                 )
                 self.assertEqual(ingest.failed, 0)
-                self.assertEqual(ingest.loaded, 10)
+                self.assertEqual(ingest.loaded, 11)
                 self.assertEqual(ingest.scoped_out, 5)
-                self.assertEqual(ingest_progress[-1][:2], (10, 10))
+                self.assertEqual(ingest_progress[-1][:2], (11, 11))
                 self.assertTrue(any(total == 0 and "Call by Call" in label for _, total, label in ingest_progress))
                 for table in ("raw.schedule_shift", "raw.lilo", "raw.agent_status", "raw.call_leg"):
                     self.assertEqual(conn.execute(f"SELECT count(*) FROM {table} WHERE agent_id='999'").fetchone()[0], 0)
@@ -180,7 +207,13 @@ class EndToEndTests(unittest.TestCase):
                     conn, config, "test", date(2026, 8, 1), date(2026, 8, 2),
                     progress=lambda current, total, label: model_progress.append((current, total, label)),
                 )
-                self.assertEqual(model_progress[-1], (17, 17, "Models ready"))
+                self.assertEqual(model_progress[-1], (20, 20, "Models ready"))
+                self.assertEqual(
+                    dict(conn.execute(
+                        "SELECT source_variant, count(*) FROM meta.source_file WHERE source_family='schedule' AND active=true GROUP BY source_variant"
+                    ).fetchall()),
+                    {"ACTIVITIES": 1, "START_END": 1},
+                )
                 saved_period = replace(config, period_start=date(2026, 8, 1), period_end=date(2026, 8, 1))
                 self.assertEqual(resolve_period(conn, saved_period, None, None, True), (date(2026, 8, 1), date(2026, 8, 1)))
                 self.assertEqual(resolve_period(conn, saved_period, None, None, False), (date(2026, 8, 1), date(2026, 8, 2)))
@@ -228,12 +261,58 @@ class EndToEndTests(unittest.TestCase):
                 ).fetchone()
                 self.assertEqual(service[:2], (18, 22))
                 self.assertEqual(service[2], 2390)
-                self.assertEqual(conn.execute("SELECT count(*) FROM raw.call_leg").fetchone()[0], 2)
-                self.assertEqual(conn.execute("SELECT count(*) FROM core.clean_call_leg").fetchone()[0], 1)
-                pcs = conn.execute("SELECT survey_responses, pcs_average, average_handle_seconds FROM mart.agent_pcs_day WHERE agent_id='100'").fetchone()
+                self.assertEqual(conn.execute("SELECT count(*) FROM raw.call_leg").fetchone()[0], 12)
+                self.assertEqual(conn.execute("SELECT count(*) FROM core.clean_call_leg").fetchone()[0], 6)
+                pcs = conn.execute(
+                    """SELECT survey_responses, pcs_average, average_handle_seconds,
+                              pcs_status_calls, pcs_participation_responses,
+                              pcs_invalid_responses, pcs_status_blank_responses,
+                              pcs_response_without_status, low_score_responses,
+                              top_box_responses
+                       FROM mart.agent_pcs_day WHERE agent_id='100'"""
+                ).fetchone()
                 self.assertEqual(pcs[0], 1)
-                self.assertEqual(pcs[1], 4.5)
+                self.assertEqual(pcs[1], 5.0)
                 self.assertEqual(pcs[2], 300)
+                self.assertEqual(pcs[3:], (4, 4, 3, 1, 1, 0, 1))
+
+                # A refresh during an active shift is provisional: the future
+                # part of that shift must not become an early-leave or no-show
+                # correction. Once the shift has ended, normal final logic
+                # applies again.
+                refresh_models(
+                    conn, config, "in-progress", date(2026, 8, 1), date(2026, 8, 1),
+                    as_of=datetime(2026, 8, 1, 12, 0),
+                )
+                provisional = dict(conn.execute(
+                    "SELECT agent_id, attendance_result FROM mart.attendance_agent_day"
+                ).fetchall())
+                self.assertEqual(provisional["100"], "Late - shift in progress")
+                self.assertEqual(provisional["200"], "Not seen - shift in progress")
+                self.assertEqual(
+                    conn.execute("SELECT call_action FROM mart.attendance_agent_day WHERE agent_id='200'").fetchone()[0],
+                    "CALL_NOT_SEEN_NOW",
+                )
+                self.assertEqual(
+                    conn.execute(
+                        """SELECT count(*) FROM mart.correction_candidate
+                           WHERE detected_issue IN ('Early leave','No show')"""
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertIsNone(conn.execute(
+                    "SELECT attendance_percent FROM mart.attendance_agent_day WHERE agent_id='100'"
+                ).fetchone()[0])
+                refresh_models(
+                    conn, config, "completed-today", date(2026, 8, 1), date(2026, 8, 2),
+                    as_of=datetime(2026, 8, 2, 17, 0),
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT attendance_result FROM mart.attendance_agent_day WHERE agent_day_key='20260801-200'"
+                    ).fetchone()[0],
+                    "No show",
+                )
                 before_failure = conn.execute(
                     "SELECT agent_day_key, attendance_result FROM mart.attendance_agent_day ORDER BY agent_day_key"
                 ).fetchall()
@@ -256,9 +335,9 @@ class EndToEndTests(unittest.TestCase):
                     conn, config, "calls", model.start, model.end,
                     progress=lambda current, total, label: export_progress.append((current, total, label)),
                 )
-                self.assertEqual(clean_calls.rows, 1)
+                self.assertEqual(clean_calls.rows, 6)
                 self.assertTrue(clean_calls.manifest.exists())
-                self.assertEqual(export_progress[-1], (1, 0, "Exported calls: 1 rows"))
+                self.assertEqual(export_progress[-1], (6, 0, "Exported calls: 6 rows"))
 
                 filtered_report = build_report(
                     conn, config, date(2026, 8, 1), date(2026, 8, 1),

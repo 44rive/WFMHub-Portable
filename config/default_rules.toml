@@ -5,7 +5,7 @@
 # every change. All percentages are stored as decimals (0.80 = 80%).
 
 [rulebook]
-version = "2026.08.2"
+version = "2026.08.3"
 effective_from = "2026-01-01"
 description = "Canonical WFM rules learned from the August Verint, Storm, PCS and reporting references."
 
@@ -22,13 +22,19 @@ unmapped_activity_is_error = false
 scored_questions = [1, 2]
 comment_questions = [3]
 survey_mode = "2"
+primary_score_question = 1
+participation_question = 1
+participation_status = "1"
+allowed_scores = [1, 2, 3, 4, 5]
+negative_score_maximum = 3
 minimum_score = 1
 maximum_score = 5
 top_box_minimum = 4
-low_score_maximum = 2
+low_score_maximum = 3
 
 [service]
 target_seconds = 20
+target_percent = 0.80
 default_sl_profile = "adjusted_20"
 
 [service.profiles.adjusted_20]
@@ -98,11 +104,11 @@ grain = "agent day; response-weighted at higher grains"
 description = "Sum of valid per-response scores divided by valid scored responses."
 
 [formulas.pcs_response_rate]
-label = "PCS response rate"
-formula = "survey_responses / nullif(pcs_enabled_calls, 0)"
+label = "PCS participation rate"
+formula = "pcs_participation_responses / nullif(pcs_status_calls, 0)"
 unit = "percent"
 grain = "agent day; ratio of sums at higher grains"
-description = "Valid scored survey responses divided by PCS-enabled calls."
+description = "Inbound legs with a nonblank raw Q1 divided by inbound legs where PCSStatus equals the configured participation status."
 
 [formulas.pcs_top_box_rate]
 label = "PCS top-box rate"

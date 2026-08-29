@@ -8,7 +8,24 @@ Pivot, ODBC, DuckDB, or Python in Excel.
 Raw extracts are never edited and are never copied into normal report sheets.
 The SQLite hub remains the source of truth.
 
-## What v0.5 adds
+## What v0.6 adds
+
+- A data-first validation release: the new business workbooks are intentionally
+  parked until their governed clean datasets are accepted.
+- Strict header-based separation of Verint StartEndTimes (operational plan) and
+  Activities (corrected final ledger).
+- Explicit daily attendance call actions with provisional current-day gating;
+  unfinished shifts never become final early leaves.
+- 15-minute staffing gaps by roster LOB/language and exact full-shift evidence
+  segments for a later Verint-like visual.
+- Overlap-safe residual correction intervals after matching the union of final
+  Activities, plus an independent Activities-only final absenteeism ledger.
+- Exact reference-workbook PCS logic: inbound discrete Q1 scores, counts `<=3`
+  and `>3`, and raw-Q1 participation over inbound `PCSStatus=1`.
+- Governed daily/team/month PCS, attendance, staffing, service, correction,
+  timeline, and final-absence exports with manifests.
+
+## What v0.5 added
 
 - One editable, validated business rulebook: `config\wfm_rules.toml`.
 - Attendance and absence detected from LILO boundaries plus Agent Status
@@ -48,7 +65,7 @@ The SQLite hub remains the source of truth.
 
 ## Windows quick start
 
-1. Download `WFMHub-Portable-v0.5.1-win-x64.zip` from GitHub Releases. Do not
+1. Download `WFMHub-Portable-v0.6.0-win-x64.zip` from GitHub Releases. Do not
    use GitHub's automatic Source code ZIP.
 2. Choose **Extract All** and keep the complete `WFMHub` folder together.
 3. Double-click `SETUP.cmd` once and select the folder containing `FTE`,
@@ -59,6 +76,7 @@ The SQLite hub remains the source of truth.
 
 Use the blank `templates\FTE Count.xlsx` roster if needed. Read the
 [beginner guide](docs/BEGINNER_GUIDE.md), [rulebook guide](docs/RULEBOOK_GUIDE.md),
+[clean-data contract](docs/CLEAN_DATA_CONTRACT.md), [PCS logic](docs/PCS_LOGIC.md),
 and [PivotTable guide](docs/PIVOT_GUIDE.md).
 
 ## Output folders
@@ -82,7 +100,7 @@ curated Excel Tables designed as PivotTable sources. They are not raw extracts.
 | Source | Used for |
 |---|---|
 | FTE Agent sheet | Agent scope and organisation context |
-| Verint StartEndTimes | Planned start/end boundary and final assignment reference |
+| Verint StartEndTimes | Operational planned start/end boundary and assignment |
 | Storm LILO | Observed daily presence, first login, and last logout |
 | Storm Agent Status | Observed within-shift working/non-working intervals; no adherence |
 | Verint Activities | Post-day final correction ledger used only for reconciliation |

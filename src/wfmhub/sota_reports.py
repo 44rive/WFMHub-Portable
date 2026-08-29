@@ -358,7 +358,8 @@ def _scorecard_rows(conn: DatabaseConnection, rulebook: Rulebook, start: date, e
         ])
     pcs_rows = _query(conn, """
         SELECT business_date, lob, language, sum(pcs_score_sum), sum(pcs_score_count),
-               sum(survey_responses), sum(pcs_enabled_calls), sum(handle_seconds), sum(handled_calls)
+               sum(pcs_participation_responses), sum(pcs_status_calls),
+               sum(handle_seconds), sum(handled_calls)
         FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
         GROUP BY business_date, lob, language ORDER BY business_date, lob, language
     """, [start, end])[1]
@@ -366,8 +367,8 @@ def _scorecard_rows(conn: DatabaseConnection, rulebook: Rulebook, start: date, e
         output.extend([
             _kpi_row(day, "PCS", "CALL_BY_CALL", lob, language, "pcs_average", "PCS average", score_sum, score_count,
                      evaluate_formula(rulebook.formulas["pcs_average"].formula, {"pcs_score_sum": score_sum, "pcs_score_count": score_count}), "score", "response_weighted", rulebook),
-            _kpi_row(day, "PCS", "CALL_BY_CALL", lob, language, "pcs_response_rate", "PCS response rate", responses, eligible,
-                     evaluate_formula(rulebook.formulas["pcs_response_rate"].formula, {"survey_responses": responses, "pcs_enabled_calls": eligible}), "percent", "responses_over_enabled", rulebook),
+            _kpi_row(day, "PCS", "CALL_BY_CALL", lob, language, "pcs_response_rate", "PCS participation rate", responses, eligible,
+                     (responses / eligible if eligible else None), "percent", "responses_over_status_1", rulebook),
             _kpi_row(day, "PCS", "CALL_BY_CALL", lob, language, "agent_aht_seconds", "Agent AHT", handle_seconds, handled_calls,
                      evaluate_formula(rulebook.formulas["agent_aht_seconds"].formula, {"handle_seconds": handle_seconds, "handled_calls": handled_calls}), "seconds", "weighted", rulebook),
         ])

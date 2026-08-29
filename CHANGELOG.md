@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0 — 2026-08-29
+
+- Parked the next report redesign behind a governed clean-data validation
+  layer, with explicit exports for attendance calls, staffing, APDE service,
+  PCS, residual gaps, shift timelines and final absenteeism.
+- Strictly separated Verint StartEndTimes operational schedules from the
+  Activities-only corrected ledger using a header-derived source variant.
+- Added one timezone-local evaluation cutoff per refresh, provisional
+  current-day attendance states, and protection against unfinished early leave.
+- Added agent-second 15-minute staffing, exact shift evidence segments and
+  overlap-safe residual correction intervals.
+- Added an Activities-only final absence event/day ledger with unioned overlaps
+  and the configured 8.75-hour planned-day cap.
+- Reproduced the reference PCS workbook exactly: inbound valid discrete Q1,
+  `<=3`/`>3` counts and raw-Q1 participation over inbound `PCSStatus=1`.
+- Added exact PCS and clean-data documentation plus real-extract acceptance
+  coverage for 2,349 operational agent-days and 56,274 APDE intervals.
+
 ## 0.5.1 — 2026-08-28
 
 - Prevented repeated source-load findings from generating the same deterministic

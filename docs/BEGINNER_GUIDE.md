@@ -14,7 +14,7 @@ export.
 
 ## First setup — one time
 
-1. Download `WFMHub-Portable-v0.5.1-win-x64.zip` from **Releases**.
+1. Download `WFMHub-Portable-v0.6.0-win-x64.zip` from **Releases**.
 2. Do not download GitHub's “Source code” ZIP.
 3. Right-click the downloaded ZIP and choose **Extract All**.
 4. Put the entire extracted `WFMHub` folder in a place where you can write, for
@@ -256,16 +256,20 @@ stable call-leg key. The PCS workbook contains agent summaries, trends and
 bounded survey responses—not millions of raw calls. Correction imports remain
 exclusive to the Operations `GAPS` sheet.
 
-PCS uses valid configured numeric answers. It averages configured questions
-within each response, then gives each response equal weight in the agent PCS
-average. A missing denominator displays blank, never zero.
+Official PCS uses inbound Q1 only. Q1 must equal one configured discrete score
+(normally 1, 2, 3, 4 or 5). Participation is inbound raw-Q1 nonblank divided by
+inbound `PCSStatus=1`, so invalid markers count for participation but not the
+average. Q2 and Mode 2 are diagnostics only. A missing denominator displays
+blank, never zero. See [PCS logic](PCS_LOGIC.md).
 
 ## Export clean data
 
 Choose **3. Export clean data**, then select a dataset, dates and CSV/XLSX.
-Available exports include calls, PCS responses, PCS agent/day, attendance,
-gaps, schedules, events, LILO, absence agent/day, classified absence events,
-service actuals, optional Agent Status, forecast and source health.
+The governed report-ready exports are `daily_attendance_calls`,
+`daily_staffing_gaps`, `daily_service_lob`, `pcs_agent_day`, `pcs_team_day`,
+`pcs_agent_month`, `yesterday_gap_actions`, `shift_evidence_timeline`,
+`verint_final_absence_events`, and `verint_final_absence_day`. Detailed source
+exports remain available too. See [clean-data contract](CLEAN_DATA_CONTRACT.md).
 
 Use CSV for large call data. XLSX stops before Excel's row limit. Every export
 gets a `.manifest.txt` beside it containing dates, row count and generation

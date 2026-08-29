@@ -52,15 +52,20 @@ pcs = true
 absence = true
 
 [pcs]
-# Legacy compatibility copy. v0.5 reads the authoritative PCS calculation
+# Legacy compatibility copy. The authoritative PCS calculation
 # settings from config/wfm_rules.toml so every business rule is cataloged.
 scored_questions = [1, 2]
 comment_questions = [3]
 survey_mode = "2"
+primary_score_question = 1
+participation_question = 1
+participation_status = "1"
+allowed_scores = [1, 2, 3, 4, 5]
+negative_score_maximum = 3
 minimum_score = 1
 maximum_score = 5
 top_box_minimum = 4
-low_score_maximum = 2
+low_score_maximum = 3
 
 [report]
 max_attendance_rows = 100000

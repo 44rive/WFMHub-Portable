@@ -74,6 +74,7 @@ class Rulebook:
     cap_event_to_schedule: bool
     unmapped_activity_is_error: bool
     target_seconds: int
+    service_target_percent: float
     default_sl_profile: str
     service_profiles: dict[str, ServiceProfile]
     formulas: dict[str, FormulaRule]
@@ -82,6 +83,11 @@ class Rulebook:
     pcs_scored_questions: tuple[int, ...]
     pcs_comment_questions: tuple[int, ...]
     pcs_survey_mode: str
+    pcs_primary_score_question: int
+    pcs_participation_question: int
+    pcs_participation_status: str
+    pcs_allowed_scores: tuple[float, ...]
+    pcs_negative_score_maximum: float
     pcs_minimum_score: float
     pcs_maximum_score: float
     pcs_top_box_minimum: float
@@ -281,6 +287,7 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
         version = str(meta["version"]).strip()
         standard_day_hours = float(absence["standard_day_hours"])
         target_seconds = int(service["target_seconds"])
+        service_target_percent = float(service.get("target_percent", 0.80))
         default_profile = str(service["default_sl_profile"])
     except (KeyError, TypeError, ValueError) as exc:
         raise RulebookError(f"Rulebook metadata contains an invalid or missing value: {exc}") from exc
@@ -293,6 +300,8 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
             raise RulebookError(f"absence.{key} must be between 0 and 120")
     if not 1 <= target_seconds <= 600:
         raise RulebookError("service.target_seconds must be between 1 and 600")
+    if not 0 < service_target_percent <= 1:
+        raise RulebookError("service.target_percent must be greater than 0 and at most 1")
 
     profiles: dict[str, ServiceProfile] = {}
     for key, item in profiles_raw.items():
@@ -382,12 +391,29 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
     pcs_maximum = float(pcs.get("maximum_score", 5))
     pcs_top = float(pcs.get("top_box_minimum", 4))
     pcs_low = float(pcs.get("low_score_maximum", 2))
+    pcs_primary_question = int(pcs.get("primary_score_question", 1))
+    pcs_participation_question = int(pcs.get("participation_question", 1))
+    pcs_participation_status = str(pcs.get("participation_status", "1")).strip()
+    pcs_allowed_scores = tuple(float(value) for value in pcs.get("allowed_scores", [1, 2, 3, 4, 5]))
+    pcs_negative_maximum = float(pcs.get("negative_score_maximum", 3))
     if not scored_questions or any(value not in range(1, 11) for value in scored_questions):
         raise RulebookError("pcs.scored_questions must contain question numbers from 1 to 10")
     if any(value not in range(1, 11) for value in comment_questions):
         raise RulebookError("pcs.comment_questions must contain question numbers from 1 to 10")
     if not pcs_minimum < pcs_maximum or not pcs_minimum <= pcs_low <= pcs_top <= pcs_maximum:
         raise RulebookError("PCS score thresholds must satisfy minimum <= low <= top <= maximum")
+    if pcs_primary_question not in range(1, 11):
+        raise RulebookError("pcs.primary_score_question must be from 1 to 10")
+    if pcs_participation_question not in range(1, 11):
+        raise RulebookError("pcs.participation_question must be from 1 to 10")
+    if not pcs_participation_status:
+        raise RulebookError("pcs.participation_status cannot be blank")
+    if not pcs_allowed_scores or len(set(pcs_allowed_scores)) != len(pcs_allowed_scores):
+        raise RulebookError("pcs.allowed_scores must contain unique numeric values")
+    if any(value < pcs_minimum or value > pcs_maximum for value in pcs_allowed_scores):
+        raise RulebookError("pcs.allowed_scores must stay inside the configured score range")
+    if not pcs_minimum <= pcs_negative_maximum < pcs_maximum:
+        raise RulebookError("pcs.negative_score_maximum must be inside the configured score range")
 
     return Rulebook(
         file=file, version=version, effective_from=effective_from,
@@ -399,11 +425,18 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
         spell_gap_days=int(absence.get("spell_gap_days", 1)),
         cap_event_to_schedule=bool(absence.get("cap_event_to_schedule", True)),
         unmapped_activity_is_error=bool(absence.get("unmapped_activity_is_error", True)),
-        target_seconds=target_seconds, default_sl_profile=default_profile,
+        target_seconds=target_seconds, service_target_percent=service_target_percent,
+        default_sl_profile=default_profile,
         service_profiles=profiles, formulas=formulas, activity_rules=tuple(activity_rules),
         queue_scopes=tuple(queue_scopes),
         pcs_scored_questions=scored_questions, pcs_comment_questions=comment_questions,
-        pcs_survey_mode=str(pcs.get("survey_mode", "2")), pcs_minimum_score=pcs_minimum,
+        pcs_survey_mode=str(pcs.get("survey_mode", "2")),
+        pcs_primary_score_question=pcs_primary_question,
+        pcs_participation_question=pcs_participation_question,
+        pcs_participation_status=pcs_participation_status,
+        pcs_allowed_scores=pcs_allowed_scores,
+        pcs_negative_score_maximum=pcs_negative_maximum,
+        pcs_minimum_score=pcs_minimum,
         pcs_maximum_score=pcs_maximum, pcs_top_box_minimum=pcs_top,
         pcs_low_score_maximum=pcs_low,
     )
@@ -418,6 +451,7 @@ def validate_rulebook(rulebook: Rulebook) -> list[str]:
         "shrinkage_hours": 1.5, "vacation_hours": 0,
         "pcs_score_sum": 45, "pcs_score_count": 10, "survey_responses": 10,
         "pcs_enabled_calls": 100, "top_box_responses": 7, "low_score_responses": 1,
+        "pcs_participation_responses": 14, "pcs_status_calls": 100,
         "handle_seconds": 30_000, "handled_calls": 100,
     }
     for profile in rulebook.service_profiles.values():

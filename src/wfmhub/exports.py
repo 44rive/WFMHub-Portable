@@ -49,13 +49,113 @@ DATASETS: dict[str, ExportDataset] = {
            ) ORDER BY business_date, call_start, agent_id""",
     ),
     "pcs_agent_day": ExportDataset(
-        "pcs_agent_day", "One clean PCS/call-performance row per agent/day.",
-        "SELECT * FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id",
+        "pcs_agent_day", "Exact PCS workbook counters and call performance per agent/day.",
+        """SELECT business_date, agent_id, agent_name, team_leader, ops_manager,
+                  lob, market, language, location, call_legs, handled_calls,
+                  inbound_calls, outbound_calls, transferred_legs, talk_seconds,
+                  hold_seconds, wrap_seconds, handle_seconds, average_handle_seconds,
+                  pcs_enabled_calls AS pcs_mode_2_inbound_legs,
+                  pcs_status_calls AS pcs_status_1_inbound_legs,
+                  pcs_participation_responses AS pcs_q1_nonblank_inbound_legs,
+                  survey_responses AS pcs_q1_valid_score_count,
+                  pcs_score_sum AS pcs_q1_score_sum,
+                  low_score_responses AS pcs_score_le_3_count,
+                  top_box_responses AS pcs_score_gt_3_count,
+                  pcs_invalid_responses AS pcs_q1_invalid_nonblank_count,
+                  pcs_status_blank_responses AS pcs_status_1_q1_blank_count,
+                  pcs_response_without_status AS pcs_q1_nonblank_without_status_1_count,
+                  pcs_average, pcs_participation_rate,
+                  substr(business_date,1,7) AS month_key
+           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
+           ORDER BY business_date, agent_id""",
+    ),
+    "pcs_team_day": ExportDataset(
+        "pcs_team_day", "PCS team/day ratios recalculated from summed counters.",
+        """SELECT business_date, coalesce(team_leader,'(blank)') AS team_leader,
+                  coalesce(lob,'(blank)') AS lob, coalesce(language,'(blank)') AS language,
+                  sum(inbound_calls) AS inbound_call_legs,
+                  sum(pcs_enabled_calls) AS pcs_mode_2_inbound_legs,
+                  sum(pcs_status_calls) AS pcs_status_1_inbound_legs,
+                  sum(pcs_participation_responses) AS pcs_q1_nonblank_inbound_legs,
+                  sum(survey_responses) AS pcs_q1_valid_score_count,
+                  sum(pcs_score_sum) AS pcs_q1_score_sum,
+                  sum(low_score_responses) AS pcs_score_le_3_count,
+                  sum(top_box_responses) AS pcs_score_gt_3_count,
+                  sum(pcs_invalid_responses) AS pcs_q1_invalid_nonblank_count,
+                  CASE WHEN sum(survey_responses)>0
+                       THEN 1.0*sum(pcs_score_sum)/sum(survey_responses) END AS pcs_average,
+                  CASE WHEN sum(pcs_status_calls)>0
+                       THEN 1.0*sum(pcs_participation_responses)/sum(pcs_status_calls) END AS pcs_participation_rate
+           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
+           GROUP BY business_date, coalesce(team_leader,'(blank)'),
+                    coalesce(lob,'(blank)'), coalesce(language,'(blank)')
+           ORDER BY business_date, team_leader, lob, language""",
+    ),
+    "pcs_agent_month": ExportDataset(
+        "pcs_agent_month", "PCS monthly agent totals using the workbook's ratio-of-sums logic.",
+        """SELECT substr(business_date,1,7) AS month_key, agent_id,
+                  max(agent_name) AS agent_name, max(team_leader) AS team_leader,
+                  max(ops_manager) AS ops_manager, max(lob) AS lob,
+                  max(language) AS language, sum(inbound_calls) AS inbound_call_legs,
+                  sum(pcs_status_calls) AS pcs_status_1_inbound_legs,
+                  sum(pcs_participation_responses) AS pcs_q1_nonblank_inbound_legs,
+                  sum(survey_responses) AS pcs_q1_valid_score_count,
+                  sum(pcs_score_sum) AS pcs_q1_score_sum,
+                  sum(low_score_responses) AS pcs_score_le_3_count,
+                  sum(top_box_responses) AS pcs_score_gt_3_count,
+                  sum(pcs_invalid_responses) AS pcs_q1_invalid_nonblank_count,
+                  CASE WHEN sum(survey_responses)>0
+                       THEN 1.0*sum(pcs_score_sum)/sum(survey_responses) END AS pcs_average,
+                  CASE WHEN sum(pcs_status_calls)>0
+                       THEN 1.0*sum(pcs_participation_responses)/sum(pcs_status_calls) END AS pcs_participation_rate
+           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
+           GROUP BY substr(business_date,1,7), agent_id
+           ORDER BY month_key, agent_id""",
     ),
     "attendance": ExportDataset(
         "attendance", "Attendance agent/day results without adherence metrics.",
         """SELECT * FROM mart.attendance_agent_day
            WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id""",
+    ),
+    "daily_attendance_calls": ExportDataset(
+        "daily_attendance_calls", "Absent, not-seen and late agents requiring an attendance call.",
+        """SELECT business_date, agent_id, agent_name, team_leader, ops_manager,
+                  lob, language, scheduled_start, scheduled_end, shift_state,
+                  attendance_result, call_action, requires_call, is_provisional,
+                  actual_first_seen, actual_last_seen, actual_evidence,
+                  uncoded_late_minutes, no_show_minutes, source_loaded,
+                  schedule_source, lilo_source, status_source, evaluation_as_of
+           FROM mart.attendance_agent_day
+           WHERE business_date BETWEEN ? AND ? AND requires_call=true
+           ORDER BY business_date, scheduled_start, lob, language, agent_name""",
+    ),
+    "daily_staffing_gaps": ExportDataset(
+        "daily_staffing_gaps", "15-minute scheduled versus observed staffing by roster LOB and language.",
+        """SELECT * FROM mart.staffing_interval
+           WHERE business_date BETWEEN ? AND ?
+           ORDER BY business_date, interval_start, lob, language""",
+    ),
+    "yesterday_gap_actions": ExportDataset(
+        "yesterday_gap_actions", "Uncovered observed gap segments ready for correction review and Verint injection.",
+        """SELECT r.business_date, r.agent_id, c.agent_name, c.team_leader,
+                  c.ops_manager, c.lob, c.scheduled_start, c.scheduled_end,
+                  c.detected_issue, r.residual_start AS gap_start,
+                  r.residual_end AS gap_end, r.residual_minutes AS gap_minutes,
+                  c.confidence, r.suggested_activity, r.observed_source,
+                  r.verint_reconciliation, c.verint_activity,
+                  c.verint_overlap_minutes, c.validation_status,
+                  c.owner, c.comment, c.injected_date, r.source_file
+           FROM mart.correction_residual_segment r
+           JOIN mart.correction_candidate c ON c.correction_id=r.correction_id
+           WHERE r.business_date BETWEEN ? AND ?
+             AND coalesce(c.validation_status,'Open') NOT IN ('Injected','Rejected')
+           ORDER BY r.business_date, r.agent_id, r.residual_start""",
+    ),
+    "shift_evidence_timeline": ExportDataset(
+        "shift_evidence_timeline", "Full-shift planned-versus-observed timeline segments for visual review.",
+        """SELECT * FROM mart.shift_timeline_segment
+           WHERE business_date BETWEEN ? AND ?
+           ORDER BY business_date, agent_id, segment_start""",
     ),
     "absence_agent_day": ExportDataset(
         "absence_agent_day", "Rule-versioned payroll absence, vacation and shrinkage per agent/day.",
@@ -73,14 +173,24 @@ DATASETS: dict[str, ExportDataset] = {
         "verint_final_exceptions", "Final Verint activities with no supporting observed gap.",
         "SELECT * FROM mart.verint_final_exception WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start",
     ),
+    "verint_final_absence_events": ExportDataset(
+        "verint_final_absence_events", "Corrected Verint Activities-only final absence event ledger.",
+        """SELECT * FROM mart.verint_final_absence_event
+           WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start""",
+    ),
+    "verint_final_absence_day": ExportDataset(
+        "verint_final_absence_day", "Corrected Verint Activities-only final absence per agent/day.",
+        """SELECT * FROM mart.verint_final_absence_agent_day
+           WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id""",
+    ),
     "schedules": ExportDataset(
         "schedules", "Parsed, FTE-scoped schedule shifts.",
         """SELECT source_file_id, source_row, schedule_date, agent_id_raw,
                   agent_id, agent_name, scheduling_period, shift_assignment,
                   assignment, assignment_type, scheduled_start, scheduled_end,
-                  shift_events, parse_ok, source_file
+                  shift_events, parse_ok, source_variant, source_file
            FROM (
-               SELECT r.*, f.file_name AS source_file,
+               SELECT r.*, f.source_variant, f.file_name AS source_file,
                       row_number() OVER (
                           PARTITION BY r.schedule_date, r.agent_id,
                                        r.scheduled_start, r.scheduled_end,
@@ -88,7 +198,8 @@ DATASETS: dict[str, ExportDataset] = {
                           ORDER BY f.modified_at DESC, f.loaded_at DESC, r.source_row DESC
                       ) row_rank
                FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id
-               WHERE f.active=true AND f.status='SUCCESS' AND r.schedule_date BETWEEN ? AND ?
+               WHERE f.active=true AND f.status='SUCCESS'
+                 AND f.source_variant='START_END' AND r.schedule_date BETWEEN ? AND ?
            ) x WHERE row_rank=1
            ORDER BY schedule_date, agent_id, scheduled_start""",
     ),
@@ -96,16 +207,17 @@ DATASETS: dict[str, ExportDataset] = {
         "events", "Parsed Verint schedule activity intervals.",
         """SELECT source_file_id, source_row, event_index, schedule_date,
                   agent_id, agent_name, activity, activity_type, event_start,
-                  event_end, parse_ok, source_file
+                  event_end, parse_ok, source_variant, source_file
            FROM (
-               SELECT r.*, f.file_name AS source_file,
+               SELECT r.*, f.source_variant, f.file_name AS source_file,
                       row_number() OVER (
                           PARTITION BY r.schedule_date, r.agent_id,
                                        upper(coalesce(r.activity,'')), r.event_start, r.event_end
                           ORDER BY f.modified_at DESC, f.loaded_at DESC, r.source_row DESC
                       ) row_rank
                FROM raw.schedule_event r JOIN meta.source_file f ON f.file_id=r.source_file_id
-               WHERE f.active=true AND f.status='SUCCESS' AND r.schedule_date BETWEEN ? AND ?
+               WHERE f.active=true AND f.status='SUCCESS'
+                 AND f.source_variant='ACTIVITIES' AND r.schedule_date BETWEEN ? AND ?
            ) x WHERE row_rank=1
            ORDER BY schedule_date, agent_id, event_start""",
     ),
@@ -144,6 +256,27 @@ DATASETS: dict[str, ExportDataset] = {
     "service_actual": ExportDataset(
         "service_actual", "Rule-versioned service performance; availability means answered/offered.",
         "SELECT * FROM mart.service_interval WHERE business_date BETWEEN ? AND ? ORDER BY business_date, interval_start, source_system, queue",
+    ),
+    "daily_service_lob": ExportDataset(
+        "daily_service_lob", "APDE intraday service state recalculated from summed LOB/language counters.",
+        """SELECT business_date, interval_start, coalesce(lob,'(blank)') AS lob,
+                  coalesce(language,'(blank)') AS language,
+                  sum(offered) AS offered, sum(answered) AS answered,
+                  sum(abandoned) AS abandoned, sum(short_abandoned) AS short_abandoned,
+                  sum(answered_within_target) AS answered_within_target,
+                  sum(handled_seconds) AS handled_seconds,
+                  CASE WHEN sum(offered)-sum(coalesce(short_abandoned,0))>0
+                       THEN 1.0*sum(answered_within_target)/(sum(offered)-sum(coalesce(short_abandoned,0))) END AS service_level,
+                  CASE WHEN sum(offered)>0 THEN 1.0*sum(answered)/sum(offered) END AS service_availability,
+                  max(sl_target) AS sl_target,
+                  CASE WHEN sum(offered)=0 OR sum(offered)-sum(coalesce(short_abandoned,0))<=0 THEN 'NO_TRAFFIC'
+                       WHEN 1.0*sum(answered_within_target)/(sum(offered)-sum(coalesce(short_abandoned,0))) >= max(sl_target)
+                       THEN 'ON_TARGET' ELSE 'BELOW_TARGET' END AS sl_state,
+                  max(mapping_status) AS mapping_status
+           FROM mart.service_interval
+           WHERE source_system='APDE' AND business_date BETWEEN ? AND ?
+           GROUP BY business_date, interval_start, coalesce(lob,'(blank)'), coalesce(language,'(blank)')
+           ORDER BY business_date, interval_start, lob, language""",
     ),
     "forecast": ExportDataset(
         "forecast", "Clean Verint forecast and required staffing hours.",

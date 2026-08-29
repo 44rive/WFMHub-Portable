@@ -41,6 +41,7 @@ class ParseResult:
     tables: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     rejected: list[str] = field(default_factory=list)
     scoped_out: int = 0
+    source_variant: str | None = None
 
     @property
     def row_count(self) -> int:
@@ -97,6 +98,7 @@ class AgentScope:
 
 AGENT_SCOPED_FAMILIES = {"schedule", "lilo", "agent_status", "calls"}
 AGENT_SCOPE_POLICY_VERSION = "v1-id-or-unique-name-preserve-source-id"
+SCHEDULE_PARSER_POLICY_VERSION = "v2-explicit-start-end-vs-activities"
 
 
 FILENAME_DATE_RE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
@@ -391,11 +393,32 @@ def _parse_start_end_schedule(path: Path, file_id: str, scope: AgentScope | None
     return ParseResult({"raw.schedule_shift": shifts, "raw.schedule_event": []}, rejected, scoped_out)
 
 
-def parse_schedule(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
+def _schedule_variant(path: Path) -> str:
     with path.open("r", encoding="cp1252", newline="") as probe:
         headers = next(csv.reader(probe, delimiter="\t"), [])
-    if "Scheduling Period" not in headers and len(headers) >= 3 and any(parse_date(value) for value in headers[2:]):
-        return _parse_start_end_schedule(path, file_id, scope)
+    stripped = [str(value or "").strip() for value in headers]
+    activities = {"Name", "Data Source IDs", "Scheduling Period", "Shift Assignment", "Shift Events"}
+    if activities <= set(stripped):
+        return "ACTIVITIES"
+    date_headers = [value for value in stripped[2:] if value]
+    if (
+        stripped[:2] == ["Name", "Data Source IDs"]
+        and date_headers
+        and len(date_headers) == len(set(date_headers))
+        and all(parse_date(value) is not None for value in date_headers)
+    ):
+        return "START_END"
+    raise SourceSchemaError(
+        "Schedule header is neither a StartEndTimes export nor an Activities export"
+    )
+
+
+def parse_schedule(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
+    variant = _schedule_variant(path)
+    if variant == "START_END":
+        result = _parse_start_end_schedule(path, file_id, scope)
+        result.source_variant = variant
+        return result
     shifts: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     rejected: list[str] = []
@@ -456,7 +479,10 @@ def parse_schedule(path: Path, file_id: str, scope: AgentScope | None = None) ->
                 })
                 if not event_ok:
                     rejected.append(f"line {source_row} event {event_index}: interval could not be parsed")
-    return ParseResult({"raw.schedule_shift": shifts, "raw.schedule_event": events}, rejected, scoped_out)
+    return ParseResult(
+        {"raw.schedule_shift": shifts, "raw.schedule_event": events},
+        rejected, scoped_out, variant,
+    )
 
 
 def parse_lilo(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
@@ -1113,6 +1139,8 @@ def ingest_all(
                 progress(index, total, f"Failed {candidate.family}: {path.name}")
             continue
         scope_fingerprint = scope.fingerprint if scope is not None else ""
+        if candidate.family == "schedule":
+            scope_fingerprint = f"{scope_fingerprint}|{SCHEDULE_PARSER_POLICY_VERSION}"
         existing = conn.execute(
             """SELECT file_id, active, row_count, scoped_out_count FROM meta.source_file
                WHERE source_family=? AND source_path=? AND sha256=?
@@ -1184,12 +1212,14 @@ def ingest_all(
                     scoped_out_count = result.scoped_out
                     for table, rows in result.tables.items():
                         _insert_rows(conn, table, rows)
+                source_variant = result.source_variant if result is not None else None
                 conn.execute(
                     """INSERT INTO meta.source_file(
                            file_id, source_family, source_path, file_name, sha256, size_bytes,
                            modified_at, discovered_at, loaded_at, active, status, row_count,
-                           rejected_count, error_message, scope_fingerprint, scoped_out_count
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, 'SUCCESS', ?, ?, NULL, ?, ?)
+                           rejected_count, error_message, scope_fingerprint, scoped_out_count,
+                           source_variant
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, 'SUCCESS', ?, ?, NULL, ?, ?, ?)
                        ON CONFLICT(file_id) DO UPDATE SET
                            source_family=excluded.source_family, source_path=excluded.source_path,
                            file_name=excluded.file_name, sha256=excluded.sha256,
@@ -1198,8 +1228,9 @@ def ingest_all(
                            active=true, status='SUCCESS', row_count=excluded.row_count,
                            rejected_count=excluded.rejected_count, error_message=NULL,
                            scope_fingerprint=excluded.scope_fingerprint,
-                           scoped_out_count=excluded.scoped_out_count""",
-                    [file_id, candidate.family, path_text, path.name, sha256, stat.st_size, modified_at, discovered_at, datetime.now(), row_count, rejected_count, scope_fingerprint, scoped_out_count],
+                           scoped_out_count=excluded.scoped_out_count,
+                           source_variant=excluded.source_variant""",
+                    [file_id, candidate.family, path_text, path.name, sha256, stat.st_size, modified_at, discovered_at, datetime.now(), row_count, rejected_count, scope_fingerprint, scoped_out_count, source_variant],
                 )
                 conn.execute("COMMIT")
             except Exception:
@@ -1214,8 +1245,9 @@ def ingest_all(
                 """INSERT INTO meta.source_file(
                        file_id, source_family, source_path, file_name, sha256, size_bytes,
                        modified_at, discovered_at, loaded_at, active, status, row_count,
-                       rejected_count, error_message, scope_fingerprint, scoped_out_count
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, false, 'ERROR', 0, 0, ?, ?, 0)
+                       rejected_count, error_message, scope_fingerprint, scoped_out_count,
+                       source_variant
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, false, 'ERROR', 0, 0, ?, ?, 0, NULL)
                    ON CONFLICT(file_id) DO UPDATE SET
                        modified_at=excluded.modified_at, discovered_at=excluded.discovered_at,
                        loaded_at=excluded.loaded_at, active=false, status='ERROR',

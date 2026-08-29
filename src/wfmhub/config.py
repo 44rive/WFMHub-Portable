@@ -28,6 +28,11 @@ class PCSSettings:
     scored_questions: tuple[int, ...]
     comment_questions: tuple[int, ...]
     survey_mode: str
+    primary_score_question: int
+    participation_question: int
+    participation_status: str
+    allowed_scores: tuple[float, ...]
+    negative_score_maximum: float
     minimum_score: float
     maximum_score: float
     top_box_minimum: float
@@ -151,6 +156,11 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
             scored_questions=tuple(int(value) for value in raw.get("pcs", {}).get("scored_questions", [1, 2])),
             comment_questions=tuple(int(value) for value in raw.get("pcs", {}).get("comment_questions", [3])),
             survey_mode=str(raw.get("pcs", {}).get("survey_mode", "2")),
+            primary_score_question=int(raw.get("pcs", {}).get("primary_score_question", 1)),
+            participation_question=int(raw.get("pcs", {}).get("participation_question", 1)),
+            participation_status=str(raw.get("pcs", {}).get("participation_status", "1")),
+            allowed_scores=tuple(float(value) for value in raw.get("pcs", {}).get("allowed_scores", [1, 2, 3, 4, 5])),
+            negative_score_maximum=float(raw.get("pcs", {}).get("negative_score_maximum", 3)),
             minimum_score=float(raw.get("pcs", {}).get("minimum_score", 1)),
             maximum_score=float(raw.get("pcs", {}).get("maximum_score", 5)),
             top_box_minimum=float(raw.get("pcs", {}).get("top_box_minimum", 4)),
@@ -175,12 +185,24 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         raise ConfigError("pcs.scored_questions must contain question numbers from 1 to 10")
     if any(question not in range(1, 11) for question in cfg.pcs.comment_questions):
         raise ConfigError("pcs.comment_questions must contain question numbers from 1 to 10")
+    if cfg.pcs.primary_score_question not in range(1, 11):
+        raise ConfigError("pcs.primary_score_question must be from 1 to 10")
+    if cfg.pcs.participation_question not in range(1, 11):
+        raise ConfigError("pcs.participation_question must be from 1 to 10")
+    if not cfg.pcs.participation_status.strip():
+        raise ConfigError("pcs.participation_status cannot be blank")
+    if not cfg.pcs.allowed_scores or len(set(cfg.pcs.allowed_scores)) != len(cfg.pcs.allowed_scores):
+        raise ConfigError("pcs.allowed_scores must contain unique numeric values")
     if not cfg.pcs.minimum_score < cfg.pcs.maximum_score:
         raise ConfigError("pcs.minimum_score must be lower than pcs.maximum_score")
     if not cfg.pcs.minimum_score <= cfg.pcs.low_score_maximum <= cfg.pcs.maximum_score:
         raise ConfigError("pcs.low_score_maximum must be inside the configured score range")
     if not cfg.pcs.minimum_score <= cfg.pcs.top_box_minimum <= cfg.pcs.maximum_score:
         raise ConfigError("pcs.top_box_minimum must be inside the configured score range")
+    if any(value < cfg.pcs.minimum_score or value > cfg.pcs.maximum_score for value in cfg.pcs.allowed_scores):
+        raise ConfigError("pcs.allowed_scores must stay inside the configured score range")
+    if not cfg.pcs.minimum_score <= cfg.pcs.negative_score_maximum < cfg.pcs.maximum_score:
+        raise ConfigError("pcs.negative_score_maximum must be inside the configured score range")
     if cfg.database.suffix.lower() == ".duckdb":
         raise ConfigError(
             "This corporate-compatible release uses SQLite. Change paths.database "
@@ -198,6 +220,11 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         scored_questions=business.pcs_scored_questions,
         comment_questions=business.pcs_comment_questions,
         survey_mode=business.pcs_survey_mode,
+        primary_score_question=business.pcs_primary_score_question,
+        participation_question=business.pcs_participation_question,
+        participation_status=business.pcs_participation_status,
+        allowed_scores=business.pcs_allowed_scores,
+        negative_score_maximum=business.pcs_negative_score_maximum,
         minimum_score=business.pcs_minimum_score,
         maximum_score=business.pcs_maximum_score,
         top_box_minimum=business.pcs_top_box_minimum,

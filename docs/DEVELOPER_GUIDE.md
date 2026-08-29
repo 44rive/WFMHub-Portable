@@ -114,8 +114,10 @@ builders through `build_report_pack`; do not import them directly in the CLI.
 
 Call-by-call uses a stable deterministic leg key. Full-history extracts may
 overlap, so `core.clean_call_leg` chooses the newest active row at that key.
-PCS numerator, denominator, eligible survey mode, scored questions, thresholds
-and zero-denominator behavior live in the central rulebook and tests.
+PCS primary/participation questions, participation status, discrete allowed
+scores, diagnostic survey mode, thresholds, and zero-denominator behavior live
+in the central rulebook and tests. Official score and participation counters
+are inbound-only and higher grains divide summed counters.
 
 `exports.py` streams detailed clean data to CSV/XLSX only on explicit request.
 `custom_jobs.py` exposes a query-only context, but Python jobs remain trusted

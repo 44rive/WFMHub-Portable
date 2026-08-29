@@ -129,7 +129,7 @@ def build_pcs_report(
                       CASE WHEN sum(handled_calls)>0 THEN 1.0*sum(handle_seconds)/sum(handled_calls) END average_handle_seconds,
                       sum(pcs_enabled_calls) pcs_enabled_calls,
                       sum(survey_responses) survey_responses,
-                      CASE WHEN sum(pcs_enabled_calls)>0 THEN 1.0*sum(survey_responses)/sum(pcs_enabled_calls) END response_rate,
+                      CASE WHEN sum(pcs_status_calls)>0 THEN 1.0*sum(pcs_participation_responses)/sum(pcs_status_calls) END response_rate,
                       CASE WHEN sum(q1_response_count)>0 THEN 1.0*sum(q1_score_sum)/sum(q1_response_count) END q1_average,
                       CASE WHEN sum(q2_response_count)>0 THEN 1.0*sum(q2_score_sum)/sum(q2_response_count) END q2_average,
                       CASE WHEN sum(pcs_score_count)>0 THEN 1.0*sum(pcs_score_sum)/sum(pcs_score_count) END pcs_average,

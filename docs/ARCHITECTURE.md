@@ -74,11 +74,16 @@ details remain in one module.
 | `mart.attendance_agent_day` | One scheduled Agent ID/day |
 | `mart.conformance_agent_day` | Legacy compatibility table; empty in v0.5 |
 | `mart.correction_candidate` | One observed LILO/status gap plus Verint-final check |
+| `mart.correction_residual_segment` | One still-uncovered interval requiring Verint review/injection |
+| `mart.staffing_interval` | One 15-minute roster LOB/language staffing interval |
+| `mart.shift_timeline_segment` | One exact planned-versus-observed timeline segment |
 | `mart.rta_snapshot` | Legacy compatibility table; empty in v0.5 |
 | `mart.verint_final_exception` | One final Verint interval with no observed supporting gap |
 | `mart.forecast_hour` | One raw forecast queue/hour plus mapped scopes |
 | `mart.intraday_queue_interval` | One actual queue/15-minute interval |
 | `mart.agent_pcs_day` | One admitted Agent ID/day with call and PCS measures |
+| `mart.verint_final_absence_event` | One classified Activities-only final-ledger evidence interval |
+| `mart.verint_final_absence_agent_day` | One Activities-only final absence result per Agent ID/day |
 | `mart.absence_event` | One observed, schedule-clipped LILO/status gap with final label |
 | `mart.absence_agent_day` | One payroll absence/vacation/shrinkage result per Agent ID/day |
 | `mart.service_interval` | One rule-versioned APBE/APFR/APDE service interval |
@@ -152,10 +157,14 @@ be proven.
 
 Call CSVs are FTE-scoped before storage. A stable Call Key combines call
 references, direction, agent and timestamps; `core.clean_call_leg` selects the
-newest active version across overlapping history extracts. Configured numeric
-questions are averaged within each response, then response scores are averaged
-per agent/day so every respondent has equal weight. Q1/Q2 remain separately
-weighted by their own answer counts. Zero-denominator averages remain NULL.
+newest active version across overlapping history extracts. The official PCS
+contract reproduces `TOLEARN/PCS Report.xlsx`: keep inbound legs with an Agent
+ID, accept Q1 only when its numeric value is one of the configured discrete
+scores (default `1,2,3,4,5`), and calculate `sum(valid Q1) / count(valid Q1)`.
+Counts `<=3` and `>3` remain counts. Participation is `inbound raw-Q1 nonblank /
+inbound PCSStatus=1`; invalid raw answers stay in that numerator and are
+separately counted. Q2 and Mode 2 are diagnostics only. Higher grains always
+sum counters before dividing. See [PCS logic](PCS_LOGIC.md).
 
 ## Clean exports and Custom Lab
 
@@ -188,7 +197,7 @@ The order is deliberate:
 4. Use exclusive Agent Status `Logged Off`/`Unavailable` intervals between those
    boundaries for mid-shift gap detection.
 5. Build gaps before reading any final Verint activity.
-6. Match each observed gap against the final Activities/assignment ledger.
+6. Match each observed gap against the Activities-only final ledger.
 7. Label it `CORRECTED`, `PARTIAL`, or `NOT_CORRECTED` without changing the
    observed interval.
 
@@ -218,10 +227,11 @@ spell grouping remain tested engine primitives rather than editable formulas.
 
 ## Absence engine
 
-Activities and wide StartEndTimes both normalize into `raw.schedule_shift`;
-Activities also produces `raw.schedule_event`. Data Source IDs is the primary
-operational Agent ID. Start/end is the plan boundary. LILO and Agent Status are
-the actual evidence. Activities is the final correction ledger.
+Activities and wide StartEndTimes both normalize into `raw.schedule_shift`, but
+`meta.source_file.source_variant` keeps them strictly separated. Activities
+also produces `raw.schedule_event`. Data Source IDs is the primary operational
+Agent ID. StartEndTimes is the only plan boundary. LILO and Agent Status are the
+actual evidence. Activities is the final correction ledger.
 
 The absence engine:
 
