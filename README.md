@@ -65,7 +65,7 @@ The SQLite hub remains the source of truth.
 
 ## Windows quick start
 
-1. Download `WFMHub-Portable-v0.6.0-win-x64.zip` from GitHub Releases. Do not
+1. Download `WFMHub-Portable-v0.6.1-win-x64.zip` from GitHub Releases. Do not
    use GitHub's automatic Source code ZIP.
 2. Choose **Extract All** and keep the complete `WFMHub` folder together.
 3. Double-click `SETUP.cmd` once and select the folder containing `FTE`,

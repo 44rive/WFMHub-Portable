@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 — 2026-08-29
+
+- Bundled the IANA timezone database required by Windows embedded Python, so
+  the default `Europe/Berlin` evaluation clock loads correctly.
+- Added a safe fallback to the Windows local clock if a portable installation
+  is incomplete, preventing timezone data from aborting attendance refresh.
+
 ## 0.6.0 — 2026-08-29
 
 - Parked the next report redesign behind a governed clean-data validation

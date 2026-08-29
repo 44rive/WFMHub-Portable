@@ -14,7 +14,7 @@ export.
 
 ## First setup — one time
 
-1. Download `WFMHub-Portable-v0.6.0-win-x64.zip` from **Releases**.
+1. Download `WFMHub-Portable-v0.6.1-win-x64.zip` from **Releases**.
 2. Do not download GitHub's “Source code” ZIP.
 3. Right-click the downloaded ZIP and choose **Extract All**.
 4. Put the entire extracted `WFMHub` folder in a place where you can write, for

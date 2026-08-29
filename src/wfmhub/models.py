@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Iterable
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .config import Config
 from .database import DatabaseConnection, DatabaseCursor
@@ -37,6 +37,23 @@ class ModelSummary:
     timeline_rows: int = 0
     final_absence_rows: int = 0
     final_absence_event_rows: int = 0
+
+
+def _evaluation_time(timezone_name: str, as_of: datetime | None) -> datetime:
+    """Return one timezone-local naive cutoff, even on stripped Python builds."""
+    try:
+        local_zone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        # The portable package ships tzdata, but a damaged/incomplete copy must
+        # still run using the Windows-configured local clock instead of aborting.
+        if as_of is None:
+            return datetime.now()
+        return as_of.astimezone().replace(tzinfo=None) if as_of.tzinfo is not None else as_of
+    if as_of is None:
+        return datetime.now(local_zone).replace(tzinfo=None)
+    if as_of.tzinfo is not None:
+        return as_of.astimezone(local_zone).replace(tzinfo=None)
+    return as_of
 
 
 def _dicts(cursor: DatabaseCursor) -> list[dict[str, Any]]:
@@ -2148,13 +2165,7 @@ def refresh_models(
         stage(0, "Validating business rules")
         rulebook = load_rulebook(config.home, config.business_rules)
         mapping = load_queue_mapping(config.queue_mapping)
-        local_zone = ZoneInfo(config.timezone)
-        if as_of is None:
-            evaluation_as_of = datetime.now(local_zone).replace(tzinfo=None)
-        elif as_of.tzinfo is not None:
-            evaluation_as_of = as_of.astimezone(local_zone).replace(tzinfo=None)
-        else:
-            evaluation_as_of = as_of
+        evaluation_as_of = _evaluation_time(config.timezone, as_of)
         stage(1, "Selecting reporting period")
         start, end = resolve_period(conn, config, start, end, use_config_period)
         stage(2, "Loading schedules")

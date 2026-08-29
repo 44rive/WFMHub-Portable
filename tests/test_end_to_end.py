@@ -6,9 +6,10 @@ import tempfile
 import unittest
 import zipfile
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
+from zoneinfo import ZoneInfoNotFoundError
 
 from openpyxl import Workbook, load_workbook
 
@@ -16,7 +17,7 @@ from wfmhub.actions import import_actions
 from wfmhub.config import ensure_user_config, load_config, write_source_root
 from wfmhub.database import write_session
 from wfmhub.ingestion import ingest_all
-from wfmhub.models import refresh_models, resolve_period
+from wfmhub.models import _evaluation_time, refresh_models, resolve_period
 from wfmhub.exports import export_dataset
 from wfmhub.report_packs import build_report_pack
 from wfmhub.reports import build_report
@@ -160,6 +161,15 @@ def make_calls(path: Path):
 
 
 class EndToEndTests(unittest.TestCase):
+    def test_evaluation_time_uses_named_zone_and_survives_missing_tzdata(self):
+        self.assertEqual(
+            _evaluation_time("Europe/Berlin", datetime(2026, 8, 1, 12, tzinfo=timezone.utc)),
+            datetime(2026, 8, 1, 14),
+        )
+        supplied = datetime(2026, 8, 1, 14)
+        with patch("wfmhub.models.ZoneInfo", side_effect=ZoneInfoNotFoundError("missing")):
+            self.assertEqual(_evaluation_time("Europe/Berlin", supplied), supplied)
+
     def test_refresh_builds_safe_attendance_gaps_and_excel(self):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "hub"
