@@ -173,6 +173,7 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
             "intraday": "intraday",
             "quality_pcs": "quality_pcs",
             "absence": "absence",
+            "corrections": "corrections",
             "scorecard": "scorecard",
             **{str(k): str(v) for k, v in raw.get("report_packs", {}).items()},
         },

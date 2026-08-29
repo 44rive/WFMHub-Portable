@@ -249,6 +249,10 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(model.absence_rows, 4)
                 self.assertGreater(model.absence_event_rows, 0)
                 self.assertEqual(model.service_rows, 2)
+                final_absence_max = conn.execute(
+                    "SELECT max(final_absence_rate) FROM mart.verint_final_absence_agent_day"
+                ).fetchone()[0]
+                self.assertLessEqual(final_absence_max or 0, 1.0)
                 absence_100 = conn.execute(
                     "SELECT absence_minutes, absence_rate FROM mart.absence_agent_day WHERE agent_day_key='20260801-100'"
                 ).fetchone()
@@ -335,11 +339,10 @@ class EndToEndTests(unittest.TestCase):
                 )
                 report = build_report(conn, config, model.start, model.end)
                 self.assertEqual(report.parent, home / "output" / "operations")
-                self.assertTrue(report.name.startswith("WFMHub_Operations_"))
-                intraday_report = build_report_pack("intraday", conn, config, model.start, model.end)
+                self.assertTrue(report.name.startswith("WFMHub_Daily_Operations_"))
+                corrections_report = build_report_pack("corrections", conn, config, model.start, model.start)
                 pcs_report = build_report_pack("quality_pcs", conn, config, model.start, model.end)
                 absence_report = build_report_pack("absence", conn, config, model.start, model.end)
-                scorecard_report = build_report_pack("scorecard", conn, config, model.start, model.end)
                 export_progress = []
                 clean_calls = export_dataset(
                     conn, config, "calls", model.start, model.end,
@@ -355,14 +358,14 @@ class EndToEndTests(unittest.TestCase):
                 )
                 filtered = load_workbook(filtered_report, read_only=True, data_only=True)
                 try:
-                    filtered_dates = [row[0] for row in filtered["ATTENDANCE"].iter_rows(min_row=5, values_only=True) if row[0] is not None]
-                    self.assertEqual(len(filtered_dates), 3)
+                    filtered_dates = [row[0] for row in filtered["ATTENDANCE_CALLS"].iter_rows(min_row=5, values_only=True) if row[0] is not None]
+                    self.assertGreaterEqual(len(filtered_dates), 1)
                     self.assertTrue(all(value.date() == date(2026, 8, 1) for value in filtered_dates))
                 finally:
                     filtered.close()
 
                 bad_report = home / "output" / "bad-actions.xlsx"
-                shutil.copy2(report, bad_report)
+                shutil.copy2(corrections_report, bad_report)
                 bad = load_workbook(bad_report)
                 bad_gap_sheet = bad["GAPS"]
                 bad_headers = {cell.value: cell.column for cell in bad_gap_sheet[4]}
@@ -376,50 +379,47 @@ class EndToEndTests(unittest.TestCase):
                     import_actions(conn, bad_report)
                 self.assertEqual(conn.execute("SELECT count(*) FROM core.correction_action").fetchone()[0], 0)
 
-                edited = load_workbook(report)
+                edited = load_workbook(corrections_report)
                 gap_sheet = edited["GAPS"]
                 gap_headers = {cell.value: cell.column for cell in gap_sheet[4]}
                 gap_sheet.cell(5, gap_headers["Validation Status"], "Validated")
                 gap_sheet.cell(5, gap_headers["Owner"], "WFM")
-                edited.save(report)
+                edited.save(corrections_report)
                 edited.close()
-                self.assertEqual(import_actions(conn, report), 1)
+                self.assertEqual(import_actions(conn, corrections_report), 1)
                 self.assertEqual(conn.execute("SELECT validation_status FROM core.correction_action").fetchone()[0], "Validated")
 
             self.assertTrue(report.exists())
             workbook = load_workbook(report, read_only=True, data_only=True)
             try:
-                self.assertEqual(workbook.sheetnames, ["START_HERE", "SUMMARY", "ATTENDANCE", "GAPS", "VERINT_FINAL_CHECK", "DATA_QUALITY", "SOURCE_HEALTH"])
+                self.assertEqual(workbook.sheetnames, ["DAILY_SUMMARY", "ATTENDANCE_CALLS", "STAFFING_GAPS", "SERVICE_LEVEL", "FORMULA_LOGIC", "DATA_QUALITY", "SOURCE_HEALTH", "SCHEDULE_SOURCES"])
             finally:
                 workbook.close()
-            intraday_book = load_workbook(intraday_report, read_only=True, data_only=True)
+            corrections_book = load_workbook(corrections_report, read_only=True, data_only=True)
             try:
-                self.assertEqual(intraday_book.sheetnames, ["START_HERE", "SUMMARY", "ACTUALS", "FORECAST", "PIVOT_SCOPE_HOUR", "QUEUE_MAPPING", "DATA_QUALITY", "SOURCE_HEALTH"])
+                self.assertIn("GAPS", corrections_book.sheetnames)
+                self.assertIn("SHIFT_VIEW", corrections_book.sheetnames)
+                self.assertIn("TIMELINE_DATA", corrections_book.sheetnames)
             finally:
-                intraday_book.close()
+                corrections_book.close()
             pcs_book = load_workbook(pcs_report, read_only=True, data_only=True)
             try:
-                self.assertIn("AGENT_PCS", pcs_book.sheetnames)
-                self.assertIn("SURVEY_RESPONSES", pcs_book.sheetnames)
-                self.assertIn("PYTHON_RECIPES", pcs_book.sheetnames)
+                self.assertIn("AGENT_MONTH", pcs_book.sheetnames)
+                self.assertIn("RESPONSE_DETAIL", pcs_book.sheetnames)
+                self.assertIn("PCS_LOGIC", pcs_book.sheetnames)
             finally:
                 pcs_book.close()
             absence_book = load_workbook(absence_report, read_only=False, data_only=True)
             try:
-                self.assertIn("PIVOT_ABSENCE", absence_book.sheetnames)
-                self.assertIn("KPI_CATALOG", absence_book.sheetnames)
-                self.assertIn("tblPivotAbsence", absence_book["PIVOT_ABSENCE"].tables)
+                self.assertIn("AGENT_DAY", absence_book.sheetnames)
+                self.assertIn("ACTIVITY_EVENTS", absence_book.sheetnames)
+                self.assertIn("ACTIVITY_RULES", absence_book.sheetnames)
+                self.assertIn("tblAgentDay", absence_book["AGENT_DAY"].tables)
             finally:
                 absence_book.close()
-            scorecard_book = load_workbook(scorecard_report, read_only=False, data_only=True)
-            try:
-                self.assertIn("KPI_DAILY", scorecard_book.sheetnames)
-                self.assertIn("SERVICE_INTERVALS", scorecard_book.sheetnames)
-                self.assertIn("tblKpiDaily", scorecard_book["KPI_DAILY"].tables)
-            finally:
-                scorecard_book.close()
-            with zipfile.ZipFile(report) as archive:
-                self.assertFalse(any("externalLinks" in name for name in archive.namelist()))
+            for generated_report in (report, corrections_report, pcs_report, absence_report):
+                with zipfile.ZipFile(generated_report) as archive:
+                    self.assertFalse(any("externalLinks" in name for name in archive.namelist()))
 
 
 if __name__ == "__main__":

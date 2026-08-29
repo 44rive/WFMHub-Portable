@@ -8,22 +8,22 @@ Pivot, ODBC, DuckDB, or Python in Excel.
 Raw extracts are never edited and are never copied into normal report sheets.
 The SQLite hub remains the source of truth.
 
-## What v0.6 adds
+## What v0.7 adds
 
-- A data-first validation release: the new business workbooks are intentionally
-  parked until their governed clean datasets are accepted.
-- Strict header-based separation of Verint StartEndTimes (operational plan) and
-  Activities (corrected final ledger).
-- Explicit daily attendance call actions with provisional current-day gating;
-  unfinished shifts never become final early leaves.
-- 15-minute staffing gaps by roster LOB/language and exact full-shift evidence
-  segments for a later Verint-like visual.
-- Overlap-safe residual correction intervals after matching the union of final
-  Activities, plus an independent Activities-only final absenteeism ledger.
-- Exact reference-workbook PCS logic: inbound discrete Q1 scores, counts `<=3`
-  and `>3`, and raw-Q1 participation over inbound `PCSStatus=1`.
-- Governed daily/team/month PCS, attendance, staffing, service, correction,
-  timeline, and final-absence exports with manifests.
+- Four finished, independent Excel workbooks: Daily Operations, Yesterday
+  Corrections, exact Agent PCS, and Final Absenteeism.
+- A single-day operational control view combining the absent/late call list,
+  15-minute staffing gaps by roster LOB/language, and APDE service state.
+- A Verint-style correction workbook for the latest evidence-complete day,
+  with residual gaps, editable decisions, and a full-shift timeline.
+- Exact reference-workbook PCS formulas: inbound discrete Q1 scores, counts
+  `<=3` and `>3`, and raw-Q1 participation over inbound `PCSStatus=1`.
+- An Activities-only final absenteeism ledger with capped daily numerators,
+  activity rules, unmapped review, and no mixing with observed LILO/status gaps.
+- Visible source health, calculation contracts, governed Excel Tables, semantic
+  exception colors, and explicit incomplete-data states in every relevant pack.
+- A cleaner fixed dashboard wordmark while retaining the small
+  `made by Anass ASSRI` credit.
 
 ## What v0.5 added
 
@@ -65,7 +65,7 @@ The SQLite hub remains the source of truth.
 
 ## Windows quick start
 
-1. Download `WFMHub-Portable-v0.6.1-win-x64.zip` from GitHub Releases. Do not
+1. Download `WFMHub-Portable-v0.7.0-win-x64.zip` from GitHub Releases. Do not
    use GitHub's automatic Source code ZIP.
 2. Choose **Extract All** and keep the complete `WFMHub` folder together.
 3. Double-click `SETUP.cmd` once and select the folder containing `FTE`,
@@ -83,17 +83,17 @@ and [PivotTable guide](docs/PIVOT_GUIDE.md).
 
 | Folder | Contents |
 |---|---|
-| `output\operations` | Attendance and correction candidates; no adherence KPI |
-| `output\absence` | Agent-day absence, classified events, spells, Bradford, and rules |
-| `output\intraday` | APBE/APFR/APDE service actuals and separate Verint forecast |
-| `output\scorecard` | Daily service, forecast, absence, and PCS KPI facts |
-| `output\quality_pcs` | Agent call performance, PCS, and survey responses |
+| `output\operations` | Daily absent/late calls, staffing gaps, and APDE service state |
+| `output\corrections` | Latest completed-day residual gaps and full-shift evidence timeline |
+| `output\quality_pcs` | Exact Agent PCS summaries, participation, and response detail |
+| `output\absence` | Final Activities-only absenteeism ledger and audit evidence |
 | `output\reference` | Generated KPI catalog |
 | `output\data_exports` | Explicit clean CSV/XLSX exports |
 | `output\custom` | Custom Lab results |
 
-The `PIVOT_*`, `KPI_DAILY`, `SERVICE_INTERVALS`, and `ABSENCE_DAILY` sheets are
-curated Excel Tables designed as PivotTable sources. They are not raw extracts.
+The detailed sheets such as `ATTENDANCE_CALLS`, `STAFFING_GAPS`,
+`SERVICE_LEVEL`, `AGENT_DAY`, `AGENT_MONTH`, `GAPS`, and `ACTIVITY_EVENTS` are
+curated Excel Tables suitable for your own PivotTables. They are not raw extracts.
 
 ## Source boundaries
 

@@ -1,8 +1,9 @@
 # Governed clean-data contract
 
-This release deliberately stops at clean data. It does not create the new
-business workbooks yet. Validate these datasets first; each future workbook is
-then only a presentation layer over an accepted contract.
+These datasets are the governed contracts behind the four business workbooks.
+The workbook layer formats and filters them; it does not invent a second KPI
+definition. The same contracts remain directly exportable for audit, sending,
+custom Python, or a future report.
 
 Source extracts are opened read-only. FTE defines the admitted agents. Dates
 come from row content, not filenames.
@@ -25,7 +26,7 @@ cannot silently substitute for the operational schedule.
 
 ## Datasets to validate
 
-| Export key | Grain | Future report use |
+| Export key | Grain | Workbook use |
 |---|---|---|
 | `daily_attendance_calls` | Agent/day requiring a call | Daily absent/late call list |
 | `daily_staffing_gaps` | Date/15 minutes/roster LOB/language | Daily staffing gap sheet |
@@ -53,8 +54,9 @@ gap can therefore produce one or more exact residual rows.
 
 Final absenteeism is independent of LILO and Agent Status. It is built only
 from the selected Activities snapshot, clips evidence to its Activities shift,
-unions overlaps, and caps the rate denominator at the configured standard day
-(default 8.75 hours).
+unions overlaps, caps planned net minutes at the configured standard day
+(default 8.75 hours), and caps each daily classified numerator to that planned
+net value. A final rate therefore cannot exceed 100%.
 
 Run an export from `WFMHub.cmd > Export clean data`. Each CSV/XLSX is written
 under `output\data_exports\<dataset>` with a manifest containing its period,

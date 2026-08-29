@@ -15,15 +15,26 @@ from .report_packs import report_pack, report_pack_folder
 
 
 COLORS = {
-    "dark": "#16212A",
-    "muted": "#52636F",
-    "teal": "#075E68",
-    "teal_light": "#DDEFF1",
+    "dark": "#0B1F33",
+    "muted": "#536474",
+    "teal": "#007C83",
+    "teal_light": "#DFF3F3",
+    "canvas": "#F4F7F9",
     "gold": "#D6A84B",
-    "rule": "#9AA5B1",
-    "thin": "#D5DADD",
+    "rule": "#9AA6B2",
+    "thin": "#D8E0E6",
     "blue": "#0563C1",
-    "red": "#C00000",
+    "blue_light": "#E3F0FA",
+    "green": "#1F7A53",
+    "green_light": "#DDF3E8",
+    "amber": "#A65F00",
+    "amber_light": "#FFF1CC",
+    "red": "#B42318",
+    "red_light": "#FDE7E5",
+    "purple": "#6E56CF",
+    "purple_light": "#EEEAFE",
+    "future": "#9AA6B2",
+    "future_light": "#EEF1F4",
     "white": "#FFFFFF",
 }
 
@@ -69,19 +80,22 @@ class ExcelReport:
             "author": "Anass ASSRI",
             "company": "WFM",
         })
-        self.title = self.workbook.add_format({"font_name": "Aptos Display", "font_size": 16, "bold": True, "font_color": COLORS["white"], "bg_color": COLORS["teal"], "align": "center", "valign": "vcenter"})
-        self.subtitle = self.workbook.add_format({"font_name": "Aptos", "font_size": 9, "font_color": COLORS["dark"], "bg_color": COLORS["teal_light"], "align": "center", "valign": "vcenter"})
+        self.title = self.workbook.add_format({"font_name": "Aptos Display", "font_size": 18, "bold": True, "font_color": COLORS["white"], "bg_color": COLORS["dark"], "align": "left", "valign": "vcenter", "indent": 1})
+        self.subtitle = self.workbook.add_format({"font_name": "Aptos", "font_size": 9, "font_color": COLORS["white"], "bg_color": COLORS["teal"], "align": "left", "valign": "vcenter", "indent": 1})
         self.section = self.workbook.add_format({"font_name": "Aptos Display", "font_size": 11, "bold": True, "font_color": COLORS["teal"], "bottom": 2, "bottom_color": COLORS["gold"]})
-        self.body = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "bottom": 1, "bottom_color": COLORS["thin"]})
-        self.header = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "bold": True, "font_color": COLORS["teal"], "text_wrap": True, "top": 2, "bottom": 2, "top_color": COLORS["teal"], "bottom_color": COLORS["gold"], "bg_color": COLORS["teal_light"], "valign": "vcenter"})
-        self.editable = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["blue"], "bottom": 1, "bottom_color": COLORS["thin"]})
-        self.editable_date = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["blue"], "num_format": "yyyy-mm-dd", "bottom": 1, "bottom_color": COLORS["thin"]})
-        self.error = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["red"]})
-        self.integer = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "#,##0", "bottom": 1, "bottom_color": COLORS["thin"]})
-        self.decimal = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "#,##0.00", "bottom": 1, "bottom_color": COLORS["thin"]})
-        self.percent = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "0.0%", "bottom": 1, "bottom_color": COLORS["thin"]})
-        self.date = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "yyyy-mm-dd", "bottom": 1, "bottom_color": COLORS["thin"]})
-        self.datetime = self.workbook.add_format({"font_name": "Calibri", "font_size": 10, "font_color": COLORS["dark"], "num_format": "yyyy-mm-dd hh:mm", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.body = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.header = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "bold": True, "font_color": COLORS["white"], "text_wrap": True, "bg_color": COLORS["teal"], "bottom": 2, "bottom_color": COLORS["gold"], "valign": "vcenter"})
+        self.editable = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["blue"], "bg_color": COLORS["blue_light"], "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.editable_date = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["blue"], "bg_color": COLORS["blue_light"], "num_format": "yyyy-mm-dd", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.error = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "bold": True, "font_color": COLORS["red"], "bg_color": COLORS["red_light"]})
+        self.integer = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": "#,##0", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.decimal = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": "#,##0.00", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.percent = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": "0.0%", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.date = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": "yyyy-mm-dd", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.datetime = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": "yyyy-mm-dd hh:mm", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.kpi_label = self.workbook.add_format({"font_name": "Aptos", "font_size": 9, "bold": True, "font_color": COLORS["muted"], "bg_color": COLORS["canvas"], "align": "center", "valign": "vcenter", "top": 1, "left": 1, "right": 1, "top_color": COLORS["thin"], "left_color": COLORS["thin"], "right_color": COLORS["thin"]})
+        self.kpi_value = self.workbook.add_format({"font_name": "Aptos Display", "font_size": 20, "bold": True, "font_color": COLORS["dark"], "bg_color": COLORS["white"], "align": "center", "valign": "vcenter", "bottom": 1, "left": 1, "right": 1, "bottom_color": COLORS["thin"], "left_color": COLORS["thin"], "right_color": COLORS["thin"]})
+        self.note = self.workbook.add_format({"font_name": "Aptos", "font_size": 9, "font_color": COLORS["muted"], "text_wrap": True, "valign": "top"})
 
     def add_table_sheet(
         self,
@@ -92,7 +106,7 @@ class ExcelReport:
         rows: list[tuple[Any, ...]],
         editable_headers: set[str] | None = None,
         exception_column: str | None = None,
-    ) -> None:
+    ):
         editable_headers = editable_headers or set()
         worksheet = self.workbook.add_worksheet(name)
         worksheet.set_tab_color(COLORS["teal"])
@@ -101,8 +115,8 @@ class ExcelReport:
         last_col = max(0, len(headers) - 1)
         worksheet.merge_range(0, 0, 0, last_col, title, self.title)
         worksheet.merge_range(1, 0, 1, last_col, subtitle, self.subtitle)
-        worksheet.set_row(0, 23)
-        worksheet.set_row(1, 17)
+        worksheet.set_row(0, 30)
+        worksheet.set_row(1, 19)
         worksheet.set_row(3, 30)
         display = [_display_header(header) for header in headers]
         for column, header in enumerate(display):
@@ -116,9 +130,9 @@ class ExcelReport:
                     fmt = self.datetime
                 elif isinstance(value, date):
                     fmt = self.date
-                elif header.endswith(" %") or header in {"Attendance %", "Conformance %", "Status Coverage %", "SL Forecast", "SL Required", "Service Level 20S", "Abandon Rate"}:
+                elif header.endswith(" %") or any(token in header for token in (" Rate", "Participation", "Availability", "Service Level")):
                     fmt = self.percent
-                elif isinstance(value, (int, float)) and not isinstance(value, bool) and "Average" in header:
+                elif isinstance(value, (int, float)) and not isinstance(value, bool) and any(token in header for token in ("Average", "Hours", "FTE", "Variance")):
                     fmt = self.decimal
                 elif isinstance(value, (int, float)) and not isinstance(value, bool):
                     fmt = self.integer
@@ -127,7 +141,7 @@ class ExcelReport:
             columns = [{"header": header, "header_format": self.header} for header in display]
             worksheet.add_table(3, 0, 3 + len(rows), last_col, {
                 "name": "tbl" + "".join(char for char in name.title() if char.isalnum()),
-                "style": "Table Style Medium 2",
+                "style": "Table Style Light 9",
                 "columns": columns,
             })
         else:
@@ -147,6 +161,8 @@ class ExcelReport:
             worksheet.conditional_format(4, col, 3 + len(rows), col, {
                 "type": "text", "criteria": "containing", "value": "ERROR", "format": self.error,
             })
+        worksheet.set_zoom(90)
+        return worksheet
 
     def close(self) -> None:
         self.workbook.close()
@@ -232,7 +248,7 @@ def _start_sheet(report: ExcelReport, config: Config, start: date, end: date, ge
     ws.set_column("B:H", 3)
 
 
-def build_report(
+def build_legacy_report(
     conn: DatabaseConnection,
     config: Config,
     start: date,
@@ -329,3 +345,16 @@ def build_report(
         report.close()
         partial.replace(output)
     return output
+
+
+def build_report(
+    conn: DatabaseConnection,
+    config: Config,
+    start: date,
+    end: date,
+    output: Path | None = None,
+) -> Path:
+    """Compatibility entry point for the governed Daily Operations workbook."""
+    from .governed_workbooks import build_daily_operations_workbook
+
+    return build_daily_operations_workbook(conn, config, start, end, output)

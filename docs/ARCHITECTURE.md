@@ -95,13 +95,14 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 
 | Pack | Folder | Scope |
 |---|---|---|
-| `operations` | `output/operations` | Attendance, GAPS and quality/health; no adherence KPI |
-| `absence` | `output/absence` | Payroll absence, activity evidence, spells and Bradford |
-| `intraday` | `output/intraday` | APBE/APFR/APDE actuals and separate Verint forecast |
-| `scorecard` | `output/scorecard` | Pivot-ready daily Service, Forecast, Absence and PCS KPI facts |
-| `quality_pcs` | `output/quality_pcs` | Agent call performance, PCS, trends and responses |
+| `operations` | `output/operations` | Selected-day attendance calls, staffing gaps, and APDE service state |
+| `corrections` | `output/corrections` | Latest evidence-complete-day residual gaps and shift timeline |
+| `quality_pcs` | `output/quality_pcs` | Exact Q1 PCS, participation, day/team/month summaries and responses |
+| `absence` | `output/absence` | Activities-only final absence ledger, evidence and activity rules |
 
-Operations remains the only workbook accepted for correction-action import.
+The Yesterday Corrections workbook is the only workbook accepted for
+correction-action import. Legacy Intraday and Executive Scorecard builders
+remain internal compatibility code but are not registered or offered.
 Raw call-by-call rows stay in SQLite; PCS reports receive summaries, trends and
 bounded responses. Full clean details are explicit CSV/XLSX exports.
 
@@ -286,10 +287,10 @@ forecast exports are valid; absent forecast measures remain NULL.
 
 ## Upgrades
 
-v0.5 uses SQLite and does not convert or open v0.1 DuckDB data. Install v0.5 in
-a new folder, point it at the same untouched source root, and let it rebuild
-SQLite. Preserve the entire old folder. Saved Excel reports can re-import
-correction decisions.
+Current releases use SQLite and do not convert or open v0.1 DuckDB data.
+Install the portable release in a new folder, point it at the same untouched
+source root, and let it rebuild SQLite. Preserve the entire old folder. Saved
+Yesterday Corrections workbooks can re-import correction decisions.
 
 Within the SQLite generation, migrations are additive and never edited after
 release. Config upgrades create a timestamped TOML backup. Database upgrades

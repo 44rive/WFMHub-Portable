@@ -429,24 +429,22 @@ def _choose_source_group() -> str:
 
 def _choose_packs(allow_none: bool = True) -> tuple[str, ...]:
     print("\nREPORTS")
-    print("1. Operations")
-    print("2. Intraday")
-    print("3. Agent PCS")
-    print("4. Attendance & Absence")
-    print("5. Executive Scorecard")
-    print("6. All reports")
+    print("1. Daily Operations: calls, staffing gaps, APDE SL")
+    print("2. Yesterday Corrections: residual gaps + timeline")
+    print("3. Agent PCS: exact Q1 score + participation")
+    print("4. Final Absenteeism: corrected Verint Activities")
+    print("5. All four workbooks")
     if allow_none:
-        print("7. No report")
-    choice = input(f"Choose 1-{'7' if allow_none else '6'}: ").strip()
+        print("6. No report")
+    choice = input(f"Choose 1-{'6' if allow_none else '5'}: ").strip()
     mapping = {
         "1": ("operations",),
-        "2": ("intraday",),
+        "2": ("corrections",),
         "3": ("quality_pcs",),
         "4": ("absence",),
-        "5": ("scorecard",),
-        "6": IMPLEMENTED_REPORT_PACK_KEYS,
+        "5": IMPLEMENTED_REPORT_PACK_KEYS,
     }
-    if allow_none and choice == "7":
+    if allow_none and choice == "6":
         return ()
     try:
         return mapping[choice]
@@ -542,7 +540,7 @@ def menu(home: Path) -> int:
                 show_status(home)
                 show_coverage(home)
             elif choice == "7":
-                path = Path(input("Paste the edited Operations report path: ").strip().strip('"'))
+                path = Path(input("Paste the edited Yesterday Corrections workbook path: ").strip().strip('"'))
                 import_decisions(home, path)
             elif choice == "8":
                 create_backup(home)
@@ -554,7 +552,7 @@ def menu(home: Path) -> int:
             elif choice == "11":
                 return 0
             else:
-                print("Please choose a number from 1 to 10.")
+                print("Please choose a number from 1 to 11.")
         except Exception as exc:
             print(f"\nERROR: {exc}")
             print("Nothing was changed in your extract files. Check the latest file in logs.")

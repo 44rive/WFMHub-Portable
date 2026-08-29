@@ -14,7 +14,7 @@ export.
 
 ## First setup — one time
 
-1. Download `WFMHub-Portable-v0.6.1-win-x64.zip` from **Releases**.
+1. Download `WFMHub-Portable-v0.7.0-win-x64.zip` from **Releases**.
 2. Do not download GitHub's “Source code” ZIP.
 3. Right-click the downloaded ZIP and choose **Extract All**.
 4. Put the entire extracted `WFMHub` folder in a place where you can write, for
@@ -215,12 +215,14 @@ Only the first result is a no-show.
 2. Confirm all expected LILO, Agent Status and authoritative Verint schedule dates in
    `SOURCE_HEALTH`.
 3. Check `DATA_QUALITY`; resolve `ERROR` before payroll or injection work.
-4. Open `GAPS`.
+4. Build **Yesterday Corrections** and open its `GAPS` sheet. WFMHub chooses
+   the latest day in your period that has complete actual evidence.
 5. Review the detected interval, reason, confidence, and suggested activity.
-6. Read **Verint Final Check**:
+6. Read **Verint Reconciliation**:
 
    - `CORRECTED`: the final activity covers the observed gap.
-   - `PARTIAL`: only part of the observed gap is in Verint.
+   - `PARTIAL`: only part of the observed gap is in Verint. `GAPS` shows only
+     the remaining uncovered piece.
    - `NOT_CORRECTED`: no final activity covers it yet.
 
 7. Edit only the blue columns:
@@ -244,17 +246,17 @@ refresh again to update the automatic final check.
 
 Keep different work grains in different workbooks:
 
-- `output\operations`: attendance, gaps and operational data quality; no adherence KPI.
-- `output\absence`: payroll absence, vacation, shrinkage, events, spells and Bradford.
-- `output\intraday`: APBE/APFR/APDE service actuals and separate Verint forecast.
-- `output\scorecard`: pivot-ready daily Service, Forecast, Absence and PCS KPIs.
-- `output\quality_pcs`: call performance, Agent PCS, trends, survey responses,
-  PCS data quality and copy/paste Python-in-Excel recipes.
+- `output\operations`: today's absent/late calls, staffing gaps and APDE service state.
+- `output\corrections`: latest completed-day residual gaps and shift timeline.
+- `output\quality_pcs`: exact Q1 PCS, participation, agent/team/month summaries
+  and bounded response detail.
+- `output\absence`: final Activities-only absenteeism, classified evidence,
+  unmapped review and activity rules.
 
 Call-by-call rows can be enormous. They will stay in SQLite, deduplicated by a
 stable call-leg key. The PCS workbook contains agent summaries, trends and
 bounded survey responses—not millions of raw calls. Correction imports remain
-exclusive to the Operations `GAPS` sheet.
+exclusive to the Yesterday Corrections `GAPS` sheet.
 
 Official PCS uses inbound Q1 only. Q1 must equal one configured discrete score
 (normally 1, 2, 3, 4 or 5). Participation is inbound raw-Q1 nonblank divided by
@@ -283,9 +285,10 @@ Choose **5. Validate rules and build KPI catalog** to check the central
 `output\reference`.
 
 Use [RULEBOOK_GUIDE.md](RULEBOOK_GUIDE.md) before changing a formula or Verint
-activity category. Use [PIVOT_GUIDE.md](PIVOT_GUIDE.md) for literal click-by-click
-instructions to turn `PIVOT_ABSENCE`, `KPI_DAILY`, or `SERVICE_INTERVALS` into
-your own PivotTables and slicers.
+activity category. Each workbook also contains `FORMULA_LOGIC` or `PCS_LOGIC`
+so you can see the exact contract beside the result. Use
+[PIVOT_GUIDE.md](PIVOT_GUIDE.md) for literal click-by-click instructions to
+turn the governed Excel Tables into your own PivotTables and slicers.
 
 ## Custom Lab
 
@@ -313,8 +316,9 @@ config\queue_mapping.csv
 Open it in Excel or Notepad. `queue` rows map operational queues, `forecast_file`
 rows map forecast filename prefixes, and `scope_rollup` rows connect detailed
 scopes to a comparison scope. Save as CSV, run rule validation, and refresh.
-The extracts are untouched. The Intraday `QUEUE_MAPPING` sheet shows the exact
-mapping used, and `PIVOT_SCOPE_HOUR` compares mapped hourly actual versus forecast.
+The extracts are untouched. `SOURCE_HEALTH` shows the freshest available dates;
+the clean service and forecast exports retain mapped detailed and comparison
+scopes for your own analysis.
 
 New KPIs or reports can be added later without replacing the source extracts or
 attendance rules because forecast, actuals, agent facts, and report marts are

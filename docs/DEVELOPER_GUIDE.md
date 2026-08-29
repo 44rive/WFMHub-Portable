@@ -50,7 +50,7 @@ attendance, absence, correction, or payroll models.
 ## Windows portable build
 
 ```bash
-python3 packaging/windows/build_portable.py --version 0.5.1 --python-version 3.13.7
+python3 packaging/windows/build_portable.py --version 0.7.0 --python-version 3.13.7
 ```
 
 The builder always deletes and recreates stage and wheelhouse. It:
@@ -109,7 +109,7 @@ python3 tools/build_fte_template.py --source /path/to/current/FTE.xlsx \
 
 Report-pack keys and destinations live in `report_packs.py` and
 `[report_packs]`, separate from integer row limits in `[report]`.
-`reports.build_report()` remains the Operations compatibility API. Register
+`reports.build_report()` remains the Daily Operations compatibility API. Register
 builders through `build_report_pack`; do not import them directly in the CLI.
 
 Call-by-call uses a stable deterministic leg key. Full-history extracts may

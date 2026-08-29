@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0 — 2026-08-29
+
+- Shipped four governed business workbooks: Daily Operations, Yesterday
+  Corrections, exact Agent PCS, and Activities-only Final Absenteeism.
+- Added an incomplete-data banner and `DATA_MISSING`/`DATA_PARTIAL` staffing
+  states; absent attendance evidence now produces blank gap/variance values
+  instead of a false staffing shortage.
+- Added the latest evidence-complete-day selector, editable residual-gap sheet,
+  exact full-shift timeline, and correction calculation contract.
+- Added exact reference PCS day/team/month summaries, diagnostic response
+  detail, participation logic, and low-sample visibility.
+- Added a separately branded final ledger that never uses observed LILO or
+  Agent Status for its final absence totals and caps daily classified minutes
+  at planned net minutes.
+- Included formula, source-health, data-quality, and schedule-role sheets in
+  the relevant workbooks; generated files have no external Excel links.
+- Replaced the dashboard banner with a compact block-letter WFM HUB wordmark.
+
 ## 0.6.1 — 2026-08-29
 
 - Bundled the IANA timezone database required by Windows embedded Python, so

@@ -41,8 +41,8 @@ class DashboardTests(unittest.TestCase):
             quality_reviews=2,
         ))
 
-        self.assertIn("______", text)
-        self.assertIn("\\_/\\_/", text)
+        self.assertIn("# # #", text)
+        self.assertIn("#####", text)
         self.assertIn("made by Anass ASSRI", text)
         self.assertIn("Latest data: 2026-08-27", text)
         self.assertIn("(schedule)", text)

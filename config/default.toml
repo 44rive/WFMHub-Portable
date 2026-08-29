@@ -76,12 +76,15 @@ max_pcs_agent_rows = 100000
 max_pcs_exception_rows = 100000
 max_absence_rows = 100000
 max_service_rows = 100000
+max_staffing_rows = 100000
+max_timeline_rows = 100000
+max_final_absence_rows = 100000
+max_final_absence_event_rows = 100000
 
 [report_packs]
-# Keep outputs separated by business grain and audience. Quality PCS will use
-# its own folder when the call-by-call source is added.
+# Four separate operational workbooks. The older intraday and scorecard packs
+# are no longer offered; their governed facts remain available as clean data.
 operations = "operations"
-intraday = "intraday"
 quality_pcs = "quality_pcs"
 absence = "absence"
-scorecard = "scorecard"
+corrections = "corrections"

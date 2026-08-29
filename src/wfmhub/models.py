@@ -141,7 +141,8 @@ def _load_events(conn: DatabaseConnection, start: date, end: date) -> list[dict[
         """
         WITH chosen_shift AS (
             SELECT r.source_file_id, r.source_row, r.schedule_date, r.agent_id,
-                   f.file_name AS source_file,
+                   r.agent_name, r.assignment, r.scheduled_start, r.scheduled_end,
+                   r.parse_ok, f.file_name AS source_file,
                    row_number() OVER (
                        PARTITION BY r.schedule_date, r.agent_id
                        ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
@@ -160,9 +161,21 @@ def _load_events(conn: DatabaseConnection, start: date, end: date) -> list[dict[
           ON e.source_file_id=s.source_file_id AND e.source_row=s.source_row
         WHERE s.row_rank=1 AND e.parse_ok AND e.event_end >= ?
           AND e.event_start < ?
-        ORDER BY e.schedule_date, e.agent_id, e.event_start, e.event_index
+        UNION ALL
+        SELECT s.source_file_id, s.source_row, -1 AS event_index,
+               s.schedule_date, s.agent_id, s.agent_name,
+               s.assignment AS activity, 'FINAL_ASSIGNMENT' AS activity_type,
+               s.scheduled_start AS event_start, s.scheduled_end AS event_end,
+               s.parse_ok, s.source_file
+        FROM chosen_shift s
+        WHERE s.row_rank=1 AND s.parse_ok AND s.assignment IS NOT NULL
+          AND s.scheduled_end >= ? AND s.scheduled_start < ?
+        ORDER BY schedule_date, agent_id, event_start, event_index
         """,
-        [start - timedelta(days=1), end + timedelta(days=1), window_start, window_end],
+        [
+            start - timedelta(days=1), end + timedelta(days=1),
+            window_start, window_end, window_start, window_end,
+        ],
     ))
 
 
@@ -903,6 +916,7 @@ def _build_staffing(
             "interval_end": right, "lob": lob, "language": language,
             "scheduled_ids": set(), "observed_ids": set(), "productive_ids": set(),
             "auxiliary_ids": set(), "scheduled_seconds": 0.0,
+            "source_available_seconds": 0.0,
             "elapsed_scheduled_seconds": 0.0, "observed_seconds": 0.0,
             "productive_seconds": 0.0, "evidence": set(),
         })
@@ -922,6 +936,8 @@ def _build_staffing(
             if scheduled:
                 bucket["scheduled_ids"].add(row["agent_id"])
                 bucket["scheduled_seconds"] += scheduled
+                if row.get("source_loaded"):
+                    bucket["source_available_seconds"] += scheduled
                 bucket["elapsed_scheduled_seconds"] += elapsed
 
         exclusive = row.get("_status_exclusive", [])
@@ -972,8 +988,14 @@ def _build_staffing(
         productive_fte = item["productive_seconds"] / 900
         variance = observed_fte - elapsed_scheduled_fte
         gap = max(0.0, -variance)
+        scheduled_seconds = item["scheduled_seconds"]
+        available_seconds = item["source_available_seconds"]
         if item["interval_start"] >= as_of:
             state = "FUTURE"
+            variance = None
+            gap = None
+        elif available_seconds + 0.001 < scheduled_seconds:
+            state = "DATA_MISSING" if available_seconds <= 0.001 else "DATA_PARTIAL"
             variance = None
             gap = None
         elif item["interval_start"] < as_of < item["interval_end"]:
@@ -981,6 +1003,8 @@ def _build_staffing(
         else:
             state = "GAP" if gap is not None and gap > 0.001 else "OK"
         evidence = "+".join(sorted(item["evidence"])) or "NONE"
+        if available_seconds + 0.001 < scheduled_seconds:
+            evidence = f"{evidence}+MISSING_SOURCE"
         output.append({
             **{key: item[key] for key in (
                 "business_date", "interval_start", "interval_end", "lob", "language",
@@ -1222,8 +1246,16 @@ def _build_verint_final_absence(
             flag: interval_minutes(shift_start, shift_end, intervals)
             for flag, intervals in flag_intervals.items()
         }
-        absence_minutes = totals.get("absence", 0)
-        unmapped_minutes = totals.get("unmapped", 0)
+        # The configured standard day is a net payroll denominator.  Final
+        # Activities may overlap or contain full-span assignments, so every
+        # classified daily numerator is unioned above and capped again here.
+        # This guarantees that no final rate can exceed 100% and mirrors the
+        # governed observed-absence mart.
+        absence_minutes = min(planned_net_minutes, totals.get("absence", 0))
+        vacation_minutes = min(planned_net_minutes, totals.get("vacation", 0))
+        unpaid_minutes = min(planned_net_minutes, totals.get("unpaid", 0))
+        shrinkage_minutes = min(planned_net_minutes, totals.get("shrinkage", 0))
+        unmapped_minutes = min(planned_net_minutes, totals.get("unmapped", 0))
         day_rows.append({
             "agent_day_key": agent_day_key, "business_date": shift["schedule_date"],
             "agent_id": shift["agent_id"],
@@ -1234,9 +1266,9 @@ def _build_verint_final_absence(
             "scheduled_minutes": scheduled_minutes,
             "planned_net_minutes": planned_net_minutes,
             "final_absence_minutes": absence_minutes,
-            "final_vacation_minutes": totals.get("vacation", 0),
-            "final_unpaid_minutes": totals.get("unpaid", 0),
-            "final_shrinkage_minutes": totals.get("shrinkage", 0),
+            "final_vacation_minutes": vacation_minutes,
+            "final_unpaid_minutes": unpaid_minutes,
+            "final_shrinkage_minutes": shrinkage_minutes,
             "final_unmapped_minutes": unmapped_minutes,
             "final_absence_hours": absence_minutes / 60,
             "final_absence_rate": absence_minutes / planned_net_minutes if planned_net_minutes else None,

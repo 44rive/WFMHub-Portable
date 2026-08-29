@@ -114,10 +114,10 @@ not counted twice within one KPI.
 
 ## Adding a new Verint activity
 
-1. Open the Attendance & Absence report.
-2. Open `NOT_CORRECTED` for observed gaps awaiting Verint correction, or
-   `VERINT_ONLY` for a final activity without supporting actual evidence.
-3. Copy the activity wording exactly.
+1. Open the Final Absenteeism workbook.
+2. Open `UNMAPPED_REVIEW` for a final Activities label that has no rule.
+3. Copy the activity wording exactly. Use Yesterday Corrections `GAPS` separately
+   for observed intervals still awaiting a Verint correction.
 4. Add a new `[[activity_rules]]` block above broad rules such as Production.
 5. Choose the flags carefully.
 6. Increase the rule version, validate, and rebuild the same dates.

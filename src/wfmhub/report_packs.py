@@ -25,14 +25,15 @@ REPORT_PACKS = {
     "operations": ReportPack(
         key="operations",
         default_folder="operations",
-        filename_prefix="WFMHub_Operations",
-        purpose="Attendance, corrections, data quality, and source health without adherence KPIs.",
+        filename_prefix="WFMHub_Daily_Operations",
+        purpose="Attendance calls, staffing gaps, and APDE service state without adherence KPIs.",
     ),
     "intraday": ReportPack(
         key="intraday",
         default_folder="intraday",
         filename_prefix="WFMHub_Intraday",
-        purpose="Storm actual performance and separate Verint forecast/requirements.",
+        purpose="Legacy combined intraday output retained only for command compatibility.",
+        implemented=False,
     ),
     "quality_pcs": ReportPack(
         key="quality_pcs",
@@ -43,14 +44,21 @@ REPORT_PACKS = {
     "absence": ReportPack(
         key="absence",
         default_folder="absence",
-        filename_prefix="WFMHub_Attendance_Absence",
-        purpose="Payroll absence, vacation, shrinkage, spells and classified Verint events.",
+        filename_prefix="WFMHub_Final_Absenteeism",
+        purpose="Activities-only corrected final absenteeism ledger.",
+    ),
+    "corrections": ReportPack(
+        key="corrections",
+        default_folder="corrections",
+        filename_prefix="WFMHub_Yesterday_Corrections",
+        purpose="Residual observed gaps, decisions, and a full-shift evidence timeline.",
     ),
     "scorecard": ReportPack(
         key="scorecard",
         default_folder="scorecard",
         filename_prefix="WFMHub_Executive_Scorecard",
-        purpose="Rule-versioned service, forecast, absence and PCS KPI facts.",
+        purpose="Legacy combined scorecard retained only for command compatibility.",
+        implemented=False,
     ),
 }
 
@@ -87,23 +95,25 @@ def build_report_pack(
             f"Report pack {key!r} is reserved but not implemented yet. {pack.purpose}"
         )
     if key == "operations":
-        # Local import keeps the registry independent from individual builders
-        # while preserving the existing reports.build_report() API.
-        from .reports import build_report
+        from .governed_workbooks import build_daily_operations_workbook
 
-        return build_report(conn, config, start, end, output)
+        return build_daily_operations_workbook(conn, config, start, end, output)
     if key == "intraday":
         from .intraday_reports import build_intraday_report
 
         return build_intraday_report(conn, config, start, end, output)
     if key == "quality_pcs":
-        from .pcs_reports import build_pcs_report
+        from .governed_workbooks import build_exact_pcs_workbook
 
-        return build_pcs_report(conn, config, start, end, output)
+        return build_exact_pcs_workbook(conn, config, start, end, output)
     if key == "absence":
-        from .sota_reports import build_absence_report
+        from .governed_workbooks import build_final_absence_workbook
 
-        return build_absence_report(conn, config, start, end, output)
+        return build_final_absence_workbook(conn, config, start, end, output)
+    if key == "corrections":
+        from .governed_workbooks import build_corrections_workbook
+
+        return build_corrections_workbook(conn, config, start, end, output)
     if key == "scorecard":
         from .sota_reports import build_scorecard_report
 

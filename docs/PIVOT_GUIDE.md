@@ -1,62 +1,46 @@
 # Creating PivotTables from WFMHub reports
 
-WFMHub creates clean Excel Tables. You create the PivotTable yourself, which
-keeps the portable hub simple and lets you arrange the report your way.
+WFMHub creates governed Excel Tables; it does not create PivotTables for you.
+You can arrange those tables without touching the extracts or the SQLite hub.
 
-## Example 1: absence hours by agent and month
+## The basic clicks
 
-1. Open the newest workbook under `output\absence`.
-2. Open the `PIVOT_ABSENCE` sheet.
-3. Click any cell inside the table.
-4. On Excel's ribbon, click **Insert**.
-5. Click **PivotTable**.
-6. Excel should show the table name `tblPivotAbsence`.
-7. Select **New Worksheet**, then click **OK**.
-8. In PivotTable Fields, drag **Calendar Month** to **Rows**.
-9. Drag **Agent** below Calendar Month in **Rows**.
-10. Drag **Absence Hours** to **Values**.
-11. If Excel says “Count of Absence Hours,” click it, choose **Value Field
-    Settings**, select **Sum**, and click **OK**.
-12. Drag **Team Leader**, **LOB**, **Language**, or **Location** to **Filters**.
+1. Open one of the four generated workbooks.
+2. Open the detailed sheet named below.
+3. Click any populated cell inside the striped table.
+4. On Excel's ribbon, click **Insert**, then **PivotTable**.
+5. Choose **New Worksheet**, then click **OK**.
+6. Drag fields into **Rows**, **Columns**, **Values**, and **Filters**.
+7. If Excel says **Count of** a numeric field, open **Value Field Settings**
+   and change it to **Sum** or **Average**, as described below.
 
-You now have a monthly absence-hours PivotTable.
+If a sheet says “No rows for this period,” there is no table to pivot. Check
+`SOURCE_HEALTH`, the selected dates, and `DATA_QUALITY`, then refresh.
 
-## Example 2: absence percentage
+## Daily staffing gaps by LOB and language
 
-Do not average the `Absence Rate %` column across days. A correct month is:
+Use the newest workbook in `output\operations`, sheet `STAFFING_GAPS`.
 
-```text
-Sum of Absence Hours / Sum of Planned Net Hours
-```
+- Rows: **LOB**, then **Language**.
+- Columns: **Interval Start** if you want the intraday curve.
+- Values: **Sum of Required FTE**, **Sum of Available FTE**, and **Sum of
+  Staffing Gap FTE**.
+- Filters: **Business Date**, **Staffing State**, **Evidence Basis**.
 
-The easiest beginner method is:
+Treat `DATA_MISSING` and `DATA_PARTIAL` as unknown evidence. Their gap and
+variance are deliberately blank; do not replace them with zero.
 
-1. Put **Sum of Absence Hours** in Values.
-2. Put **Sum of Planned Net Hours** in Values.
-3. Next to the PivotTable, divide the first result by the second.
-4. Format the result as Percentage.
+## APDE service state by LOB
 
-If you know PivotTable calculated fields, create one using:
+Use `output\operations`, sheet `SERVICE_LEVEL`.
 
-```text
-='Absence Hours' / 'Planned Net Hours'
-```
+- Rows: **LOB**, then **Language**.
+- Columns: **Interval Start** or **Interval Label**.
+- Values: **Sum of Offered**, **Sum of Answered**, **Sum of Answered Within
+  Target**, **Sum of Short Abandoned**, and **Sum of Handled Seconds**.
 
-Always verify that Excel is using sums, not counts or averages.
-
-## Example 3: service performance
-
-1. Open the newest workbook under `output\scorecard`.
-2. Open `SERVICE_INTERVALS`.
-3. Click inside `tblServiceIntervals` and insert a PivotTable.
-4. Put **Date**, **Source System**, **LOB**, or **Language** in Rows/Filters.
-5. Use sums of these components:
-   - Offered
-   - Answered
-   - Answered Within Target
-   - Short Abandoned
-   - Handled Seconds
-6. Calculate outside the PivotTable:
+Do not average interval percentages. Calculate the total after summing the
+components:
 
 ```text
 Gross SL              = Answered Within Target / Offered
@@ -65,35 +49,63 @@ Service Availability  = Answered / Offered
 AHT                    = Handled Seconds / Answered
 ```
 
-Do not average interval SL, availability, or AHT percentages.
+Service availability is the availability of the service, never an agent
+availability or adherence measure.
 
-## Example 4: one long KPI PivotTable
+## Exact PCS by agent and month
 
-The `KPI_DAILY` sheet in the Executive Scorecard is useful when you want one
-PivotTable for Service, Absence, Forecast, and PCS.
+Use `output\quality_pcs`, sheet `AGENT_MONTH` for a monthly PivotTable or
+`AGENT_DAY` for daily detail.
 
-1. Insert a PivotTable from `tblKpiDaily`.
-2. Put **Domain** and **KPI Name** in Rows.
-3. Put **Calendar Month** or **ISO Week** in Columns.
-4. Put **Source**, **LOB**, and **Language** in Filters.
-5. For additive KPIs such as Offered or Absence Hours, use **Sum of Value**.
-6. For ratio KPIs, use summed **Numerator** divided by summed **Denominator**.
+- Rows: **Agent Name**.
+- Columns: **Month Key** in `AGENT_MONTH`, or **Business Date** in `AGENT_DAY`.
+- Values: sum the score and participation counters.
+- Filters: **Team Leader**, **LOB**, **Language**, **Sample Flag**.
+
+For a higher-grain result, divide summed counters:
+
+```text
+PCS average      = Sum of Score Sum / Sum of Valid Score Responses
+PCS participation = Sum of Participation Responses / Sum of PCS Status Calls
+```
+
+Never average the already-calculated agent/day percentages. `PCS_LOGIC`
+documents the exact Q1 eligibility, `<=3`/`>3` counts, and participation rule.
+
+## Final absenteeism by agent and month
+
+Use `output\absence`, sheet `AGENT_DAY`.
+
+- Rows: **Agent Name**.
+- Columns: **Business Date**. In Excel, right-click one date and choose
+  **Group**, then **Months**, if you want a monthly agent view.
+- Values: **Sum of Final Absence Hours** and **Sum of Planned Net Hours**.
+- Filters: **Team Leader**, **LOB**, **Language**, **Final Ledger Status**.
+
+Calculate the correct aggregate rate beside the PivotTable:
+
+```text
+Final absence rate = Sum of Final Absence Hours / Sum of Planned Net Hours
+```
+
+Do not average `Final Absence Rate`. Use `ACTIVITY_EVENTS` only for audit and
+activity detail; it can contain overlapping evidence and is not the headline
+numerator. Review `UNMAPPED_REVIEW` before using final payroll results.
 
 ## Add slicers
 
 1. Click the PivotTable.
-2. Click **PivotTable Analyze**.
-3. Click **Insert Slicer**.
-4. Choose fields such as LOB, Language, Team Leader, Location, Source, or KPI
-   Name.
-5. Click **OK** and place the slicers beside the PivotTable.
+2. Click **PivotTable Analyze**, then **Insert Slicer**.
+3. Choose fields such as LOB, Language, Team Leader, Status, or Source.
+4. Click **OK** and place the slicers beside the PivotTable.
 
 ## If the PivotTable looks wrong
 
-- “Count of …” instead of “Sum of …”: change Value Field Settings to Sum.
-- Percent above 100%: check the numerator/denominator and active SL profile.
-- Monthly percentage differs from the daily average: the monthly ratio-of-sums
-  is the correct one.
-- Missing agents: check FTE scope and `SOURCE_HEALTH`.
-- Missing dates: check the latest source date and selected report period.
-- Unexplained absence: check `ABSENCE_EVENTS`, `NOT_CORRECTED`, `VERINT_ONLY`, and the rule version.
+- **Count of …** instead of **Sum of …**: change Value Field Settings.
+- Percentage above 100%: use summed numerator divided by summed denominator.
+- Missing agents: check the FTE scope and `SOURCE_HEALTH`.
+- Missing dates: check the selected period and newest source dates.
+- Empty Daily Operations: StartEndTimes is required for the operational plan;
+  Activities cannot replace it.
+- Unexplained final absence: check `ACTIVITY_EVENTS`, `UNMAPPED_REVIEW`,
+  `ACTIVITY_RULES`, and the rule version/hash.
