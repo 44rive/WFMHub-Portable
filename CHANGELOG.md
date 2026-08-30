@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.0 — 2026-08-31
+
+- Added a management-ready Bonus proposal rebuilt from the audited source with
+  centralized rules, explicit policy ownership, input/completeness controls,
+  formula documentation, and a technical payroll-release gate.
+- Added a lightweight three-hour PCS template based exclusively on the original
+  `PCS Report.xlsx` O/P/Q/R definitions: discrete Q1 average, `<=3`, `>3`, and
+  nonblank-Q1 participation over `PCSStatus=1`.
+- Retained full call timestamps for true interval reporting and added separate
+  valid-response rate, LOB ratio-of-sums, low-sample warnings, and data-quality
+  controls.
+- Removed the original PCS external Actions Rate link and avoided copying its
+  worldwide 39,982-row cache or million-row roster table into the management
+  workbook.
+- Added the persistent, public-repo-safe `shared_reports` workflow and menu/CLI
+  action; generated management workbooks remain local and source files are
+  never modified.
+
 ## 0.7.0 — 2026-08-29
 
 - Shipped four governed business workbooks: Daily Operations, Yesterday

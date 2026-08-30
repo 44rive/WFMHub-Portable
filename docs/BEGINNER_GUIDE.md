@@ -14,7 +14,7 @@ export.
 
 ## First setup — one time
 
-1. Download `WFMHub-Portable-v0.7.0-win-x64.zip` from **Releases**.
+1. Download `WFMHub-Portable-v0.8.0-win-x64.zip` from **Releases**.
 2. Do not download GitHub's “Source code” ZIP.
 3. Right-click the downloaded ZIP and choose **Extract All**.
 4. Put the entire extracted `WFMHub` folder in a place where you can write, for
@@ -263,6 +263,45 @@ Official PCS uses inbound Q1 only. Q1 must equal one configured discrete score
 inbound `PCSStatus=1`, so invalid markers count for participation but not the
 average. Q2 and Mode 2 are diagnostics only. A missing denominator displays
 blank, never zero. See [PCS logic](PCS_LOGIC.md).
+
+## Build a management shared report
+
+Choose **5. Build a management shared report** when you want a workbook you
+will attach to an email yourself. WFMHub saves it under `shared_reports` and
+does not modify the workbook you select as its source.
+
+### Bonus proposal
+
+1. Choose **Bonus management proposal**.
+2. Paste the path to the existing Bonus workbook.
+3. Open `shared_reports\Bonus_Management_Proposal.xlsx`.
+4. Read the red banner on `MANAGEMENT`.
+5. Edit blue cells only on `SETUP`, `POLICY_APPROVAL`, `BONUS_RULES`, and
+   `AGENT_INPUT`.
+6. Scenario payout is for discussion. `Released Payout` remains blank until
+   every policy says `Validated`, the input row says `VALIDATED`, and the
+   employee eligibility gate passes.
+
+The workbook can explain the model without accidentally presenting synthetic
+or incomplete values as payroll output.
+
+### PCS update every three hours
+
+1. Choose **PCS management three-hour template** and select the original
+   `PCS Report.xlsx` so WFMHub can copy its bounded agent roster.
+2. Open `shared_reports\PCS_Management_3H_Template.xlsx`.
+3. On `INPUT_CALLS`, paste these Call-by-Call source fields under their matching
+   blue headers: Call Date/Time, Call End Date/Time, Call ID, Call Direction,
+   Agent ID, Agent, Talk/Hold/Wrap Time, Language, Queue,
+   PostCallSurveyMode, PCSStatus, and Question 1.
+4. Keep the time inside Call Date/Time; it is required for a true three-hour
+   window.
+5. On `SETUP`, enter the report date, window start, and window end.
+6. Check `DATA_QUALITY`, then send `PCS_REPORT` with the workbook.
+
+`PCS Participation` deliberately preserves the original formula: nonblank Q1
+divided by `PCSStatus=1`. `Valid Response Rate` is different: valid Q1 scores
+1–5 divided by `PCSStatus=1`. The report shows both.
 
 ## Export clean data
 

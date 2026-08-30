@@ -8,7 +8,22 @@ Pivot, ODBC, DuckDB, or Python in Excel.
 Raw extracts are never edited and are never copied into normal report sheets.
 The SQLite hub remains the source of truth.
 
-## What v0.7 adds
+## What v0.8 adds
+
+- A management-ready Bonus proposal rebuilt in the WFMHub navy/teal design,
+  with a single period, centralized thresholds, formula documentation, an
+  executive view, and a hard payroll-release gate.
+- A paste-ready three-hour PCS management template based only on the original
+  `PCS Report.xlsx` O/P/Q/R logic—not the discarded generated workbook.
+- Separate daily cumulative and timestamp-bounded three-hour PCS views by agent
+  and LOB, with exact participation and valid-response rate shown separately.
+- A persistent `shared_reports` folder for files you send manually. Generated
+  workbooks stay out of the public Git repository and source files stay intact.
+- Removal of the original PCS workbook's broken external Actions Rate link,
+  million-row roster table, full-column calculation ranges, and worldwide raw
+  call cache from the management attachment.
+
+## What v0.7 added
 
 - Four finished, independent Excel workbooks: Daily Operations, Yesterday
   Corrections, exact Agent PCS, and Final Absenteeism.
@@ -65,7 +80,7 @@ The SQLite hub remains the source of truth.
 
 ## Windows quick start
 
-1. Download `WFMHub-Portable-v0.7.0-win-x64.zip` from GitHub Releases. Do not
+1. Download `WFMHub-Portable-v0.8.0-win-x64.zip` from GitHub Releases. Do not
    use GitHub's automatic Source code ZIP.
 2. Choose **Extract All** and keep the complete `WFMHub` folder together.
 3. Double-click `SETUP.cmd` once and select the folder containing `FTE`,
@@ -90,6 +105,7 @@ and [PivotTable guide](docs/PIVOT_GUIDE.md).
 | `output\reference` | Generated KPI catalog |
 | `output\data_exports` | Explicit clean CSV/XLSX exports |
 | `output\custom` | Custom Lab results |
+| `shared_reports` | Bonus and three-hour PCS workbooks shared manually with management |
 
 The detailed sheets such as `ATTENDANCE_CALLS`, `STAFFING_GAPS`,
 `SERVICE_LEVEL`, `AGENT_DAY`, `AGENT_MONTH`, `GAPS`, and `ACTIVITY_EVENTS` are
@@ -142,6 +158,7 @@ python3 -m wfmhub --home . doctor
 python3 -m wfmhub --home . setup --source-root /path/to/untouched-extracts --non-interactive
 python3 -m wfmhub --home . rules catalog
 python3 -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31 --all-packs
+python3 -m wfmhub --home . shared-report pcs "TOLEARN/PCS Report.xlsx" --date 2026-08-31
 python3 -m unittest discover -s tests -v
 ```
 

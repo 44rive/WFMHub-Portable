@@ -7,6 +7,10 @@ backups/
 logs/
 output/
 extracts/
+shared_reports/*.xlsx
+shared_reports/*.xlsm
+shared_reports/*.pdf
+!shared_reports/README.txt
 input/*.xlsx
 input/*.csv
 !input/README.md

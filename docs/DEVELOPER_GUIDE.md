@@ -50,7 +50,7 @@ attendance, absence, correction, or payroll models.
 ## Windows portable build
 
 ```bash
-python3 packaging/windows/build_portable.py --version 0.7.0 --python-version 3.13.7
+python3 packaging/windows/build_portable.py --version 0.8.0 --python-version 3.13.7
 ```
 
 The builder always deletes and recreates stage and wheelhouse. It:

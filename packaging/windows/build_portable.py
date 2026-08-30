@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.7.0"
+DEFAULT_VERSION = "0.8.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -200,9 +200,10 @@ def build(args) -> Path:
         "Only pure-Python report libraries are added under runtime/site-packages.\n",
         encoding="utf-8",
     )
-    for folder in ("database", "backups", "logs", "output", "input", "extracts"):
+    for folder in ("database", "backups", "logs", "output", "input", "extracts", "shared_reports"):
         (stage / folder).mkdir(exist_ok=True)
     shutil.copy2(ROOT / "input" / "README.md", stage / "input" / "README.md")
+    shutil.copy2(ROOT / "shared_reports" / "README.txt", stage / "shared_reports" / "README.txt")
     validate_stage(stage, expected_native)
 
     dist = ROOT / "dist"

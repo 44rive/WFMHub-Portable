@@ -24,6 +24,7 @@ from .progress import ProgressBar, ProgressCallback
 from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack
 from .rules import load_rulebook, validate_rulebook
 from .sota_reports import build_kpi_catalog
+from .shared_reports import build_shared_report
 from .ui import clear_screen, render_dashboard
 
 
@@ -377,6 +378,53 @@ def rules_tool(home: Path, action: str = "validate") -> int:
     return 0
 
 
+def shared_report_tool(
+    home: Path,
+    kind: str,
+    source: Path | None,
+    output: Path | None = None,
+    report_date: date | None = None,
+) -> int:
+    """Build a fresh workbook intended for manual management sharing."""
+
+    folder = home / "shared_reports"
+    default_name = (
+        "Bonus_Management_Proposal.xlsx"
+        if kind == "bonus"
+        else "PCS_Management_3H_Template.xlsx"
+    )
+    target = (output or folder / default_name).resolve()
+    bar = ProgressBar()
+    try:
+        bar.update(0.1, f"Reading original {kind.upper()} workbook")
+        path = build_shared_report(kind, source.resolve() if source else None, target, report_date)
+        bar.finish("Shared report ready")
+    except Exception as exc:
+        bar.fail(str(exc))
+        raise
+    print(f"Shared report : {path}")
+    print("Source file   : unchanged")
+    return 0
+
+
+def _choose_shared_report(home: Path) -> int:
+    print("\nMANAGEMENT SHARED REPORT")
+    print("1. Bonus management proposal")
+    print("2. PCS management three-hour template")
+    choice = input("Choose 1-2: ").strip()
+    kind = {"1": "bonus", "2": "pcs"}.get(choice)
+    if kind is None:
+        raise ValueError("Please choose Bonus or PCS")
+    entered = input(f"Paste the original {kind.upper()} workbook path: ").strip().strip('"')
+    if not entered:
+        raise ValueError("The source workbook path is required")
+    selected_date = None
+    if kind == "pcs":
+        value = input("Report date YYYY-MM-DD [use date stored in original workbook]: ").strip()
+        selected_date = _date(value) if value else None
+    return shared_report_tool(home, kind, Path(entered), report_date=selected_date)
+
+
 def _choose_period() -> tuple[date | None, date | None, bool]:
     print("\nDATE PERIOD")
     print("1. Today")
@@ -503,16 +551,17 @@ def menu(home: Path) -> int:
         print("    [2] Build reports from existing hub data")
         print("    [3] Export clean data")
         print("    [4] Run custom Python or SQL analysis")
+        print("    [5] Build a management shared report")
         print("\n  CONTROL & REVIEW")
-        print("    [5] Validate rules and build KPI catalog")
-        print("    [6] Show source health and date coverage")
-        print("    [7] Import correction decisions")
+        print("    [6] Validate rules and build KPI catalog")
+        print("    [7] Show source health and date coverage")
+        print("    [8] Import correction decisions")
         print("\n  HUB TOOLS")
-        print("    [8] Create database backup")
-        print("    [9] Change source root")
-        print("   [10] Run system check")
-        print("   [11] Exit")
-        choice = input("\n  Choose 1-11: ").strip()
+        print("    [9] Create database backup")
+        print("   [10] Change source root")
+        print("   [11] Run system check")
+        print("   [12] Exit")
+        choice = input("\n  Choose 1-12: ").strip()
         try:
             if choice == "1":
                 group = _choose_source_group()
@@ -535,24 +584,26 @@ def menu(home: Path) -> int:
                 start, end, use_config = _choose_period()
                 run_custom(home, kind, job, start, end, use_config)
             elif choice == "5":
-                rules_tool(home, "catalog")
+                _choose_shared_report(home)
             elif choice == "6":
+                rules_tool(home, "catalog")
+            elif choice == "7":
                 show_status(home)
                 show_coverage(home)
-            elif choice == "7":
+            elif choice == "8":
                 path = Path(input("Paste the edited Yesterday Corrections workbook path: ").strip().strip('"'))
                 import_decisions(home, path)
-            elif choice == "8":
-                create_backup(home)
             elif choice == "9":
+                create_backup(home)
+            elif choice == "10":
                 path = Path(input("Paste the folder containing FTE, Storm and Verint: ").strip().strip('"'))
                 setup(home, path, True)
-            elif choice == "10":
-                run_doctor(home)
             elif choice == "11":
+                run_doctor(home)
+            elif choice == "12":
                 return 0
             else:
-                print("Please choose a number from 1 to 11.")
+                print("Please choose a number from 1 to 12.")
         except Exception as exc:
             print(f"\nERROR: {exc}")
             print("Nothing was changed in your extract files. Check the latest file in logs.")
@@ -598,6 +649,11 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("doctor", help="Test the corporate runtime, SQLite and Excel libraries")
     rules_p = commands.add_parser("rules", help="Validate the central rulebook or generate its KPI catalog")
     rules_p.add_argument("action", choices=("validate", "catalog"), nargs="?", default="validate")
+    shared_p = commands.add_parser("shared-report", help="Build an email-safe Bonus or PCS management workbook")
+    shared_p.add_argument("kind", choices=("bonus", "pcs"))
+    shared_p.add_argument("source", type=Path, nargs="?", help="Original workbook; required for Bonus and recommended for PCS roster")
+    shared_p.add_argument("--output", type=Path)
+    shared_p.add_argument("--date", type=_date, help="PCS report date YYYY-MM-DD")
     commands.add_parser("menu", help="Open the interactive menu")
     return root
 
@@ -629,6 +685,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if run_doctor(home) else 1
         if args.command == "rules":
             return rules_tool(home, args.action)
+        if args.command == "shared-report":
+            return shared_report_tool(home, args.kind, args.source, args.output, args.date)
         return menu(home)
     except (ConfigError, HubLockedError, FileNotFoundError, ValueError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
