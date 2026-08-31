@@ -5,6 +5,9 @@
 - Added a management-ready Bonus proposal rebuilt from the audited source with
   centralized rules, explicit policy ownership, input/completeness controls,
   formula documentation, and a technical payroll-release gate.
+- Reworked the landing sheet around the uploaded cockpit's executive hierarchy:
+  large payout cards, LOB decomposition, input-coverage comparison, payout
+  distribution, and a compact governance footer.
 - Added a lightweight three-hour PCS template based exclusively on the original
   `PCS Report.xlsx` O/P/Q/R definitions: discrete Q1 average, `<=3`, `>3`, and
   nonblank-Q1 participation over `PCSStatus=1`.

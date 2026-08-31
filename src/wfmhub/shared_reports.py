@@ -573,50 +573,294 @@ def build_bonus_management(source: Path, output: Path) -> Path:
     scenario_total = sum(result.scenario or 0 for result in results)
     gross_total = sum((result.reference or 0) * (result.proration or 0) * (result.gross or 0) for result in results)
     malus_deduction = gross_total - scenario_total
-    final_values = [result.final for result in results if result.final is not None]
-    management = book.sheet("MANAGEMENT", "Bonus management proposal",
-                            f"Period {period} | management scenario | generated {datetime.now():%Y-%m-%d %H:%M}", 11)
-    management.set_column("A:L", 14)
-    book.banner(management, 3, 0, 11,
-                "ILLUSTRATIVE SCENARIO — BLOCKED FOR PAYROLL UNTIL POLICY AND DATA VALIDATION", "bad")
-    book.kpi(management, 0, 5, "MODELED AGENTS", len(records), '=COUNTIF(tblBonusCalc[Agent ID],"<>")')
-    book.kpi(management, 2, 5, "AVG ACHIEVEMENT", sum(final_values) / len(final_values) if final_values else 0,
-             '=IFERROR(AVERAGE(tblBonusCalc[Final Achievement]),0)', "kpi_pct")
-    book.kpi(management, 4, 5, "GROSS PAYOUT", gross_total,
-             '=SUMPRODUCT(tblBonusCalc[Reference Bonus],tblBonusCalc[Proration],tblBonusCalc[Gross Achievement])', "kpi_money")
-    book.kpi(management, 6, 5, "MALUS DEDUCTION", malus_deduction,
-             '=SUMPRODUCT(tblBonusCalc[Reference Bonus],tblBonusCalc[Proration],tblBonusCalc[Gross Achievement])-SUM(tblBonusCalc[Scenario Payout])', "kpi_money")
-    book.kpi(management, 8, 5, "SCENARIO PAYOUT", scenario_total,
-             '=SUM(tblBonusCalc[Scenario Payout])', "kpi_money")
-    book.kpi(management, 10, 5, "RELEASED PAYOUT", 0,
-             '=SUM(tblBonusCalc[Released Payout])', "kpi_money")
-    management.write("A11", "Population", f["header"])
-    management.write("B11", "Agents", f["header"])
-    management.write("C11", "Scenario payout", f["header"])
-    management.write("D11", "Average achievement", f["header"])
     populations = sorted({rule.population for rule in rules})
     result_pairs = list(zip(records, results))
-    for index, population in enumerate(populations, 11):
-        population_results = [result for record, result in result_pairs if _clean(_bonus_value(record, "Population")) == population]
-        pop_final = [result.final for result in population_results if result.final is not None]
-        cached_payout = sum(result.scenario or 0 for result in population_results)
-        management.write(index, 0, population, f["body"])
-        management.write_formula(index, 1, f'=COUNTIF(tblBonusCalc[Population],A{index+1})', f["int"], len(population_results))
-        management.write_formula(index, 2, f'=SUMIF(tblBonusCalc[Population],A{index+1},tblBonusCalc[Scenario Payout])', f["money"], cached_payout)
-        management.write_formula(index, 3, f'=IFERROR(AVERAGEIF(tblBonusCalc[Population],A{index+1},tblBonusCalc[Final Achievement]),0)', f["pct"], sum(pop_final) / len(pop_final) if pop_final else 0)
-    chart = wb.add_chart({"type": "column"})
-    chart.add_series({"name": "Scenario payout", "categories": ["MANAGEMENT", 11, 0, 10 + len(populations), 0],
-                      "values": ["MANAGEMENT", 11, 2, 10 + len(populations), 2],
-                      "fill": {"color": COLORS["teal"]}, "border": {"none": True}})
-    chart.set_title({"name": "Scenario payout by population"})
-    chart.set_legend({"none": True})
-    chart.set_style(10)
-    chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-    chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-    management.insert_chart("F11", chart, {"x_scale": 1.25, "y_scale": 1.12})
-    management.write("A18", "Decision message", f["section"])
-    management.merge_range("A19:L22",
-                           "This model makes every threshold, policy, and agent-level calculation visible. The scenario can be discussed now; payroll output remains technically blocked until HR/Compensation owners validate all eight policy decisions and the input rows are marked VALIDATED.",
+    total_agents = len(records)
+    input_ready = sum(result.core_ready for result in results)
+    paid_agents = sum((result.scenario or 0) > 0 for result in results)
+    average_paid = scenario_total / paid_agents if paid_agents else 0
+    highest_paid = max((result.scenario or 0 for result in results), default=0)
+    pending_policies = sum(
+        not (len(row) > 5 and _clean(row[5]).casefold() == "validated") for row in policies
+    )
+    eligibility_reviews = sum(result.eligibility == "REVIEW" for result in results)
+    open_reviews = sum(result.status != "READY" for result in results) + pending_policies
+    released_total = sum(result.release or 0 for result in results)
+    release_state = "READY" if open_reviews == 0 else "BLOCKED"
+    try:
+        period_title = datetime.strptime(period, "%Y-%m").strftime("%B %Y").upper()
+    except ValueError:
+        period_title = period.upper()
+
+    # The executive cockpit intentionally follows the stronger hierarchy of
+    # the uploaded management dashboard: three primary cards, secondary status
+    # chips, a complete LOB table, two comparison charts, payout distribution,
+    # and a visible governance footer.
+    management = wb.add_worksheet("MANAGEMENT")
+    management.hide_gridlines(2)
+    management.set_tab_color(COLORS["teal"])
+    management.set_default_row(19.5)
+    management.freeze_panes(10, 1)
+    management.set_zoom(90)
+    management.set_landscape()
+    management.fit_to_pages(1, 2)
+    management.print_area("B1:O62")
+    management.set_column("A:A", 3)
+    management.set_column("B:B", 18)
+    management.set_column("C:D", 12)
+    management.set_column("E:E", 14)
+    management.set_column("F:F", 3)
+    management.set_column("G:G", 18)
+    management.set_column("H:I", 12)
+    management.set_column("J:J", 14)
+    management.set_column("K:K", 3)
+    management.set_column("L:L", 18)
+    management.set_column("M:N", 12)
+    management.set_column("O:O", 14)
+    management.set_column("P:P", 3)
+
+    add = wb.add_format
+    dash_title = add({"font_name": "Aptos Display", "font_size": 20, "bold": True,
+                      "font_color": COLORS["white"], "bg_color": COLORS["navy"],
+                      "valign": "vcenter", "indent": 1})
+    dash_subtitle = add({"font_name": "Aptos", "font_size": 9, "font_color": "#C9D6E2",
+                         "bg_color": COLORS["navy"], "valign": "vcenter", "indent": 1})
+    dash_period = add({"font_name": "Aptos", "font_size": 9, "bold": True,
+                       "font_color": COLORS["teal_light"], "bg_color": COLORS["navy"],
+                       "align": "center", "valign": "vcenter"})
+    dash_status = add({"font_name": "Aptos", "font_size": 9, "bold": True,
+                       "font_color": COLORS["white"], "bg_color": COLORS["red"],
+                       "align": "center", "valign": "vcenter"})
+    card_label_teal = add({"font_name": "Aptos", "font_size": 10, "bold": True,
+                           "font_color": COLORS["white"], "bg_color": COLORS["teal"],
+                           "align": "center", "valign": "vcenter"})
+    card_label_blue = add({"font_name": "Aptos", "font_size": 10, "bold": True,
+                           "font_color": COLORS["white"], "bg_color": "#2F75B5",
+                           "align": "center", "valign": "vcenter"})
+    card_label_navy = add({"font_name": "Aptos", "font_size": 10, "bold": True,
+                           "font_color": COLORS["white"], "bg_color": "#173F5F",
+                           "align": "center", "valign": "vcenter"})
+    card_money = add({"font_name": "Aptos Display", "font_size": 22, "bold": True,
+                      "font_color": COLORS["navy"], "bg_color": COLORS["white"],
+                      "num_format": '#,##0.00 "MAD"', "align": "center", "valign": "vcenter",
+                      "border": 1, "border_color": COLORS["line"]})
+    card_integer = add({"font_name": "Aptos Display", "font_size": 22, "bold": True,
+                        "font_color": COLORS["navy"], "bg_color": COLORS["white"],
+                        "num_format": "#,##0", "align": "center", "valign": "vcenter",
+                        "border": 1, "border_color": COLORS["line"]})
+    small_label = add({"font_name": "Aptos", "font_size": 8, "bold": True,
+                       "font_color": COLORS["muted"], "align": "center", "valign": "vcenter"})
+    chip_green = add({"font_name": "Aptos Display", "font_size": 12, "bold": True,
+                      "font_color": COLORS["white"], "bg_color": COLORS["green"],
+                      "num_format": "0.0%", "align": "center", "valign": "vcenter"})
+    chip_gold = add({"font_name": "Aptos Display", "font_size": 12, "bold": True,
+                     "font_color": COLORS["white"], "bg_color": COLORS["gold"],
+                     "num_format": '#,##0.00 "MAD"', "align": "center", "valign": "vcenter"})
+    chip_red = add({"font_name": "Aptos Display", "font_size": 12, "bold": True,
+                    "font_color": COLORS["white"], "bg_color": COLORS["red"],
+                    "num_format": "#,##0", "align": "center", "valign": "vcenter"})
+    dash_section = add({"font_name": "Aptos", "font_size": 11, "bold": True,
+                        "font_color": COLORS["white"], "bg_color": COLORS["navy"],
+                        "valign": "vcenter", "indent": 1, "bottom": 2,
+                        "bottom_color": COLORS["gold"]})
+    table_header = add({"font_name": "Aptos", "font_size": 8, "bold": True,
+                        "font_color": COLORS["white"], "bg_color": "#173F5F",
+                        "align": "center", "valign": "vcenter", "text_wrap": True})
+    row_name = add({"font_name": "Aptos", "font_size": 10, "bold": True,
+                    "font_color": COLORS["navy"], "bg_color": COLORS["white"],
+                    "bottom": 1, "bottom_color": COLORS["line"]})
+    row_name_alt = add({"font_name": "Aptos", "font_size": 10, "bold": True,
+                        "font_color": COLORS["navy"], "bg_color": COLORS["canvas"],
+                        "bottom": 1, "bottom_color": COLORS["line"]})
+    row_int = add({"font_name": "Aptos", "font_size": 10, "num_format": "#,##0",
+                   "bg_color": COLORS["white"], "align": "center",
+                   "bottom": 1, "bottom_color": COLORS["line"]})
+    row_int_alt = add({"font_name": "Aptos", "font_size": 10, "num_format": "#,##0",
+                       "bg_color": COLORS["canvas"], "align": "center",
+                       "bottom": 1, "bottom_color": COLORS["line"]})
+    row_pct = add({"font_name": "Aptos", "font_size": 10, "num_format": "0.0%",
+                   "bg_color": COLORS["white"], "align": "center",
+                   "bottom": 1, "bottom_color": COLORS["line"]})
+    row_pct_alt = add({"font_name": "Aptos", "font_size": 10, "num_format": "0.0%",
+                       "bg_color": COLORS["canvas"], "align": "center",
+                       "bottom": 1, "bottom_color": COLORS["line"]})
+    row_money = add({"font_name": "Aptos", "font_size": 10, "num_format": '#,##0.00 "MAD"',
+                     "bg_color": COLORS["white"], "align": "right",
+                     "bottom": 1, "bottom_color": COLORS["line"]})
+    row_money_alt = add({"font_name": "Aptos", "font_size": 10, "num_format": '#,##0.00 "MAD"',
+                         "bg_color": COLORS["canvas"], "align": "right",
+                         "bottom": 1, "bottom_color": COLORS["line"]})
+    total_label = add({"font_name": "Aptos", "font_size": 10, "bold": True,
+                       "font_color": COLORS["navy"], "bg_color": "#EAF2F8",
+                       "top": 2, "top_color": COLORS["teal"]})
+    total_int = add({"font_name": "Aptos", "font_size": 10, "bold": True,
+                     "font_color": COLORS["navy"], "bg_color": "#EAF2F8",
+                     "num_format": "#,##0", "align": "center", "top": 2,
+                     "top_color": COLORS["teal"]})
+    total_pct = add({"font_name": "Aptos", "font_size": 10, "bold": True,
+                     "font_color": COLORS["navy"], "bg_color": "#EAF2F8",
+                     "num_format": "0.0%", "align": "center", "top": 2,
+                     "top_color": COLORS["teal"]})
+    total_money = add({"font_name": "Aptos", "font_size": 10, "bold": True,
+                       "font_color": COLORS["navy"], "bg_color": "#EAF2F8",
+                       "num_format": '#,##0.00 "MAD"', "align": "right", "top": 2,
+                       "top_color": COLORS["teal"]})
+    governance_value = add({"font_name": "Aptos Display", "font_size": 19, "bold": True,
+                            "font_color": COLORS["navy"], "bg_color": COLORS["white"],
+                            "align": "center", "valign": "vcenter", "border": 1,
+                            "border_color": COLORS["line"]})
+
+    management.merge_range("B1:O1", f"{period_title}  |  BONUS PAYOUT COCKPIT", dash_title)
+    management.merge_range("B2:I2", "MANAGEMENT VIEW  /  PAYOUT, COVERAGE AND RELEASE CONTROL", dash_subtitle)
+    management.merge_range("J2:L2", f"PERIOD  |  {period}", dash_period)
+    management.merge_range("M2:O2", f"PAYROLL  |  {release_state}", dash_status if release_state == "BLOCKED" else f["good"])
+
+    def dashboard_card(label_range: str, value_range: str, label: str, formula: str,
+                       cached: Any, label_format, value_format) -> None:
+        management.merge_range(label_range, label, label_format)
+        management.merge_range(value_range, "", value_format)
+        management.write_formula(value_range.split(":")[0], formula, value_format, cached)
+
+    dashboard_card("B4:D4", "B5:D7", "SCENARIO PAYOUT", '=SUM(tblBonusCalc[Scenario Payout])',
+                   scenario_total, card_label_teal, card_money)
+    dashboard_card("G4:I4", "G5:I7", "AGENTS WITH PAYOUT", '=COUNTIF(tblBonusCalc[Scenario Payout],">0")',
+                   paid_agents, card_label_blue, card_integer)
+    dashboard_card("L4:N4", "L5:N7", "AVERAGE PAID PAYOUT", '=IFERROR(AVERAGEIF(tblBonusCalc[Scenario Payout],">0"),0)',
+                   average_paid, card_label_navy, card_money)
+    management.merge_range("B8:D8", "INPUT READINESS", small_label)
+    management.merge_range("G8:I8", "HIGHEST SCENARIO PAYOUT", small_label)
+    management.merge_range("L8:N8", "OPEN RELEASE REVIEWS", small_label)
+    management.merge_range("B9:D9", "", chip_green)
+    management.write_formula("B9", '=IFERROR(COUNTIF(tblBonusCalc[Core Input],"READY")/COUNTIF(tblBonusCalc[Agent ID],"<>"),0)', chip_green,
+                             input_ready / total_agents if total_agents else 0)
+    management.merge_range("G9:I9", "", chip_gold)
+    management.write_formula("G9", '=MAX(tblBonusCalc[Scenario Payout])', chip_gold, highest_paid)
+    management.merge_range("L9:N9", "", chip_red)
+    management.write_formula("L9", '=COUNTIFS(tblBonusCalc[Agent ID],"<>",tblBonusCalc[Release Status],"<>READY")+COUNTIF(tblPolicies[Status],"<>Validated")',
+                             chip_red, open_reviews)
+
+    management.merge_range("B11:O11", "LOB DECOMPOSITION  |  SCALE, INPUT COVERAGE AND PAYOUT EXPOSURE", dash_section)
+    lob_headers = ["LOB", "Agents", "Input Ready", "Input Blocked", "Ready Rate", "Paid Agents",
+                   "Scenario Payout", "Share of Total", "Average Paid"]
+    for col, header in enumerate(lob_headers, 1):
+        management.write(12, col, header, table_header)
+    population_cache: list[dict[str, Any]] = []
+    for position, population in enumerate(populations):
+        row = 13 + position
+        excel_row = row + 1
+        population_results = [result for record, result in result_pairs
+                              if _clean(_bonus_value(record, "Population")) == population]
+        pop_agents = len(population_results)
+        pop_ready = sum(result.core_ready for result in population_results)
+        pop_paid = sum((result.scenario or 0) > 0 for result in population_results)
+        pop_payout = sum(result.scenario or 0 for result in population_results)
+        population_cache.append({"agents": pop_agents, "ready": pop_ready, "paid": pop_paid, "payout": pop_payout})
+        alternating = position % 2 == 1
+        name_fmt = row_name_alt if alternating else row_name
+        int_fmt = row_int_alt if alternating else row_int
+        pct_fmt = row_pct_alt if alternating else row_pct
+        money_fmt = row_money_alt if alternating else row_money
+        management.write(row, 1, population, name_fmt)
+        management.write_formula(row, 2, f'=COUNTIF(tblBonusCalc[Population],$B{excel_row})', int_fmt, pop_agents)
+        management.write_formula(row, 3, f'=COUNTIFS(tblBonusCalc[Population],$B{excel_row},tblBonusCalc[Core Input],"READY")', int_fmt, pop_ready)
+        management.write_formula(row, 4, f'=C{excel_row}-D{excel_row}', int_fmt, pop_agents - pop_ready)
+        management.write_formula(row, 5, f'=IFERROR(D{excel_row}/C{excel_row},0)', pct_fmt, pop_ready / pop_agents if pop_agents else 0)
+        management.write_formula(row, 6, f'=COUNTIFS(tblBonusCalc[Population],$B{excel_row},tblBonusCalc[Scenario Payout],">0")', int_fmt, pop_paid)
+        management.write_formula(row, 7, f'=SUMIF(tblBonusCalc[Population],$B{excel_row},tblBonusCalc[Scenario Payout])', money_fmt, pop_payout)
+        management.write_formula(row, 8, f'=IFERROR(H{excel_row}/SUM($H$14:$H${13+len(populations)}),0)', pct_fmt,
+                                 pop_payout / scenario_total if scenario_total else 0)
+        management.write_formula(row, 9, f'=IFERROR(H{excel_row}/G{excel_row},0)', money_fmt,
+                                 pop_payout / pop_paid if pop_paid else 0)
+    total_row = 13 + len(populations)
+    total_excel = total_row + 1
+    management.write(total_row, 1, "TOTAL / ALL", total_label)
+    management.write_formula(total_row, 2, '=COUNTIF(tblBonusCalc[Agent ID],"<>")', total_int, total_agents)
+    management.write_formula(total_row, 3, '=COUNTIF(tblBonusCalc[Core Input],"READY")', total_int, input_ready)
+    management.write_formula(total_row, 4, f'=C{total_excel}-D{total_excel}', total_int, total_agents - input_ready)
+    management.write_formula(total_row, 5, f'=IFERROR(D{total_excel}/C{total_excel},0)', total_pct,
+                             input_ready / total_agents if total_agents else 0)
+    management.write_formula(total_row, 6, '=COUNTIF(tblBonusCalc[Scenario Payout],">0")', total_int, paid_agents)
+    management.write_formula(total_row, 7, '=SUM(tblBonusCalc[Scenario Payout])', total_money, scenario_total)
+    management.write_formula(total_row, 8, '=IFERROR(H{0}/H{0},0)'.format(total_excel), total_pct, 1 if scenario_total else 0)
+    management.write_formula(total_row, 9, f'=IFERROR(H{total_excel}/G{total_excel},0)', total_money, average_paid)
+
+    management.merge_range("B22:O22", "MANAGEMENT VISUALS  |  PAYOUT MIX AND INPUT COVERAGE", dash_section)
+    payout_chart = wb.add_chart({"type": "column"})
+    payout_chart.add_series({"name": "Scenario payout", "categories": ["MANAGEMENT", 13, 1, 12 + len(populations), 1],
+                             "values": ["MANAGEMENT", 13, 7, 12 + len(populations), 7],
+                             "fill": {"color": COLORS["teal"]}, "border": {"none": True}})
+    payout_chart.set_title({"name": "Scenario payout by LOB"})
+    payout_chart.set_legend({"none": True})
+    payout_chart.set_y_axis({"num_format": '#,##0 "MAD"', "major_gridlines": {"visible": False}})
+    payout_chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    payout_chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    management.insert_chart("B24", payout_chart, {"x_scale": 1.20, "y_scale": 1.08})
+
+    readiness_chart = wb.add_chart({"type": "column", "subtype": "stacked"})
+    readiness_chart.add_series({"name": "Input ready", "categories": ["MANAGEMENT", 13, 1, 12 + len(populations), 1],
+                                "values": ["MANAGEMENT", 13, 3, 12 + len(populations), 3],
+                                "fill": {"color": COLORS["green"]}, "border": {"none": True}})
+    readiness_chart.add_series({"name": "Input blocked", "categories": ["MANAGEMENT", 13, 1, 12 + len(populations), 1],
+                                "values": ["MANAGEMENT", 13, 4, 12 + len(populations), 4],
+                                "fill": {"color": COLORS["red"]}, "border": {"none": True}})
+    readiness_chart.set_title({"name": "Input-ready versus blocked agents"})
+    readiness_chart.set_legend({"position": "bottom"})
+    readiness_chart.set_y_axis({"major_unit": 10, "major_gridlines": {"visible": False}})
+    readiness_chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    readiness_chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    management.insert_chart("I24", readiness_chart, {"x_scale": 1.20, "y_scale": 1.08})
+
+    management.merge_range("B40:O40", "PAYOUT DISTRIBUTION  |  AGENT CONCENTRATION", dash_section)
+    distribution = [
+        ("Input not ready", sum(not r.core_ready for r in results), '=COUNTIF(tblBonusCalc[Core Input],"BLOCKED")'),
+        ("Ready / no payout", sum(r.core_ready and not (r.scenario or 0) for r in results), '=COUNTIFS(tblBonusCalc[Core Input],"READY",tblBonusCalc[Scenario Payout],0)'),
+        ("1 - 499 MAD", sum(r.core_ready and 0 < (r.scenario or 0) < 500 for r in results), '=COUNTIFS(tblBonusCalc[Core Input],"READY",tblBonusCalc[Scenario Payout],">0",tblBonusCalc[Scenario Payout],"<500")'),
+        ("500 - 999 MAD", sum(r.core_ready and 500 <= (r.scenario or 0) < 1000 for r in results), '=COUNTIFS(tblBonusCalc[Core Input],"READY",tblBonusCalc[Scenario Payout],">=500",tblBonusCalc[Scenario Payout],"<1000")'),
+        ("1,000 - 1,499 MAD", sum(r.core_ready and 1000 <= (r.scenario or 0) < 1500 for r in results), '=COUNTIFS(tblBonusCalc[Core Input],"READY",tblBonusCalc[Scenario Payout],">=1000",tblBonusCalc[Scenario Payout],"<1500")'),
+        ("1,500+ MAD", sum(r.core_ready and (r.scenario or 0) >= 1500 for r in results), '=COUNTIFS(tblBonusCalc[Core Input],"READY",tblBonusCalc[Scenario Payout],">=1500")'),
+    ]
+    for col, header in enumerate(("Payout band", "Agents", "Share"), 1):
+        management.write(41, col, header, table_header)
+    for position, (label, count, formula) in enumerate(distribution):
+        row, excel_row = 42 + position, 43 + position
+        alternating = position % 2 == 1
+        management.write(row, 1, label, row_name_alt if alternating else row_name)
+        management.write_formula(row, 2, formula, row_int_alt if alternating else row_int, count)
+        management.write_formula(row, 3, f'=IFERROR(C{excel_row}/SUM($C$43:$C$48),0)',
+                                 row_pct_alt if alternating else row_pct, count / total_agents if total_agents else 0)
+    distribution_chart = wb.add_chart({"type": "doughnut"})
+    distribution_chart.add_series({"name": "Agent payout distribution",
+                                   "categories": ["MANAGEMENT", 42, 1, 47, 1],
+                                   "values": ["MANAGEMENT", 42, 2, 47, 2],
+                                   "points": [
+                                       {"fill": {"color": COLORS["red"]}},
+                                       {"fill": {"color": COLORS["muted"]}},
+                                       {"fill": {"color": COLORS["amber"]}},
+                                       {"fill": {"color": COLORS["gold"]}},
+                                       {"fill": {"color": "#2F75B5"}},
+                                       {"fill": {"color": COLORS["teal"]}},
+                                   ]})
+    distribution_chart.set_title({"name": "Agent payout distribution"})
+    distribution_chart.set_hole_size(58)
+    distribution_chart.set_legend({"position": "right"})
+    distribution_chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    management.insert_chart("F42", distribution_chart, {"x_scale": 1.20, "y_scale": 1.02})
+
+    management.merge_range("B54:O54", "RELEASE GOVERNANCE  |  WHAT MANAGEMENT MUST APPROVE", dash_section)
+    management.merge_range("B56:D56", "POLICIES VALIDATED", card_label_teal)
+    management.merge_range("B57:D59", "", governance_value)
+    management.write_formula("B57", '=COUNTIF(tblPolicies[Status],"Validated")&" / "&ROWS(tblPolicies[Status])', governance_value,
+                             f"{len(policies)-pending_policies} / {len(policies)}")
+    management.merge_range("G56:I56", "INPUT READY", card_label_blue)
+    management.merge_range("G57:I59", "", governance_value)
+    management.write_formula("G57", '=COUNTIF(tblBonusCalc[Core Input],"READY")&" / "&COUNTIF(tblBonusCalc[Agent ID],"<>")', governance_value,
+                             f"{input_ready} / {total_agents}")
+    management.merge_range("L56:N56", "PAYROLL RELEASE", card_label_navy)
+    management.merge_range("L57:N59", "", governance_value)
+    management.write_formula("L57", '=IF(AND(SETUP!$B$9="READY",COUNTIFS(tblBonusCalc[Agent ID],"<>",tblBonusCalc[Release Status],"<>READY")=0),"READY","BLOCKED")',
+                             governance_value, release_state)
+    management.merge_range("B61:O62",
+                           f"Management scenario: {scenario_total:,.2f} MAD. Gross-before-malus exposure: {gross_total:,.2f} MAD; modeled malus impact: {malus_deduction:,.2f} MAD. Released payout is {released_total:,.2f} MAD until all policy, input, data-status and eligibility checks pass. Review POLICY_APPROVAL and CONTROLS before payroll use.",
                            f["note"])
 
     controls = book.sheet("CONTROLS", "Release controls",
