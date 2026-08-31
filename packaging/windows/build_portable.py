@@ -204,6 +204,11 @@ def build(args) -> Path:
         (stage / folder).mkdir(exist_ok=True)
     shutil.copy2(ROOT / "input" / "README.md", stage / "input" / "README.md")
     shutil.copy2(ROOT / "shared_reports" / "README.txt", stage / "shared_reports" / "README.txt")
+    for workbook_name in ("Bonus_Management_Proposal.xlsx", "PCS_Management_3H_Template.xlsx"):
+        workbook = ROOT / "shared_reports" / workbook_name
+        if not workbook.exists():
+            raise FileNotFoundError(f"Official shared workbook is missing: {workbook}")
+        shutil.copy2(workbook, stage / "shared_reports" / workbook_name)
     validate_stage(stage, expected_native)
 
     dist = ROOT / "dist"

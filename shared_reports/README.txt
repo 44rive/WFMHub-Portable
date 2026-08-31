@@ -2,7 +2,12 @@ WFMHUB SHARED REPORTS
 =====================
 
 This folder is for workbooks you create and share manually with management.
-Generated XLSX/PDF files are intentionally not committed to the public repo.
+The two official starting workbooks are included in the public release:
+
+  Bonus_Management_Proposal.xlsx
+  PCS_Management_3H_Template.xlsx
+
+Other generated XLSX/PDF copies remain local and are not committed.
 
 Included builders
 -----------------

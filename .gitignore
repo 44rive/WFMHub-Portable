@@ -11,6 +11,8 @@ shared_reports/*.xlsx
 shared_reports/*.xlsm
 shared_reports/*.pdf
 !shared_reports/README.txt
+!shared_reports/Bonus_Management_Proposal.xlsx
+!shared_reports/PCS_Management_3H_Template.xlsx
 input/*.xlsx
 input/*.csv
 !input/README.md
