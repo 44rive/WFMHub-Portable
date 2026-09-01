@@ -174,6 +174,19 @@ a manifest. Custom SQL is restricted to one SELECT/WITH statement on a
 query-only connection. Custom Python receives the same read-only query context,
 but is trusted executable local code and is not an operating-system sandbox.
 
+## External analysis snapshot boundary
+
+`analysis-snapshot` opens the hub database read-only and copies only four fixed
+aggregate contracts—source health, APDE service by LOB, staffing gaps, and PCS
+team/day—into a separate SQLite bundle. It never runs ingestion or model
+refresh, accepts no SQL text, and excludes raw extracts and local source paths.
+
+The bundle manifest records date bounds, dataset grains and row counts, the
+latest available refresh/model run, applied and current rule/mapping hashes,
+and the snapshot SHA-256. The published files are marked read-only. An external
+AI or BI service receives only this bundle; it must never mount or connect to
+the operational WFMHub database.
+
 ## Terminal dashboard
 
 The daily menu reads a small read-only dashboard snapshot from existing marts.

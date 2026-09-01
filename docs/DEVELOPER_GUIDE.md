@@ -123,3 +123,9 @@ are inbound-only and higher grains divide summed counters.
 `custom_jobs.py` exposes a query-only context, but Python jobs remain trusted
 code rather than a sandbox. The portable build copies underscore templates from
 `custom`; runnable user copies must never be added to a public release.
+
+`ai_snapshot.py` is a narrower external-analysis seam. Its dataset SQL and
+schemas are fixed in code, its source connection must be read-only, and its
+atomic output contains only curated aggregates plus provenance. Do not add raw
+tables, arbitrary SQL, operational-database attachment, or a write-back path to
+this module.

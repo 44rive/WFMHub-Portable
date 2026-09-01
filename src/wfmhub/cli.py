@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import __version__
 from .actions import import_actions
+from .ai_snapshot import create_analysis_snapshot
 from .config import ConfigError, ensure_user_config, load_config, write_source_root
 from .database import HubLockedError, backup_database, connect, migrate, write_session
 from .doctor import run_doctor
@@ -255,6 +256,41 @@ def export_clean(
     print(f"Clean export : {result.path}")
     print(f"Rows         : {result.rows:,}")
     print(f"Manifest     : {result.manifest}")
+    return 0
+
+
+def export_analysis_snapshot(
+    home: Path,
+    start: date,
+    end: date,
+    output: Path | None = None,
+) -> int:
+    """Export fixed governed aggregates without rebuilding or mutating the hub."""
+    config = load_config(home)
+    _logging(config)
+    bar = ProgressBar()
+    bar.update(0.02, "Opening hub database read-only")
+    conn = None
+    try:
+        conn = connect(config, read_only=True)
+        result = create_analysis_snapshot(
+            conn, config, start, end, output,
+            _phase_progress(bar, 0.05, 0.99),
+        )
+        bar.finish("Analysis snapshot ready")
+    except Exception as exc:
+        bar.fail(str(exc))
+        raise
+    finally:
+        if conn is not None:
+            conn.close()
+    print(f"Analysis bundle : {result.bundle_dir}")
+    print(f"SQLite snapshot : {result.database}")
+    print(f"Manifest        : {result.manifest}")
+    print("Datasets        : " + ", ".join(
+        f"{key}={rows:,}" for key, rows in result.row_counts.items()
+    ))
+    print("Hub database    : opened read-only; no models were rebuilt")
     return 0
 
 
@@ -636,6 +672,13 @@ def parser() -> argparse.ArgumentParser:
     export_p.add_argument("--end", type=_date)
     export_p.add_argument("--format", choices=("csv", "xlsx"), default="csv")
     export_p.add_argument("--output", type=Path)
+    snapshot_p = commands.add_parser(
+        "analysis-snapshot",
+        help="Create a read-only governed SQLite bundle for external analysis",
+    )
+    snapshot_p.add_argument("--start", type=_date, required=True)
+    snapshot_p.add_argument("--end", type=_date, required=True)
+    snapshot_p.add_argument("--output", type=Path, help="New output folder; must not already exist")
     custom_p = commands.add_parser("custom", help="Run a trusted Python or read-only SQL job")
     custom_p.add_argument("kind", choices=("python", "sql"))
     custom_p.add_argument("job", type=Path)
@@ -673,6 +716,8 @@ def main(argv: list[str] | None = None) -> int:
             return import_decisions(home, args.workbook)
         if args.command == "export":
             return export_clean(home, args.dataset, args.start, args.end, args.format, args.output)
+        if args.command == "analysis-snapshot":
+            return export_analysis_snapshot(home, args.start, args.end, args.output)
         if args.command == "custom":
             return run_custom(home, args.kind, args.job, args.start, args.end)
         if args.command == "status":

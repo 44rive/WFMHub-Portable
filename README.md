@@ -76,6 +76,8 @@ The SQLite hub remains the source of truth.
 - Forecast and staffing requirements from Verint only.
 - Agent call performance and PCS from FTE-scoped Call-by-Call extracts.
 - Clean CSV/XLSX exports and trusted custom portable-Python/read-only SQL jobs.
+- Read-only AI analysis snapshots containing fixed service, staffing, PCS and
+  source-health aggregates; no raw extracts or arbitrary SQL.
 - Progress and fixed source-health/latest-date status displays.
 
 ## Windows quick start
@@ -92,7 +94,8 @@ The SQLite hub remains the source of truth.
 Use the blank `templates\FTE Count.xlsx` roster if needed. Read the
 [beginner guide](docs/BEGINNER_GUIDE.md), [rulebook guide](docs/RULEBOOK_GUIDE.md),
 [clean-data contract](docs/CLEAN_DATA_CONTRACT.md), [PCS logic](docs/PCS_LOGIC.md),
-and [PivotTable guide](docs/PIVOT_GUIDE.md).
+[PivotTable guide](docs/PIVOT_GUIDE.md), and
+[AI snapshot guide](docs/AI_ANALYSIS_SNAPSHOT.md).
 
 ## Output folders
 
@@ -104,6 +107,7 @@ and [PivotTable guide](docs/PIVOT_GUIDE.md).
 | `output\absence` | Final Activities-only absenteeism ledger and audit evidence |
 | `output\reference` | Generated KPI catalog |
 | `output\data_exports` | Explicit clean CSV/XLSX exports |
+| `output\ai_analysis` | Read-only governed SQLite bundles for external analysis |
 | `output\custom` | Custom Lab results |
 | `shared_reports` | Bonus and three-hour PCS workbooks shared manually with management |
 

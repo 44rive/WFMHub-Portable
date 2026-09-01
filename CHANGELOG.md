@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added an atomic, read-only SQLite analysis bundle with bounded source-health,
+  APDE service, staffing-gap and PCS team/day datasets, plus rule/mapping/run
+  provenance and a SHA-256 manifest. The export uses only fixed queries and
+  never rebuilds or modifies the operational hub.
+
 ## 0.8.0 — 2026-08-31
 
 - Added a management-ready Bonus proposal rebuilt from the audited source with

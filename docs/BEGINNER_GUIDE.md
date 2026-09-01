@@ -317,6 +317,21 @@ gets a `.manifest.txt` beside it containing dates, row count and generation
 time plus the active rule version/hash. Outputs go to `output\data_exports`;
 extracts are not changed.
 
+## Create a safe AI analysis bundle
+
+After refreshing WFMHub, open Command Prompt in the WFMHub folder and run:
+
+```text
+WFMHub.cmd analysis-snapshot --start 2026-08-01 --end 2026-08-31
+```
+
+WFMHub creates a new folder under `output\ai_analysis`. Send or upload only
+that folder to the separate analysis service. The bundle contains governed
+source-health, service, staffing and PCS aggregates—not raw extracts or the
+operational database. It cannot update WFMHub and it does not rebuild the
+models. See [AI_ANALYSIS_SNAPSHOT.md](AI_ANALYSIS_SNAPSHOT.md) for the complete
+contract and safety boundary.
+
 ## Edit calculations and make PivotTables
 
 Choose **5. Validate rules and build KPI catalog** to check the central
