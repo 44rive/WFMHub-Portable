@@ -1,0 +1,510 @@
+# WFMHub effective-dated metric catalog
+#
+# Copy-on-first-run target: config/metric_catalog.toml
+# Metric arithmetic lives here. Domain evidence rules remain in wfm_rules.toml.
+# Higher grains always follow the declared aggregation; never average ratios.
+
+[catalog]
+version = "2026.09.1"
+description = "Canonical WFM metric methods, scopes, targets and aggregation contracts."
+
+[[metrics]]
+id = "service_level"
+method = "adjusted_20"
+label = "Adjusted service level 20s"
+description = "Answered within target divided by offered less short abandons."
+domain = "service"
+source_model = "service_interval"
+grain = "queue interval"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "answered_within_target"
+denominator = "offered - short_abandoned"
+sample = "offered - short_abandoned"
+target = 0.80
+direction = "higher_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["source_system", "lob", "language"]
+
+[[metrics]]
+id = "service_level_gross"
+method = "gross_20"
+label = "Gross service level 20s"
+description = "Answered within target divided by every offered contact."
+domain = "service"
+source_model = "service_interval"
+grain = "queue interval"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "answered_within_target"
+denominator = "offered"
+sample = "offered"
+target = 0.80
+direction = "higher_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["source_system", "lob", "language"]
+
+[[metrics]]
+id = "service_availability"
+method = "answered_over_offered"
+label = "Service availability"
+description = "Answered contacts divided by offered contacts; never agent availability."
+domain = "service"
+source_model = "service_interval"
+grain = "queue interval"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "answered"
+denominator = "offered"
+sample = "offered"
+direction = "higher_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["source_system", "lob", "language"]
+
+[[metrics]]
+id = "abandon_rate"
+method = "abandoned_over_offered"
+label = "Abandon rate"
+description = "Abandoned contacts divided by offered contacts."
+domain = "service"
+source_model = "service_interval"
+grain = "queue interval"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "abandoned"
+denominator = "offered"
+sample = "offered"
+direction = "lower_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["source_system", "lob", "language"]
+
+[[metrics]]
+id = "aht_seconds"
+method = "handled_seconds_over_answered"
+label = "Average handle time"
+description = "Handled workload seconds divided by answered contacts."
+domain = "service"
+source_model = "service_interval"
+grain = "queue interval"
+unit = "seconds"
+aggregation = "ratio_of_sums"
+numerator = "handled_seconds"
+denominator = "answered"
+sample = "answered"
+direction = "neutral"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["source_system", "lob", "language"]
+
+[[metrics]]
+id = "forecast_attainment"
+method = "actual_over_forecast"
+label = "Forecast attainment"
+description = "Actual offered volume divided by forecast volume at mapped hour scope."
+domain = "forecast"
+source_model = "forecast_comparison_hour"
+grain = "comparison scope/hour"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "actual_volume"
+denominator = "forecast_volume"
+sample = "forecast_volume"
+target = 1.0
+direction = "neutral"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob"]
+
+[[metrics]]
+id = "forecast_absolute_error_rate"
+method = "absolute_error_over_forecast"
+label = "Forecast absolute error rate"
+description = "Absolute volume error divided by forecast volume."
+domain = "forecast"
+source_model = "forecast_comparison_hour"
+grain = "comparison scope/hour"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "abs(actual_volume - forecast_volume)"
+denominator = "forecast_volume"
+sample = "forecast_volume"
+target = 0.10
+direction = "lower_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob"]
+
+[[metrics]]
+id = "pcs_average"
+method = "valid_q1_response_weighted"
+label = "PCS average"
+description = "Sum of valid inbound Q1 scores divided by valid Q1 responses."
+domain = "pcs"
+source_model = "pcs_agent_day"
+grain = "agent day"
+unit = "score"
+aggregation = "ratio_of_sums"
+numerator = "pcs_score_sum"
+denominator = "pcs_score_count"
+sample = "pcs_score_count"
+direction = "higher_is_better"
+minimum_sample = 5
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["team_leader", "lob", "language"]
+
+[[metrics]]
+id = "pcs_participation"
+method = "raw_q1_over_status"
+label = "PCS participation"
+description = "Inbound raw-Q1 nonblank legs divided by inbound PCSStatus-qualified legs."
+domain = "pcs"
+source_model = "pcs_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "pcs_participation_responses"
+denominator = "pcs_status_calls"
+sample = "pcs_status_calls"
+direction = "higher_is_better"
+minimum_sample = 5
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["team_leader", "lob", "language"]
+
+[[metrics]]
+id = "pcs_positive_rate"
+method = "positive_over_valid_q1"
+label = "PCS positive response rate"
+description = "Valid Q1 responses above the configured negative boundary divided by valid Q1 responses."
+domain = "pcs"
+source_model = "pcs_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "top_box_responses"
+denominator = "survey_responses"
+sample = "survey_responses"
+direction = "higher_is_better"
+minimum_sample = 5
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["team_leader", "lob", "language"]
+
+[[metrics]]
+id = "pcs_negative_rate"
+method = "negative_over_valid_q1"
+label = "PCS negative response rate"
+description = "Valid Q1 responses at or below the configured boundary divided by valid Q1 responses."
+domain = "pcs"
+source_model = "pcs_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "low_score_responses"
+denominator = "survey_responses"
+sample = "survey_responses"
+direction = "lower_is_better"
+minimum_sample = 5
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["team_leader", "lob", "language"]
+
+[[metrics]]
+id = "agent_aht_seconds"
+method = "handle_seconds_over_calls"
+label = "Agent average handle time"
+description = "Agent handle seconds divided by handled call legs."
+domain = "pcs"
+source_model = "pcs_agent_day"
+grain = "agent day"
+unit = "seconds"
+aggregation = "ratio_of_sums"
+numerator = "handle_seconds"
+denominator = "handled_calls"
+sample = "handled_calls"
+direction = "neutral"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["team_leader", "lob", "language"]
+
+[[metrics]]
+id = "agent_talk_seconds"
+method = "talk_seconds_over_calls"
+label = "Agent average talk time"
+description = "Agent talk seconds divided by handled call legs."
+domain = "pcs"
+source_model = "pcs_agent_day"
+grain = "agent day"
+unit = "seconds"
+aggregation = "ratio_of_sums"
+numerator = "talk_seconds"
+denominator = "handled_calls"
+sample = "handled_calls"
+direction = "neutral"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["team_leader", "lob", "language"]
+
+[[metrics]]
+id = "agent_hold_seconds"
+method = "hold_seconds_over_calls"
+label = "Agent average hold time"
+description = "Agent hold seconds divided by handled call legs."
+domain = "pcs"
+source_model = "pcs_agent_day"
+grain = "agent day"
+unit = "seconds"
+aggregation = "ratio_of_sums"
+numerator = "hold_seconds"
+denominator = "handled_calls"
+sample = "handled_calls"
+direction = "neutral"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["team_leader", "lob", "language"]
+
+[[metrics]]
+id = "agent_wrap_seconds"
+method = "wrap_seconds_over_calls"
+label = "Agent average wrap time"
+description = "Agent wrap seconds divided by handled call legs."
+domain = "pcs"
+source_model = "pcs_agent_day"
+grain = "agent day"
+unit = "seconds"
+aggregation = "ratio_of_sums"
+numerator = "wrap_seconds"
+denominator = "handled_calls"
+sample = "handled_calls"
+direction = "neutral"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["team_leader", "lob", "language"]
+
+[[metrics]]
+id = "pcs_q1_average"
+method = "valid_q1_response_weighted"
+label = "Diagnostic Q1 average"
+description = "Valid Q1 score sum divided by valid Q1 responses."
+domain = "pcs"
+source_model = "pcs_agent_day"
+grain = "agent day"
+unit = "score"
+aggregation = "ratio_of_sums"
+numerator = "q1_score_sum"
+denominator = "q1_response_count"
+sample = "q1_response_count"
+direction = "neutral"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["team_leader", "lob", "language"]
+
+[[metrics]]
+id = "pcs_q2_average"
+method = "valid_q2_response_weighted"
+label = "Diagnostic Q2 average"
+description = "Valid Q2 score sum divided by valid Q2 responses; never the headline PCS."
+domain = "pcs"
+source_model = "pcs_agent_day"
+grain = "agent day"
+unit = "score"
+aggregation = "ratio_of_sums"
+numerator = "q2_score_sum"
+denominator = "q2_response_count"
+sample = "q2_response_count"
+direction = "neutral"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["team_leader", "lob", "language"]
+
+[[metrics]]
+id = "observed_absence_rate"
+method = "observed_gap_over_planned"
+label = "Observed absence rate"
+description = "Observed LILO/status absence minutes divided by planned net minutes."
+domain = "attendance"
+source_model = "observed_absence_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "absence_minutes"
+denominator = "planned_net_minutes"
+sample = "planned_net_minutes"
+direction = "lower_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob", "language"]
+
+[[metrics]]
+id = "observed_vacation_rate"
+method = "observed_vacation_over_planned"
+label = "Observed vacation rate"
+description = "Observed classified vacation minutes divided by planned net minutes."
+domain = "attendance"
+source_model = "observed_absence_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "vacation_minutes"
+denominator = "planned_net_minutes"
+sample = "planned_net_minutes"
+direction = "neutral"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob", "language"]
+
+[[metrics]]
+id = "observed_shrinkage_rate"
+method = "observed_shrinkage_over_planned"
+label = "Observed shrinkage rate"
+description = "Observed classified shrinkage minutes divided by planned net minutes."
+domain = "attendance"
+source_model = "observed_absence_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "shrinkage_minutes"
+denominator = "planned_net_minutes"
+sample = "planned_net_minutes"
+direction = "lower_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob", "language"]
+
+[[metrics]]
+id = "final_absence_rate"
+method = "verint_final_over_planned"
+label = "Final absenteeism rate"
+description = "Corrected Verint absence minutes divided by planned net minutes."
+domain = "absence"
+source_model = "final_absence_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "final_absence_minutes"
+denominator = "planned_net_minutes"
+sample = "planned_net_minutes"
+direction = "lower_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob", "language"]
+
+[[metrics]]
+id = "final_vacation_rate"
+method = "verint_vacation_over_planned"
+label = "Final vacation rate"
+description = "Corrected Verint vacation minutes divided by planned net minutes."
+domain = "absence"
+source_model = "final_absence_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "final_vacation_minutes"
+denominator = "planned_net_minutes"
+sample = "planned_net_minutes"
+direction = "neutral"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob", "language"]
+
+[[metrics]]
+id = "final_shrinkage_rate"
+method = "verint_shrinkage_over_planned"
+label = "Final shrinkage rate"
+description = "Corrected Verint shrinkage minutes divided by planned net minutes."
+domain = "absence"
+source_model = "final_absence_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "final_shrinkage_minutes"
+denominator = "planned_net_minutes"
+sample = "planned_net_minutes"
+direction = "lower_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob", "language"]
+
+[[metrics]]
+id = "staffing_gap_fte"
+method = "mean_observed_gap"
+label = "Mean staffing gap FTE"
+description = "Mean positive staffing shortfall across evidence-complete 15-minute intervals."
+domain = "staffing"
+source_model = "staffing_interval"
+grain = "LOB/language/15 minutes"
+unit = "fte"
+aggregation = "ratio_of_sums"
+numerator = "staffing_gap_fte"
+denominator = "evidence_intervals"
+sample = "evidence_intervals"
+target = 0
+direction = "lower_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob", "language"]
+
+[[metrics]]
+id = "no_show_rate"
+method = "confirmed_no_show_over_scheduled"
+label = "Confirmed no-show rate"
+description = "Completed, evidence-qualified no-shows divided by scheduled working shifts."
+domain = "attendance"
+source_model = "attendance_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "no_show_count"
+denominator = "scheduled_working_count"
+sample = "scheduled_working_count"
+target = 0
+direction = "lower_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob", "language"]
+
+[[metrics]]
+id = "late_rate"
+method = "late_over_scheduled"
+label = "Late-arrival rate"
+description = "Completed or provisional late arrivals divided by scheduled working shifts."
+domain = "attendance"
+source_model = "attendance_agent_day"
+grain = "agent day"
+unit = "percent"
+aggregation = "ratio_of_sums"
+numerator = "late_count"
+denominator = "scheduled_working_count"
+sample = "scheduled_working_count"
+target = 0
+direction = "lower_is_better"
+minimum_sample = 1
+effective_from = 2026-01-01
+priority = 0
+finding_dimensions = ["lob", "language"]

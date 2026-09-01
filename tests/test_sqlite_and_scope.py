@@ -24,8 +24,11 @@ def make_home(folder: str) -> tuple[Path, Path]:
     home = root / "hub"
     source = root / "source"
     (home / "config").mkdir(parents=True)
-    shutil.copy2(REPO / "config" / "default.toml", home / "config" / "default.toml")
-    shutil.copy2(REPO / "config" / "default_rules.toml", home / "config" / "default_rules.toml")
+    for name in (
+        "default.toml", "default_rules.toml", "default_metrics.toml",
+        "default_analytics.toml", "default_reports.toml",
+    ):
+        shutil.copy2(REPO / "config" / name, home / "config" / name)
     shutil.copytree(REPO / "sql", home / "sql")
     config_file = ensure_user_config(home)
     write_source_root(config_file, source)
@@ -108,7 +111,10 @@ class SQLiteLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "hub"
             (home / "config").mkdir(parents=True)
-            for name in ("default.toml", "default_rules.toml", "default_queue_mapping.csv"):
+            for name in (
+                "default.toml", "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml", "default_queue_mapping.csv",
+            ):
                 shutil.copy2(REPO / "config" / name, home / "config" / name)
             migrations = home / "sql" / "migrations"
             migrations.mkdir(parents=True)
@@ -159,7 +165,10 @@ class SQLiteLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "hub"
             (home / "config").mkdir(parents=True)
-            for name in ("default.toml", "default_rules.toml", "default_queue_mapping.csv"):
+            for name in (
+                "default.toml", "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml", "default_queue_mapping.csv",
+            ):
                 shutil.copy2(REPO / "config" / name, home / "config" / name)
             migrations = home / "sql" / "migrations"
             migrations.mkdir(parents=True)
@@ -201,8 +210,11 @@ class SQLiteLifecycleTests(unittest.TestCase):
             root = Path(folder)
             home = root / "hub"
             (home / "config").mkdir(parents=True)
-            shutil.copy2(REPO / "config" / "default.toml", home / "config" / "default.toml")
-            shutil.copy2(REPO / "config" / "default_rules.toml", home / "config" / "default_rules.toml")
+            for name in (
+                "default.toml", "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml",
+            ):
+                shutil.copy2(REPO / "config" / name, home / "config" / name)
             migrations = home / "sql" / "migrations"
             migrations.mkdir(parents=True)
             shutil.copy2(REPO / "sql" / "migrations" / "001_initial.sql", migrations / "001_initial.sql")
@@ -303,7 +315,11 @@ class SQLiteLifecycleTests(unittest.TestCase):
             (home / "config").mkdir(parents=True)
             default = (REPO / "config" / "default.toml").read_text(encoding="utf-8")
             (home / "config" / "default.toml").write_text(default, encoding="utf-8")
-            shutil.copy2(REPO / "config" / "default_rules.toml", home / "config" / "default_rules.toml")
+            for name in (
+                "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml",
+            ):
+                shutil.copy2(REPO / "config" / name, home / "config" / name)
             (home / "config" / "wfmhub.toml").write_text(
                 default.replace('database = "database/wfm.sqlite3"', 'database = "database/wfm.duckdb"'),
                 encoding="utf-8",

@@ -1,4 +1,4 @@
-"""Validated, versioned business rules and safe KPI formula evaluation."""
+"""Validated domain evidence rules and safe metric-expression evaluation."""
 
 from __future__ import annotations
 
@@ -19,24 +19,6 @@ class RulebookError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class FormulaRule:
-    key: str
-    label: str
-    formula: str
-    unit: str
-    grain: str
-    description: str
-
-
-@dataclass(frozen=True)
-class ServiceProfile:
-    key: str
-    label: str
-    formula: str
-    description: str
-
-
-@dataclass(frozen=True)
 class ActivityRule:
     name: str
     category: str
@@ -48,15 +30,6 @@ class ActivityRule:
     vacation: bool
     unpaid: bool
     shrinkage: bool
-
-
-@dataclass(frozen=True)
-class QueueScope:
-    name: str
-    sources: tuple[str, ...]
-    lob_contains: tuple[str, ...]
-    languages: tuple[str, ...]
-    sl_profile: str
 
 
 @dataclass(frozen=True)
@@ -74,12 +47,7 @@ class Rulebook:
     cap_event_to_schedule: bool
     unmapped_activity_is_error: bool
     target_seconds: int
-    service_target_percent: float
-    default_sl_profile: str
-    service_profiles: dict[str, ServiceProfile]
-    formulas: dict[str, FormulaRule]
     activity_rules: tuple[ActivityRule, ...]
-    queue_scopes: tuple[QueueScope, ...]
     pcs_scored_questions: tuple[int, ...]
     pcs_comment_questions: tuple[int, ...]
     pcs_survey_mode: str
@@ -109,21 +77,6 @@ class Rulebook:
                 if rule.match == "exact_or_suffix" and (suffix == pattern or suffix.endswith(" " + pattern)):
                     return rule
         return None
-
-    def service_profile_for(self, source: str | None, lob: str | None, language: str | None) -> ServiceProfile:
-        source_text = str(source or "").upper()
-        lob_text = str(lob or "").upper()
-        language_text = str(language or "").upper()
-        for scope in self.queue_scopes:
-            if scope.sources and source_text not in scope.sources:
-                continue
-            if scope.lob_contains and not any(token in lob_text for token in scope.lob_contains):
-                continue
-            if scope.languages and language_text not in scope.languages:
-                continue
-            return self.service_profiles[scope.sl_profile]
-        return self.service_profiles[self.default_sl_profile]
-
 
 _ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
 _ALLOWED_UNARYOPS = (ast.UAdd, ast.USub)
@@ -250,6 +203,21 @@ def evaluate_formula(expression: str, values: Mapping[str, Any]) -> float | None
     return result if result is None or math.isfinite(result) else None
 
 
+def formula_names(expression: str, label: str = "formula") -> frozenset[str]:
+    """Return component names referenced by a validated safe expression."""
+    tree = _validate_expression(expression, label)
+    function_names = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    return frozenset(
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and node.id not in function_names
+    )
+
+
 def ensure_rulebook(home: Path) -> Path:
     config_dir = home / "config"
     default = config_dir / "default_rules.toml"
@@ -280,15 +248,11 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
     absence = _required_table(raw, "absence")
     service = _required_table(raw, "service")
     pcs = _required_table(raw, "pcs")
-    profiles_raw = _required_table(service, "profiles")
-    formulas_raw = _required_table(raw, "formulas")
     try:
         effective_from = date.fromisoformat(str(meta["effective_from"]))
         version = str(meta["version"]).strip()
         standard_day_hours = float(absence["standard_day_hours"])
         target_seconds = int(service["target_seconds"])
-        service_target_percent = float(service.get("target_percent", 0.80))
-        default_profile = str(service["default_sl_profile"])
     except (KeyError, TypeError, ValueError) as exc:
         raise RulebookError(f"Rulebook metadata contains an invalid or missing value: {exc}") from exc
     if not version:
@@ -300,46 +264,6 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
             raise RulebookError(f"absence.{key} must be between 0 and 120")
     if not 1 <= target_seconds <= 600:
         raise RulebookError("service.target_seconds must be between 1 and 600")
-    if not 0 < service_target_percent <= 1:
-        raise RulebookError("service.target_percent must be greater than 0 and at most 1")
-
-    profiles: dict[str, ServiceProfile] = {}
-    for key, item in profiles_raw.items():
-        if not isinstance(item, dict):
-            raise RulebookError(f"[service.profiles.{key}] must be a table")
-        expression = str(item.get("formula", "")).strip()
-        _validate_expression(expression, f"service.profiles.{key}.formula")
-        profiles[key] = ServiceProfile(
-            key=key, label=str(item.get("label", key)), formula=expression,
-            description=str(item.get("description", "")),
-        )
-    if default_profile not in profiles:
-        raise RulebookError(f"service.default_sl_profile references missing profile {default_profile!r}")
-    missing_profiles = sorted({"gross_20", "adjusted_20"} - profiles.keys())
-    if missing_profiles:
-        raise RulebookError(f"Missing required service profiles: {', '.join(missing_profiles)}")
-
-    formulas: dict[str, FormulaRule] = {}
-    for key, item in formulas_raw.items():
-        if not isinstance(item, dict):
-            raise RulebookError(f"[formulas.{key}] must be a table")
-        expression = str(item.get("formula", "")).strip()
-        _validate_expression(expression, f"formulas.{key}.formula")
-        formulas[key] = FormulaRule(
-            key=key, label=str(item.get("label", key)), formula=expression,
-            unit=str(item.get("unit", "number")), grain=str(item.get("grain", "")),
-            description=str(item.get("description", "")),
-        )
-    required_formulas = {
-        "service_availability", "abandon_rate", "aht_seconds", "forecast_deviation",
-        "absence_rate", "shrinkage_rate", "vacation_rate",
-        "pcs_average", "pcs_response_rate", "pcs_top_box_rate",
-        "pcs_low_score_rate", "agent_aht_seconds",
-    }
-    missing_formulas = sorted(required_formulas - formulas.keys())
-    if missing_formulas:
-        raise RulebookError(f"Missing required formulas: {', '.join(missing_formulas)}")
-
     activity_rules: list[ActivityRule] = []
     seen_categories: set[str] = set()
     valid_matches = {"exact", "contains", "exact_or_suffix"}
@@ -369,21 +293,6 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
     missing_categories = sorted(required_categories - seen_categories)
     if missing_categories:
         raise RulebookError(f"Missing engine-required activity categories: {', '.join(missing_categories)}")
-
-    queue_scopes: list[QueueScope] = []
-    for index, item in enumerate(raw.get("queue_scopes", []), 1):
-        if not isinstance(item, dict):
-            raise RulebookError(f"queue_scopes item {index} must be a table")
-        profile = str(item.get("sl_profile", default_profile))
-        if profile not in profiles:
-            raise RulebookError(f"Queue scope {item.get('name', index)!r} references missing profile {profile!r}")
-        queue_scopes.append(QueueScope(
-            name=str(item.get("name", f"scope_{index}")),
-            sources=tuple(str(value).upper() for value in item.get("sources", [])),
-            lob_contains=tuple(str(value).upper() for value in item.get("lob_contains", [])),
-            languages=tuple(str(value).upper() for value in item.get("languages", [])),
-            sl_profile=profile,
-        ))
 
     scored_questions = tuple(int(value) for value in pcs.get("scored_questions", []))
     comment_questions = tuple(int(value) for value in pcs.get("comment_questions", []))
@@ -425,10 +334,7 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
         spell_gap_days=int(absence.get("spell_gap_days", 1)),
         cap_event_to_schedule=bool(absence.get("cap_event_to_schedule", True)),
         unmapped_activity_is_error=bool(absence.get("unmapped_activity_is_error", True)),
-        target_seconds=target_seconds, service_target_percent=service_target_percent,
-        default_sl_profile=default_profile,
-        service_profiles=profiles, formulas=formulas, activity_rules=tuple(activity_rules),
-        queue_scopes=tuple(queue_scopes),
+        target_seconds=target_seconds, activity_rules=tuple(activity_rules),
         pcs_scored_questions=scored_questions, pcs_comment_questions=comment_questions,
         pcs_survey_mode=str(pcs.get("survey_mode", "2")),
         pcs_primary_score_question=pcs_primary_question,
@@ -443,24 +349,9 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
 
 
 def validate_rulebook(rulebook: Rulebook) -> list[str]:
-    """Exercise every formula with a representative numeric context."""
-    sample = {
-        "answered_within_target": 75, "offered": 100, "short_abandoned": 5,
-        "answered": 90, "abandoned": 10, "handled_seconds": 27_000,
-        "forecast_volume": 95, "absence_hours": 7, "planned_net_hours": 8.75,
-        "shrinkage_hours": 1.5, "vacation_hours": 0,
-        "pcs_score_sum": 45, "pcs_score_count": 10, "survey_responses": 10,
-        "pcs_enabled_calls": 100, "top_box_responses": 7, "low_score_responses": 1,
-        "pcs_participation_responses": 14, "pcs_status_calls": 100,
-        "handle_seconds": 30_000, "handled_calls": 100,
-    }
-    for profile in rulebook.service_profiles.values():
-        evaluate_formula(profile.formula, sample)
-    for formula in rulebook.formulas.values():
-        evaluate_formula(formula.formula, sample)
+    """Return a concise validation record for non-metric domain rules."""
     return [
         f"Rulebook {rulebook.version} is valid.",
         f"SHA-256: {rulebook.sha256}",
-        f"{len(rulebook.activity_rules)} activity rules; {len(rulebook.formulas)} KPI formulas; "
-        f"{len(rulebook.service_profiles)} SL profiles.",
+        f"{len(rulebook.activity_rules)} activity rules; KPI arithmetic is in metric_catalog.toml.",
     ]

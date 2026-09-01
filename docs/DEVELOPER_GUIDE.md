@@ -27,10 +27,11 @@ and the preserved v0.1 database are not modified.
    business rule.
 9. Update architecture and beginner documentation.
 
-Business KPI equations and activity classifications belong in
-`config/default_rules.toml` and the validated `rules.py` engine. Do not add a
-second hidden formula in SQL or an Excel sheet. Every new result must carry the
-rule version/hash when applicable.
+Business KPI methods belong only in `config/default_metrics.toml` and are
+evaluated by `metrics.py` from additive components registered in `semantic.py`.
+Activity/evidence classification belongs in `config/default_rules.toml`. Do
+not add a second hidden ratio in model SQL or Excel. Every result must carry the
+catalog and rule hashes when applicable.
 
 Forecast fields must remain forecast-only. Do not join forecast into employee
 attendance, absence, correction, or payroll models.
@@ -50,7 +51,7 @@ attendance, absence, correction, or payroll models.
 ## Windows portable build
 
 ```bash
-python3 packaging/windows/build_portable.py --version 0.8.0 --python-version 3.13.7
+python3 packaging/windows/build_portable.py --version 0.9.0 --python-version 3.13.7
 ```
 
 The builder always deletes and recreates stage and wheelhouse. It:
@@ -124,8 +125,7 @@ are inbound-only and higher grains divide summed counters.
 code rather than a sandbox. The portable build copies underscore templates from
 `custom`; runnable user copies must never be added to a public release.
 
-`ai_snapshot.py` is a narrower external-analysis seam. Its dataset SQL and
-schemas are fixed in code, its source connection must be read-only, and its
-atomic output contains only curated aggregates plus provenance. Do not add raw
-tables, arbitrary SQL, operational-database attachment, or a write-back path to
-this module.
+`analytics.py` is deterministic and must remain evidence-backed. Add a finding
+type only when it can name the governed metric/dataset, scope, period, method,
+and evidence filter. Do not add a model/API client or external database upload
+path to the runtime. The Copilot file under `prompts` is a manual handoff only.

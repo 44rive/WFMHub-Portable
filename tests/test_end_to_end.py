@@ -175,8 +175,11 @@ class EndToEndTests(unittest.TestCase):
             home = Path(folder) / "hub"
             source = Path(folder) / "source"
             (home / "config").mkdir(parents=True)
-            shutil.copy2(REPO / "config" / "default.toml", home / "config" / "default.toml")
-            shutil.copy2(REPO / "config" / "default_rules.toml", home / "config" / "default_rules.toml")
+            for name in (
+                "default.toml", "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml",
+            ):
+                shutil.copy2(REPO / "config" / name, home / "config" / name)
             shutil.copytree(REPO / "sql", home / "sql")
             make_fte(source / "FTE/FTE Count.xlsx")
             make_start_end_schedule(source / "Verint/Schedules & Activities/StartEndTimes.txt")
@@ -217,7 +220,7 @@ class EndToEndTests(unittest.TestCase):
                     conn, config, "test", date(2026, 8, 1), date(2026, 8, 2),
                     progress=lambda current, total, label: model_progress.append((current, total, label)),
                 )
-                self.assertEqual(model_progress[-1], (20, 20, "Models ready"))
+                self.assertEqual(model_progress[-1], (22, 22, "Models ready"))
                 self.assertEqual(
                     dict(conn.execute(
                         "SELECT source_variant, count(*) FROM meta.source_file WHERE source_family='schedule' AND active=true GROUP BY source_variant"
@@ -249,6 +252,24 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(model.absence_rows, 4)
                 self.assertGreater(model.absence_event_rows, 0)
                 self.assertEqual(model.service_rows, 2)
+                self.assertGreater(model.metric_rows, 0)
+                self.assertGreater(model.finding_rows, 0)
+                self.assertEqual(
+                    conn.execute("SELECT count(*) FROM meta.metric_application WHERE run_id='test'").fetchone()[0],
+                    1,
+                )
+                service_metric = conn.execute(
+                    """SELECT sum(numerator), sum(denominator)
+                       FROM mart.metric_value WHERE metric_id='service_level'"""
+                ).fetchone()
+                service_components = conn.execute(
+                    """SELECT sum(answered_within_target), sum(offered-short_abandoned)
+                       FROM mart.service_interval"""
+                ).fetchone()
+                self.assertAlmostEqual(
+                    service_metric[0] / service_metric[1],
+                    service_components[0] / service_components[1],
+                )
                 final_absence_max = conn.execute(
                     "SELECT max(final_absence_rate) FROM mart.verint_final_absence_agent_day"
                 ).fetchone()[0]
@@ -289,6 +310,12 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(pcs[1], 5.0)
                 self.assertEqual(pcs[2], 300)
                 self.assertEqual(pcs[3:], (4, 4, 3, 1, 1, 0, 1))
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT metric_value FROM mart.metric_value WHERE metric_id='pcs_average'"
+                    ).fetchone()[0],
+                    pcs[1],
+                )
 
                 # A refresh during an active shift is provisional: the future
                 # part of that shift must not become an early-leave or no-show
@@ -351,6 +378,25 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(clean_calls.rows, 6)
                 self.assertTrue(clean_calls.manifest.exists())
                 self.assertEqual(export_progress[-1], (6, 0, "Exported calls: 6 rows"))
+                governed_service = export_dataset(
+                    conn, config, "daily_service_lob", model.start, model.end,
+                )
+                governed_pcs = export_dataset(
+                    conn, config, "pcs_team_day", model.start, model.end,
+                )
+                governed_absence = export_dataset(
+                    conn, config, "final_absence_lob_month", model.start, model.end,
+                )
+                self.assertIn(
+                    "service_level",
+                    governed_service.path.read_text(encoding="utf-8-sig").splitlines()[0],
+                )
+                self.assertEqual(governed_pcs.rows, 1)
+                self.assertGreater(governed_absence.rows, 0)
+                self.assertIn(
+                    "Metric catalog SHA-256:",
+                    governed_service.manifest.read_text(encoding="utf-8"),
+                )
 
                 filtered_report = build_report(
                     conn, config, date(2026, 8, 1), date(2026, 8, 1),
@@ -392,7 +438,11 @@ class EndToEndTests(unittest.TestCase):
             self.assertTrue(report.exists())
             workbook = load_workbook(report, read_only=True, data_only=True)
             try:
-                self.assertEqual(workbook.sheetnames, ["DAILY_SUMMARY", "ATTENDANCE_CALLS", "STAFFING_GAPS", "SERVICE_LEVEL", "FORMULA_LOGIC", "DATA_QUALITY", "SOURCE_HEALTH", "SCHEDULE_SOURCES"])
+                self.assertEqual(workbook.sheetnames, [
+                    "DAILY_SUMMARY", "FINDINGS", "ATTENDANCE_CALLS", "STAFFING_GAPS",
+                    "SERVICE_LEVEL", "DATA_QUALITY", "SOURCE_HEALTH", "SCHEDULE_SOURCES",
+                    "DOMAIN_RULES", "METHODS", "PROVENANCE",
+                ])
             finally:
                 workbook.close()
             corrections_book = load_workbook(corrections_report, read_only=True, data_only=True)
@@ -406,7 +456,7 @@ class EndToEndTests(unittest.TestCase):
             try:
                 self.assertIn("AGENT_MONTH", pcs_book.sheetnames)
                 self.assertIn("RESPONSE_DETAIL", pcs_book.sheetnames)
-                self.assertIn("PCS_LOGIC", pcs_book.sheetnames)
+                self.assertIn("METHODS", pcs_book.sheetnames)
             finally:
                 pcs_book.close()
             absence_book = load_workbook(absence_report, read_only=False, data_only=True)
@@ -414,6 +464,7 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("AGENT_DAY", absence_book.sheetnames)
                 self.assertIn("ACTIVITY_EVENTS", absence_book.sheetnames)
                 self.assertIn("ACTIVITY_RULES", absence_book.sheetnames)
+                self.assertIn("METHODS", absence_book.sheetnames)
                 self.assertIn("tblAgentDay", absence_book["AGENT_DAY"].tables)
             finally:
                 absence_book.close()

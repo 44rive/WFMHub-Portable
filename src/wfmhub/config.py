@@ -52,6 +52,9 @@ class Config:
     input: Path
     custom: Path
     business_rules: Path
+    metric_catalog: Path
+    analytics_rules: Path
+    report_catalog: Path
     queue_mapping: Path
     sources: dict[str, str]
     period_start: date | None
@@ -137,6 +140,9 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         input=_portable_path(home, str(paths.get("input", "input"))),
         custom=_portable_path(home, str(paths.get("custom", "custom"))),
         business_rules=_portable_path(home, str(paths.get("business_rules", "config/wfm_rules.toml"))),
+        metric_catalog=_portable_path(home, str(paths.get("metric_catalog", "config/metric_catalog.toml"))),
+        analytics_rules=_portable_path(home, str(paths.get("analytics_rules", "config/analytics_rules.toml"))),
+        report_catalog=_portable_path(home, str(paths.get("report_catalog", "config/report_catalog.toml"))),
         queue_mapping=_portable_path(home, str(paths.get("queue_mapping", "config/queue_mapping.csv"))),
         sources={
             "call_folder": "Storm/Call by Call",
@@ -209,12 +215,21 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
             "This corporate-compatible release uses SQLite. Change paths.database "
             "in config\\wfmhub.toml to database/wfm.sqlite3; the old DuckDB file is preserved."
         )
+    from .analytics import ensure_analytics_rules, load_analytics_rules
     from .mapping import ensure_queue_mapping, load_queue_mapping
+    from .metrics import ensure_metric_catalog, load_metric_catalog
+    from .report_specs import ensure_report_catalog, load_report_catalog
     from .rules import ensure_rulebook, load_rulebook, validate_rulebook
 
     ensure_rulebook(home)
+    ensure_metric_catalog(home, cfg.metric_catalog)
+    ensure_analytics_rules(home, cfg.analytics_rules)
+    ensure_report_catalog(home, cfg.report_catalog)
     ensure_queue_mapping(home, cfg.queue_mapping)
     load_queue_mapping(cfg.queue_mapping)
+    load_metric_catalog(home, cfg.metric_catalog)
+    load_analytics_rules(home, cfg.analytics_rules)
+    load_report_catalog(home, cfg.report_catalog)
     business = load_rulebook(home, cfg.business_rules)
     validate_rulebook(business)
     cfg = replace(cfg, pcs=PCSSettings(

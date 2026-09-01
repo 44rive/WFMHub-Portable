@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from wfmhub.metrics import MetricCatalogError, load_metric_catalog
 from wfmhub.rules import RulebookError, evaluate_formula, load_rulebook, validate_rulebook
 
 
@@ -26,13 +27,20 @@ class RulebookTests(unittest.TestCase):
         with self.assertRaises(RulebookError):
             evaluate_formula("__import__('os').system('whoami')", {})
 
-    def test_invalid_user_formula_is_rejected_before_refresh(self):
+    def test_invalid_metric_formula_is_rejected_before_refresh(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "bad.toml"
-            text = (REPO / "config" / "default_rules.toml").read_text(encoding="utf-8")
-            path.write_text(text.replace("answered / nullif(offered, 0)", "answered // offered", 1), encoding="utf-8")
-            with self.assertRaisesRegex(RulebookError, "forbidden formula element"):
-                load_rulebook(REPO, path)
+            text = (REPO / "config" / "default_metrics.toml").read_text(encoding="utf-8")
+            path.write_text(
+                text.replace(
+                    'numerator = "answered_within_target"',
+                    'numerator = "answered_within_target // offered"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(MetricCatalogError, "forbidden formula element"):
+                load_metric_catalog(REPO, path)
 
 
 if __name__ == "__main__":

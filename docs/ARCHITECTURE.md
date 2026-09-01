@@ -5,7 +5,9 @@
 Every feature follows the same layers:
 
 ```text
-untouched source -> parser/scope gate -> raw table -> rule engine -> mart -> Excel
+untouched source -> parser/scope gate -> raw/core -> additive marts
+                 -> effective metric catalog -> semantic values
+                 -> deterministic findings + report datasets -> Excel
 ```
 
 A new forecast KPI, queue feed, or attendance rule adds an adapter, a numbered
@@ -25,10 +27,17 @@ WFMHub/
 ├── templates/FTE Count.xlsx    blank standard roster workbook
 ├── config/default.toml         shipped defaults
 ├── config/wfmhub.toml          user configuration
-├── config/default_rules.toml   shipped calculation defaults
-├── config/wfm_rules.toml       editable/versioned business rulebook
+├── config/default_rules.toml   shipped evidence/domain defaults
+├── config/wfm_rules.toml       editable/versioned evidence rulebook
+├── config/default_metrics.toml shipped metric methods
+├── config/metric_catalog.toml  editable formulas/targets/effective dates
+├── config/default_analytics.toml shipped finding thresholds
+├── config/analytics_rules.toml editable deterministic-analysis settings
+├── config/default_reports.toml shipped workbook contracts
+├── config/report_catalog.toml  editable/validated report contract
 ├── config/default_queue_mapping.csv shipped mapping defaults
 ├── config/queue_mapping.csv    editable queue/file/scope mapping
+├── prompts/                    optional manual Copilot handoff prompt
 ├── database/wfm.sqlite3        durable SQLite hub
 ├── input/                      persistent human inputs
 ├── custom/                     Python and read-only SQL job templates
@@ -60,6 +69,8 @@ details remain in one module.
 | `meta.quality_issue` | One issue detected by the current model run |
 | `meta.rule_application` | Exact rule version/hash applied by one model run |
 | `meta.mapping_application` | Exact queue-mapping hash applied by one model run |
+| `meta.metric_application` | Exact metric-catalog version/hash applied by one model run |
+| `meta.analytics_application` | Exact analytics version/hash applied by one model run |
 | `raw.fte_agent` | One FTE Agent-sheet row |
 | `raw.schedule_shift` | One admitted Verint schedule row |
 | `raw.schedule_event` | One parsed event interval belonging to an admitted shift |
@@ -87,6 +98,8 @@ details remain in one module.
 | `mart.absence_event` | One observed, schedule-clipped LILO/status gap with final label |
 | `mart.absence_agent_day` | One payroll absence/vacation/shrinkage result per Agent ID/day |
 | `mart.service_interval` | One rule-versioned APBE/APFR/APDE service interval |
+| `mart.metric_value` | One configured KPI observation per source entity/method |
+| `mart.analysis_finding` | One ranked deterministic finding with evidence filter |
 | `mart.source_health` | One configured source family |
 
 ## Report packs
@@ -101,8 +114,8 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `absence` | `output/absence` | Activities-only final absence ledger, evidence and activity rules |
 
 The Yesterday Corrections workbook is the only workbook accepted for
-correction-action import. Legacy Intraday and Executive Scorecard builders
-remain internal compatibility code but are not registered or offered.
+correction-action import. Legacy Intraday and Executive Scorecard keys remain
+reserved and disabled; their old builders are not shipped.
 Raw call-by-call rows stay in SQLite; PCS reports receive summaries, trends and
 bounded responses. Full clean details are explicit CSV/XLSX exports.
 
@@ -174,18 +187,18 @@ a manifest. Custom SQL is restricted to one SELECT/WITH statement on a
 query-only connection. Custom Python receives the same read-only query context,
 but is trusted executable local code and is not an operating-system sandbox.
 
-## External analysis snapshot boundary
+## Deterministic analysis boundary
 
-`analysis-snapshot` opens the hub database read-only and copies only four fixed
-aggregate contracts—source health, APDE service by LOB, staffing gaps, and PCS
-team/day—into a separate SQLite bundle. It never runs ingestion or model
-refresh, accepts no SQL text, and excludes raw extracts and local source paths.
+`analytics.py` reads only governed semantic metrics and source-health state. It
+uses configured targets, sample minimums, threshold deltas, and period changes
+to write ranked findings. A finding stores its metric/method, scope, selected
+period, values, evidence dataset/filter, and catalog/analytics hashes. There is
+no model server, paid API, GPU, prompt execution, or database upload path.
 
-The bundle manifest records date bounds, dataset grains and row counts, the
-latest available refresh/model run, applied and current rule/mapping hashes,
-and the snapshot SHA-256. The published files are marked read-only. An external
-AI or BI service receives only this bundle; it must never mount or connect to
-the operational WFMHub database.
+`prompts/COPILOT_WFM_ANALYST.md` is a static manual aid. A user may attach a
+chosen finished workbook to an approved Copilot account. The runtime never
+connects Copilot to SQLite or raw extracts, and Copilot is never a calculation
+authority.
 
 ## Terminal dashboard
 
@@ -223,18 +236,26 @@ Final Verint activities are deliberately not subtracted from late, early or
 status gaps. Doing so would hide the original problem immediately after it was
 corrected, destroying the audit trail.
 
-## Central rulebook and calculation audit
+## Configuration boundaries and calculation audit
 
-`config/wfm_rules.toml` is the canonical business definition. It contains
-named, validated KPI expressions, activity categories/flags, standard-day
-hours, service-level profiles and queue scopes. The expression engine supports
-only numeric variables, arithmetic, and a small function allowlist. It never
-uses Python `eval`.
+`config/wfm_rules.toml` classifies evidence and activities. It owns standard-day
+and tolerance policy plus PCS source parsing, but contains no KPI arithmetic.
+`config/metric_catalog.toml` is the sole KPI source: formula components,
+denominator, sample, aggregation, target, direction, scope, priority, and
+effective dates. `analytics_rules.toml` owns finding sensitivity;
+`report_catalog.toml` validates the presentation contract; `queue_mapping.csv`
+owns naming.
 
-Every absence and service row stores the active `rule_version` and
-`rule_sha256`. `meta.rule_application` records the same identity by refresh run.
-The KPI catalog workbook is generated from this rulebook; documentation and
-calculation code therefore cannot silently drift.
+The safe expression engine supports numeric components, arithmetic, comparisons,
+and a small function allowlist. It never uses Python `eval`. Scoped methods are
+selected by date and highest priority; equal-priority ambiguity aborts refresh.
+Higher-grain ratios always sum stored numerators and denominators before
+division.
+
+Every semantic value stores catalog, rule and method identity.
+`meta.metric_application`, `meta.rule_application`, and workbook `PROVENANCE`
+record the same hashes by run. The governance workbook is generated directly
+from all four catalogs, preventing documentation/calculation drift.
 
 Clipping, overlap unions, overnight handling, deduplication, identity, and
 spell grouping remain tested engine primitives rather than editable formulas.

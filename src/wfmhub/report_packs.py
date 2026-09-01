@@ -98,10 +98,6 @@ def build_report_pack(
         from .governed_workbooks import build_daily_operations_workbook
 
         return build_daily_operations_workbook(conn, config, start, end, output)
-    if key == "intraday":
-        from .intraday_reports import build_intraday_report
-
-        return build_intraday_report(conn, config, start, end, output)
     if key == "quality_pcs":
         from .governed_workbooks import build_exact_pcs_workbook
 
@@ -114,8 +110,4 @@ def build_report_pack(
         from .governed_workbooks import build_corrections_workbook
 
         return build_corrections_workbook(conn, config, start, end, output)
-    if key == "scorecard":
-        from .sota_reports import build_scorecard_report
-
-        return build_scorecard_report(conn, config, start, end, output)
     raise ValueError(f"Report pack {key!r} has no registered builder")

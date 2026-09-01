@@ -11,6 +11,9 @@ backups = "backups"
 input = "input"
 custom = "custom"
 business_rules = "config/wfm_rules.toml"
+metric_catalog = "config/metric_catalog.toml"
+analytics_rules = "config/analytics_rules.toml"
+report_catalog = "config/report_catalog.toml"
 queue_mapping = "config/queue_mapping.csv"
 
 [sources]
@@ -33,8 +36,8 @@ start = ""
 end = ""
 
 [rules]
-# Legacy status-compatibility settings. Attendance/absence tolerance and all
-# active KPI formulas live in config/wfm_rules.toml.
+# Runtime status settings. Attendance evidence rules live in wfm_rules.toml;
+# all KPI arithmetic, targets and scopes live in metric_catalog.toml.
 tolerance_minutes = 5
 break_minutes = 30
 lunch_minutes = 45
@@ -50,22 +53,6 @@ intraday = true
 forecast = true
 pcs = true
 absence = true
-
-[pcs]
-# Legacy compatibility copy. The authoritative PCS calculation
-# settings from config/wfm_rules.toml so every business rule is cataloged.
-scored_questions = [1, 2]
-comment_questions = [3]
-survey_mode = "2"
-primary_score_question = 1
-participation_question = 1
-participation_status = "1"
-allowed_scores = [1, 2, 3, 4, 5]
-negative_score_maximum = 3
-minimum_score = 1
-maximum_score = 5
-top_box_minimum = 4
-low_score_maximum = 3
 
 [report]
 max_attendance_rows = 100000

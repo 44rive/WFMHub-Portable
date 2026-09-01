@@ -1,0 +1,56 @@
+# Deterministic WFM finding policies. No model or external service is used.
+
+[analytics]
+version = "2026.09.1"
+description = "Evidence-backed target, trend, sample and source-health findings."
+max_findings = 250
+include_information = true
+
+[defaults.percent]
+warning_delta = 0.03
+critical_delta = 0.10
+trend_delta = 0.03
+
+[defaults.score]
+warning_delta = 0.25
+critical_delta = 0.75
+trend_delta = 0.25
+
+[defaults.seconds]
+warning_delta = 15
+critical_delta = 60
+trend_delta = 20
+
+[defaults.fte]
+warning_delta = 1
+critical_delta = 3
+trend_delta = 1
+
+[defaults.number]
+warning_delta = 1
+critical_delta = 5
+trend_delta = 1
+
+[[metric_thresholds]]
+metric_id = "service_level"
+warning_delta = 0.03
+critical_delta = 0.10
+trend_delta = 0.03
+
+[[metric_thresholds]]
+metric_id = "staffing_gap_fte"
+warning_delta = 1
+critical_delta = 3
+trend_delta = 1
+
+[[metric_thresholds]]
+metric_id = "pcs_average"
+warning_delta = 0.25
+critical_delta = 0.75
+trend_delta = 0.25
+
+[[metric_thresholds]]
+metric_id = "forecast_absolute_error_rate"
+warning_delta = 0.05
+critical_delta = 0.15
+trend_delta = 0.05

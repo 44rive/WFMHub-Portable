@@ -18,8 +18,11 @@ class DashboardTests(unittest.TestCase):
     def make_home(self, folder: str, include_sql: bool = True) -> Path:
         home = Path(folder) / "hub"
         (home / "config").mkdir(parents=True)
-        shutil.copy2(REPO / "config" / "default.toml", home / "config" / "default.toml")
-        shutil.copy2(REPO / "config" / "default_rules.toml", home / "config" / "default_rules.toml")
+        for name in (
+            "default.toml", "default_rules.toml", "default_metrics.toml",
+            "default_analytics.toml", "default_reports.toml",
+        ):
+            shutil.copy2(REPO / "config" / name, home / "config" / name)
         if include_sql:
             shutil.copytree(REPO / "sql", home / "sql")
         ensure_user_config(home)

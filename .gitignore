@@ -1,7 +1,11 @@
 # Local data and generated state
 config/wfmhub.toml
 config/wfm_rules.toml
+config/metric_catalog.toml
+config/analytics_rules.toml
+config/report_catalog.toml
 config/queue_mapping.csv
+config/wfmhub_pre_*.toml
 database/
 backups/
 logs/

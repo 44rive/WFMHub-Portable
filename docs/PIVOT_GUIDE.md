@@ -69,8 +69,9 @@ PCS average      = Sum of Score Sum / Sum of Valid Score Responses
 PCS participation = Sum of Participation Responses / Sum of PCS Status Calls
 ```
 
-Never average the already-calculated agent/day percentages. `PCS_LOGIC`
-documents the exact Q1 eligibility, `<=3`/`>3` counts, and participation rule.
+Never average the already-calculated agent/day percentages. `METHODS` documents
+the active metric recipe; `DOMAIN_RULES` documents exact Q1 eligibility,
+`<=3`/`>3` counts, and participation evidence.
 
 ## Final absenteeism by agent and month
 

@@ -1,0 +1,33 @@
+# Presentation contracts. These choose report composition, never calculate KPIs.
+
+[catalog]
+version = "2026.09.1"
+description = "Focused WFMHub workbook contracts rendered from governed datasets."
+
+[[packs]]
+key = "operations"
+title = "WFM HUB  /  DAILY OPERATIONS"
+purpose = "Daily attendance calls, staffing gaps and service state."
+finding_domains = ["attendance", "staffing", "service", "data_quality"]
+sheets = ["DAILY_SUMMARY", "FINDINGS", "ATTENDANCE_CALLS", "STAFFING_GAPS", "SERVICE_LEVEL", "DATA_QUALITY", "SOURCE_HEALTH", "SCHEDULE_SOURCES", "DOMAIN_RULES", "METHODS", "PROVENANCE"]
+
+[[packs]]
+key = "quality_pcs"
+title = "WFM HUB  /  EXACT AGENT PCS"
+purpose = "Response-weighted Q1 PCS, participation, samples and call performance."
+finding_domains = ["pcs", "data_quality"]
+sheets = ["PCS_SUMMARY", "FINDINGS", "AGENT_DAY", "TEAM_DAY", "AGENT_MONTH", "RESPONSE_DETAIL", "DATA_QUALITY", "SOURCE_HEALTH", "DOMAIN_RULES", "METHODS", "PROVENANCE"]
+
+[[packs]]
+key = "corrections"
+title = "WFM HUB  /  YESTERDAY INCOHERENCE"
+purpose = "Residual observed gaps and full-shift correction evidence."
+finding_domains = ["attendance", "data_quality"]
+sheets = ["DAY_SUMMARY", "FINDINGS", "GAPS", "SHIFT_VIEW", "TIMELINE_DATA", "DATA_QUALITY", "SOURCE_HEALTH", "SCHEDULE_SOURCES", "DOMAIN_RULES", "METHODS", "PROVENANCE"]
+
+[[packs]]
+key = "absence"
+title = "WFM HUB  /  FINAL ABSENTEEISM"
+purpose = "Corrected Verint final absence ledger and governed monthly rates."
+finding_domains = ["absence", "data_quality"]
+sheets = ["FINAL_SUMMARY", "FINDINGS", "AGENT_DAY", "LOB_MONTH", "ACTIVITY_EVENTS", "UNMAPPED_REVIEW", "ACTIVITY_RULES", "DATA_QUALITY", "SOURCE_HEALTH", "SCHEDULE_SOURCES", "DOMAIN_RULES", "METHODS", "PROVENANCE"]

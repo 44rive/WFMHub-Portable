@@ -19,8 +19,11 @@ class QualityIssueTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "hub"
             (home / "config").mkdir(parents=True)
-            shutil.copy2(REPO / "config" / "default.toml", home / "config" / "default.toml")
-            shutil.copy2(REPO / "config" / "default_rules.toml", home / "config" / "default_rules.toml")
+            for name in (
+                "default.toml", "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml",
+            ):
+                shutil.copy2(REPO / "config" / name, home / "config" / name)
             shutil.copy2(REPO / "config" / "default_queue_mapping.csv", home / "config" / "default_queue_mapping.csv")
             shutil.copytree(REPO / "sql", home / "sql")
             ensure_user_config(home)

@@ -10,11 +10,14 @@ from pathlib import Path
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from .analytics import build_findings, load_analytics_rules, validate_analytics_rules
 from .config import Config
 from .database import DatabaseConnection, DatabaseCursor
 from .mapping import QueueMapping, load_queue_mapping
+from .metrics import MetricCatalog, MetricEvaluation, evaluate_metric, load_metric_catalog, validate_metric_catalog
 from .progress import ProgressCallback
-from .rules import Rulebook, evaluate_formula, load_rulebook
+from .rules import Rulebook, load_rulebook
+from .semantic import SOURCE_COMPONENTS, build_metric_values
 from .utils import clip_intervals, interval_minutes, merge_intervals, subtract_intervals
 
 
@@ -37,6 +40,8 @@ class ModelSummary:
     timeline_rows: int = 0
     final_absence_rows: int = 0
     final_absence_event_rows: int = 0
+    metric_rows: int = 0
+    finding_rows: int = 0
 
 
 def _evaluation_time(timezone_name: str, as_of: datetime | None) -> datetime:
@@ -59,6 +64,34 @@ def _evaluation_time(timezone_name: str, as_of: datetime | None) -> datetime:
 def _dicts(cursor: DatabaseCursor) -> list[dict[str, Any]]:
     columns = [item[0] for item in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def _metric_evaluation(
+    catalog: MetricCatalog,
+    metric_id: str,
+    business_date: date,
+    dimensions: dict[str, Any],
+    components: dict[str, Any],
+) -> MetricEvaluation:
+    method = catalog.method_for(metric_id, business_date, dimensions)
+    if method is None:
+        raise ValueError(
+            f"No effective metric method for {metric_id!r} on {business_date} "
+            f"with dimensions {dimensions}"
+        )
+    return evaluate_metric(method, components)
+
+
+def _optional_metric_value(
+    catalog: MetricCatalog,
+    metric_id: str,
+    business_date: date,
+    dimensions: dict[str, Any],
+    components: dict[str, Any],
+) -> float | None:
+    """Keep non-headline compatibility columns blank on an older user catalog."""
+    method = catalog.method_for(metric_id, business_date, dimensions)
+    return evaluate_metric(method, components).value if method is not None else None
 
 
 def resolve_period(
@@ -506,10 +539,6 @@ def _build_attendance(
             result = "Early leave"
         else:
             result = "Present"
-        attendance_pct = None
-        trusted_results = {"No show", "Present", "Late", "Early leave", "Late + early leave"}
-        if shift["assignment_type"] != "Off" and scheduled_minutes and result in trusted_results:
-            attendance_pct = max(0.0, 1 - (no_show + late + early) / scheduled_minutes)
         shift_state = (
             "NOT_STARTED" if shift_not_started else
             "IN_PROGRESS" if shift_in_progress else
@@ -538,7 +567,7 @@ def _build_attendance(
             "first_login": first, "last_logout": last, "source_loaded": source_loaded or status_source_loaded, "lilo_row_present": row_present,
             "seen_in_lilo": agent_id in seen_ids, "raw_late_minutes": raw_late, "raw_early_leave_minutes": raw_early,
             "uncoded_late_minutes": late, "uncoded_early_leave_minutes": early, "no_show_minutes": no_show,
-            "worked_span_minutes": worked_span, "attendance_result": result, "attendance_percent": attendance_pct,
+            "worked_span_minutes": worked_span, "attendance_result": result, "attendance_percent": None,
             "schedule_source": shift["source_file"], "lilo_source": lilo_source,
             "actual_first_seen": actual_first, "actual_last_seen": actual_last,
             "actual_evidence": actual_evidence, "status_covered_minutes": status_covered,
@@ -1130,6 +1159,7 @@ FINAL_ABSENCE_DAY_COLUMNS = [
 def _build_verint_final_absence(
     conn: DatabaseConnection,
     rulebook: Rulebook,
+    metric_catalog: MetricCatalog,
     start: date,
     end: date,
 ) -> tuple[int, int]:
@@ -1256,6 +1286,23 @@ def _build_verint_final_absence(
         unpaid_minutes = min(planned_net_minutes, totals.get("unpaid", 0))
         shrinkage_minutes = min(planned_net_minutes, totals.get("shrinkage", 0))
         unmapped_minutes = min(planned_net_minutes, totals.get("unmapped", 0))
+        dimensions = {
+            "lob": shift["roster_lob"],
+            "language": shift["language"],
+            "team_leader": shift["team_leader"],
+        }
+        final_absence = _metric_evaluation(
+            metric_catalog,
+            "final_absence_rate",
+            shift["schedule_date"],
+            dimensions,
+            {
+                "final_absence_minutes": absence_minutes,
+                "final_vacation_minutes": vacation_minutes,
+                "final_shrinkage_minutes": shrinkage_minutes,
+                "planned_net_minutes": planned_net_minutes,
+            },
+        )
         day_rows.append({
             "agent_day_key": agent_day_key, "business_date": shift["schedule_date"],
             "agent_id": shift["agent_id"],
@@ -1271,7 +1318,7 @@ def _build_verint_final_absence(
             "final_shrinkage_minutes": shrinkage_minutes,
             "final_unmapped_minutes": unmapped_minutes,
             "final_absence_hours": absence_minutes / 60,
-            "final_absence_rate": absence_minutes / planned_net_minutes if planned_net_minutes else None,
+            "final_absence_rate": final_absence.value,
             "final_absence_day": absence_minutes > 0,
             "final_ledger_status": (
                 "UNMAPPED_REVIEW" if unmapped_minutes
@@ -1363,7 +1410,11 @@ INTRADAY_COLUMNS = [
 
 
 def _build_intraday(
-    conn: DatabaseConnection, start: date, end: date, mapping: QueueMapping,
+    conn: DatabaseConnection,
+    start: date,
+    end: date,
+    mapping: QueueMapping,
+    metric_catalog: MetricCatalog,
 ) -> tuple[int, int]:
     conn.execute("DELETE FROM mart.forecast_hour")
     forecast_source = _dicts(conn.execute(
@@ -1420,10 +1471,32 @@ def _build_intraday(
     for row in actual_source:
         mapped = mapping.map_actual(row["source_system"], row["queue"], row["business_partner"], row["lob"])
         offered, answered, abandoned = row["offered"], row["answered"], row["abandoned"]
+        dimensions = {
+            "source_system": row["source_system"],
+            "queue": row["queue"],
+            "business_partner": row["business_partner"],
+            "lob": row["lob"],
+            "language": row["language"],
+        }
+        components = {
+            "offered": offered,
+            "answered": answered,
+            "abandoned": abandoned,
+            "short_abandoned": row["short_calls"],
+            "answered_within_target": row["answered_20s"],
+            "handled_seconds": (
+                float(row["aht_seconds"]) * float(answered)
+                if row["aht_seconds"] is not None and answered is not None else None
+            ),
+        }
         actual_rows.append({
             **row,
-            "service_level_20s": None if not offered else (row["answered_20s"] or 0) / offered,
-            "abandon_rate": None if not offered else (abandoned or 0) / offered,
+            "service_level_20s": _metric_evaluation(
+                metric_catalog, "service_level_gross", row["business_date"], dimensions, components,
+            ).value,
+            "abandon_rate": _metric_evaluation(
+                metric_catalog, "abandon_rate", row["business_date"], dimensions, components,
+            ).value,
             "service_scope": mapped.service_scope, "comparison_scope": mapped.comparison_scope,
             "designation": mapped.designation,
             "mapping_status": mapped.status, "mapping_sha256": mapping.sha256,
@@ -1432,23 +1505,19 @@ def _build_intraday(
     return len(forecast_rows), len(actual_rows)
 
 
-def _build_pcs(conn: DatabaseConnection, config: Config, start: date, end: date) -> int:
+def _build_pcs(
+    conn: DatabaseConnection,
+    config: Config,
+    metric_catalog: MetricCatalog,
+    start: date,
+    end: date,
+) -> int:
     """Aggregate deduplicated, FTE-scoped call legs to one agent/day."""
     conn.execute("DELETE FROM mart.agent_pcs_day")
     if not config.modules.get("pcs", True):
         return 0
     minimum = config.pcs.minimum_score
     maximum = config.pcs.maximum_score
-    scored = sorted(set(config.pcs.scored_questions))
-    valid = {
-        number: f"CASE WHEN question_{number}_score BETWEEN {minimum:g} AND {maximum:g} THEN 1 ELSE 0 END"
-        for number in range(1, 11)
-    }
-    score_count = " + ".join(valid[number] for number in scored)
-    score_sum = " + ".join(
-        f"CASE WHEN question_{number}_score BETWEEN {minimum:g} AND {maximum:g} THEN question_{number}_score ELSE 0 END"
-        for number in scored
-    )
     primary = config.pcs.primary_score_question
     participation = config.pcs.participation_question
     primary_score = f"question_{primary}_score"
@@ -1475,8 +1544,6 @@ def _build_pcs(conn: DatabaseConnection, config: Config, start: date, end: date)
                    CASE WHEN upper(coalesce(c.call_direction,''))='I'
                               AND c.{primary_score} IN ({allowed_scores})
                         THEN c.{primary_score} END AS primary_score,
-                   ({score_count}) AS valid_score_count,
-                   ({score_sum}) AS valid_score_sum,
                    CASE WHEN upper(coalesce(c.call_direction,''))='I'
                               AND question_1_score IN ({allowed_scores}) THEN question_1_score END AS valid_q1,
                    CASE WHEN upper(coalesce(c.call_direction,''))='I'
@@ -1485,10 +1552,6 @@ def _build_pcs(conn: DatabaseConnection, config: Config, start: date, end: date)
             FROM core.clean_call_leg c
             LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
             WHERE c.business_date BETWEEN ? AND ? AND c.agent_id IS NOT NULL
-        ), scored_calls AS (
-            SELECT *,
-                   CASE WHEN valid_score_count>0 THEN 1.0*valid_score_sum/valid_score_count END AS survey_score
-            FROM prepared
         ), aggregated AS (
             SELECT business_date, agent_id,
                    coalesce(max(canonical_name), max(agent_name)) AS agent_name,
@@ -1521,7 +1584,7 @@ def _build_pcs(conn: DatabaseConnection, config: Config, start: date, end: date)
                    sum(CASE WHEN primary_score > {config.pcs.negative_score_maximum:g} THEN 1 ELSE 0 END) AS top_box_responses,
                    sum(CASE WHEN primary_score <= {config.pcs.negative_score_maximum:g} THEN 1 ELSE 0 END) AS low_score_responses,
                    sum(CASE WHEN pcs_eligible=1 THEN has_comment ELSE 0 END) AS comments_count
-            FROM scored_calls
+            FROM prepared
             GROUP BY business_date, agent_id
         )
         INSERT INTO mart.agent_pcs_day (
@@ -1546,25 +1609,24 @@ def _build_pcs(conn: DatabaseConnection, config: Config, start: date, end: date)
                lob, market, language, location, call_legs, handled_calls,
                inbound_calls, outbound_calls, talk_seconds, hold_seconds,
                wrap_seconds, handle_seconds,
-               CASE WHEN handled_calls>0 THEN 1.0*talk_seconds/handled_calls END,
-               CASE WHEN handled_calls>0 THEN 1.0*hold_seconds/handled_calls END,
-               CASE WHEN handled_calls>0 THEN 1.0*wrap_seconds/handled_calls END,
-               CASE WHEN handled_calls>0 THEN 1.0*handle_seconds/handled_calls END,
+               NULL,
+               NULL,
+               NULL,
+               NULL,
                pcs_enabled_calls, survey_responses,
-               CASE WHEN pcs_status_calls>0 THEN 1.0*pcs_participation_responses/pcs_status_calls END,
+               NULL,
                q1_response_count, q1_score_sum,
-               CASE WHEN q1_response_count>0 THEN 1.0*q1_score_sum/q1_response_count END,
+               NULL,
                q2_response_count, q2_score_sum,
-               CASE WHEN q2_response_count>0 THEN 1.0*q2_score_sum/q2_response_count END,
+               NULL,
                pcs_score_count, pcs_score_sum,
-               CASE WHEN pcs_score_count>0 THEN 1.0*pcs_score_sum/pcs_score_count END,
+               NULL,
                top_box_responses, low_score_responses,
-               CASE WHEN survey_responses>0 THEN 1.0*top_box_responses/survey_responses END,
-               CASE WHEN survey_responses>0 THEN 1.0*low_score_responses/survey_responses END,
+               NULL,
+               NULL,
                comments_count, transferred_legs, pcs_status_calls,
                pcs_participation_responses,
-               CASE WHEN pcs_status_calls>0
-                    THEN 1.0*pcs_participation_responses/pcs_status_calls END,
+               NULL,
                pcs_invalid_responses, pcs_status_blank_responses,
                pcs_response_without_status
         FROM aggregated
@@ -1573,6 +1635,79 @@ def _build_pcs(conn: DatabaseConnection, config: Config, start: date, end: date)
         sql,
         [config.pcs.survey_mode, config.pcs.participation_status, start, end],
     )
+    rows = _dicts(conn.execute(
+        """SELECT agent_day_key, business_date, team_leader, lob, language,
+                  talk_seconds, hold_seconds, wrap_seconds, handle_seconds,
+                  handled_calls, q1_score_sum, q1_response_count,
+                  q2_score_sum, q2_response_count, pcs_score_sum, pcs_score_count,
+                  pcs_participation_responses, pcs_status_calls,
+                  top_box_responses, low_score_responses, survey_responses
+           FROM mart.agent_pcs_day"""
+    ))
+    for row in rows:
+        dimensions = {
+            "team_leader": row["team_leader"],
+            "lob": row["lob"],
+            "language": row["language"],
+        }
+        components = {
+            "talk_seconds": row["talk_seconds"],
+            "hold_seconds": row["hold_seconds"],
+            "wrap_seconds": row["wrap_seconds"],
+            "handle_seconds": row["handle_seconds"],
+            "handled_calls": row["handled_calls"],
+            "q1_score_sum": row["q1_score_sum"],
+            "q1_response_count": row["q1_response_count"],
+            "q2_score_sum": row["q2_score_sum"],
+            "q2_response_count": row["q2_response_count"],
+            "pcs_score_sum": row["pcs_score_sum"],
+            "pcs_score_count": row["pcs_score_count"],
+            "pcs_participation_responses": row["pcs_participation_responses"],
+            "pcs_status_calls": row["pcs_status_calls"],
+            "top_box_responses": row["top_box_responses"],
+            "low_score_responses": row["low_score_responses"],
+            "survey_responses": row["survey_responses"],
+        }
+        aht = _metric_evaluation(
+            metric_catalog, "agent_aht_seconds", row["business_date"], dimensions, components,
+        ).value
+        average_talk = _optional_metric_value(
+            metric_catalog, "agent_talk_seconds", row["business_date"], dimensions, components,
+        )
+        average_hold = _optional_metric_value(
+            metric_catalog, "agent_hold_seconds", row["business_date"], dimensions, components,
+        )
+        average_wrap = _optional_metric_value(
+            metric_catalog, "agent_wrap_seconds", row["business_date"], dimensions, components,
+        )
+        q1_average = _optional_metric_value(
+            metric_catalog, "pcs_q1_average", row["business_date"], dimensions, components,
+        )
+        q2_average = _optional_metric_value(
+            metric_catalog, "pcs_q2_average", row["business_date"], dimensions, components,
+        )
+        average = _metric_evaluation(
+            metric_catalog, "pcs_average", row["business_date"], dimensions, components,
+        ).value
+        participation = _metric_evaluation(
+            metric_catalog, "pcs_participation", row["business_date"], dimensions, components,
+        ).value
+        positive = _metric_evaluation(
+            metric_catalog, "pcs_positive_rate", row["business_date"], dimensions, components,
+        ).value
+        negative = _metric_evaluation(
+            metric_catalog, "pcs_negative_rate", row["business_date"], dimensions, components,
+        ).value
+        conn.execute(
+            """UPDATE mart.agent_pcs_day
+               SET average_talk_seconds=?, average_hold_seconds=?, average_wrap_seconds=?,
+                   average_handle_seconds=?, response_rate=?, q1_average=?, q2_average=?, pcs_average=?,
+                   top_box_percent=?, low_score_percent=?, pcs_participation_rate=?
+               WHERE agent_day_key=?""",
+            [average_talk, average_hold, average_wrap, aht, participation,
+             q1_average, q2_average, average, positive, negative, participation,
+             row["agent_day_key"]],
+        )
     return conn.execute("SELECT count(*) FROM mart.agent_pcs_day").fetchone()[0]
 
 
@@ -1619,6 +1754,7 @@ def _build_absence(
     conn: DatabaseConnection,
     config: Config,
     rulebook: Rulebook,
+    metric_catalog: MetricCatalog,
     attendance: list[dict[str, Any]],
     corrections: list[dict[str, Any]],
 ) -> tuple[int, int]:
@@ -1727,9 +1863,16 @@ def _build_absence(
         production = max(0, planned_net - min(planned_net, minutes_for("all")))
         corrected = min(minutes_for("all"), corrected_overlap_minutes)
         unverified = max(0, minutes_for("all") - corrected)
-        values = {
-            "absence_hours": absence / 60.0, "vacation_hours": vacation / 60.0,
-            "shrinkage_hours": shrinkage / 60.0, "planned_net_hours": planned_net / 60.0,
+        dimensions = {
+            "lob": base["lob"],
+            "language": base["language"],
+            "team_leader": base["team_leader"],
+        }
+        components = {
+            "absence_minutes": absence,
+            "vacation_minutes": vacation,
+            "shrinkage_minutes": shrinkage,
+            "planned_net_minutes": planned_net,
         }
         day_rows.append({
             **{key: base[key] for key in (
@@ -1745,9 +1888,15 @@ def _build_absence(
             "early_leave_minutes": interval_minutes(shift_start, shift_end, issue_intervals["Early leave"]) if shift_start and shift_end else 0,
             "no_show_minutes": interval_minutes(shift_start, shift_end, issue_intervals["No show"]) if shift_start and shift_end else 0,
             "unmapped_minutes": unverified,
-            "absence_rate": evaluate_formula(rulebook.formulas["absence_rate"].formula, values),
-            "vacation_rate": evaluate_formula(rulebook.formulas["vacation_rate"].formula, values),
-            "shrinkage_rate": evaluate_formula(rulebook.formulas["shrinkage_rate"].formula, values),
+            "absence_rate": _metric_evaluation(
+                metric_catalog, "observed_absence_rate", base["business_date"], dimensions, components,
+            ).value,
+            "vacation_rate": _metric_evaluation(
+                metric_catalog, "observed_vacation_rate", base["business_date"], dimensions, components,
+            ).value,
+            "shrinkage_rate": _metric_evaluation(
+                metric_catalog, "observed_shrinkage_rate", base["business_date"], dimensions, components,
+            ).value,
             "absence_day": absence > 0, "absence_spell": None, "absence_spells": 0,
             "absence_days": 0.0, "bradford_factor": 0.0,
             "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
@@ -1790,7 +1939,12 @@ SERVICE_COLUMNS = [
 
 
 def _build_service(
-    conn: DatabaseConnection, rulebook: Rulebook, mapping: QueueMapping, start: date, end: date,
+    conn: DatabaseConnection,
+    rulebook: Rulebook,
+    metric_catalog: MetricCatalog,
+    mapping: QueueMapping,
+    start: date,
+    end: date,
 ) -> int:
     conn.execute("DELETE FROM mart.service_interval")
     rows = _dicts(conn.execute(
@@ -1812,22 +1966,40 @@ def _build_service(
         """, [start, end],
     ))
     output: list[dict[str, Any]] = []
-    gross = rulebook.service_profiles["gross_20"]
-    adjusted = rulebook.service_profiles["adjusted_20"]
     for row in rows:
         short_abandoned = row["abandoned_20s"] if row["abandoned_20s"] is not None else row["short_calls"]
         handled_seconds = (
             float(row["aht_seconds"]) * float(row["answered"])
             if row["aht_seconds"] is not None and row["answered"] is not None else None
         )
-        values = {
+        components = {
             "offered": row["offered"], "answered": row["answered"],
             "abandoned": row["abandoned"], "short_abandoned": short_abandoned,
             "answered_within_target": row["answered_20s"], "handled_seconds": handled_seconds,
         }
-        profile = rulebook.service_profile_for(row["source_system"], row["lob"], row["language"])
         mapped = mapping.map_actual(row["source_system"], row["queue"], row["business_partner"], row["lob"])
-        service_level = evaluate_formula(profile.formula, values)
+        dimensions = {
+            "source_system": row["source_system"],
+            "queue": row["queue"],
+            "business_partner": row["business_partner"],
+            "lob": row["lob"],
+            "language": row["language"],
+        }
+        service_level = _metric_evaluation(
+            metric_catalog, "service_level", row["business_date"], dimensions, components,
+        )
+        gross = _metric_evaluation(
+            metric_catalog, "service_level_gross", row["business_date"], dimensions, components,
+        )
+        availability = _metric_evaluation(
+            metric_catalog, "service_availability", row["business_date"], dimensions, components,
+        )
+        abandon = _metric_evaluation(
+            metric_catalog, "abandon_rate", row["business_date"], dimensions, components,
+        )
+        aht = _metric_evaluation(
+            metric_catalog, "aht_seconds", row["business_date"], dimensions, components,
+        )
         output.append({
             **{key: row[key] for key in (
                 "business_date", "interval_start", "hour_start", "source_system", "queue",
@@ -1836,22 +2008,19 @@ def _build_service(
             )},
             "short_abandoned": short_abandoned, "answered_within_target": row["answered_20s"],
             "handled_seconds": handled_seconds,
-            "sl_gross": evaluate_formula(gross.formula, values),
-            "sl_adjusted": evaluate_formula(adjusted.formula, values),
-            "sl_profile": profile.key, "service_level": service_level,
-            "service_availability": evaluate_formula(rulebook.formulas["service_availability"].formula, values),
-            "abandon_rate": evaluate_formula(rulebook.formulas["abandon_rate"].formula, values),
-            "aht_seconds": evaluate_formula(rulebook.formulas["aht_seconds"].formula, values),
+            "sl_gross": gross.value,
+            "sl_adjusted": service_level.value,
+            "sl_profile": service_level.method.method_id,
+            "service_level": service_level.value,
+            "service_availability": availability.value,
+            "abandon_rate": abandon.value,
+            "aht_seconds": aht.value,
             "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
             "service_scope": mapped.service_scope, "comparison_scope": mapped.comparison_scope,
             "designation": mapped.designation,
             "mapping_status": mapped.status, "mapping_sha256": mapping.sha256,
-            "sl_target": rulebook.service_target_percent,
-            "sl_state": (
-                "NO_TRAFFIC" if service_level is None
-                else "ON_TARGET" if service_level >= rulebook.service_target_percent
-                else "BELOW_TARGET"
-            ),
+            "sl_target": service_level.method.target,
+            "sl_state": service_level.state,
         })
     _insert_dicts(conn, "mart.service_interval", SERVICE_COLUMNS, output)
     return len(output)
@@ -2186,7 +2355,7 @@ def refresh_models(
     progress: ProgressCallback | None = None,
     as_of: datetime | None = None,
 ) -> ModelSummary:
-    total_stages = 20
+    total_stages = 22
 
     def stage(completed: int, label: str) -> None:
         if progress is not None:
@@ -2196,6 +2365,10 @@ def refresh_models(
     try:
         stage(0, "Validating business rules")
         rulebook = load_rulebook(config.home, config.business_rules)
+        metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
+        validate_metric_catalog(metric_catalog, SOURCE_COMPONENTS)
+        analytics_rules = load_analytics_rules(config.home, config.analytics_rules)
+        validate_analytics_rules(analytics_rules, metric_catalog)
         mapping = load_queue_mapping(config.queue_mapping)
         evaluation_as_of = _evaluation_time(config.timezone, as_of)
         stage(1, "Selecting reporting period")
@@ -2232,21 +2405,33 @@ def refresh_models(
         conn.execute("DELETE FROM mart.rta_snapshot")
         rta = []
         stage(13, "Building intraday actual and forecast")
-        forecast, actual = _build_intraday(conn, start, end, mapping)
+        forecast, actual = _build_intraday(conn, start, end, mapping, metric_catalog)
         stage(14, "Building exact PCS counters")
-        pcs = _build_pcs(conn, config, start, end)
+        pcs = _build_pcs(conn, config, metric_catalog, start, end)
         stage(15, "Building observed absence and shrinkage")
-        absence, absence_events = _build_absence(conn, config, rulebook, attendance, corrections)
+        absence, absence_events = _build_absence(
+            conn, config, rulebook, metric_catalog, attendance, corrections,
+        )
         stage(16, "Building corrected Verint final absence")
-        final_absence_events, final_absence = _build_verint_final_absence(conn, rulebook, start, end)
+        final_absence_events, final_absence = _build_verint_final_absence(
+            conn, rulebook, metric_catalog, start, end,
+        )
         stage(17, "Building service performance")
-        service = _build_service(conn, rulebook, mapping, start, end)
+        service = _build_service(conn, rulebook, metric_catalog, mapping, start, end)
         _record_rule_application(conn, run_id, rulebook)
         _record_mapping_application(conn, run_id, mapping)
         stage(18, "Checking source health")
         _build_source_health(conn, config)
         stage(19, "Running data-quality checks")
         quality = _build_quality(conn, config, run_id, start, end)
+        stage(20, "Materializing configured KPI values")
+        metric_rows = build_metric_values(
+            conn, metric_catalog, rulebook, run_id, start, end,
+        )
+        stage(21, "Generating deterministic Python findings")
+        finding_rows = build_findings(
+            conn, metric_catalog, analytics_rules, run_id, start, end,
+        )
         result = ModelSummary(
             start=start, end=end, attendance_rows=len(attendance), conformance_rows=len(conformance),
             correction_rows=len(corrections), rta_rows=len(rta), forecast_rows=forecast,
@@ -2255,6 +2440,7 @@ def refresh_models(
             staffing_rows=staffing, timeline_rows=timeline,
             final_absence_rows=final_absence,
             final_absence_event_rows=final_absence_events,
+            metric_rows=metric_rows, finding_rows=finding_rows,
         )
         conn.execute("RELEASE SAVEPOINT refresh_models")
         stage(total_stages, "Models ready")

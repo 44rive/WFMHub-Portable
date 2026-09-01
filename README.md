@@ -8,7 +8,23 @@ Pivot, ODBC, DuckDB, or Python in Excel.
 Raw extracts are never edited and are never copied into normal report sheets.
 The SQLite hub remains the source of truth.
 
-## What v0.8 adds
+## What v0.9 adds
+
+- A Python-only semantic metric layer. Extract parsing creates trusted additive
+  components; one effective-dated catalog turns them into KPI values.
+- Separate editable files for domain evidence rules, metric methods, analytics
+  thresholds, report composition, and queue mapping—so a formula change never
+  requires editing Python, SQL, Excel, or an extract.
+- Deterministic findings for target breaches, material changes, low samples,
+  and unhealthy sources. Every finding carries its method and evidence filter.
+- Focused workbooks now use governed datasets and include `FINDINGS`, `METHODS`,
+  `DOMAIN_RULES`, and `PROVENANCE`; Excel owns presentation, not KPI arithmetic.
+- Effective dates, scoped overrides, explicit priorities, ratio-of-sums
+  aggregation, validation, method explanation, catalog diffing, and test values.
+- Removal of the AI snapshot/runtime path. A manual Copilot prompt is provided
+  under `prompts` for optional analysis of a workbook you choose to attach.
+
+## What v0.8 added
 
 - A management-ready Bonus proposal rebuilt in the WFMHub navy/teal design,
   with a single period, centralized thresholds, formula documentation, an
@@ -76,26 +92,23 @@ The SQLite hub remains the source of truth.
 - Forecast and staffing requirements from Verint only.
 - Agent call performance and PCS from FTE-scoped Call-by-Call extracts.
 - Clean CSV/XLSX exports and trusted custom portable-Python/read-only SQL jobs.
-- Read-only AI analysis snapshots containing fixed service, staffing, PCS and
-  source-health aggregates; no raw extracts or arbitrary SQL.
 - Progress and fixed source-health/latest-date status displays.
 
 ## Windows quick start
 
-1. Download `WFMHub-Portable-v0.8.0-win-x64.zip` from GitHub Releases. Do not
+1. Download `WFMHub-Portable-v0.9.0-win-x64.zip` from GitHub Releases. Do not
    use GitHub's automatic Source code ZIP.
 2. Choose **Extract All** and keep the complete `WFMHub` folder together.
 3. Double-click `SETUP.cmd` once and select the folder containing `FTE`,
    `Storm`, and `Verint`.
 4. Double-click `WFMHub.cmd` for daily work.
-5. Choose **Validate rules and build KPI catalog** once before the first refresh.
+5. Choose **Validate rules and build governance catalog** once before the first refresh.
 6. Refresh the required source group and date period.
 
 Use the blank `templates\FTE Count.xlsx` roster if needed. Read the
 [beginner guide](docs/BEGINNER_GUIDE.md), [rulebook guide](docs/RULEBOOK_GUIDE.md),
-[clean-data contract](docs/CLEAN_DATA_CONTRACT.md), [PCS logic](docs/PCS_LOGIC.md),
-[PivotTable guide](docs/PIVOT_GUIDE.md), and
-[AI snapshot guide](docs/AI_ANALYSIS_SNAPSHOT.md).
+[clean-data contract](docs/CLEAN_DATA_CONTRACT.md), [metric catalog guide](docs/METRIC_CATALOG_GUIDE.md),
+[PCS logic](docs/PCS_LOGIC.md), and [PivotTable guide](docs/PIVOT_GUIDE.md).
 
 ## Output folders
 
@@ -107,7 +120,6 @@ Use the blank `templates\FTE Count.xlsx` roster if needed. Read the
 | `output\absence` | Final Activities-only absenteeism ledger and audit evidence |
 | `output\reference` | Generated KPI catalog |
 | `output\data_exports` | Explicit clean CSV/XLSX exports |
-| `output\ai_analysis` | Read-only governed SQLite bundles for external analysis |
 | `output\custom` | Custom Lab results |
 | `shared_reports` | Bonus and three-hour PCS workbooks shared manually with management |
 
@@ -132,21 +144,30 @@ Filename dates are hints. Each dated row or Verint date column determines its
 business date. Missing files and missing LILO roster rows are never invented as
 no-shows.
 
-## Central rulebook
+## Governed configuration
 
-Edit `config\wfm_rules.toml`, increase `rulebook.version`, then run:
+The generated user files have deliberately separate jobs:
+
+| File | Owns |
+|---|---|
+| `config\wfm_rules.toml` | Attendance/absence evidence classification and PCS parsing policy |
+| `config\metric_catalog.toml` | KPI formulas, targets, units, scope, priority, effective dates and aggregation |
+| `config\analytics_rules.toml` | Deterministic finding thresholds and limits |
+| `config\report_catalog.toml` | Workbook titles, finding domains and validated ordered sheet contracts |
+| `config\queue_mapping.csv` | Source queue/file names and comparison scopes |
+
+After a change, increase the relevant version and run:
 
 ```text
-WFMHub.cmd > Validate rules and build KPI catalog
+WFMHub.cmd > Validate rules and build governance catalog
 ```
 
-The file controls activity taxonomy, absence/payroll/shrinkage flags, standard
-day hours, SL formulas, service availability, AHT, forecast deviation, queue
-scopes, and other business definitions. Unsafe Python and unknown formula
-elements are rejected.
+Unsafe expressions, unknown components, ambiguous methods, invalid date windows,
+unknown report contracts, and unknown analytics metrics are rejected before a
+refresh. See the [metric catalog guide](docs/METRIC_CATALOG_GUIDE.md).
 
-Every modeled row stores the rule version and SHA-256 so a result can be traced
-back to its exact definitions.
+Every semantic value and finding stores the exact catalog/rule versions and
+SHA-256 hashes so a result can be traced to its definitions.
 
 Queue/file mappings live separately in `config\queue_mapping.csv`. Change the
 mapping there and refresh: the hub remaps existing raw data without changing or

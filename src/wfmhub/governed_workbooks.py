@@ -1,10 +1,4 @@
-"""Focused Excel workbooks built only from governed WFMHub marts.
-
-The business calculations live in ``models.py`` and ``wfm_rules.toml``.  This
-module is deliberately presentation-only: it selects stable mart grains,
-creates ratio-of-sums summaries, and renders decision-ready workbooks without
-copying raw extracts into ordinary worksheets.
-"""
+"""Focused Excel workbooks rendered from governed datasets and metric values."""
 
 from __future__ import annotations
 
@@ -15,9 +9,25 @@ from typing import Any, Iterable
 
 from .config import Config
 from .database import DatabaseConnection
+from .datasets import (
+    final_absence_lob_month,
+    pcs_agent_month,
+    pcs_team_day,
+    service_scope_interval,
+)
+from .metrics import load_metric_catalog
 from .report_packs import report_pack, report_pack_folder
+from .reporting import (
+    add_domain_rules_sheet,
+    add_findings_sheet,
+    add_methods_sheet,
+    add_provenance_sheet,
+    report_spec,
+    validate_workbook_contract,
+)
 from .reports import COLORS, ExcelReport, _display_header, _query
 from .rules import load_rulebook
+from .semantic import aggregate_metric_values
 
 
 def _output_path(
@@ -225,7 +235,13 @@ def build_daily_operations_workbook(
     partial = output.with_name(f"{output.stem}.partial{output.suffix}")
     report = ExcelReport(partial)
     rulebook = load_rulebook(config.home, config.business_rules)
+    metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
+    spec = report_spec(config, "operations")
     try:
+        service_dataset = service_scope_interval(
+            conn, metric_catalog, report_day, "APDE",
+            config.report_limits.get("max_service_rows", 100000),
+        )
         call_now, no_shows = conn.execute(
             """SELECT count(*), coalesce(sum(CASE WHEN call_action='CALL_NO_SHOW' THEN 1 ELSE 0 END),0)
                FROM mart.attendance_agent_day
@@ -249,20 +265,10 @@ def build_daily_operations_workbook(
                WHERE business_date=? AND staffing_gap_fte IS NOT NULL""",
             [report_day],
         ).fetchone()[0]
-        below_target = conn.execute(
-            """SELECT count(*) FROM (
-                   SELECT interval_start, coalesce(lob,'(blank)'), coalesce(language,'(blank)')
-                   FROM mart.service_interval
-                   WHERE source_system='APDE' AND business_date=?
-                   GROUP BY interval_start, coalesce(lob,'(blank)'), coalesce(language,'(blank)')
-                   HAVING sum(offered)-sum(coalesce(short_abandoned,0))>0
-                      AND 1.0*sum(answered_within_target)/
-                          (sum(offered)-sum(coalesce(short_abandoned,0))) < max(sl_target)
-               ) x""",
-            [report_day],
-        ).fetchone()[0]
+        state_index = service_dataset.headers.index("sl_state")
+        below_target = sum(1 for row in service_dataset.rows if row[state_index] == "BELOW_TARGET")
         _add_landing(
-            report, "DAILY_SUMMARY", "WFM HUB  /  DAILY OPERATIONS",
+            report, "DAILY_SUMMARY", spec.title,
             f"Operational day {report_day:%Y-%m-%d}  |  generated {generated:%Y-%m-%d %H:%M}",
             [
                 ("Call now", call_now or 0, "integer"),
@@ -278,6 +284,7 @@ def build_daily_operations_workbook(
             ],
             badge=coverage_badge,
         )
+        add_findings_sheet(report, conn, spec, report_day, report_day)
 
         headers, rows = _query(
             conn,
@@ -335,59 +342,23 @@ def build_daily_operations_workbook(
                 "type": "data_bar", "bar_color": COLORS["red"],
             })
 
-        headers, rows = _query(
-            conn,
-            """SELECT business_date, interval_start,
-                      coalesce(lob,'(blank)') AS lob,
-                      coalesce(language,'(blank)') AS language,
-                      sum(offered) AS offered, sum(answered) AS answered,
-                      sum(abandoned) AS abandoned,
-                      sum(short_abandoned) AS short_abandoned,
-                      sum(answered_within_target) AS answered_within_target,
-                      CASE WHEN sum(offered)-sum(coalesce(short_abandoned,0))>0
-                           THEN 1.0*sum(answered_within_target)/
-                                (sum(offered)-sum(coalesce(short_abandoned,0))) END AS service_level,
-                      CASE WHEN sum(offered)>0
-                           THEN 1.0*sum(answered)/sum(offered) END AS service_availability,
-                      max(sl_target) AS sl_target,
-                      CASE WHEN sum(offered)=0 OR sum(offered)-sum(coalesce(short_abandoned,0))<=0
-                           THEN 'NO_TRAFFIC'
-                           WHEN 1.0*sum(answered_within_target)/
-                                (sum(offered)-sum(coalesce(short_abandoned,0))) >= max(sl_target)
-                           THEN 'ON_TARGET' ELSE 'BELOW_TARGET' END AS sl_state,
-                      max(mapping_status) AS mapping_status
-               FROM mart.service_interval
-               WHERE source_system='APDE' AND business_date=?
-               GROUP BY business_date, interval_start, coalesce(lob,'(blank)'),
-                        coalesce(language,'(blank)')
-               ORDER BY interval_start, lob, language
-               LIMIT ?""",
-            [report_day, config.report_limits.get("max_service_rows", 100000)],
-        )
+        headers, rows = service_dataset.headers, service_dataset.rows
         ws = report.add_table_sheet(
             "SERVICE_LEVEL", "APDE service-level state by LOB",
-            "Adjusted SL = answered within target / (offered - short abandoned). Availability = answered / offered.",
+            "Values come from effective-dated metric methods; additive counters remain visible for reconciliation.",
             headers, rows,
         )
         _color_statuses(report, ws, headers, rows, "sl_state", {
-            "BELOW_TARGET": "bad", "ON_TARGET": "good", "NO_TRAFFIC": "future",
+            "BELOW_TARGET": "bad", "ON_TARGET": "good",
+            "NO_DATA": "future", "NO_TRAFFIC": "future", "LOW_SAMPLE": "warn",
         })
-        report.add_table_sheet(
-            "FORMULA_LOGIC", "Daily Operations calculation contract",
-            f"Central rules: {rulebook.file.name}; version {rulebook.version}; SHA-256 {rulebook.sha256[:16]}...",
-            ["metric", "formula", "grain", "source_of_truth", "guardrail"],
-            [
-                ("Attendance call", "requires_call = true", "Agent/day", "StartEndTimes + LILO + Agent Status", "Planned absence and Off are excluded"),
-                ("No-show", "completed scheduled shift + loaded blank LILO row + no active Agent Status", "Agent/day", "Observed evidence", "Missing source data is never a no-show"),
-                ("Late", f"observed first seen - scheduled start, after {rulebook.late_tolerance_minutes:g} minute tolerance", "Agent/day", "LILO + Agent Status", "Running shifts remain provisional"),
-                ("Staffing gap FTE", "max(0, elapsed scheduled agent-seconds - observed agent-seconds) / 900", "LOB/language/15 min", "Roster + observed evidence", "Missing/future evidence returns blank, not zero"),
-                ("Service level", "answered within target / (offered - short abandoned)", "APDE LOB/language/interval", "APDE", "Ratios are recalculated from summed counters"),
-                ("Service availability", "answered / offered", "APDE LOB/language/interval", "APDE", "Never means agent availability or adherence"),
-            ],
-        )
         _quality_sheet(report, conn, report_day, report_day, ("fte", "schedule", "lilo", "agent_status", "attendance", "apde", "service"))
         _source_health_sheet(report, conn, ("fte", "schedule", "lilo", "agent_status", "apde"))
         _schedule_variant_sheet(report, conn)
+        add_domain_rules_sheet(report, config, spec)
+        add_methods_sheet(report, config, spec)
+        add_provenance_sheet(report, conn, config, spec, report_day, report_day)
+        validate_workbook_contract(report, spec)
     except Exception:
         report.close()
         partial.unlink(missing_ok=True)
@@ -412,6 +383,8 @@ def build_exact_pcs_workbook(
     partial = output.with_name(f"{output.stem}.partial{output.suffix}")
     report = ExcelReport(partial)
     allowed = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
+    metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
+    spec = report_spec(config, "quality_pcs")
     try:
         totals = conn.execute(
             """SELECT coalesce(sum(inbound_calls),0),
@@ -425,10 +398,17 @@ def build_exact_pcs_workbook(
             [start, end],
         ).fetchone()
         inbound, valid_count, score_sum, negative, positive, participants, denominator = totals
-        pcs_average = score_sum / valid_count if valid_count else None
-        participation = participants / denominator if denominator else None
+        semantic_summary = {
+            item.metric_id: item
+            for item in aggregate_metric_values(
+                conn, metric_catalog, start, end,
+                ["pcs_average", "pcs_participation"], (),
+            )
+        }
+        pcs_average = semantic_summary.get("pcs_average").value if semantic_summary.get("pcs_average") else None
+        participation = semantic_summary.get("pcs_participation").value if semantic_summary.get("pcs_participation") else None
         _add_landing(
-            report, "PCS_SUMMARY", "WFM HUB  /  EXACT AGENT PCS",
+            report, "PCS_SUMMARY", spec.title,
             f"Period {start:%Y-%m-%d} to {end:%Y-%m-%d}  |  generated {generated:%Y-%m-%d %H:%M}",
             [
                 ("Valid Q1 average", pcs_average, "decimal"),
@@ -444,6 +424,7 @@ def build_exact_pcs_workbook(
             ],
             badge="REFERENCE-COMPATIBLE Q1 LOGIC  /  COUNTERS FIRST, RATIOS SECOND",
         )
+        add_findings_sheet(report, conn, spec, start, end)
 
         agent_day_sql = """SELECT business_date, agent_id, agent_name, team_leader,
                    ops_manager, lob, market, language, location,
@@ -472,59 +453,16 @@ def build_exact_pcs_workbook(
         )
         _color_statuses(report, ws, headers, rows, "sample_flag", {"LOW_SAMPLE": "warn", "OK": "good"})
 
-        headers, rows = _query(
-            conn,
-            """SELECT business_date, coalesce(team_leader,'(blank)') AS team_leader,
-                      coalesce(lob,'(blank)') AS lob, coalesce(language,'(blank)') AS language,
-                      sum(inbound_calls) AS inbound_call_legs,
-                      sum(pcs_enabled_calls) AS pcs_mode_2_inbound_legs,
-                      sum(pcs_status_calls) AS pcs_status_1_inbound_legs,
-                      sum(pcs_participation_responses) AS pcs_q1_nonblank_inbound_legs,
-                      sum(survey_responses) AS pcs_q1_valid_score_count,
-                      sum(pcs_score_sum) AS pcs_q1_score_sum,
-                      sum(low_score_responses) AS pcs_score_le_3_count,
-                      sum(top_box_responses) AS pcs_score_gt_3_count,
-                      sum(pcs_invalid_responses) AS pcs_q1_invalid_nonblank_count,
-                      CASE WHEN sum(survey_responses)>0
-                           THEN 1.0*sum(pcs_score_sum)/sum(survey_responses) END AS pcs_average,
-                      CASE WHEN sum(pcs_status_calls)>0
-                           THEN 1.0*sum(pcs_participation_responses)/sum(pcs_status_calls) END AS pcs_participation_rate
-               FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
-               GROUP BY business_date, coalesce(team_leader,'(blank)'),
-                        coalesce(lob,'(blank)'), coalesce(language,'(blank)')
-               ORDER BY business_date, team_leader, lob, language""",
-            [start, end],
-        )
+        team_dataset = pcs_team_day(conn, metric_catalog, start, end)
+        headers, rows = team_dataset.headers, team_dataset.rows
         report.add_table_sheet(
             "TEAM_DAY", "Exact PCS by team and day",
-            "All ratios are recalculated after summing their governed counters.",
+            "Counters are additive; KPI values come from the effective-dated semantic metric engine.",
             headers, rows,
         )
 
-        headers, rows = _query(
-            conn,
-            """SELECT substr(business_date,1,7) AS month_key, agent_id,
-                      max(agent_name) AS agent_name, max(team_leader) AS team_leader,
-                      max(ops_manager) AS ops_manager, max(lob) AS lob,
-                      max(language) AS language,
-                      sum(inbound_calls) AS inbound_call_legs,
-                      sum(pcs_status_calls) AS pcs_status_1_inbound_legs,
-                      sum(pcs_participation_responses) AS pcs_q1_nonblank_inbound_legs,
-                      sum(survey_responses) AS pcs_q1_valid_score_count,
-                      sum(pcs_score_sum) AS pcs_q1_score_sum,
-                      sum(low_score_responses) AS pcs_score_le_3_count,
-                      sum(top_box_responses) AS pcs_score_gt_3_count,
-                      sum(pcs_invalid_responses) AS pcs_q1_invalid_nonblank_count,
-                      CASE WHEN sum(survey_responses)>0
-                           THEN 1.0*sum(pcs_score_sum)/sum(survey_responses) END AS pcs_average,
-                      CASE WHEN sum(pcs_status_calls)>0
-                           THEN 1.0*sum(pcs_participation_responses)/sum(pcs_status_calls) END AS pcs_participation_rate,
-                      CASE WHEN sum(survey_responses)<20 THEN 'LOW_SAMPLE' ELSE 'OK' END AS sample_flag
-               FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
-               GROUP BY substr(business_date,1,7), agent_id
-               ORDER BY month_key, agent_id""",
-            [start, end],
-        )
+        month_dataset = pcs_agent_month(conn, metric_catalog, start, end)
+        headers, rows = month_dataset.headers, month_dataset.rows
         ws = report.add_table_sheet(
             "AGENT_MONTH", "Exact monthly agent PCS",
             "This is the presentation-ready monthly grain. A LOW_SAMPLE flag never changes the calculated score.",
@@ -577,22 +515,12 @@ def build_exact_pcs_workbook(
             "INVALID": "bad", "BLANK": "future", "<=3": "warn", ">3": "good",
         })
 
-        logic_headers = ["metric", "formula", "numerator", "denominator", "business_rule"]
-        logic_rows = [
-            ("PCS average", "sum(valid inbound Q1) / count(valid inbound Q1)", "Q1 score sum", "Q1 valid count", f"Valid discrete scores: {{{allowed}}}"),
-            ("Negative count", f"count(valid inbound Q1 <= {config.pcs.negative_score_maximum:g})", "Qualifying legs", "Not applicable", "Inbound legs only"),
-            ("Positive count", f"count(valid inbound Q1 > {config.pcs.negative_score_maximum:g})", "Qualifying legs", "Not applicable", "Inbound legs only"),
-            ("Participation", "raw inbound Q1 nonblank / inbound PCSStatus=1", "Raw Q1 nonblank", "PCSStatus=1", "Invalid raw Q1 still participates"),
-            ("Mode 2", "diagnostic count only", "Mode 2 inbound legs", "Not applicable", "Never filters or weights the official score"),
-            ("Higher grains", "ratio of summed counters", "Sum child numerators", "Sum child denominators", "Never average percentages"),
-        ]
-        report.add_table_sheet(
-            "PCS_LOGIC", "Central PCS calculation contract",
-            "These are the exact formulas used throughout this workbook and the governed mart.",
-            logic_headers, logic_rows,
-        )
         _quality_sheet(report, conn, start, end, ("fte", "calls", "pcs"))
         _source_health_sheet(report, conn, ("fte", "calls"))
+        add_domain_rules_sheet(report, config, spec)
+        add_methods_sheet(report, config, spec)
+        add_provenance_sheet(report, conn, config, spec, start, end)
+        validate_workbook_contract(report, spec)
     except Exception:
         report.close()
         partial.unlink(missing_ok=True)
@@ -786,6 +714,7 @@ def build_corrections_workbook(
     partial = output.with_name(f"{output.stem}.partial{output.suffix}")
     report = ExcelReport(partial)
     rulebook = load_rulebook(config.home, config.business_rules)
+    spec = report_spec(config, "corrections")
     try:
         gap_count, gap_minutes, agents = conn.execute(
             """SELECT count(*), coalesce(sum(residual_minutes),0), count(DISTINCT agent_id)
@@ -804,7 +733,7 @@ def build_corrections_workbook(
             [report_day],
         ).fetchone()[0]
         _add_landing(
-            report, "DAY_SUMMARY", "WFM HUB  /  YESTERDAY INCOHERENCE",
+            report, "DAY_SUMMARY", spec.title,
             f"Latest evidence-complete day {report_day:%Y-%m-%d}  |  requested through {end:%Y-%m-%d}",
             [
                 ("Residual segments", gap_count or 0, "integer"),
@@ -820,6 +749,7 @@ def build_corrections_workbook(
             ],
             badge="OBSERVED LILO + AGENT STATUS GAPS  /  VERIFIED AGAINST FINAL VERINT ACTIVITIES",
         )
+        add_findings_sheet(report, conn, spec, report_day, report_day)
 
         headers, rows = _query(
             conn,
@@ -893,21 +823,13 @@ def build_corrections_workbook(
             "Audit data behind SHIFT_VIEW; planned versus observed segments remain exact, not rounded to the visual grid.",
             timeline_headers, timeline_rows,
         )
-        report.add_table_sheet(
-            "FORMULA_LOGIC", "Correction calculation contract",
-            f"Central rules: {rulebook.file.name}; version {rulebook.version}; SHA-256 {rulebook.sha256[:16]}...",
-            ["metric", "formula", "grain", "source_of_truth", "guardrail"],
-            [
-                ("Observed gap", "scheduled time minus observed LILO/Agent Status evidence", "Agent/time segment", "StartEndTimes + LILO + Agent Status", "Activities never create the initial gap"),
-                ("Corrected overlap", "union of classified Activities intersected with observed gap", "Agent/time segment", "Verint Activities", "Overlapping Activities are not double-counted"),
-                ("Residual gap", "observed gap minus corrected overlap", "Agent/time segment", "Governed correction mart", f"Residuals at most {rulebook.verint_match_tolerance_minutes:g} minutes are ignored"),
-                ("Current-day unfinished tail", "FUTURE and is_gap=false", "Agent/time segment", "Evaluation cutoff", "Can never become Early leave before shift completion"),
-                ("Human decision", "confirmed activity + validation status + owner + comment + injected date", "Correction ID", "GAPS blue columns", "Imported only after the workbook is saved"),
-            ],
-        )
         _quality_sheet(report, conn, report_day, report_day, ("fte", "schedule", "lilo", "agent_status", "attendance"))
         _source_health_sheet(report, conn, ("fte", "schedule", "lilo", "agent_status"))
         _schedule_variant_sheet(report, conn)
+        add_domain_rules_sheet(report, config, spec)
+        add_methods_sheet(report, config, spec)
+        add_provenance_sheet(report, conn, config, spec, report_day, report_day)
+        validate_workbook_contract(report, spec)
     except Exception:
         report.close()
         partial.unlink(missing_ok=True)
@@ -932,6 +854,8 @@ def build_final_absence_workbook(
     partial = output.with_name(f"{output.stem}.partial{output.suffix}")
     report = ExcelReport(partial)
     rulebook = load_rulebook(config.home, config.business_rules)
+    metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
+    spec = report_spec(config, "absence")
     try:
         totals = conn.execute(
             """SELECT coalesce(sum(planned_net_minutes),0),
@@ -945,9 +869,15 @@ def build_final_absence_workbook(
             [start, end],
         ).fetchone()
         planned, absence, vacation, unpaid, unmapped, absence_days = totals
-        absence_rate = absence / planned if planned else None
+        semantic_summary = {
+            item.metric_id: item
+            for item in aggregate_metric_values(
+                conn, metric_catalog, start, end, ["final_absence_rate"], (),
+            )
+        }
+        absence_rate = semantic_summary.get("final_absence_rate").value if semantic_summary.get("final_absence_rate") else None
         _add_landing(
-            report, "FINAL_SUMMARY", "WFM HUB  /  FINAL ABSENTEEISM",
+            report, "FINAL_SUMMARY", spec.title,
             f"Period {start:%Y-%m-%d} to {end:%Y-%m-%d}  |  rule {rulebook.version}",
             [
                 ("Planned net hours", planned / 60, "decimal"),
@@ -963,6 +893,7 @@ def build_final_absence_workbook(
             ],
             badge="FINAL  /  VERINT ACTIVITIES ONLY  /  OVERLAP-SAFE DAILY TOTALS",
         )
+        add_findings_sheet(report, conn, spec, start, end)
 
         headers, rows = _query(
             conn,
@@ -991,33 +922,11 @@ def build_final_absence_workbook(
             "UNMAPPED_REVIEW": "bad", "ABSENCE_RECORDED": "warn", "CLEAR": "good",
         })
 
-        headers, rows = _query(
-            conn,
-            """SELECT substr(business_date,1,7) AS month_key,
-                      coalesce(lob,'(blank)') AS lob,
-                      coalesce(language,'(blank)') AS language,
-                      count(*) AS agent_days,
-                      sum(planned_net_minutes)/60.0 AS planned_net_hours,
-                      sum(final_absence_minutes)/60.0 AS final_absence_hours,
-                      sum(final_vacation_minutes)/60.0 AS final_vacation_hours,
-                      sum(final_unpaid_minutes)/60.0 AS final_unpaid_hours,
-                      sum(final_shrinkage_minutes)/60.0 AS final_shrinkage_hours,
-                      sum(final_unmapped_minutes)/60.0 AS final_unmapped_hours,
-                      CASE WHEN sum(planned_net_minutes)>0
-                           THEN 1.0*sum(final_absence_minutes)/sum(planned_net_minutes) END AS final_absence_rate,
-                      CASE WHEN sum(planned_net_minutes)>0
-                           THEN 1.0*sum(final_vacation_minutes)/sum(planned_net_minutes) END AS final_vacation_rate,
-                      sum(CASE WHEN final_absence_day THEN 1 ELSE 0 END) AS absence_agent_days
-               FROM mart.verint_final_absence_agent_day
-               WHERE business_date BETWEEN ? AND ?
-               GROUP BY substr(business_date,1,7), coalesce(lob,'(blank)'),
-                        coalesce(language,'(blank)')
-               ORDER BY month_key, lob, language""",
-            [start, end],
-        )
+        month_dataset = final_absence_lob_month(conn, metric_catalog, start, end)
+        headers, rows = month_dataset.headers, month_dataset.rows
         report.add_table_sheet(
             "LOB_MONTH", "Final absence by LOB and month",
-            "Presentation grain for monthly reporting; percentages are ratios of summed daily counters.",
+            "Presentation grain for monthly reporting; KPI values come from configured metric methods.",
             headers, rows,
         )
 
@@ -1061,22 +970,13 @@ def build_final_absence_workbook(
             f"Loaded from {rulebook.file.name}; version {rulebook.version}; SHA-256 {rulebook.sha256[:16]}... Maternity classification is explicit here.",
             rule_headers, rule_rows,
         )
-        formula_headers = ["metric", "formula", "grain", "guardrail"]
-        formula_rows = [
-            ("Planned net", f"min(shift span, {rulebook.standard_day_hours:g} h)", "Agent/day", "Standard day is a net payroll cap"),
-            ("Final absence", "union minutes where activity rule absence=true", "Agent/day", "Capped to planned net"),
-            ("Final absence rate", "sum(final absence minutes) / sum(planned net minutes)", "Any higher grain", "Never average daily rates"),
-            ("Final vacation", "union minutes where activity rule vacation=true", "Agent/day", "Separate flag; may also count shrinkage"),
-            ("Event evidence", "schedule-clipped classified Activities intervals", "Activity interval", "Never sum overlapping event rows for totals"),
-        ]
-        report.add_table_sheet(
-            "FORMULA_LOGIC", "Final absenteeism calculation contract",
-            "The workbook contains no hidden formula variation; these governed formulas apply to every summary.",
-            formula_headers, formula_rows,
-        )
         _quality_sheet(report, conn, start, end, ("fte", "schedule"))
         _source_health_sheet(report, conn, ("fte", "schedule"))
         _schedule_variant_sheet(report, conn)
+        add_domain_rules_sheet(report, config, spec)
+        add_methods_sheet(report, config, spec)
+        add_provenance_sheet(report, conn, config, spec, start, end)
+        validate_workbook_contract(report, spec)
     except Exception:
         report.close()
         partial.unlink(missing_ok=True)

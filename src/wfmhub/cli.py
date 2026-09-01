@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import __version__
 from .actions import import_actions
-from .ai_snapshot import create_analysis_snapshot
+from .analytics import load_analytics_rules, validate_analytics_rules
 from .config import ConfigError, ensure_user_config, load_config, write_source_root
 from .database import HubLockedError, backup_database, connect, migrate, write_session
 from .doctor import run_doctor
@@ -20,10 +20,13 @@ from .exports import DATASETS, export_dataset
 from .ingestion import ingest_all
 from .models import refresh_models
 from .mapping import load_queue_mapping
+from .metrics import diff_metric_catalogs, evaluate_metric, load_metric_catalog, validate_metric_catalog
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
 from .progress import ProgressBar, ProgressCallback
 from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack
+from .report_specs import load_report_catalog, validate_report_catalog
 from .rules import load_rulebook, validate_rulebook
+from .semantic import SOURCE_COMPONENTS
 from .sota_reports import build_kpi_catalog
 from .shared_reports import build_shared_report
 from .ui import clear_screen, render_dashboard
@@ -103,6 +106,9 @@ def setup(home: Path, source_root: Path | None, non_interactive: bool) -> int:
     print(f"Source root : {config.source_root}")
     print(f"Database    : {config.database}")
     print(f"Rules       : {config.business_rules}")
+    print(f"Metrics     : {config.metric_catalog}")
+    print(f"Analytics   : {config.analytics_rules}")
+    print(f"Reports     : {config.report_catalog}")
     print(f"Queue map   : {config.queue_mapping}")
     print(f"Log         : {log}")
     if migrations:
@@ -146,7 +152,7 @@ def refresh(
                     bar.update(report_end, f"Created {pack} report")
                 conn.execute(
                     """UPDATE meta.refresh_run SET finished_at=?, status='SUCCESS', files_loaded=?, files_skipped=?, files_failed=?, details=? WHERE run_id=?""",
-                    [datetime.now(), ingested.loaded, ingested.skipped, ingested.failed, f"attendance={model.attendance_rows}; absence={model.absence_rows}; service={model.service_rows}; gaps={model.correction_rows}; quality={model.quality_rows}; scoped_out={ingested.scoped_out}", run_id],
+                    [datetime.now(), ingested.loaded, ingested.skipped, ingested.failed, f"attendance={model.attendance_rows}; absence={model.absence_rows}; service={model.service_rows}; gaps={model.correction_rows}; metrics={model.metric_rows}; findings={model.finding_rows}; quality={model.quality_rows}; scoped_out={ingested.scoped_out}", run_id],
                 )
             except Exception as exc:
                 conn.execute("UPDATE meta.refresh_run SET finished_at=?, status='ERROR', details=? WHERE run_id=?", [datetime.now(), str(exc)[:4000], run_id])
@@ -164,6 +170,8 @@ def refresh(
     print(f"Absence     : {model.absence_rows:,} agent-day + {model.absence_event_rows:,} evidence rows")
     print(f"Service     : {model.service_rows:,} actual + {model.forecast_rows:,} forecast rows")
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
+    print(f"Metrics     : {model.metric_rows:,} governed values")
+    print(f"Findings    : {model.finding_rows:,} deterministic observations")
     print(f"Quality     : {model.quality_rows:,} issues")
     business = load_rulebook(home, config.business_rules)
     mapping = load_queue_mapping(config.queue_mapping)
@@ -256,41 +264,6 @@ def export_clean(
     print(f"Clean export : {result.path}")
     print(f"Rows         : {result.rows:,}")
     print(f"Manifest     : {result.manifest}")
-    return 0
-
-
-def export_analysis_snapshot(
-    home: Path,
-    start: date,
-    end: date,
-    output: Path | None = None,
-) -> int:
-    """Export fixed governed aggregates without rebuilding or mutating the hub."""
-    config = load_config(home)
-    _logging(config)
-    bar = ProgressBar()
-    bar.update(0.02, "Opening hub database read-only")
-    conn = None
-    try:
-        conn = connect(config, read_only=True)
-        result = create_analysis_snapshot(
-            conn, config, start, end, output,
-            _phase_progress(bar, 0.05, 0.99),
-        )
-        bar.finish("Analysis snapshot ready")
-    except Exception as exc:
-        bar.fail(str(exc))
-        raise
-    finally:
-        if conn is not None:
-            conn.close()
-    print(f"Analysis bundle : {result.bundle_dir}")
-    print(f"SQLite snapshot : {result.database}")
-    print(f"Manifest        : {result.manifest}")
-    print("Datasets        : " + ", ".join(
-        f"{key}={rows:,}" for key, rows in result.row_counts.items()
-    ))
-    print("Hub database    : opened read-only; no models were rebuilt")
     return 0
 
 
@@ -398,19 +371,94 @@ def create_backup(home: Path) -> int:
     return 0
 
 
-def rules_tool(home: Path, action: str = "validate") -> int:
+_METRIC_TEST_COMPONENTS = {
+    "service_interval": {
+        "offered": 100, "answered": 90, "abandoned": 10, "short_abandoned": 5,
+        "answered_within_target": 75, "handled_seconds": 27_000,
+    },
+    "forecast_comparison_hour": {"forecast_volume": 100, "actual_volume": 90},
+    "pcs_agent_day": {
+        "handled_calls": 100, "talk_seconds": 20_000, "hold_seconds": 4_000,
+        "wrap_seconds": 6_000, "handle_seconds": 30_000, "pcs_status_calls": 100,
+        "pcs_participation_responses": 14, "survey_responses": 10,
+        "pcs_score_count": 10, "pcs_score_sum": 45,
+        "q1_response_count": 10, "q1_score_sum": 45,
+        "q2_response_count": 8, "q2_score_sum": 32,
+        "top_box_responses": 7, "low_score_responses": 3,
+    },
+    "observed_absence_agent_day": {
+        "planned_net_minutes": 525, "absence_minutes": 60, "vacation_minutes": 0,
+        "unpaid_minutes": 0, "shrinkage_minutes": 90,
+    },
+    "final_absence_agent_day": {
+        "planned_net_minutes": 525, "final_absence_minutes": 60,
+        "final_vacation_minutes": 0, "final_unpaid_minutes": 0,
+        "final_shrinkage_minutes": 90,
+    },
+    "staffing_interval": {
+        "staffing_gap_fte": 1.5, "staffing_variance_fte": -1.5,
+        "scheduled_fte": 8, "observed_fte": 6.5, "productive_fte": 6,
+        "evidence_intervals": 1,
+    },
+    "attendance_agent_day": {
+        "scheduled_working_count": 1, "no_show_count": 0, "late_count": 1,
+        "requires_call_count": 1, "uncoded_late_minutes": 10, "no_show_minutes": 0,
+    },
+}
+
+
+def rules_tool(
+    home: Path,
+    action: str = "validate",
+    metric_id: str | None = None,
+    against: Path | None = None,
+) -> int:
     config = load_config(home)
     rulebook = load_rulebook(home, config.business_rules)
-    for line in validate_rulebook(rulebook):
-        print(line)
+    catalog = load_metric_catalog(home, config.metric_catalog)
+    analytics = load_analytics_rules(home, config.analytics_rules)
+    reports = load_report_catalog(home, config.report_catalog)
     mapping = load_queue_mapping(config.queue_mapping)
+    if action == "explain":
+        if not metric_id:
+            raise ValueError("rules explain requires a metric id")
+        print("\n".join(catalog.explain(metric_id)))
+        return 0
+    if action == "diff":
+        if against is None:
+            raise ValueError("rules diff requires --against PATH_TO_OLD_METRIC_CATALOG")
+        before = load_metric_catalog(home, against.resolve())
+        print("\n".join(diff_metric_catalogs(before, catalog)))
+        return 0
+    for lines in (
+        validate_rulebook(rulebook),
+        validate_metric_catalog(catalog, SOURCE_COMPONENTS),
+        validate_analytics_rules(analytics, catalog),
+        validate_report_catalog(reports, IMPLEMENTED_REPORT_PACK_KEYS),
+    ):
+        for line in lines:
+            print(line)
     print(f"Queue mapping is valid: {mapping.file}")
     print(f"Queue mapping SHA-256: {mapping.sha256}")
     if action == "catalog":
         path = build_kpi_catalog(config)
-        print(f"KPI catalog: {path}")
-    else:
-        print(f"Editable file: {rulebook.file}")
+        print(f"Governance catalog: {path}")
+    elif action == "test":
+        for method in catalog.methods:
+            dimensions = {}
+            for key, values in method.scope.items():
+                dimensions[key.removesuffix("_contains")] = values[0] if values else None
+            result = evaluate_metric(
+                method, _METRIC_TEST_COMPONENTS[method.source_model],
+            )
+            print(
+                f"PASS {method.metric_id}.{method.method_id} "
+                f"effective={method.effective_from} value={result.value} state={result.state}"
+            )
+    print(f"Domain rules : {rulebook.file}")
+    print(f"Metric catalog: {catalog.file}")
+    print(f"Analytics    : {analytics.file}")
+    print(f"Report specs : {reports.file}")
     return 0
 
 
@@ -589,7 +637,7 @@ def menu(home: Path) -> int:
         print("    [4] Run custom Python or SQL analysis")
         print("    [5] Build a management shared report")
         print("\n  CONTROL & REVIEW")
-        print("    [6] Validate rules and build KPI catalog")
+        print("    [6] Validate rules and build governance catalog")
         print("    [7] Show source health and date coverage")
         print("    [8] Import correction decisions")
         print("\n  HUB TOOLS")
@@ -672,13 +720,6 @@ def parser() -> argparse.ArgumentParser:
     export_p.add_argument("--end", type=_date)
     export_p.add_argument("--format", choices=("csv", "xlsx"), default="csv")
     export_p.add_argument("--output", type=Path)
-    snapshot_p = commands.add_parser(
-        "analysis-snapshot",
-        help="Create a read-only governed SQLite bundle for external analysis",
-    )
-    snapshot_p.add_argument("--start", type=_date, required=True)
-    snapshot_p.add_argument("--end", type=_date, required=True)
-    snapshot_p.add_argument("--output", type=Path, help="New output folder; must not already exist")
     custom_p = commands.add_parser("custom", help="Run a trusted Python or read-only SQL job")
     custom_p.add_argument("kind", choices=("python", "sql"))
     custom_p.add_argument("job", type=Path)
@@ -690,8 +731,13 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("coverage", help="Show available dates and row counts")
     commands.add_parser("backup", help="Create a database backup")
     commands.add_parser("doctor", help="Test the corporate runtime, SQLite and Excel libraries")
-    rules_p = commands.add_parser("rules", help="Validate the central rulebook or generate its KPI catalog")
-    rules_p.add_argument("action", choices=("validate", "catalog"), nargs="?", default="validate")
+    rules_p = commands.add_parser("rules", help="Validate, explain, test or compare governed methods")
+    rules_p.add_argument(
+        "action", choices=("validate", "catalog", "explain", "diff", "test"),
+        nargs="?", default="validate",
+    )
+    rules_p.add_argument("metric", nargs="?", help="Metric id for the explain action")
+    rules_p.add_argument("--against", type=Path, help="Earlier metric catalog for the diff action")
     shared_p = commands.add_parser("shared-report", help="Build an email-safe Bonus or PCS management workbook")
     shared_p.add_argument("kind", choices=("bonus", "pcs"))
     shared_p.add_argument("source", type=Path, nargs="?", help="Original workbook; required for Bonus and recommended for PCS roster")
@@ -716,8 +762,6 @@ def main(argv: list[str] | None = None) -> int:
             return import_decisions(home, args.workbook)
         if args.command == "export":
             return export_clean(home, args.dataset, args.start, args.end, args.format, args.output)
-        if args.command == "analysis-snapshot":
-            return export_analysis_snapshot(home, args.start, args.end, args.output)
         if args.command == "custom":
             return run_custom(home, args.kind, args.job, args.start, args.end)
         if args.command == "status":
@@ -729,7 +773,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "doctor":
             return 0 if run_doctor(home) else 1
         if args.command == "rules":
-            return rules_tool(home, args.action)
+            return rules_tool(home, args.action, args.metric, args.against)
         if args.command == "shared-report":
             return shared_report_tool(home, args.kind, args.source, args.output, args.date)
         return menu(home)

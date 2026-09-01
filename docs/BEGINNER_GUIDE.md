@@ -14,7 +14,7 @@ export.
 
 ## First setup — one time
 
-1. Download `WFMHub-Portable-v0.8.0-win-x64.zip` from **Releases**.
+1. Download `WFMHub-Portable-v0.9.0-win-x64.zip` from **Releases**.
 2. Do not download GitHub's “Source code” ZIP.
 3. Right-click the downloaded ZIP and choose **Extract All**.
 4. Put the entire extracted `WFMHub` folder in a place where you can write, for
@@ -40,8 +40,9 @@ export.
 
 10. Press Enter and wait for **Setup complete**.
 
-Setup creates `config\wfmhub.toml`, `config\wfm_rules.toml`, and
-`database\wfm.sqlite3`. It does not edit,
+Setup creates `config\wfmhub.toml`, `config\wfm_rules.toml`,
+`config\metric_catalog.toml`, `config\analytics_rules.toml`,
+`config\report_catalog.toml`, and `database\wfm.sqlite3`. It does not edit,
 move, rename, or delete an extract.
 
 ## Standard FTE file
@@ -317,30 +318,25 @@ gets a `.manifest.txt` beside it containing dates, row count and generation
 time plus the active rule version/hash. Outputs go to `output\data_exports`;
 extracts are not changed.
 
-## Create a safe AI analysis bundle
+## Optional manual Copilot help
 
-After refreshing WFMHub, open Command Prompt in the WFMHub folder and run:
-
-```text
-WFMHub.cmd analysis-snapshot --start 2026-08-01 --end 2026-08-31
-```
-
-WFMHub creates a new folder under `output\ai_analysis`. Send or upload only
-that folder to the separate analysis service. The bundle contains governed
-source-health, service, staffing and PCS aggregates—not raw extracts or the
-operational database. It cannot update WFMHub and it does not rebuild the
-models. See [AI_ANALYSIS_SNAPSHOT.md](AI_ANALYSIS_SNAPSHOT.md) for the complete
-contract and safety boundary.
+WFMHub does not call an AI service. Python produces the calculations and
+`FINDINGS` sheet. If you want writing help, manually attach only the workbook
+you choose in your approved Microsoft Copilot and paste
+`prompts\COPILOT_WFM_ANALYST.md`. Never give Copilot the operational SQLite
+database or source folder. Copilot explains governed results; it does not
+replace or recalculate them.
 
 ## Edit calculations and make PivotTables
 
-Choose **5. Validate rules and build KPI catalog** to check the central
-`config\wfm_rules.toml` file and create a readable catalog under
+Choose **6. Validate rules and build governance catalog** to check every
+configuration file and create a readable catalog under
 `output\reference`.
 
-Use [RULEBOOK_GUIDE.md](RULEBOOK_GUIDE.md) before changing a formula or Verint
-activity category. Each workbook also contains `FORMULA_LOGIC` or `PCS_LOGIC`
-so you can see the exact contract beside the result. Use
+Use [METRIC_CATALOG_GUIDE.md](METRIC_CATALOG_GUIDE.md) before changing a KPI and
+[RULEBOOK_GUIDE.md](RULEBOOK_GUIDE.md) before changing a Verint activity
+category. Each governed workbook contains `METHODS`, `DOMAIN_RULES`, and
+`PROVENANCE`, so you can see the exact contract beside the result. Use
 [PIVOT_GUIDE.md](PIVOT_GUIDE.md) for literal click-by-click instructions to
 turn the governed Excel Tables into your own PivotTables and slicers.
 
@@ -413,7 +409,7 @@ backup and additive migration.
 | `py` is not recognized | Ignore `py`; the release uses `runtime\python.exe` only |
 | A DLL/application-control error appears | Re-extract the complete v0.5 ZIP; do not overlay v0.1 or move runtime files |
 | Source is `MISSING` | Correct `source_root` in `config\wfmhub.toml` |
-| Rule validation fails | Read the named formula/section, restore the backup rule file, and validate again |
+| Rule validation fails | Read the named catalog/section, restore your backup copy, and validate again |
 | `NOT_CORRECTED` has rows | Correct/complete the activity in Verint, re-export Activities, then refresh |
 | Intraday mapping is `UNMAPPED` | Add the queue or forecast filename prefix to `config\queue_mapping.csv` |
 | PCS average is blank | No valid configured survey response exists for the FTE-scoped calls and dates |

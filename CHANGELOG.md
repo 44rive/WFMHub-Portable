@@ -2,10 +2,22 @@
 
 ## Unreleased
 
-- Added an atomic, read-only SQLite analysis bundle with bounded source-health,
-  APDE service, staffing-gap and PCS team/day datasets, plus rule/mapping/run
-  provenance and a SHA-256 manifest. The export uses only fixed queries and
-  never rebuilds or modifies the operational hub.
+## 0.9.0 — 2026-09-01
+
+- Added an effective-dated, scope-aware metric catalog as the single source for
+  KPI formulas, targets, samples, units, priorities and aggregation behavior.
+- Added a semantic value mart retaining numerator, denominator, method and
+  catalog/rule provenance; higher-grain reports use ratio-of-sums.
+- Added deterministic Python findings for target breaches, material changes,
+  low samples and source-health problems, with evidence filters and hashes.
+- Split domain rules, metric methods, finding thresholds, report contracts and
+  queue mapping into separately validated editable files.
+- Migrated the four operational workbooks to governed datasets and added
+  `FINDINGS`, `METHODS`, `DOMAIN_RULES` and `PROVENANCE` sheets.
+- Added rule commands to validate, exercise, explain and compare methods and to
+  generate one management-readable governance workbook.
+- Removed the external AI snapshot/runtime path. Added only a static manual
+  Copilot prompt for optional explanation of a user-selected workbook.
 
 ## 0.8.0 — 2026-08-31
 

@@ -12,6 +12,8 @@ import xlsxwriter
 
 from .config import Config
 from .database import DatabaseConnection
+from .datasets import final_absence_lob_month, pcs_agent_month, pcs_team_day, service_scope_interval
+from .metrics import load_metric_catalog
 from .progress import ProgressCallback
 from .rules import load_rulebook
 
@@ -20,8 +22,9 @@ from .rules import load_rulebook
 class ExportDataset:
     key: str
     description: str
-    sql: str
+    sql: str | None
     dated: bool = True
+    contract: str | None = None
 
 
 @dataclass(frozen=True)
@@ -70,47 +73,12 @@ DATASETS: dict[str, ExportDataset] = {
            ORDER BY business_date, agent_id""",
     ),
     "pcs_team_day": ExportDataset(
-        "pcs_team_day", "PCS team/day ratios recalculated from summed counters.",
-        """SELECT business_date, coalesce(team_leader,'(blank)') AS team_leader,
-                  coalesce(lob,'(blank)') AS lob, coalesce(language,'(blank)') AS language,
-                  sum(inbound_calls) AS inbound_call_legs,
-                  sum(pcs_enabled_calls) AS pcs_mode_2_inbound_legs,
-                  sum(pcs_status_calls) AS pcs_status_1_inbound_legs,
-                  sum(pcs_participation_responses) AS pcs_q1_nonblank_inbound_legs,
-                  sum(survey_responses) AS pcs_q1_valid_score_count,
-                  sum(pcs_score_sum) AS pcs_q1_score_sum,
-                  sum(low_score_responses) AS pcs_score_le_3_count,
-                  sum(top_box_responses) AS pcs_score_gt_3_count,
-                  sum(pcs_invalid_responses) AS pcs_q1_invalid_nonblank_count,
-                  CASE WHEN sum(survey_responses)>0
-                       THEN 1.0*sum(pcs_score_sum)/sum(survey_responses) END AS pcs_average,
-                  CASE WHEN sum(pcs_status_calls)>0
-                       THEN 1.0*sum(pcs_participation_responses)/sum(pcs_status_calls) END AS pcs_participation_rate
-           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
-           GROUP BY business_date, coalesce(team_leader,'(blank)'),
-                    coalesce(lob,'(blank)'), coalesce(language,'(blank)')
-           ORDER BY business_date, team_leader, lob, language""",
+        "pcs_team_day", "PCS team/day governed counters and configured metric values.",
+        None, contract="pcs_team_day",
     ),
     "pcs_agent_month": ExportDataset(
-        "pcs_agent_month", "PCS monthly agent totals using the workbook's ratio-of-sums logic.",
-        """SELECT substr(business_date,1,7) AS month_key, agent_id,
-                  max(agent_name) AS agent_name, max(team_leader) AS team_leader,
-                  max(ops_manager) AS ops_manager, max(lob) AS lob,
-                  max(language) AS language, sum(inbound_calls) AS inbound_call_legs,
-                  sum(pcs_status_calls) AS pcs_status_1_inbound_legs,
-                  sum(pcs_participation_responses) AS pcs_q1_nonblank_inbound_legs,
-                  sum(survey_responses) AS pcs_q1_valid_score_count,
-                  sum(pcs_score_sum) AS pcs_q1_score_sum,
-                  sum(low_score_responses) AS pcs_score_le_3_count,
-                  sum(top_box_responses) AS pcs_score_gt_3_count,
-                  sum(pcs_invalid_responses) AS pcs_q1_invalid_nonblank_count,
-                  CASE WHEN sum(survey_responses)>0
-                       THEN 1.0*sum(pcs_score_sum)/sum(survey_responses) END AS pcs_average,
-                  CASE WHEN sum(pcs_status_calls)>0
-                       THEN 1.0*sum(pcs_participation_responses)/sum(pcs_status_calls) END AS pcs_participation_rate
-           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
-           GROUP BY substr(business_date,1,7), agent_id
-           ORDER BY month_key, agent_id""",
+        "pcs_agent_month", "PCS monthly agent governed counters and configured metric values.",
+        None, contract="pcs_agent_month",
     ),
     "attendance": ExportDataset(
         "attendance", "Attendance agent/day results without adherence metrics.",
@@ -182,6 +150,11 @@ DATASETS: dict[str, ExportDataset] = {
         "verint_final_absence_day", "Corrected Verint Activities-only final absence per agent/day.",
         """SELECT * FROM mart.verint_final_absence_agent_day
            WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id""",
+    ),
+    "final_absence_lob_month": ExportDataset(
+        "final_absence_lob_month",
+        "Monthly final absence counters and configured semantic metric values by LOB/language.",
+        None, contract="final_absence_lob_month",
     ),
     "schedules": ExportDataset(
         "schedules", "Parsed, FTE-scoped schedule shifts.",
@@ -258,25 +231,8 @@ DATASETS: dict[str, ExportDataset] = {
         "SELECT * FROM mart.service_interval WHERE business_date BETWEEN ? AND ? ORDER BY business_date, interval_start, source_system, queue",
     ),
     "daily_service_lob": ExportDataset(
-        "daily_service_lob", "APDE intraday service state recalculated from summed LOB/language counters.",
-        """SELECT business_date, interval_start, coalesce(lob,'(blank)') AS lob,
-                  coalesce(language,'(blank)') AS language,
-                  sum(offered) AS offered, sum(answered) AS answered,
-                  sum(abandoned) AS abandoned, sum(short_abandoned) AS short_abandoned,
-                  sum(answered_within_target) AS answered_within_target,
-                  sum(handled_seconds) AS handled_seconds,
-                  CASE WHEN sum(offered)-sum(coalesce(short_abandoned,0))>0
-                       THEN 1.0*sum(answered_within_target)/(sum(offered)-sum(coalesce(short_abandoned,0))) END AS service_level,
-                  CASE WHEN sum(offered)>0 THEN 1.0*sum(answered)/sum(offered) END AS service_availability,
-                  max(sl_target) AS sl_target,
-                  CASE WHEN sum(offered)=0 OR sum(offered)-sum(coalesce(short_abandoned,0))<=0 THEN 'NO_TRAFFIC'
-                       WHEN 1.0*sum(answered_within_target)/(sum(offered)-sum(coalesce(short_abandoned,0))) >= max(sl_target)
-                       THEN 'ON_TARGET' ELSE 'BELOW_TARGET' END AS sl_state,
-                  max(mapping_status) AS mapping_status
-           FROM mart.service_interval
-           WHERE source_system='APDE' AND business_date BETWEEN ? AND ?
-           GROUP BY business_date, interval_start, coalesce(lob,'(blank)'), coalesce(language,'(blank)')
-           ORDER BY business_date, interval_start, lob, language""",
+        "daily_service_lob", "APDE service counters and configured semantic metric values.",
+        None, contract="service_scope_interval",
     ),
     "forecast": ExportDataset(
         "forecast", "Clean Verint forecast and required staffing hours.",
@@ -291,6 +247,41 @@ DATASETS: dict[str, ExportDataset] = {
 
 def _safe_name(value: str) -> str:
     return "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value).strip("_")
+
+
+class _RowsCursor:
+    """Minimal fetch cursor for governed in-memory dataset contracts."""
+
+    def __init__(self, headers: list[str], rows: list[tuple[Any, ...]]) -> None:
+        self.description = [(header,) for header in headers]
+        self._rows = rows
+        self._index = 0
+
+    def fetchmany(self, size: int) -> list[tuple[Any, ...]]:
+        batch = self._rows[self._index:self._index + size]
+        self._index += len(batch)
+        return batch
+
+
+def _contract_cursor(
+    conn: DatabaseConnection,
+    config: Config,
+    contract: str,
+    start: date,
+    end: date,
+) -> _RowsCursor:
+    catalog = load_metric_catalog(config.home, config.metric_catalog)
+    builders = {
+        "pcs_team_day": lambda: pcs_team_day(conn, catalog, start, end),
+        "pcs_agent_month": lambda: pcs_agent_month(conn, catalog, start, end),
+        "service_scope_interval": lambda: service_scope_interval(conn, catalog, start, end),
+        "final_absence_lob_month": lambda: final_absence_lob_month(conn, catalog, start, end),
+    }
+    try:
+        dataset = builders[contract]()
+    except KeyError as exc:
+        raise ValueError(f"Unknown governed export contract {contract!r}") from exc
+    return _RowsCursor(dataset.headers, dataset.rows)
 
 
 def _write_csv(
@@ -392,7 +383,11 @@ def export_dataset(
     output.parent.mkdir(parents=True, exist_ok=True)
     if progress is not None:
         progress(0, 0, f"Preparing {dataset.key} export")
-    cursor = conn.execute(dataset.sql, [start, end] if dataset.dated else [])
+    cursor = (
+        _contract_cursor(conn, config, dataset.contract, start, end)
+        if dataset.contract is not None
+        else conn.execute(dataset.sql, [start, end] if dataset.dated else [])
+    )
     rows = (
         _write_csv(cursor, output, dataset.key, progress)
         if file_format == "csv"
@@ -402,6 +397,7 @@ def export_dataset(
         progress(rows, 0, f"Exported {dataset.key}: {rows:,} rows")
     manifest = output.with_name(output.name + ".manifest.txt")
     rulebook = load_rulebook(config.home, config.business_rules)
+    metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
     manifest.write_text(
         "\n".join([
             "WFMHub clean-data export",
@@ -413,6 +409,8 @@ def export_dataset(
             f"Format: {file_format.upper()}",
             f"Rule version: {rulebook.version}",
             f"Rule SHA-256: {rulebook.sha256}",
+            f"Metric catalog version: {metric_catalog.version}",
+            f"Metric catalog SHA-256: {metric_catalog.sha256}",
             "Source extracts modified: no",
         ]) + "\n",
         encoding="utf-8",
