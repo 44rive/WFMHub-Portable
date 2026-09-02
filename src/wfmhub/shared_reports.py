@@ -1316,6 +1316,14 @@ def build_shared_report(kind: str, source: Path | None, output: Path,
         if source is None:
             raise ValueError("Bonus report requires a source workbook")
         return build_bonus_management(source, output)
+    if kind == "bonus-analysis":
+        if source is None:
+            raise ValueError("Bonus KPI analysis requires a source workbook")
+        # Imported lazily because the analysis report reuses this module's
+        # workbook design system and source parser.
+        from .bonus_analysis_report import build_bonus_kpi_change_case
+
+        return build_bonus_kpi_change_case(source, output)
     if kind == "pcs":
         return build_pcs_management(source, output, report_date)
-    raise ValueError("Shared report kind must be 'bonus' or 'pcs'")
+    raise ValueError("Shared report kind must be 'bonus', 'bonus-analysis', or 'pcs'")

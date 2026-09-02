@@ -472,11 +472,11 @@ def shared_report_tool(
     """Build a fresh workbook intended for manual management sharing."""
 
     folder = home / "shared_reports"
-    default_name = (
-        "Bonus_Management_Proposal.xlsx"
-        if kind == "bonus"
-        else "PCS_Management_3H_Template.xlsx"
-    )
+    default_name = {
+        "bonus": "Bonus_Management_Proposal.xlsx",
+        "bonus-analysis": "Bonus_KPI_Change_Case.xlsx",
+        "pcs": "PCS_Management_3H_Template.xlsx",
+    }[kind]
     target = (output or folder / default_name).resolve()
     bar = ProgressBar()
     try:
@@ -495,11 +495,13 @@ def _choose_shared_report(home: Path) -> int:
     print("\nMANAGEMENT SHARED REPORT")
     print("1. Bonus management proposal")
     print("2. PCS management three-hour template")
-    choice = input("Choose 1-2: ").strip()
-    kind = {"1": "bonus", "2": "pcs"}.get(choice)
+    print("3. Bonus KPI change case")
+    choice = input("Choose 1-3: ").strip()
+    kind = {"1": "bonus", "2": "pcs", "3": "bonus-analysis"}.get(choice)
     if kind is None:
-        raise ValueError("Please choose Bonus or PCS")
-    entered = input(f"Paste the original {kind.upper()} workbook path: ").strip().strip('"')
+        raise ValueError("Please choose Bonus, PCS, or Bonus KPI analysis")
+    source_label = "BONUS" if kind == "bonus-analysis" else kind.upper()
+    entered = input(f"Paste the original {source_label} workbook path: ").strip().strip('"')
     if not entered:
         raise ValueError("The source workbook path is required")
     selected_date = None
@@ -738,8 +740,8 @@ def parser() -> argparse.ArgumentParser:
     )
     rules_p.add_argument("metric", nargs="?", help="Metric id for the explain action")
     rules_p.add_argument("--against", type=Path, help="Earlier metric catalog for the diff action")
-    shared_p = commands.add_parser("shared-report", help="Build an email-safe Bonus or PCS management workbook")
-    shared_p.add_argument("kind", choices=("bonus", "pcs"))
+    shared_p = commands.add_parser("shared-report", help="Build an email-safe Bonus, Bonus analysis, or PCS management workbook")
+    shared_p.add_argument("kind", choices=("bonus", "bonus-analysis", "pcs"))
     shared_p.add_argument("source", type=Path, nargs="?", help="Original workbook; required for Bonus and recommended for PCS roster")
     shared_p.add_argument("--output", type=Path)
     shared_p.add_argument("--date", type=_date, help="PCS report date YYYY-MM-DD")

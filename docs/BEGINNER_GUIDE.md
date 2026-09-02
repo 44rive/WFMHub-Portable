@@ -286,6 +286,21 @@ does not modify the workbook you select as its source.
 The workbook can explain the model without accidentally presenting synthetic
 or incomplete values as payroll output.
 
+### Bonus KPI change case
+
+1. Choose **Bonus KPI change case**.
+2. Paste the path to the populated Bonus workbook for the month you want to
+   review.
+3. Open `shared_reports\Bonus_KPI_Change_Case.xlsx`.
+4. Start with `EXECUTIVE_CASE`, then use `SCENARIO_SENSITIVITY` to explain the
+   financial effect of each policy choice separately.
+5. Copy the wording from `EMAIL_BRIEF`; it clearly states that the scenarios
+   are not a retroactive payroll instruction.
+
+The analysis detects the period and KPI configuration from the source. It
+derives a participation sensitivity from the measured distribution, holds
+incomplete rows in the controlled-pilot view, and never edits the source file.
+
 ### PCS update every three hours
 
 1. Choose **PCS management three-hour template** and select the original

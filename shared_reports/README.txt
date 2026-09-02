@@ -18,7 +18,14 @@ Included builders
      until policies, eligibility and input data are validated.
    - Keeps all thresholds, formulas and controls visible.
 
-2. PCS management 3-hour template
+2. Bonus KPI change case
+   - Reconciles the source workbook's current modeled payout.
+   - Separates measured coverage from KPI attainment and compares LOB behavior.
+   - Isolates participation, Extra PCS and completeness-gate sensitivities.
+   - Includes an agent trace, audit method and copy-ready management email.
+   - Treats every scenario as a policy test, never a payroll instruction.
+
+3. PCS management 3-hour template
    - Uses the exact logic from the original TOLEARN/PCS Report.xlsx:
        PCS Average      = average of valid Question 1 scores 1 to 5
        <=3 / >3         = counts of valid Question 1 scores
@@ -31,6 +38,8 @@ Build from the portable command line
 ------------------------------------
 
   runtime\python.exe -m wfmhub --home . shared-report bonus "C:\path\Bonus.xlsx"
+
+  runtime\python.exe -m wfmhub --home . shared-report bonus-analysis "C:\path\Bonus.xlsx"
 
   runtime\python.exe -m wfmhub --home . shared-report pcs "C:\path\PCS Report.xlsx" --date 2026-08-31
 

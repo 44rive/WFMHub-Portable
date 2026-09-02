@@ -8,6 +8,7 @@ from zipfile import ZipFile
 
 from openpyxl import Workbook, load_workbook
 
+from wfmhub.bonus_analysis_report import build_bonus_kpi_change_case
 from wfmhub.shared_reports import build_bonus_management, build_pcs_management
 
 
@@ -50,6 +51,31 @@ def make_pcs_source(path: Path) -> None:
 
 
 class SharedReportTests(unittest.TestCase):
+    def test_bonus_change_case_reconciles_and_keeps_scenarios_explicit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "bonus.xlsx"
+            output = root / "Bonus_KPI_Change_Case.xlsx"
+            make_bonus_source(source)
+            source_bytes = source.read_bytes()
+
+            build_bonus_kpi_change_case(source, output)
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            workbook = load_workbook(output, data_only=True, keep_links=False)
+            self.assertEqual(workbook.sheetnames[0], "EXECUTIVE_CASE")
+            self.assertIn("SCENARIO_SENSITIVITY", workbook.sheetnames)
+            self.assertIn("AGENT_IMPACT", workbook.sheetnames)
+            self.assertIn("EMAIL_BRIEF", workbook.sheetnames)
+            self.assertEqual(workbook["SCENARIO_SENSITIVITY"]["A6"].value, "Current configuration")
+            self.assertEqual(workbook["AGENT_IMPACT"]["F6"].value, "COMPLETE")
+            self.assertIn("not a retroactive payroll instruction", workbook["EMAIL_BRIEF"]["B7"].value)
+            workbook.close()
+            with ZipFile(output) as archive:
+                names = archive.namelist()
+                self.assertFalse(any("externalLink" in name for name in names))
+                self.assertFalse(any("connections" in name for name in names))
+
     def test_bonus_management_is_gated_and_has_no_external_links(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

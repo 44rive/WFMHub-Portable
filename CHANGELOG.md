@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added a deterministic Bonus KPI change-case workbook that reconciles the
+  current payout, separates KPI coverage from attainment, exposes LOB
+  comparability and incomplete-row risk, and models isolated configuration
+  sensitivities without changing the source or issuing a payroll instruction.
+
 ## 0.9.0 — 2026-09-01
 
 - Added an effective-dated, scope-aware metric catalog as the single source for
