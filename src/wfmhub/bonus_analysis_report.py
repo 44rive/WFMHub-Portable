@@ -376,6 +376,7 @@ def build_bonus_kpi_change_case(source: Path, output: Path) -> Path:
         ))
 
     participation = next(row for row in diagnostics if row["metric"].rule_name == "PCS % (Participation)")
+    absence = next(row for row in diagnostics if row["metric"].rule_name == "Abs%")
     lob_spreads: list[tuple[str, float]] = []
     for metric in METRICS:
         rates = [
@@ -394,6 +395,12 @@ def build_bonus_kpi_change_case(source: Path, output: Path) -> Path:
     policy_reviews = sum(_clean(row[5] if len(row) > 5 else "").casefold() != "validated" for row in policies)
     statuses = Counter(_clean(record.get("Data Status")) or "BLANK" for record in records)
     voc_zero = sum((_number(record.get("VOC Detractor Count")) or 0) == 0 for record in records)
+    full_proration = sum(
+        (_number(record.get("Eligible Days")) is not None)
+        and (_number(record.get("Scheduled Days")) or 0) > 0
+        and (_number(record.get("Eligible Days")) or 0) >= (_number(record.get("Scheduled Days")) or 0)
+        for record in records
+    )
     cached_total, cached_rows = _cached_result_total(source)
     reconciliation_delta = None if cached_total is None else baseline_total - cached_total
 
@@ -425,6 +432,12 @@ def build_bonus_kpi_change_case(source: Path, output: Path) -> Path:
         ),
         (
             "HIGH",
+            "Absence may be charged twice once proration is activated",
+            f"Absence currently carries {absence['rule'].tier1_bonus:.0%} weight. July has {full_proration} of {len(records)} rows at full proration, but using the same future absence in Eligible Days would reduce payout a second time.",
+            "Count the same absence once: use proration and remove the Absence weight, or keep the KPI only when proration excludes that absence.",
+        ),
+        (
+            "HIGH",
             "Survey reliability cannot be tested",
             "The workbook contains PCS score and participation percentages but no response numerator, denominator, or minimum sample field.",
             "Add eligible-survey and valid-response counts before using PCS score as a high-weight payout driver.",
@@ -450,6 +463,237 @@ def build_bonus_kpi_change_case(source: Path, output: Path) -> Path:
         "HIGH": f["warn"],
         "REVIEW": f["warn"],
     }
+
+    start = book.sheet(
+        "START_HERE",
+        f"{title_period}  |  WHY THE BONUS RULES NEED A REVIEW",
+        "SIMPLE MANAGEMENT VERSION  /  OPEN THIS TAB FIRST",
+        14,
+    )
+    start.set_tab_color(COLORS["gold"])
+    start.set_column("A:A", 2)
+    start.set_column("B:O", 13)
+    book.banner(
+        start,
+        3,
+        1,
+        13,
+        "THE ASK  |  Approve a controlled three-month KPI pilot. Do not recalculate July payroll from this file.",
+        "warn",
+    )
+    book.kpi(start, 1, 5, "JULY MODELED PAYOUT", baseline_total, kind="kpi_money")
+    book.kpi(start, 4, 5, "PARTICIPATION TARGET", participation["rule"].tier1_target, kind="kpi_pct")
+    book.kpi(start, 7, 5, "JULY MAXIMUM", participation["maximum"], kind="kpi_pct")
+    book.kpi(start, 10, 5, "INCOMPLETE ROWS", missing_rows, kind="kpi")
+    book.kpi(start, 13, 5, "AMOUNT AFFECTED", incomplete_exposure, kind="kpi_money")
+    start.merge_range("B10:N10", "THE FOUR THINGS TO EXPLAIN", f["section"])
+    start.write_row("B12", ["#", "Plain-language problem", "What July shows", "What we are asking"], f["header"])
+    start.set_column("B:B", 6)
+    start.set_column("C:C", 33)
+    start.set_column("D:D", 63)
+    start.set_column("E:E", 63)
+    simple_findings = [
+        (
+            1,
+            "The participation target cannot be reached",
+            f"Target: {participation['rule'].tier1_target:.0%}. Highest July result: {participation['maximum']:.1%}. Zero Tier-1 winners.",
+            f"Test {pilot_t1:.0%} for Tier 1 and {pilot_t2:.0%} for Tier 2 for three months.",
+        ),
+        (
+            2,
+            "Absence could reduce the same bonus twice",
+            f"Absence has {absence['rule'].tier1_bonus:.0%} KPI weight. If absence also reduces proration later, the employee loses twice. July is still {full_proration}/{len(records)} at full proration.",
+            "If absence drives proration, remove its KPI weight. One absence should have one financial consequence.",
+        ),
+        (
+            3,
+            "Missing information still changes pay",
+            f"{missing_rows} rows miss a core KPI; {paid_incomplete} of them still receive {incomplete_exposure:,.0f} MAD under the current calculation.",
+            "Hold the row until information is complete; missing must not mean failed or approved.",
+        ),
+        (
+            4,
+            "One target does not fit every LOB",
+            f"The same targets cover six LOBs, but {widest_metric} attainment differs by {widest_spread:.1%} between them.",
+            "Build LOB targets from at least three comparable months and approve them with Operations and HR.",
+        ),
+    ]
+    for row_index, row in enumerate(simple_findings, 12):
+        start.write(row_index, 1, row[0], f["kpi"])
+        start.write(row_index, 2, row[1], decision)
+        start.write(row_index, 3, row[2], wrap)
+        start.write(row_index, 4, row[3], wrap)
+        start.set_row(row_index, 58)
+    start.merge_range("B19:N19", "YOUR 60-SECOND TALK TRACK", f["section"])
+    talk_track = (
+        f"I am not asking to change July payroll today. I am asking permission to test a fairer and clearer bonus configuration for three months. "
+        f"July shows that the {participation['rule'].tier1_target:.0%} participation target was impossible because the highest result was {participation['maximum']:.1%}. "
+        f"We also have {missing_rows} incomplete KPI rows, the same targets across six different LOBs, and a future risk of counting absence twice through both the {absence['rule'].tier1_bonus:.0%} KPI and proration. "
+        f"My proposal is simple: test participation at {pilot_t1:.0%}/{pilot_t2:.0%}, count absence only once, stop stacking the same PCS score twice, hold incomplete rows, and use three months of LOB data before approving final targets."
+    )
+    start.merge_range("B21:N26", talk_track, decision)
+    start.freeze_panes("B12")
+    start.set_landscape()
+    start.fit_to_pages(1, 2)
+
+    changes = book.sheet(
+        "WHAT_TO_CHANGE",
+        "CURRENT RULES  →  PROPOSED THREE-MONTH PILOT",
+        "ONE LINE PER DECISION; FINAL TARGETS STILL REQUIRE MANAGEMENT APPROVAL",
+        8,
+    )
+    changes.set_tab_color(COLORS["gold"])
+    changes.set_column("A:A", 23)
+    changes.set_column("B:B", 29)
+    changes.set_column("C:C", 42)
+    changes.set_column("D:D", 44)
+    changes.set_column("E:E", 25)
+    changes.write_row(4, 0, ["Decision", "Current rule", "Why it needs review", "Proposed pilot", "Owner"], f["header"])
+    change_rows = [
+        (
+            "PCS Participation",
+            f"Tier 1 {participation['rule'].tier1_target:.0%}; Tier 2 {participation['rule'].tier2_target:.0%}",
+            f"July maximum was {participation['maximum']:.1%}; only {participation['tier1_hits'] + participation['tier2_hits']} of {participation['coverage']} measured agents earned anything.",
+            f"Temporarily test {pilot_t1:.0%} / {pilot_t2:.0%}, then validate with three months.",
+            "Operations + HR",
+        ),
+        (
+            "Absence",
+            f"{absence['rule'].tier1_bonus:.0%} KPI weight; future proration planned",
+            "Using the same absence in both places creates a double financial penalty.",
+            "If absence reduces Eligible Days, set the Absence KPI weight to 0%. Otherwise keep the KPI and exclude that absence from proration.",
+            "HR + Payroll",
+        ),
+        (
+            "Extra PCS",
+            "Add standard PCS and Extra PCS",
+            f"The same PCS score can create {pcs_max_points:.0%} achievement points.",
+            "Use Replacement during the pilot; pay the better PCS award once.",
+            "Compensation",
+        ),
+        (
+            "Missing KPI",
+            "Missing value earns zero points",
+            f"{missing_rows} rows are incomplete and {incomplete_exposure:,.0f} MAD is affected.",
+            "Hold the calculation until the required KPI arrives.",
+            "WFM + Payroll",
+        ),
+        (
+            "LOB targets",
+            "Same targets for all six LOBs",
+            f"Observed {widest_metric} attainment differs by {widest_spread:.1%}.",
+            "Use effective-dated LOB targets built from at least three comparable months.",
+            "Operations + HR",
+        ),
+        (
+            "PCS evidence",
+            "Percentages only",
+            "The source has no eligible-survey or valid-response counts, so score reliability cannot be tested.",
+            "Load numerator, denominator and minimum sample before applying high PCS weight.",
+            "Quality + WFM",
+        ),
+    ]
+    for row_index, row in enumerate(change_rows, 5):
+        for column, value in enumerate(row):
+            changes.write(row_index, column, value, decision if column == 3 else wrap)
+        changes.set_row(row_index, 62)
+    changes.merge_range("A13:E13", "BUDGET SENSITIVITY  |  WHAT THE JULY TEST CHANGES", f["section"])
+    changes.write_row(15, 0, ["Test", "July effect", "Meaning"], f["header"])
+    budget_rows = [
+        ("Participation change only", summaries[1].delta, "Cost if this rule changes and everything else stays the same."),
+        ("Remove PCS overlap only", summaries[2].delta, "Saving if Extra PCS replaces rather than adds to standard PCS."),
+        ("Both changes on complete rows", summaries[3].delta, "Comparable change for rows with all required KPI data."),
+        ("Incomplete amount held", incomplete_exposure, "Pending data completion—not cancelled or denied."),
+    ]
+    for row_index, row in enumerate(budget_rows, 16):
+        changes.write(row_index, 0, row[0], f["body"])
+        changes.write(row_index, 1, row[1], money_delta if row_index < 19 else f["money"])
+        changes.merge_range(row_index, 2, row_index, 4, row[2], wrap)
+        changes.set_row(row_index, 34)
+    changes.merge_range(
+        "A22:E24",
+        f"ABSENCE RULE IN ONE SENTENCE\nIf the same absence reduces proration, remove the {absence['rule'].tier1_bonus:.0%} Absence KPI weight. "
+        "If proration is only for joiners, leavers, or another non-overlapping eligibility reason, the Absence KPI may remain after HR approval.",
+        decision,
+    )
+    changes.freeze_panes(5, 0)
+    changes.set_landscape()
+    changes.fit_to_pages(1, 2)
+
+    proof = book.sheet(
+        "PROOF",
+        f"{title_period}  |  THE NUMBERS BEHIND THE REQUEST",
+        "ONLY THREE IDEAS: TARGET REACHABILITY, DATA COMPLETENESS, AND LOB COMPARABILITY",
+        11,
+    )
+    proof.set_tab_color(COLORS["gold"])
+    proof.set_column("A:A", 22)
+    proof.set_column("B:E", 15)
+    proof.set_column("F:F", 43)
+    proof.set_column("G:L", 13)
+    proof.write_row(4, 0, ["KPI", "Measured", "Coverage", "Any Award", "Attainment", "Simple reading"], f["header"])
+    for row_index, row in enumerate(diagnostics, 5):
+        metric = row["metric"]
+        reading = "Review coverage" if row["coverage_rate"] < 0.80 else "Target behaves inside July range"
+        if metric.rule_name == "PCS % (Participation)":
+            reading = "Tier 1 is above July maximum"
+        values = [
+            metric.label,
+            row["coverage"],
+            row["coverage_rate"],
+            row["tier1_hits"] + row["tier2_hits"],
+            row["attainment"],
+            reading,
+        ]
+        for column, value in enumerate(values):
+            fmt = pct_plain if column in {2, 4} else f["body"]
+            if column == 5 and metric.rule_name == "PCS % (Participation)":
+                fmt = f["bad"]
+            proof.write(row_index, column, value, fmt)
+    proof_chart = wb.add_chart({"type": "bar"})
+    proof_chart.add_series({
+        "name": "Attainment",
+        "categories": ["PROOF", 5, 0, 5 + len(diagnostics) - 1, 0],
+        "values": ["PROOF", 5, 4, 5 + len(diagnostics) - 1, 4],
+        "fill": {"color": COLORS["teal"]},
+        "border": {"none": True},
+        "data_labels": {"value": True, "num_format": "0.0%"},
+    })
+    proof_chart.set_title({"name": "Award attainment among measured agents"})
+    proof_chart.set_x_axis({"num_format": "0%", "min": 0, "max": 1, "major_gridlines": {"visible": False}})
+    proof_chart.set_legend({"none": True})
+    proof_chart.set_style(10)
+    proof.insert_chart("H5", proof_chart, {"x_scale": 1.05, "y_scale": 1.05})
+    proof.merge_range("A14:F14", "AHT EXAMPLE  |  SAME 450-SECOND TARGET, DIFFERENT LOB OUTCOMES", f["section"])
+    proof.write_row(16, 0, ["LOB", "Agents", "Measured", "Attaining", "Attainment", "Complete Rows"], f["header"])
+    aht_lobs = [row for row in lob_rows if row["metric"].rule_name == "AHT"]
+    for row_index, row in enumerate(aht_lobs, 17):
+        values = [row["population"], row["agents"], row["coverage"], row["attaining"], row["attainment"], row["complete"]]
+        for column, value in enumerate(values):
+            proof.write(row_index, column, value, pct_plain if column == 4 else f["body"])
+    lob_chart = wb.add_chart({"type": "column"})
+    lob_chart.add_series({
+        "name": "AHT attainment",
+        "categories": ["PROOF", 17, 0, 17 + len(aht_lobs) - 1, 0],
+        "values": ["PROOF", 17, 4, 17 + len(aht_lobs) - 1, 4],
+        "fill": {"color": COLORS["gold"]},
+        "border": {"none": True},
+        "data_labels": {"value": True, "num_format": "0.0%"},
+    })
+    lob_chart.set_title({"name": "Same AHT target, very different attainment"})
+    lob_chart.set_y_axis({"num_format": "0%", "min": 0, "max": 1, "major_gridlines": {"visible": False}})
+    lob_chart.set_legend({"none": True})
+    lob_chart.set_style(10)
+    proof.insert_chart("H17", lob_chart, {"x_scale": 1.05, "y_scale": 1.05})
+    proof.merge_range(
+        "A26:L28",
+        f"ABSENCE CHECK\nCurrent Absence weight: {absence['rule'].tier1_bonus:.0%}. July rows at full proration: {full_proration}/{len(records)}. "
+        "No July double penalty is modeled yet. The control is preventive: once absence reduces Eligible Days, the same absence must not also remove KPI points.",
+        decision,
+    )
+    proof.freeze_panes(5, 0)
+    proof.set_landscape()
+    proof.fit_to_pages(1, 2)
 
     executive = book.sheet(
         "EXECUTIVE_CASE",
@@ -762,9 +1006,9 @@ def build_bonus_kpi_change_case(source: Path, output: Path) -> Path:
     evidence.freeze_panes(5, 0)
 
     email = book.sheet(
-        "EMAIL_BRIEF",
-        "MANAGEMENT EMAIL BRIEF",
-        "COPY THE SUBJECT AND BODY; KEEP THE SENSITIVITY AND NON-RETROACTIVITY WORDING",
+        "EMAIL_SCRIPT",
+        "READY-TO-SEND EMAIL AND PRESENTATION SCRIPT",
+        "COPY THE SUBJECT AND BODY; THE WORDING IS DELIBERATELY SIMPLE",
         8,
     )
     email.set_column("A:A", 18)
@@ -779,9 +1023,10 @@ def build_bonus_kpi_change_case(source: Path, output: Path) -> Path:
         f"• The same target set is used for six LOBs, while conditional {widest_metric} attainment differs by {widest_spread:.1%} across them.\n"
         f"• {missing_rows} rows miss at least one core KPI. The current missing-as-zero logic still pays {paid_incomplete} of those rows, representing {incomplete_exposure:,.0f} MAD.\n"
         f"• Standard and Extra PCS together can contribute {pcs_max_points:.0%} achievement points from the same score field.\n\n"
+        f"• Absence already carries {absence['rule'].tier1_bonus:.0%} weight. If the same absence later reduces proration, it would reduce the bonus twice.\n\n"
         f"I request approval for a controlled three-month calibration pilot: test participation at {pilot_t1:.0%}/{pilot_t2:.0%}, "
         "use Replacement for Extra PCS pending Compensation approval, hold incomplete rows for completion, add PCS numerator/denominator counts, "
-        "and define effective-dated LOB targets from comparable history.\n\n"
+        "count the same absence only once, and define effective-dated LOB targets from comparable history.\n\n"
         f"The July sensitivities are transparent in the attached workbook: participation calibration alone is {summaries[1].delta:+,.0f} MAD; "
         f"removing PCS overlap alone is {summaries[2].delta:+,.0f} MAD; the controlled pilot changes complete-row payout by {summaries[3].delta:+,.0f} MAD, "
         f"with {incomplete_exposure:,.0f} MAD held for data completion. These are policy sensitivities, not a retroactive payroll instruction.\n\n"
@@ -795,9 +1040,14 @@ def build_bonus_kpi_change_case(source: Path, output: Path) -> Path:
     for row_index in range(7, 24):
         email.set_row(row_index, 26)
 
+    # The first four tabs are intentionally presentation-ready. Detailed
+    # reconciliations remain in the file for audit questions but stay hidden
+    # from a novice presenter unless they explicitly unhide them.
+    for technical_sheet in (executive, kpi, lob, sensitivity, agents, evidence):
+        technical_sheet.hide()
+
     output_path = book.close()
     after_hash = _source_hash(source)
     if after_hash != before_hash:
         raise RuntimeError("Source workbook changed while the bonus analysis was generated")
     return output_path
-

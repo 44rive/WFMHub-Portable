@@ -292,10 +292,14 @@ or incomplete values as payroll output.
 2. Paste the path to the populated Bonus workbook for the month you want to
    review.
 3. Open `shared_reports\Bonus_KPI_Change_Case.xlsx`.
-4. Start with `EXECUTIVE_CASE`, then use `SCENARIO_SENSITIVITY` to explain the
-   financial effect of each policy choice separately.
-5. Copy the wording from `EMAIL_BRIEF`; it clearly states that the scenarios
-   are not a retroactive payroll instruction.
+4. Read the four visible tabs in order: `START_HERE`, `WHAT_TO_CHANGE`,
+   `PROOF`, and `EMAIL_SCRIPT`.
+5. Use the 60-second script on `START_HERE` for the meeting, then copy the
+   wording from `EMAIL_SCRIPT` for the email.
+
+The detailed scenario, agent, LOB and evidence sheets are hidden so a new user
+is not overwhelmed. They remain inside the workbook and can be unhidden if
+management asks for the calculation details.
 
 The analysis detects the period and KPI configuration from the source. It
 derives a participation sensitivity from the measured distribution, holds

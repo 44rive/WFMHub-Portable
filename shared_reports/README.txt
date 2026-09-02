@@ -20,9 +20,12 @@ Included builders
 
 2. Bonus KPI change case
    - Reconciles the source workbook's current modeled payout.
+   - Opens on four simple presentation tabs with a 60-second talk track.
+   - Explains the single-treatment rule for absence KPI versus proration.
    - Separates measured coverage from KPI attainment and compares LOB behavior.
    - Isolates participation, Extra PCS and completeness-gate sensitivities.
-   - Includes an agent trace, audit method and copy-ready management email.
+   - Keeps the agent trace and audit detail hidden but available for questions.
+   - Includes a copy-ready management email.
    - Treats every scenario as a policy test, never a payroll instruction.
 
 3. PCS management 3-hour template

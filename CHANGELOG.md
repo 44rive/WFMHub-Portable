@@ -6,6 +6,9 @@
   current payout, separates KPI coverage from attainment, exposes LOB
   comparability and incomplete-row risk, and models isolated configuration
   sensitivities without changing the source or issuing a payroll instruction.
+- Simplified that workbook to four presentation tabs, added a 60-second talk
+  track, and made the absence KPI/proration single-treatment decision explicit;
+  detailed audit sheets remain hidden and available for follow-up questions.
 
 ## 0.9.0 — 2026-09-01
 
