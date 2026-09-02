@@ -16,6 +16,7 @@ shared_reports/*.xlsm
 shared_reports/*.pdf
 !shared_reports/README.txt
 !shared_reports/Bonus_Management_Proposal.xlsx
+!shared_reports/Bonus_July_2026_KPI_Change_Case.xlsx
 !shared_reports/PCS_Management_3H_Template.xlsx
 input/*.xlsx
 input/*.csv
