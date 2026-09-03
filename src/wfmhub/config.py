@@ -56,6 +56,7 @@ class Config:
     analytics_rules: Path
     report_catalog: Path
     queue_mapping: Path
+    service_profiles: Path
     sources: dict[str, str]
     period_start: date | None
     period_end: date | None
@@ -144,6 +145,7 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         analytics_rules=_portable_path(home, str(paths.get("analytics_rules", "config/analytics_rules.toml"))),
         report_catalog=_portable_path(home, str(paths.get("report_catalog", "config/report_catalog.toml"))),
         queue_mapping=_portable_path(home, str(paths.get("queue_mapping", "config/queue_mapping.csv"))),
+        service_profiles=_portable_path(home, str(paths.get("service_profiles", "config/service_profiles.toml"))),
         sources={
             "call_folder": "Storm/Call by Call",
             "apde_folder": "Storm/APDE Standard KPIs Inbound Calls",
@@ -178,6 +180,11 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
             "operations": "operations",
             "intraday": "intraday",
             "quality_pcs": "quality_pcs",
+            "pcs": "pcs",
+            "bonus": "bonus",
+            "service": "service",
+            "staffing": "staffing",
+            "attendance": "attendance",
             "absence": "absence",
             "corrections": "corrections",
             "scorecard": "scorecard",
@@ -220,14 +227,17 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
     from .metrics import ensure_metric_catalog, load_metric_catalog
     from .report_specs import ensure_report_catalog, load_report_catalog
     from .rules import ensure_rulebook, load_rulebook, validate_rulebook
+    from .service_profiles import ensure_service_profiles, load_service_profiles, validate_service_profiles
 
     ensure_rulebook(home)
     ensure_metric_catalog(home, cfg.metric_catalog)
     ensure_analytics_rules(home, cfg.analytics_rules)
     ensure_report_catalog(home, cfg.report_catalog)
     ensure_queue_mapping(home, cfg.queue_mapping)
+    ensure_service_profiles(home, cfg.service_profiles)
     load_queue_mapping(cfg.queue_mapping)
-    load_metric_catalog(home, cfg.metric_catalog)
+    metric_catalog = load_metric_catalog(home, cfg.metric_catalog)
+    validate_service_profiles(load_service_profiles(home, cfg.service_profiles), metric_catalog)
     load_analytics_rules(home, cfg.analytics_rules)
     load_report_catalog(home, cfg.report_catalog)
     business = load_rulebook(home, cfg.business_rules)

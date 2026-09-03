@@ -49,7 +49,10 @@ class QueueMapping:
     def map_forecast(self, file_name: str, raw_queue: str | None) -> MappingResult:
         key = _key(Path(file_name).stem)
         for prefix, result in self.forecast_rows:
-            if key.startswith(prefix):
+            # Reviewed exports can be named FORD_FR_... or
+            # Forecast_FORD_FR_.... The configured token still identifies the
+            # service when it occurs in the normalized filename.
+            if key.startswith(prefix) or prefix in key:
                 return result
         if raw_queue and _key(raw_queue) not in {"COMBINEDALLMEDIA", "ALL"}:
             scope = str(raw_queue).strip()

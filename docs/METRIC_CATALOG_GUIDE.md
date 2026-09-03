@@ -74,8 +74,8 @@ Percentages are decimals: `0.80` means 80%.
 4. Save.
 5. Run `WFMHub.cmd rules validate`.
 6. Run `WFMHub.cmd rules test`.
-7. Refresh a known short period and compare `METHODS`, `FINDINGS`, and
-   `PROVENANCE` with the previous workbook.
+7. Refresh a known short period and compare `DEFINITIONS`, `_AUDIT`, and the
+   on-demand `FINDINGS` workbook with the previous version.
 
 ## Change a method from a future date
 
@@ -151,9 +151,9 @@ new calculation in report SQL or an Excel cell.
 
 Before sending a management workbook:
 
-1. `SOURCE_HEALTH` has no unexplained missing/stale source.
-2. `DATA_QUALITY` has no unexplained critical issue.
-3. `METHODS` contains the expected method and effective period.
-4. `PROVENANCE` hashes match the refresh you intended.
+1. The dashboard status is not `INCOMPLETE`, or every limitation is disclosed.
+2. On-demand `FINDINGS` has no unexplained critical issue.
+3. `DEFINITIONS` contains the expected method.
+4. Hidden `_AUDIT` lineage matches the refresh you intended.
 5. Low samples are disclosed.
 6. Historical totals reconcile from summed numerator and denominator counters.

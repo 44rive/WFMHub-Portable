@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.9.0"
+DEFAULT_VERSION = "0.10.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -105,6 +105,12 @@ def validate_stage(stage: Path, expected_native: dict[str, str]) -> None:
     ]
     if any(path.exists() for path in forbidden_user_files):
         raise RuntimeError("Portable stage contains user configuration or database data")
+    local_excel_masters = [
+        path for pattern in ("*.xlsx", "*.xlsm")
+        for path in (stage / "templates" / "reports").glob(pattern)
+    ]
+    if local_excel_masters:
+        raise RuntimeError(f"Portable stage contains local Excel report masters: {local_excel_masters}")
     unexpected_custom = [
         path for path in (stage / "custom").rglob("*")
         if path.is_file() and path.name not in {
@@ -174,6 +180,12 @@ def build(args) -> Path:
     copy_tree(ROOT / "docs", stage / "docs")
     copy_tree(ROOT / "prompts", stage / "prompts")
     copy_tree(ROOT / "templates", stage / "templates")
+    # Excel-authored masters are local user assets and can contain refreshed
+    # operational data. Ship the instructions/query pattern, never the files.
+    report_template_dir = stage / "templates" / "reports"
+    for pattern in ("*.xlsx", "*.xlsm"):
+        for master in report_template_dir.glob(pattern):
+            master.unlink()
     # Ship only reviewed underscore templates. Runnable local jobs can contain
     # business logic or data and must never leak into a public portable ZIP.
     (stage / "custom" / "jobs").mkdir(parents=True, exist_ok=True)
@@ -194,6 +206,7 @@ def build(args) -> Path:
     shutil.copy2(ROOT / "config" / "default_analytics.toml", stage / "config" / "default_analytics.toml")
     shutil.copy2(ROOT / "config" / "default_reports.toml", stage / "config" / "default_reports.toml")
     shutil.copy2(ROOT / "config" / "default_queue_mapping.csv", stage / "config" / "default_queue_mapping.csv")
+    shutil.copy2(ROOT / "config" / "default_service_profiles.toml", stage / "config" / "default_service_profiles.toml")
     shutil.copy2(ROOT / "WFMHub.cmd", stage / "WFMHub.cmd")
     shutil.copy2(ROOT / "SETUP.cmd", stage / "SETUP.cmd")
     shutil.copy2(ROOT / "README.md", stage / "README.md")
@@ -207,15 +220,9 @@ def build(args) -> Path:
         "Only pure-Python report libraries are added under runtime/site-packages.\n",
         encoding="utf-8",
     )
-    for folder in ("database", "backups", "logs", "output", "input", "extracts", "shared_reports"):
+    for folder in ("database", "backups", "logs", "output", "input", "extracts"):
         (stage / folder).mkdir(exist_ok=True)
     shutil.copy2(ROOT / "input" / "README.md", stage / "input" / "README.md")
-    shutil.copy2(ROOT / "shared_reports" / "README.txt", stage / "shared_reports" / "README.txt")
-    for workbook_name in ("Bonus_Management_Proposal.xlsx", "PCS_Management_3H_Template.xlsx"):
-        workbook = ROOT / "shared_reports" / workbook_name
-        if not workbook.exists():
-            raise FileNotFoundError(f"Official shared workbook is missing: {workbook}")
-        shutil.copy2(workbook, stage / "shared_reports" / workbook_name)
     validate_stage(stage, expected_native)
 
     dist = ROOT / "dist"

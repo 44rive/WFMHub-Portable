@@ -14,6 +14,8 @@ class QueueMappingTests(unittest.TestCase):
         mapping = load_queue_mapping(REPO / "config" / "default_queue_mapping.csv")
         forecast = mapping.map_forecast("RSA_BE_08-2026.txt", "Combined - All Media")
         self.assertEqual((forecast.service_scope, forecast.comparison_scope), ("RSA BE", "RSA BE"))
+        prefixed = mapping.map_forecast("Forecast_RSA_NL_August.txt", "Combined - All Media")
+        self.assertEqual((prefixed.service_scope, prefixed.comparison_scope), ("RSA NL", "RSA NL"))
         belgium = mapping.map_actual("APBE", "APBN_BRU_RSA_INTERNAT_All_FR", None, "RSA")
         self.assertEqual((belgium.service_scope, belgium.comparison_scope), ("RSA BE FR", "RSA BE"))
         ford_nl = mapping.map_actual("APBE", "APBN_AMS_MOBILITY_Ford_Assistance_NL", None, "FORD")

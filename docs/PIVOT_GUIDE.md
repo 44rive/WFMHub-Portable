@@ -1,112 +1,122 @@
-# Creating PivotTables from WFMHub reports
+# PivotTable field guide
 
-WFMHub creates governed Excel Tables; it does not create PivotTables for you.
-You can arrange those tables without touching the extracts or the SQLite hub.
+Use [EXCEL_TEMPLATE_GUIDE.md](EXCEL_TEMPLATE_GUIDE.md) for the one-time button
+clicks. This page tells you which fields belong in each PivotTable.
 
-## The basic clicks
+The queries must read the compact CSVs in `output\model_data\<report>` and load
+as **Connection Only + Add to Data Model**. Do not load raw extracts or model
+tables into worksheets.
 
-1. Open one of the four generated workbooks.
-2. Open the detailed sheet named below.
-3. Click any populated cell inside the striped table.
-4. On Excel's ribbon, click **Insert**, then **PivotTable**.
-5. Choose **New Worksheet**, then click **OK**.
-6. Drag fields into **Rows**, **Columns**, **Values**, and **Filters**.
-7. If Excel says **Count of** a numeric field, open **Value Field Settings**
-   and change it to **Sum** or **Average**, as described below.
+## PCS Performance
 
-If a sheet says “No rows for this period,” there is no table to pivot. Check
-`SOURCE_HEALTH`, the selected dates, and `DATA_QUALITY`, then refresh.
+Use `agent_detail.csv`.
 
-## Daily staffing gaps by LOB and language
+- Rows: `agent_name`.
+- Slicers: `lob`, `team_leader`, `agent_name`, `language`, `sample_state`.
+- Values to sum: `q1_score_sum`, `valid_q1`, `q1_nonblank`, `pcs_status_1`,
+  `score_le_3`, and `score_gt_3`.
 
-Use the newest workbook in `output\operations`, sheet `STAFFING_GAPS`.
-
-- Rows: **LOB**, then **Language**.
-- Columns: **Interval Start** if you want the intraday curve.
-- Values: **Sum of Required FTE**, **Sum of Available FTE**, and **Sum of
-  Staffing Gap FTE**.
-- Filters: **Business Date**, **Staffing State**, **Evidence Basis**.
-
-Treat `DATA_MISSING` and `DATA_PARTIAL` as unknown evidence. Their gap and
-variance are deliberately blank; do not replace them with zero.
-
-## APDE service state by LOB
-
-Use `output\operations`, sheet `SERVICE_LEVEL`.
-
-- Rows: **LOB**, then **Language**.
-- Columns: **Interval Start** or **Interval Label**.
-- Values: **Sum of Offered**, **Sum of Answered**, **Sum of Answered Within
-  Target**, **Sum of Short Abandoned**, and **Sum of Handled Seconds**.
-
-Do not average interval percentages. Calculate the total after summing the
-components:
+Create Data Model measures that divide summed counters:
 
 ```text
-Gross SL              = Answered Within Target / Offered
-Adjusted SL           = Answered Within Target / (Offered - Short Abandoned)
-Service Availability  = Answered / Offered
-AHT                    = Handled Seconds / Answered
+PCS Average = SUM(q1_score_sum) / SUM(valid_q1)
+PCS Participation = SUM(q1_nonblank) / SUM(pcs_status_1)
 ```
 
-Service availability is the availability of the service, never an agent
-availability or adherence measure.
+Never average `pcs_average` or `participation_rate`.
 
-## Exact PCS by agent and month
+## Service Performance
 
-Use `output\quality_pcs`, sheet `AGENT_MONTH` for a monthly PivotTable or
-`AGENT_DAY` for daily detail.
+Use `intraday.csv` for management and `queue_detail.csv` for audit.
 
-- Rows: **Agent Name**.
-- Columns: **Month Key** in `AGENT_MONTH`, or **Business Date** in `AGENT_DAY`.
-- Values: sum the score and participation counters.
-- Filters: **Team Leader**, **LOB**, **Language**, **Sample Flag**.
+- Rows: `hour_start`.
+- Columns: `service_group`.
+- Slicers: `business_date`, `service_group`.
+- Values to sum: `offered`, `answered`, `answered_within_target`,
+  `short_abandoned`, and `handled_seconds` when present.
 
-For a higher-grain result, divide summed counters:
+Measures:
 
 ```text
-PCS average      = Sum of Score Sum / Sum of Valid Score Responses
-PCS participation = Sum of Participation Responses / Sum of PCS Status Calls
+Ford OEM Gross SL = SUM(answered_within_target) / SUM(offered)
+Service Availability = SUM(answered) / SUM(offered)
+AHT = SUM(handled_seconds) / SUM(answered)
 ```
 
-Never average the already-calculated agent/day percentages. `METHODS` documents
-the active metric recipe; `DOMAIN_RULES` documents exact Q1 eligibility,
-`<=3`/`>3` counts, and participation evidence.
+The chosen service profile controls which mapped scopes and governed SL method
+enter the files. If a different profile selects adjusted SL, its measure is
+`SUM(answered_within_target) / (SUM(offered) - SUM(short_abandoned))`. Check
+`service_method` and the report `DEFINITIONS` sheet instead of guessing.
 
-## Final absenteeism by agent and month
+## Staffing & Coverage
 
-Use `output\absence`, sheet `AGENT_DAY`.
+Use `intraday.csv`.
 
-- Rows: **Agent Name**.
-- Columns: **Business Date**. In Excel, right-click one date and choose
-  **Group**, then **Months**, if you want a monthly agent view.
-- Values: **Sum of Final Absence Hours** and **Sum of Planned Net Hours**.
-- Filters: **Team Leader**, **LOB**, **Language**, **Final Ledger Status**.
+- Rows: `interval_start`.
+- Columns: `lob`, then `language`.
+- Slicers: `business_date`, `lob`, `language`, `staffing_state`.
+- Values: sum `scheduled_fte`, `observed_fte`, `productive_fte`, and
+  `staffing_gap_fte`.
 
-Calculate the correct aggregate rate beside the PivotTable:
+Treat `DATA_MISSING` and future intervals as unknown. Do not replace blank gaps
+with zero.
+
+## Attendance Today
+
+Use `actions.csv`.
+
+- Rows: `agent_name`.
+- Slicers: `lob`, `team_leader`, `call_action`, `attendance_result`.
+- Useful columns: scheduled start/end, first/last evidence, late minutes,
+  no-show minutes, source-loaded flag, and provisional flag.
+
+This is a contact queue, not an adherence table.
+
+## Attendance Corrections
+
+Use `gaps.csv` for actions and `timeline.csv` for a planned-versus-observed
+visual.
+
+- Rows: `agent_name`, then gap start.
+- Slicers: `lob`, `team_leader`, `detected_issue`, `validation_status`.
+- Values: sum gap minutes.
+
+Edit and import decisions only in the generated workbook `GAPS` sheet. The
+Data Model copy is for analysis and should stay read-only.
+
+## Final Absence & Shrinkage
+
+Use `agent_detail.csv`.
+
+- Rows: `agent_name`.
+- Columns: `business_date`; group dates by month if needed.
+- Slicers: `lob`, `team_leader`, `language`, `final_ledger_status`.
+- Values: sum planned net, final absence, vacation, unpaid, shrinkage, and
+  unmapped hours.
+
+Measure:
 
 ```text
-Final absence rate = Sum of Final Absence Hours / Sum of Planned Net Hours
+Final Absence Rate = SUM(final_absence_hours) / SUM(planned_net_hours)
 ```
 
-Do not average `Final Absence Rate`. Use `ACTIVITY_EVENTS` only for audit and
-activity detail; it can contain overlapping evidence and is not the headline
-numerator. Review `UNMAPPED_REVIEW` before using final payroll results.
+Never average `final_absence_rate`.
 
-## Add slicers
+## Bonus Performance
 
-1. Click the PivotTable.
-2. Click **PivotTable Analyze**, then **Insert Slicer**.
-3. Choose fields such as LOB, Language, Team Leader, Status, or Source.
-4. Click **OK** and place the slicers beside the PivotTable.
+Use `agent_detail.csv` and `kpi_analysis.csv`.
 
-## If the PivotTable looks wrong
+- Rows: `population`, then `agent_name`.
+- Slicers: `period`, `population`, `release_status`, `eligibility`.
+- Values: scenario payout, released payout, and achievement components.
 
-- **Count of …** instead of **Sum of …**: change Value Field Settings.
-- Percentage above 100%: use summed numerator divided by summed denominator.
-- Missing agents: check the FTE scope and `SOURCE_HEALTH`.
-- Missing dates: check the selected period and newest source dates.
-- Empty Daily Operations: StartEndTimes is required for the operational plan;
-  Activities cannot replace it.
-- Unexplained final absence: check `ACTIVITY_EVENTS`, `UNMAPPED_REVIEW`,
-  `ACTIVITY_RULES`, and the rule version/hash.
+Do not present Scenario Payout as payroll output while release rows are blocked.
+
+## Common mistakes
+
+- **Count of** instead of **Sum of**: open Value Field Settings and select Sum.
+- Percentage above 100%: divide summed numerators by summed denominators.
+- Missing agents: check the FTE roster and Source Health.
+- Missing dates: check date coverage and the period used to build the report.
+- Refresh error: unhide `_AUDIT` and verify the Template model folder path.
+- Empty Pivot: inspect `manifest.json`; it states the exact row count per CSV.

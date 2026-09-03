@@ -122,6 +122,8 @@ def resolve_period(
             UNION ALL SELECT max(extract_date) FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
             UNION ALL SELECT min(business_date) FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
             UNION ALL SELECT max(business_date) FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(period || '-01') FROM raw.bonus_import WHERE active=true
+            UNION ALL SELECT max(period || '-01') FROM raw.bonus_import WHERE active=true
         ) x WHERE d IS NOT NULL
         """
     ).fetchone()

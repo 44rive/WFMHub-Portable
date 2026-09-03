@@ -27,6 +27,7 @@ REPORT_PACKS = {
         default_folder="operations",
         filename_prefix="WFMHub_Daily_Operations",
         purpose="Attendance calls, staffing gaps, and APDE service state without adherence KPIs.",
+        implemented=True,
     ),
     "intraday": ReportPack(
         key="intraday",
@@ -40,18 +41,49 @@ REPORT_PACKS = {
         default_folder="quality_pcs",
         filename_prefix="WFMHub_Quality_PCS",
         purpose="Agent call performance and PCS metrics sourced from call-by-call data.",
+        implemented=True,
     ),
     "absence": ReportPack(
         key="absence",
         default_folder="absence",
-        filename_prefix="WFMHub_Final_Absenteeism",
-        purpose="Activities-only corrected final absenteeism ledger.",
+        filename_prefix="WFMHub_Final_Absence_Shrinkage",
+        purpose="Corrected Verint final absence and shrinkage ledger.",
     ),
     "corrections": ReportPack(
         key="corrections",
         default_folder="corrections",
         filename_prefix="WFMHub_Yesterday_Corrections",
         purpose="Residual observed gaps, decisions, and a full-shift evidence timeline.",
+    ),
+    "pcs": ReportPack(
+        key="pcs",
+        default_folder="pcs",
+        filename_prefix="WFMHub_PCS_Performance",
+        purpose="Daily, MTD and prior-month PCS performance and participation.",
+    ),
+    "bonus": ReportPack(
+        key="bonus",
+        default_folder="bonus",
+        filename_prefix="WFMHub_Bonus_Performance",
+        purpose="Governed monthly bonus calculation, diagnostics and release gates.",
+    ),
+    "service": ReportPack(
+        key="service",
+        default_folder="service",
+        filename_prefix="WFMHub_Service_Performance",
+        purpose="Mapped-LOB service level, availability, forecast deviation and AHT.",
+    ),
+    "staffing": ReportPack(
+        key="staffing",
+        default_folder="staffing",
+        filename_prefix="WFMHub_Staffing_Coverage",
+        purpose="LOB/language staffing coverage and actionable interval gaps.",
+    ),
+    "attendance": ReportPack(
+        key="attendance",
+        default_folder="attendance",
+        filename_prefix="WFMHub_Attendance_Today",
+        purpose="Live daily attendance calling queue without adherence.",
     ),
     "scorecard": ReportPack(
         key="scorecard",
@@ -62,8 +94,8 @@ REPORT_PACKS = {
     ),
 }
 
-IMPLEMENTED_REPORT_PACK_KEYS = tuple(
-    key for key, pack in REPORT_PACKS.items() if pack.implemented
+IMPLEMENTED_REPORT_PACK_KEYS = (
+    "pcs", "bonus", "service", "staffing", "attendance", "corrections", "absence",
 )
 
 
@@ -88,6 +120,7 @@ def build_report_pack(
     start: date,
     end: date,
     output: Path | None = None,
+    service_profile: str | None = None,
 ) -> Path:
     pack = report_pack(key)
     if not pack.implemented:
@@ -102,12 +135,32 @@ def build_report_pack(
         from .governed_workbooks import build_exact_pcs_workbook
 
         return build_exact_pcs_workbook(conn, config, start, end, output)
+    if key == "pcs":
+        from .decision_products import build_pcs_performance_workbook
+
+        return build_pcs_performance_workbook(conn, config, start, end, output)
+    if key == "bonus":
+        from .bonus import build_bonus_performance_workbook
+
+        return build_bonus_performance_workbook(conn, config, start, end, output)
+    if key == "service":
+        from .decision_products import build_service_performance_workbook
+
+        return build_service_performance_workbook(conn, config, start, end, output, service_profile)
+    if key == "staffing":
+        from .decision_products import build_staffing_coverage_workbook
+
+        return build_staffing_coverage_workbook(conn, config, start, end, output)
+    if key == "attendance":
+        from .decision_products import build_attendance_today_workbook
+
+        return build_attendance_today_workbook(conn, config, start, end, output)
     if key == "absence":
-        from .governed_workbooks import build_final_absence_workbook
+        from .decision_products import build_final_absence_product_workbook
 
-        return build_final_absence_workbook(conn, config, start, end, output)
+        return build_final_absence_product_workbook(conn, config, start, end, output)
     if key == "corrections":
-        from .governed_workbooks import build_corrections_workbook
+        from .decision_products import build_attendance_corrections_workbook
 
-        return build_corrections_workbook(conn, config, start, end, output)
+        return build_attendance_corrections_workbook(conn, config, start, end, output)
     raise ValueError(f"Report pack {key!r} has no registered builder")

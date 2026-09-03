@@ -37,6 +37,10 @@ WFMHub/
 ├── config/report_catalog.toml  editable/validated report contract
 ├── config/default_queue_mapping.csv shipped mapping defaults
 ├── config/queue_mapping.csv    editable queue/file/scope mapping
+├── config/default_service_profiles.toml shipped service-product defaults
+├── config/service_profiles.toml editable effective-dated service profiles
+├── templates/reports/          protected Excel-authored Pivot/slicer masters
+├── templates/power_query/      direct-CSV Power Query pattern
 ├── prompts/                    optional manual Copilot handoff prompt
 ├── database/wfm.sqlite3        durable SQLite hub
 ├── input/                      persistent human inputs
@@ -79,6 +83,10 @@ details remain in one module.
 | `raw.forecast_interval` | One queue/forecast interval; not agent-scoped |
 | `raw.queue_actual` | One queue/15-minute actual interval; not agent-scoped |
 | `raw.call_leg` | One admitted, typed Call-by-Call source leg |
+| `raw.bonus_import` | One immutable Bonus Matrix content hash/version |
+| `raw.bonus_agent_month` | One imported agent/month input row |
+| `raw.bonus_kpi_rule` | One imported population/KPI threshold rule |
+| `raw.bonus_policy` | One imported policy decision row |
 | `core.clean_call_leg` | Deduplicated active call-leg view by stable Call Key |
 | `core.dim_agent` | One operational Agent ID |
 | `core.correction_action` | One human decision per stable Correction ID |
@@ -100,6 +108,8 @@ details remain in one module.
 | `mart.service_interval` | One rule-versioned APBE/APFR/APDE service interval |
 | `mart.metric_value` | One configured KPI observation per source entity/method |
 | `mart.analysis_finding` | One ranked deterministic finding with evidence filter |
+| `mart.bonus_agent_month` | One governed monthly bonus result per agent |
+| `mart.bonus_kpi_result` | One governed agent/KPI monthly result |
 | `mart.source_health` | One configured source family |
 
 ## Report packs
@@ -108,16 +118,24 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 
 | Pack | Folder | Scope |
 |---|---|---|
-| `operations` | `output/operations` | Selected-day attendance calls, staffing gaps, and APDE service state |
-| `corrections` | `output/corrections` | Latest evidence-complete-day residual gaps and shift timeline |
-| `quality_pcs` | `output/quality_pcs` | Exact Q1 PCS, participation, day/team/month summaries and responses |
-| `absence` | `output/absence` | Activities-only final absence ledger, evidence and activity rules |
+| `pcs` | `output/pcs` | Daily, selected-period, MTD and prior-month PCS/participation |
+| `bonus` | `output/bonus` | Imported Bonus Matrix result, KPI diagnostics and release controls |
+| `service` | `output/service` | Selected effective service profile, mapped queues, forecast and AHT |
+| `staffing` | `output/staffing` | Selected-day roster LOB/language coverage |
+| `attendance` | `output/attendance` | Same-day no-show/late/not-seen contact queue |
+| `corrections` | `output/corrections` | Latest completed-day residual gaps and shift visualization |
+| `absence` | `output/absence` | Activities-only final absence/shrinkage ledger |
 
-The Yesterday Corrections workbook is the only workbook accepted for
-correction-action import. Legacy Intraday and Executive Scorecard keys remain
-reserved and disabled; their old builders are not shipped.
-Raw call-by-call rows stay in SQLite; PCS reports receive summaries, trends and
-bounded responses. Full clean details are explicit CSV/XLSX exports.
+Every product uses the same `DASHBOARD`/detail/`DEFINITIONS`/hidden `_AUDIT`
+presentation shell. The Corrections `GAPS` sheet is the only workbook input
+accepted for correction-action import. Legacy `operations` and `quality_pcs`
+builders remain callable for compatibility but are absent from the menu;
+Intraday and Executive Scorecard keys remain disabled.
+
+Each report also refreshes compact tables in `output/model_data/<product>`.
+Excel-authored masters query those CSVs directly as connection-only Data Model
+tables. WFMHub creates a starter once and never rewrites a master, protecting
+native PivotTables and slicers.
 
 ## Agent scope and identity
 
@@ -195,6 +213,11 @@ to write ranked findings. A finding stores its metric/method, scope, selected
 period, values, evidence dataset/filter, and catalog/analytics hashes. There is
 no model server, paid API, GPU, prompt execution, or database upload path.
 
+`on_demand_analysis.py` exposes that same boundary for a user-selected period,
+domain and comparison. Its workbook contains `FINDINGS`, `METRICS`, and curated
+`EVIDENCE`; a period change is descriptive and never presented as proof of
+causality.
+
 `prompts/COPILOT_WFM_ANALYST.md` is a static manual aid. A user may attach a
 chosen finished workbook to an approved Copilot account. The runtime never
 connects Copilot to SQLite or raw extracts, and Copilot is never a calculation
@@ -244,7 +267,8 @@ and tolerance policy plus PCS source parsing, but contains no KPI arithmetic.
 denominator, sample, aggregation, target, direction, scope, priority, and
 effective dates. `analytics_rules.toml` owns finding sensitivity;
 `report_catalog.toml` validates the presentation contract; `queue_mapping.csv`
-owns naming.
+owns queue/service/forecast naming; and `service_profiles.toml` owns
+effective-dated report scope, governed metric selection and display groups.
 
 The safe expression engine supports numeric components, arithmetic, comparisons,
 and a small function allowlist. It never uses Python `eval`. Scoped methods are
@@ -253,9 +277,9 @@ Higher-grain ratios always sum stored numerators and denominators before
 division.
 
 Every semantic value stores catalog, rule and method identity.
-`meta.metric_application`, `meta.rule_application`, and workbook `PROVENANCE`
-record the same hashes by run. The governance workbook is generated directly
-from all four catalogs, preventing documentation/calculation drift.
+`meta.metric_application`, `meta.rule_application`, and workbook `_AUDIT`
+record the same lineage by run. The governance workbook is generated directly
+from the governed catalogs, preventing documentation/calculation drift.
 
 Clipping, overlap unions, overnight handling, deduplication, identity, and
 spell grouping remain tested engine primitives rather than editable formulas.

@@ -1,15 +1,28 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 — 2026-09-03
 
-- Added a deterministic Bonus KPI change-case workbook that reconciles the
-  current payout, separates KPI coverage from attainment, exposes LOB
-  comparability and incomplete-row risk, and models isolated configuration
-  sensitivities without changing the source or issuing a payroll instruction.
-- Simplified that workbook to four presentation tabs, added a 60-second talk
-  track, and made the absence KPI/proration single-treatment decision explicit;
-  detailed audit sheets remain hidden and available for follow-up questions.
-
+- Replaced the combined/shared-report workflow with seven focused decision
+  products—PCS, Bonus, Service, Staffing, Attendance Today, Attendance
+  Corrections, and Final Absence—using one management design contract.
+- Added daily/MTD/prior-month PCS comparisons, preserved exact original Q1 and
+  participation logic, and made the three-hour requirement a sending cadence
+  rather than a different KPI.
+- Added read-only, content-hashed Bonus Matrix v1.2 ingestion with governed
+  agent/KPI marts, source-result reconciliation, scenario/released payout
+  separation, and atomic idempotent imports.
+- Added effective-dated service profiles and a Ford OEM France product matching
+  the original Flash's gross SL, service-availability, forecast-attainment, AHT,
+  and Ford/Toyota/Chery presentation logic.
+- Added user-selected on-demand analysis for PCS, service, forecast, staffing,
+  attendance, final absence, and bonus with explicit comparison modes and
+  evidence rows.
+- Added the protected Excel-master route: stable compact CSV model packages,
+  direct Power Query guidance, connection-only Data Model loading, and a
+  `template-init` command that never overwrites a master during daily refresh.
+- Split attendance work into a live contact queue, staffing coverage,
+  completed-day corrections, and final corrected Verint absence; current-day
+  unfinished shifts remain protected from early-leave classification.
 ## 0.9.0 — 2026-09-01
 
 - Added an effective-dated, scope-aware metric catalog as the single source for

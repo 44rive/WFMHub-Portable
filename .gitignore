@@ -5,12 +5,16 @@ config/metric_catalog.toml
 config/analytics_rules.toml
 config/report_catalog.toml
 config/queue_mapping.csv
+config/service_profiles.toml
 config/wfmhub_pre_*.toml
 database/
 backups/
 logs/
 output/
 extracts/
+templates/reports/*.xlsx
+templates/reports/*.xlsm
+!templates/reports/README.md
 shared_reports/*.xlsx
 shared_reports/*.xlsm
 shared_reports/*.pdf

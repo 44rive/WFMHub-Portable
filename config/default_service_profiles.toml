@@ -1,0 +1,72 @@
+# Service reporting scopes. Queue membership remains in queue_mapping.csv.
+# This catalog defines how mapped queues are presented and which SLA contract
+# applies. Formulas and targets remain centralized in metric_catalog.toml.
+
+[catalog]
+version = "2026.09.2"
+default_profile = "ford_oem_fr"
+description = "Effective-dated service report profiles, starting with the Flash Ford OEM reconciliation pilot."
+
+[[profiles]]
+id = "ford_oem_fr"
+label = "Ford OEM France"
+service_scopes = ["Ford FR"]
+source_systems = ["APBE", "APFR"]
+service_level_metric = "service_level_gross"
+availability_metric = "service_availability"
+aht_metric = "aht_seconds"
+effective_from = 2026-01-01
+
+[[profiles.groups]]
+label = "Toyota"
+queue_contains = ["TOYOTA", "LEXUS"]
+
+[[profiles.groups]]
+label = "Chery"
+queue_contains = ["CHERY"]
+
+[[profiles.groups]]
+label = "Ford"
+queue_contains = ["FORD"]
+
+[[profiles]]
+id = "ford_nl"
+label = "Ford Netherlands"
+service_scopes = ["Ford NL"]
+source_systems = ["APBE"]
+service_level_metric = "service_level"
+availability_metric = "service_availability"
+aht_metric = "aht_seconds"
+effective_from = 2026-01-01
+
+[[profiles.groups]]
+label = "Ford"
+queue_contains = ["FORD"]
+
+[[profiles]]
+id = "rsa_be"
+label = "RSA Belgium"
+service_scopes = ["RSA BE FR", "RSA BE VL"]
+source_systems = ["APBE"]
+service_level_metric = "service_level"
+availability_metric = "service_availability"
+aht_metric = "aht_seconds"
+effective_from = 2026-01-01
+
+[[profiles.groups]]
+label = "RSA"
+queue_contains = ["RSA", "MOBILITY"]
+
+[[profiles]]
+id = "rsa_nl"
+label = "RSA Netherlands"
+service_scopes = ["RSA NL"]
+source_systems = ["APBE"]
+service_level_metric = "service_level"
+availability_metric = "service_availability"
+aht_metric = "aht_seconds"
+effective_from = 2026-01-01
+
+[[profiles.groups]]
+label = "RSA"
+queue_contains = ["RSA", "MOBILITY"]

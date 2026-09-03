@@ -51,7 +51,7 @@ attendance, absence, correction, or payroll models.
 ## Windows portable build
 
 ```bash
-python3 packaging/windows/build_portable.py --version 0.9.0 --python-version 3.13.7
+python3 packaging/windows/build_portable.py --version 0.10.0 --python-version 3.13.7
 ```
 
 The builder always deletes and recreates stage and wheelhouse. It:
@@ -112,6 +112,19 @@ Report-pack keys and destinations live in `report_packs.py` and
 `[report_packs]`, separate from integer row limits in `[report]`.
 `reports.build_report()` remains the Daily Operations compatibility API. Register
 builders through `build_report_pack`; do not import them directly in the CLI.
+The menu exposes only `pcs`, `bonus`, `service`, `staffing`, `attendance`,
+`corrections`, and `absence`. `operations` and `quality_pcs` remain compatibility
+API keys, not current product contracts.
+
+All current products use `DecisionWorkbook`. A builder must create the exact
+ordered sheets declared in `default_reports.toml`, keep `_AUDIT` hidden, and
+write only report-ready grains to `output/model_data/<pack>`. Do not add raw
+extract tables to workbooks or model packages.
+
+`template-init` may create a styled `.xlsx` starter. After a user adds Excel
+Data Model, PivotTable, or slicer parts, Python must never open or rewrite that
+master. Daily jobs update only the stable compact CSV package; Excel performs
+Refresh All. Local masters are Git-ignored.
 
 Call-by-call uses a stable deterministic leg key. Full-history extracts may
 overlap, so `core.clean_call_leg` chooses the newest active row at that key.
@@ -129,3 +142,9 @@ code rather than a sandbox. The portable build copies underscore templates from
 type only when it can name the governed metric/dataset, scope, period, method,
 and evidence filter. Do not add a model/API client or external database upload
 path to the runtime. The Copilot file under `prompts` is a manual handoff only.
+
+Bonus Matrix imports are content-hashed and replace the active version for one
+period inside a savepoint. Keep the source-cached result as a reconciliation
+control, and keep Scenario Payout distinct from Released Payout. Service-report
+scope and queue grouping belong in `service_profiles.toml`; queue membership
+continues to belong in `queue_mapping.csv`.

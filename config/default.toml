@@ -15,6 +15,7 @@ metric_catalog = "config/metric_catalog.toml"
 analytics_rules = "config/analytics_rules.toml"
 report_catalog = "config/report_catalog.toml"
 queue_mapping = "config/queue_mapping.csv"
+service_profiles = "config/service_profiles.toml"
 
 [sources]
 # FTE Agent is the authoritative "our agents" roster. Schedule, LILO, and
@@ -69,9 +70,12 @@ max_final_absence_rows = 100000
 max_final_absence_event_rows = 100000
 
 [report_packs]
-# Four separate operational workbooks. The older intraday and scorecard packs
-# are no longer offered; their governed facts remain available as clean data.
-operations = "operations"
-quality_pcs = "quality_pcs"
-absence = "absence"
+# One workbook per operational decision. Each product uses the same visual
+# shell and writes compact companion data for Excel Data Model templates.
+pcs = "pcs"
+bonus = "bonus"
+service = "service"
+staffing = "staffing"
+attendance = "attendance"
 corrections = "corrections"
+absence = "absence"

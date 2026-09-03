@@ -1,33 +1,69 @@
-# Presentation contracts. These choose report composition, never calculate KPIs.
+# Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.1"
-description = "Focused WFMHub workbook contracts rendered from governed datasets."
+version = "2026.09.2"
+description = "One decision per workbook, one shared visual shell, compact Excel Data Model exports."
+
+[[packs]]
+key = "pcs"
+title = "PCS PERFORMANCE"
+purpose = "Daily, MTD and previous-month PCS score and participation."
+finding_domains = ["pcs", "data_quality"]
+sheets = ["DASHBOARD", "TREND", "AGENT_DETAIL", "ACTIONS", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "bonus"
+title = "BONUS PERFORMANCE"
+purpose = "Monthly bonus results, KPI diagnostics, simulations and release controls."
+finding_domains = ["bonus", "data_quality"]
+sheets = ["DASHBOARD", "AGENT_DETAIL", "KPI_ANALYSIS", "ACTIONS", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "service"
+title = "SERVICE PERFORMANCE"
+purpose = "Mapped-LOB service level, service availability, forecast deviation and AHT."
+finding_domains = ["service", "forecast", "data_quality"]
+sheets = ["DASHBOARD", "INTRADAY", "QUEUE_DETAIL", "ACTIONS", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "staffing"
+title = "STAFFING & COVERAGE"
+purpose = "LOB/language scheduled, observed and productive staffing intervals."
+finding_domains = ["staffing", "data_quality"]
+sheets = ["DASHBOARD", "INTRADAY", "ACTIONS", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "attendance"
+title = "ATTENDANCE TODAY"
+purpose = "Live daily calling queue for no-show, late and not-seen agents."
+finding_domains = ["attendance", "data_quality"]
+sheets = ["DASHBOARD", "ACTIONS", "TREND", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "corrections"
+title = "ATTENDANCE CORRECTIONS"
+purpose = "Completed-day residual gaps and full-shift evidence for Verint correction."
+finding_domains = ["attendance", "data_quality"]
+sheets = ["DASHBOARD", "GAPS", "SHIFT_VIEW", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "absence"
+title = "FINAL ABSENCE & SHRINKAGE"
+purpose = "Corrected Verint final absence and shrinkage ledger."
+finding_domains = ["absence", "data_quality"]
+sheets = ["DASHBOARD", "TREND", "AGENT_DETAIL", "EXCEPTIONS", "DEFINITIONS", "_AUDIT"]
+
 
 [[packs]]
 key = "operations"
-title = "WFM HUB  /  DAILY OPERATIONS"
-purpose = "Daily attendance calls, staffing gaps and service state."
+title = "WFM HUB  /  LEGACY DAILY OPERATIONS"
+purpose = "Compatibility-only combined workbook; not offered in the WFMHub menu."
 finding_domains = ["attendance", "staffing", "service", "data_quality"]
 sheets = ["DAILY_SUMMARY", "FINDINGS", "ATTENDANCE_CALLS", "STAFFING_GAPS", "SERVICE_LEVEL", "DATA_QUALITY", "SOURCE_HEALTH", "SCHEDULE_SOURCES", "DOMAIN_RULES", "METHODS", "PROVENANCE"]
 
 [[packs]]
 key = "quality_pcs"
-title = "WFM HUB  /  EXACT AGENT PCS"
-purpose = "Response-weighted Q1 PCS, participation, samples and call performance."
+title = "WFM HUB  /  LEGACY EXACT AGENT PCS"
+purpose = "Compatibility-only PCS workbook; superseded by PCS Performance."
 finding_domains = ["pcs", "data_quality"]
 sheets = ["PCS_SUMMARY", "FINDINGS", "AGENT_DAY", "TEAM_DAY", "AGENT_MONTH", "RESPONSE_DETAIL", "DATA_QUALITY", "SOURCE_HEALTH", "DOMAIN_RULES", "METHODS", "PROVENANCE"]
-
-[[packs]]
-key = "corrections"
-title = "WFM HUB  /  YESTERDAY INCOHERENCE"
-purpose = "Residual observed gaps and full-shift correction evidence."
-finding_domains = ["attendance", "data_quality"]
-sheets = ["DAY_SUMMARY", "FINDINGS", "GAPS", "SHIFT_VIEW", "TIMELINE_DATA", "DATA_QUALITY", "SOURCE_HEALTH", "SCHEDULE_SOURCES", "DOMAIN_RULES", "METHODS", "PROVENANCE"]
-
-[[packs]]
-key = "absence"
-title = "WFM HUB  /  FINAL ABSENTEEISM"
-purpose = "Corrected Verint final absence ledger and governed monthly rates."
-finding_domains = ["absence", "data_quality"]
-sheets = ["FINAL_SUMMARY", "FINDINGS", "AGENT_DAY", "LOB_MONTH", "ACTIVITY_EVENTS", "UNMAPPED_REVIEW", "ACTIVITY_RULES", "DATA_QUALITY", "SOURCE_HEALTH", "SCHEDULE_SOURCES", "DOMAIN_RULES", "METHODS", "PROVENANCE"]

@@ -1,6 +1,6 @@
 # Governed clean-data contract
 
-These datasets are the governed contracts behind the four business workbooks.
+These datasets are the governed contracts behind the focused business workbooks.
 The workbook layer formats and filters them; it does not invent a second KPI
 definition. The same contracts remain directly exportable for audit, sending,
 custom Python, or a future report.
@@ -16,7 +16,7 @@ come from row content, not filenames.
 | Storm LILO | Daily presence boundaries |
 | Storm Agent Status | Actual within-shift states and attendance evidence |
 | Verint Activities | Corrected post-day ledger only |
-| APDE | Intraday service actuals |
+| APBE/APFR/APDE | Service actuals only |
 | Verint Forecast | Forecast and required staffing only |
 | Call by Call | Call-leg performance and PCS |
 
@@ -61,3 +61,8 @@ net value. A final rate therefore cannot exceed 100%.
 Run an export from `WFMHub.cmd > Export clean data`. Each CSV/XLSX is written
 under `output\data_exports\<dataset>` with a manifest containing its period,
 row count, rule version, and rule hash.
+
+Each current report also writes smaller presentation-grain CSV tables under
+`output\model_data\<report>`. Those files are for the optional Excel Data Model
+route and are not a second calculation layer. `manifest.json` records their
+period, row counts, hashes, and generation time.

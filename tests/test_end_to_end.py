@@ -447,9 +447,10 @@ class EndToEndTests(unittest.TestCase):
                 workbook.close()
             corrections_book = load_workbook(corrections_report, read_only=True, data_only=True)
             try:
-                self.assertIn("GAPS", corrections_book.sheetnames)
-                self.assertIn("SHIFT_VIEW", corrections_book.sheetnames)
-                self.assertIn("TIMELINE_DATA", corrections_book.sheetnames)
+                self.assertEqual(corrections_book.sheetnames, [
+                    "DASHBOARD", "GAPS", "SHIFT_VIEW", "DEFINITIONS", "_AUDIT",
+                ])
+                self.assertEqual(corrections_book["_AUDIT"].sheet_state, "hidden")
             finally:
                 corrections_book.close()
             pcs_book = load_workbook(pcs_report, read_only=True, data_only=True)
@@ -461,13 +462,17 @@ class EndToEndTests(unittest.TestCase):
                 pcs_book.close()
             absence_book = load_workbook(absence_report, read_only=False, data_only=True)
             try:
-                self.assertIn("AGENT_DAY", absence_book.sheetnames)
-                self.assertIn("ACTIVITY_EVENTS", absence_book.sheetnames)
-                self.assertIn("ACTIVITY_RULES", absence_book.sheetnames)
-                self.assertIn("METHODS", absence_book.sheetnames)
-                self.assertIn("tblAgentDay", absence_book["AGENT_DAY"].tables)
+                self.assertEqual(absence_book.sheetnames, [
+                    "DASHBOARD", "TREND", "AGENT_DETAIL", "EXCEPTIONS", "DEFINITIONS", "_AUDIT",
+                ])
+                self.assertIn("tblAgentDetail", absence_book["AGENT_DETAIL"].tables)
+                self.assertEqual(absence_book["_AUDIT"].sheet_state, "hidden")
             finally:
                 absence_book.close()
+            model_folder = home / "output" / "model_data" / "corrections"
+            self.assertTrue((model_folder / "gaps.csv").exists())
+            self.assertTrue((model_folder / "timeline.csv").exists())
+            self.assertTrue((model_folder / "manifest.json").exists())
             for generated_report in (report, corrections_report, pcs_report, absence_report):
                 with zipfile.ZipFile(generated_report) as archive:
                     self.assertFalse(any("externalLinks" in name for name in archive.namelist()))
