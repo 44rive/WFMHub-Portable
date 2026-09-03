@@ -94,6 +94,13 @@ class BonusImportTests(unittest.TestCase):
 
 
 class ExcelTemplateTests(unittest.TestCase):
+    def test_power_query_assigns_pcs_numeric_types_before_data_model_load(self):
+        query = (REPO / "templates" / "power_query" / "WFMHubCsv.pq").read_text(encoding="utf-8")
+        self.assertIn('{"q1_score_sum", type number}', query)
+        self.assertIn('{"valid_q1", Int64.Type}', query)
+        self.assertIn("Table.TransformColumnTypes", query)
+        self.assertTrue(query.rstrip().endswith("Typed"))
+
     def test_governance_workbook_exposes_service_and_mapping_controls(self):
         with tempfile.TemporaryDirectory() as folder:
             home = _home(Path(folder))

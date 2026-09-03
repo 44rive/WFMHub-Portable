@@ -1,9 +1,19 @@
 # Changelog
 
+## 0.10.1 — 2026-09-03
+
+- Made Attendance Callouts honor the complete selected date range; choosing
+  Current Week now includes every available action row and daily trend in that
+  week instead of collapsing the product to the end date.
+- Added explicit Power Query date, datetime and numeric types so Excel's Data
+  Model can sum PCS counters instead of treating CSV values as text.
+- Added a model-only PCS agent/day table for date slicers and documented the
+  static-report, compact-CSV, Data Model, PivotTable and slicer lifecycle.
+
 ## 0.10.0 — 2026-09-03
 
 - Replaced the combined/shared-report workflow with seven focused decision
-  products—PCS, Bonus, Service, Staffing, Attendance Today, Attendance
+  products—PCS, Bonus, Service, Staffing, Attendance Callouts, Attendance
   Corrections, and Final Absence—using one management design contract.
 - Added daily/MTD/prior-month PCS comparisons, preserved exact original Q1 and
   participation logic, and made the three-hour requirement a sending cadence

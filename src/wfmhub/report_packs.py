@@ -82,8 +82,8 @@ REPORT_PACKS = {
     "attendance": ReportPack(
         key="attendance",
         default_folder="attendance",
-        filename_prefix="WFMHub_Attendance_Today",
-        purpose="Live daily attendance calling queue without adherence.",
+        filename_prefix="WFMHub_Attendance_Callouts",
+        purpose="Selected-period attendance callout queue without adherence.",
     ),
     "scorecard": ReportPack(
         key="scorecard",

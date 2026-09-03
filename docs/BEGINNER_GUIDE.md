@@ -130,10 +130,10 @@ Use this to see scheduled, observed, and productive FTE by 15-minute interval,
 LOB, and language. Future or missing evidence is left unknown; it is not turned
 into a fake staffing gap.
 
-### Attendance Today
+### Attendance Callouts
 
-Use this as today’s calling list. It contains people who need an operational
-check for no-show, late, or not seen.
+Choose **Today** for the live calling list. Choose **Current Week** or custom
+dates to include every callout case and daily trend in that whole period.
 
 An unfinished shift cannot be marked as early leave. A confirmed no-show needs
 a completed scheduled shift, a loaded blank LILO row, and no active Agent

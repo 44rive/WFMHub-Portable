@@ -369,6 +369,8 @@ class EndToEndTests(unittest.TestCase):
                 self.assertTrue(report.name.startswith("WFMHub_Daily_Operations_"))
                 corrections_report = build_report_pack("corrections", conn, config, model.start, model.start)
                 pcs_report = build_report_pack("quality_pcs", conn, config, model.start, model.end)
+                focused_pcs_report = build_report_pack("pcs", conn, config, model.start, model.end)
+                attendance_report = build_report_pack("attendance", conn, config, model.start, model.end)
                 absence_report = build_report_pack("absence", conn, config, model.start, model.end)
                 export_progress = []
                 clean_calls = export_dataset(
@@ -460,6 +462,25 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("METHODS", pcs_book.sheetnames)
             finally:
                 pcs_book.close()
+            attendance_book = load_workbook(attendance_report, read_only=True, data_only=True)
+            try:
+                self.assertIn("2026-08-01 to 2026-08-02", attendance_book["DASHBOARD"]["A2"].value)
+                action_dates = [
+                    row[0].date() if isinstance(row[0], datetime) else row[0]
+                    for row in attendance_book["ACTIONS"].iter_rows(min_row=5, values_only=True)
+                    if row[0] is not None
+                ]
+                self.assertIn(date(2026, 8, 1), action_dates)
+                self.assertEqual(attendance_book["_AUDIT"].sheet_state, "hidden")
+            finally:
+                attendance_book.close()
+            focused_pcs_book = load_workbook(focused_pcs_report, read_only=True, data_only=True)
+            try:
+                self.assertEqual(focused_pcs_book.sheetnames, [
+                    "DASHBOARD", "TREND", "AGENT_DETAIL", "ACTIONS", "DEFINITIONS", "_AUDIT",
+                ])
+            finally:
+                focused_pcs_book.close()
             absence_book = load_workbook(absence_report, read_only=False, data_only=True)
             try:
                 self.assertEqual(absence_book.sheetnames, [
@@ -473,7 +494,16 @@ class EndToEndTests(unittest.TestCase):
             self.assertTrue((model_folder / "gaps.csv").exists())
             self.assertTrue((model_folder / "timeline.csv").exists())
             self.assertTrue((model_folder / "manifest.json").exists())
-            for generated_report in (report, corrections_report, pcs_report, absence_report):
+            pcs_model_folder = home / "output" / "model_data" / "pcs"
+            self.assertTrue((pcs_model_folder / "agent_day.csv").exists())
+            with (pcs_model_folder / "agent_day.csv").open(encoding="utf-8-sig", newline="") as handle:
+                pcs_model_headers = next(csv.reader(handle))
+            self.assertIn("business_date", pcs_model_headers)
+            self.assertIn("q1_score_sum", pcs_model_headers)
+            for generated_report in (
+                report, corrections_report, pcs_report, focused_pcs_report,
+                attendance_report, absence_report,
+            ):
                 with zipfile.ZipFile(generated_report) as archive:
                     self.assertFalse(any("externalLinks" in name for name in archive.namelist()))
 

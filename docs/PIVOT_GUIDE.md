@@ -9,10 +9,13 @@ tables into worksheets.
 
 ## PCS Performance
 
-Use `agent_detail.csv`.
+Use `agent_day.csv` for interactive date, agent, LOB and Team Leader slicing.
+Use `agent_detail.csv` only when you want one already-aggregated row per agent
+for the selected period.
 
 - Rows: `agent_name`.
-- Slicers: `lob`, `team_leader`, `agent_name`, `language`, `sample_state`.
+- Slicers: `business_date`, `lob`, `team_leader`, `agent_name`, `language`,
+  `sample_state`.
 - Values to sum: `q1_score_sum`, `valid_q1`, `q1_nonblank`, `pcs_status_1`,
   `score_le_3`, and `score_gt_3`.
 
@@ -61,7 +64,7 @@ Use `intraday.csv`.
 Treat `DATA_MISSING` and future intervals as unknown. Do not replace blank gaps
 with zero.
 
-## Attendance Today
+## Attendance Callouts
 
 Use `actions.csv`.
 
@@ -71,6 +74,9 @@ Use `actions.csv`.
   no-show minutes, source-loaded flag, and provisional flag.
 
 This is a contact queue, not an adherence table.
+
+The selected menu period is respected. **Today** gives the live callout queue;
+**Current Week** includes action rows for every available date in that week.
 
 ## Attendance Corrections
 

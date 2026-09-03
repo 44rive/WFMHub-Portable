@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.2"
+version = "2026.09.3"
 description = "One decision per workbook, one shared visual shell, compact Excel Data Model exports."
 
 [[packs]]
@@ -34,8 +34,8 @@ sheets = ["DASHBOARD", "INTRADAY", "ACTIONS", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "attendance"
-title = "ATTENDANCE TODAY"
-purpose = "Live daily calling queue for no-show, late and not-seen agents."
+title = "ATTENDANCE CALLOUTS"
+purpose = "Selected-period calling and follow-up queue for no-show, late and not-seen agents."
 finding_domains = ["attendance", "data_quality"]
 sheets = ["DASHBOARD", "ACTIONS", "TREND", "DEFINITIONS", "_AUDIT"]
 

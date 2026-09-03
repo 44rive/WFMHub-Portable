@@ -263,6 +263,27 @@ def build_pcs_performance_workbook(
         ws.conditional_format(4, state_col, 3 + len(rows), state_col, {"type": "text", "criteria": "containing", "value": "LOW_SAMPLE", "format": book.report.error})
     actions = [row for row in rows if row[headers.index("score_le_3")] or row[headers.index("sample_state")] == "LOW_SAMPLE"]
     book.table("ACTIONS", "PCS follow-up queue", "Agents with a low score or insufficient response sample. This is coaching evidence, not a penalty list.", headers, actions)
+    day_headers, day_rows = _query(
+        conn,
+        """SELECT business_date, agent_id, agent_name, team_leader, ops_manager,
+                  lob, language, inbound_calls AS inbound_call_legs,
+                  pcs_status_calls AS pcs_status_1,
+                  pcs_participation_responses AS q1_nonblank,
+                  survey_responses AS valid_q1,
+                  pcs_score_sum AS q1_score_sum,
+                  pcs_average, pcs_participation_rate AS participation_rate,
+                  low_score_responses AS score_le_3,
+                  top_box_responses AS score_gt_3,
+                  pcs_invalid_responses AS invalid_q1,
+                  CASE WHEN survey_responses<20 THEN 'LOW_SAMPLE' ELSE 'OK' END AS sample_state
+           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
+           ORDER BY business_date, lob, team_leader, agent_name""",
+        [min(period.start for period in periods), max(period.end for period in periods)],
+    )
+    # Model-only daily grain for real date slicers and current/prior-month
+    # PivotTables. The visible AGENT_DETAIL sheet remains the simpler
+    # selected-period agent summary.
+    book.tables.append(ModelTable("AGENT_DAY", day_headers, day_rows))
     book.definitions([
         ("PCS Average", "Sum of valid inbound Q1 scores / valid inbound Q1 responses", "Customer experience result", "Only configured discrete Q1 scores are valid"),
         ("PCS Participation", "Inbound raw Q1 nonblank / inbound PCSStatus=1", "Survey participation opportunity", "Invalid nonblank Q1 remains in the numerator"),
@@ -469,10 +490,11 @@ def build_attendance_today_workbook(
     end: date,
     output: Path | None = None,
 ) -> Path:
-    """Build only the live daily attendance calling product."""
+    """Build the attendance callout product for the full selected period."""
 
-    report_day = end
-    book, partial, target = _atomic_book(config, "attendance", "ATTENDANCE TODAY", report_day, report_day, output)
+    book, partial, target = _atomic_book(
+        config, "attendance", "ATTENDANCE CALLOUTS", start, end, output,
+    )
     totals = conn.execute(
         """SELECT count(*),
                   coalesce(sum(CASE WHEN requires_call THEN 1 ELSE 0 END),0),
@@ -481,17 +503,18 @@ def build_attendance_today_workbook(
                   coalesce(sum(CASE WHEN call_action='CALL_NOT_SEEN_NOW' THEN 1 ELSE 0 END),0),
                   coalesce(sum(CASE WHEN source_loaded=false THEN 1 ELSE 0 END),0)
            FROM mart.attendance_agent_day
-           WHERE business_date=? AND assignment_type NOT IN ('Off','Planned absence')""",
-        [report_day],
+           WHERE business_date BETWEEN ? AND ?
+             AND assignment_type NOT IN ('Off','Planned absence')""",
+        [start, end],
     ).fetchone()
     scheduled, call_now, no_show, late, not_seen, missing = totals
-    status, status_text = _source_state(conn, ("fte", "start_end", "lilo", "agent_status"), report_day)
+    status, status_text = _source_state(conn, ("fte", "start_end", "lilo", "agent_status"), end)
     if missing:
         status, status_text = "INCOMPLETE", f"{missing:,} scheduled row(s) do not have complete attendance evidence"
     book.dashboard(
         [
-            KpiCard("Scheduled working", scheduled, "integer", "Agent-day rows"),
-            KpiCard("Call now", call_now, "integer", "Current action queue"),
+            KpiCard("Scheduled working", scheduled, "integer", "Selected agent-day rows"),
+            KpiCard("Call/action cases", call_now, "integer", "Selected-period queue"),
             KpiCard("Confirmed no-show", no_show, "integer", "Only after completed shift"),
             KpiCard("Late", late, "integer", "Beyond configured tolerance"),
             KpiCard("Not seen yet", not_seen, "integer", "Provisional current-day state"),
@@ -500,9 +523,10 @@ def build_attendance_today_workbook(
         status,
         status_text,
         ["Result", "Agents"],
-        [("Scheduled working", scheduled), ("Call now", call_now), ("Confirmed no-show", no_show), ("Late", late), ("Not seen yet", not_seen), ("Missing evidence", missing)],
+        [("Scheduled working", scheduled), ("Call/action cases", call_now), ("Confirmed no-show", no_show), ("Late", late), ("Not seen yet", not_seen), ("Missing evidence", missing)],
         [
-            "This workbook is the live calling list; it is not an adherence report.",
+            "This workbook is the selected-period callout register; it is not an adherence report.",
+            "Choose Today for a live queue or Current Week for every callout case and daily trend in that week.",
             "An unfinished shift can be late or not seen, but can never be marked as early leave.",
             "No-show requires a completed working shift, a loaded blank LILO row, and no active Agent Status evidence.",
             "Use Attendance Corrections only after the operating day is complete.",
@@ -518,12 +542,16 @@ def build_attendance_today_workbook(
                   uncoded_late_minutes, no_show_minutes, actual_evidence,
                   source_loaded, is_provisional, evaluation_as_of
            FROM mart.attendance_agent_day
-           WHERE business_date=? AND requires_call=true
+           WHERE business_date BETWEEN ? AND ? AND requires_call=true
            ORDER BY CASE call_action WHEN 'CALL_NO_SHOW' THEN 1 WHEN 'CALL_LATE' THEN 2 ELSE 3 END,
-                    scheduled_start, lob, team_leader, agent_name""",
-        [report_day],
+                    business_date, scheduled_start, lob, team_leader, agent_name""",
+        [start, end],
     )
-    ws = book.table("ACTIONS", "People to contact now", "Operational queue ordered by severity and scheduled start.", headers, rows)
+    ws = book.table(
+        "ACTIONS", "Attendance callout cases",
+        "Every actionable case in the selected period, ordered by severity, date and scheduled start.",
+        headers, rows,
+    )
     if rows:
         col = headers.index("call_action")
         ws.conditional_format(4, col, 3 + len(rows), col, {"type": "text", "criteria": "containing", "value": "CALL_NO_SHOW", "format": book.report.error})
@@ -546,7 +574,7 @@ def build_attendance_today_workbook(
         ("Not seen now", "Shift started, no observed evidence yet", "Immediate operational check", "Always provisional"),
         ("Early leave", "Last observed evidence before completed scheduled end", "Historical correction only", "Never evaluated before shift end"),
     ])
-    book.audit(_audit_rows(conn, config, "attendance", report_day, report_day))
+    book.audit(_audit_rows(conn, config, "attendance", start, end))
     return _finish(book, partial, target)
 
 

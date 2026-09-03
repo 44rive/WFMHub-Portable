@@ -18,7 +18,7 @@ The hub now produces one workbook for one decision:
 | Bonus Performance | What does Bonus Matrix v1.2 calculate, what changed, and is it safe to release? |
 | Service Performance | Is the selected mapped LOB meeting SL, service availability, forecast, and AHT expectations? |
 | Staffing & Coverage | Where is scheduled capacity not present by LOB/language and interval? |
-| Attendance Today | Whom should Operations call now for a no-show, late arrival, or not-seen state? |
+| Attendance Callouts | Which agents require contact or follow-up on every selected date? |
 | Attendance Corrections | Which completed-day observed gaps remain to be corrected in Verint? |
 | Final Absence & Shrinkage | What does the corrected Verint ledger contain for payroll and final reporting? |
 

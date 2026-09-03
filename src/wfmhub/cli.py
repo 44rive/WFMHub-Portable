@@ -627,7 +627,7 @@ def _choose_packs(allow_none: bool = True) -> tuple[str, ...]:
     print("2. Bonus Performance: calculation and release controls")
     print("3. Service Performance: mapped LOB queues and forecast")
     print("4. Staffing & Coverage: LOB/language interval gaps")
-    print("5. Attendance Today: live calling queue")
+    print("5. Attendance Callouts: selected dates or live today")
     print("6. Attendance Corrections: completed-day gaps + timeline")
     print("7. Final Absence & Shrinkage: corrected Verint ledger")
     print("8. Build all seven separate workbooks")
@@ -658,7 +658,7 @@ def _choose_template_pack() -> str:
         "bonus": "Bonus Performance",
         "service": "Service Performance",
         "staffing": "Staffing & Coverage",
-        "attendance": "Attendance Today",
+        "attendance": "Attendance Callouts",
         "corrections": "Attendance Corrections",
         "absence": "Final Absence & Shrinkage",
     }
