@@ -1,157 +1,168 @@
-# Excel PivotTable and slicer setup
+# Excel PCS master — beginner setup
 
-This is a one-time setup for each report. WFMHub keeps every calculation in
-Python/SQLite and gives Excel only small, report-ready CSV tables.
+The normal PCS workbook is already ready to send. This guide is only for the
+optional Excel master where you want your own PivotTables and slicers.
 
-## The simple mental model
+## What updates what
 
-There are four separate pieces:
+Think of it as four boxes:
 
-1. **Extracts** are your untouched source files.
-2. **SQLite + Python** clean them and calculate governed counters and KPIs.
-3. **The generated report** under `output/<report>` is a dated, static snapshot
-   you can open or send immediately.
-4. **The Excel master** under `templates/reports` contains your Power Query
-   connections, Data Model, PivotTables and slicers. WFMHub never overwrites
-   this file.
+1. You add untouched Call by Call and FTE extracts.
+2. WFMHub reads them into SQLite and recalculates PCS.
+3. Building **PCS Performance** replaces four small files in
+   `output\template_feeds\pcs\current` and keeps a dated copy in `archive`.
+4. Excel **Refresh All** rereads those four current files into its Data Model.
 
-Building a report replaces the small CSV files in
-`output/model_data/<report>`. **Refresh All** makes Power Query read those CSVs
-into Excel's compressed Data Model. The rows do not load into a worksheet.
-Your PivotTables read the Data Model, and slicers filter those PivotTables.
+Adding an extract alone does not change Excel. First run WFMHub Refresh or
+Build Reports, then open the master and choose **Data > Refresh All**.
 
-The original dashboard cells inside the master are a starter snapshot; they do
-not recalculate. The PivotTables and charts you create from the Data Model are
-the interactive, refreshable part of the master.
+Excel does not connect directly to SQLite. That route needs an ODBC driver,
+admin installation and a trusted native DLL, which is exactly the type of file
+the work-machine application policy already blocked. The CSV feed is faster to
+support, easy to inspect, and still keeps data out of worksheets.
 
-## What happens every day
+## Files Excel reads
 
-1. Run **Build reports** in `WFMHub.cmd`.
-2. WFMHub creates the normal static workbook and refreshes the compact files in
-   `output/model_data/<report>/`.
-3. Open your saved Excel master, choose **Data > Refresh All**, and save a copy
-   for management.
+| File | Grain | Use |
+|---|---|---|
+| `PCS_AgentDay.csv` | one agent/day | main PivotTables, daily and monthly score, slicers |
+| `PCS_Summary.csv` | one named comparison period | latest day, selected period, current MTD and prior month |
+| `PCS_Actions.csv` | one valid Q1 <=3 response | coaching queue and Actions Rate |
+| `PCS_Trend.csv` | one date | simple daily trend chart |
 
-The three-hour PCS rhythm is only when you repeat these steps. It does not
-change the daily or monthly PCS formulas.
+The filenames never change. The current files are replaced atomically, so an
+Excel query never needs to search dated report folders. `manifest.json` shows
+the selected dates, refresh time, row counts, column types and file hashes.
 
-## One-time setup for PCS
+## Open the protected master
 
-1. In `WFMHub.cmd`, choose **Create an Excel Pivot/slicer master**.
-2. Choose **PCS Performance** and a populated period.
-3. Open `templates/reports/pcs.xlsx`. WFMHub protects this master from normal
-   refreshes and refuses to replace it accidentally.
-4. Open **Data > Get Data > Launch Power Query Editor**.
-5. Choose **New Source > Other Sources > Blank Query**.
-6. Open **Advanced Editor**.
-7. Copy `templates/power_query/WFMHubCsv.pq` into the editor.
-8. Replace `TABLE_FILE.csv` with `agent_day.csv`. This table supports a real
-   date slicer and includes the current/prior comparison dates.
-9. Rename the query `PCS Agent Day`.
-10. Choose **Close & Load To...**.
-11. Select **Only Create Connection** and tick **Add this data to the Data
-    Model**. Do not load it to a worksheet.
-12. Repeat for `agent_detail.csv`, `trend.csv`, or `actions.csv` only if you
-    need those additional grains.
-13. Choose **Insert > PivotTable > From Data Model**.
-14. Put the PivotTable on `DASHBOARD` or a new `PIVOT_VIEW` sheet.
-15. Choose **PivotTable Analyze > Insert Slicer** and add:
-    - LOB
-    - Team Leader
-    - Agent
-16. Save the master.
+Open `templates\reports\pcs.xlsx`. The portable ZIP includes this data-free
+starter, so the folder is not empty. WFMHub will not overwrite it during normal
+refreshes. If the file was deleted, use **Create an Excel Pivot/slicer master**
+in `WFMHub.cmd` to recreate a starter from your current PCS report.
 
-The command-line equivalent for step 1 is:
+## Add the main PCS query
 
-```text
-runtime\python.exe -m wfmhub --home . template-init --pack pcs --start 2026-08-01 --end 2026-08-31
-```
+Do these clicks exactly once:
 
-Do not use `--force` after you add PivotTables or slicers; it intentionally
-replaces the master with a new starter.
+1. In Excel choose **Data > Get Data > From Other Sources > Blank Query**.
+2. In Power Query choose **Home > Advanced Editor**.
+3. Delete the text already there.
+4. Open `templates\power_query\PCS_AgentDay.pq` in Notepad.
+5. Copy everything, paste it into Advanced Editor, then choose **Done**.
+6. Rename the query `PCS Agent Day`.
+7. Choose **Home > Close & Load > Close & Load To...**.
+8. Select **Only Create Connection**.
+9. Tick **Add this data to the Data Model**.
+10. Choose **OK**.
 
-## Recommended PivotTable fields
+No data is loaded to a worksheet. Excel stores a compressed copy inside the
+Data Model.
 
-### PCS
+Repeat those steps only for what you need:
 
-- Rows: `agent_name`
-- Filters/slicers: `business_date`, `lob`, `team_leader`, `agent_name`
-- Values: sum of `q1_score_sum`, sum of `valid_q1`, sum of `q1_nonblank`, sum
-  of `pcs_status_1`
-- Measures must divide the sums. Never average `pcs_average` or
-  `participation_rate`.
+- `PCS_Summary.pq` → query name `PCS Summary`
+- `PCS_Actions.pq` → query name `PCS Actions`
+- `PCS_Trend.pq` → query name `PCS Trend`
 
-Create these measures in **Power Pivot > Measures > New Measure**. If you named
-the query `PCS Agent Day`, use:
+Each query reads its CSV directly. There are no query-to-query references, so
+the Power Query privacy/firewall error cannot be created by this setup.
+
+## Create the PCS PivotTable
+
+1. Choose **Insert > PivotTable > From Data Model**.
+2. Put it on a new sheet named `PIVOT_VIEW`.
+3. Drag these fields:
+   - Rows: `agent_name`
+   - Optional rows above Agent: `lob`, then `team_leader`
+   - Values: `q1_score_sum`, `valid_q1`, `q1_nonblank`, `pcs_status_1`,
+     `score_le_3`, `score_gt_3`
+4. Choose **PivotTable Analyze > Insert Slicer** and select `lob`,
+   `team_leader`, `agent_name`.
+5. Choose **Insert Timeline** and select `business_date`.
+
+Do not create relationships yet. The main PivotTable and all its slicers come
+from `PCS Agent Day`, so none are required. Separate Trend, Summary or Actions
+PivotTables can use their own filters. This avoids a slow DimDate and ambiguous
+relationships while you are learning.
+
+## Create the measures
+
+In Excel choose **Power Pivot > Measures > New Measure**. Set **Table name** to
+`PCS Agent Day` and create these one by one:
 
 ```text
 PCS Average := DIVIDE(SUM('PCS Agent Day'[q1_score_sum]), SUM('PCS Agent Day'[valid_q1]))
+
 PCS Participation := DIVIDE(SUM('PCS Agent Day'[q1_nonblank]), SUM('PCS Agent Day'[pcs_status_1]))
+
+Low Score % := DIVIDE(SUM('PCS Agent Day'[score_le_3]), SUM('PCS Agent Day'[valid_q1]))
+
+Positive % := DIVIDE(SUM('PCS Agent Day'[score_gt_3]), SUM('PCS Agent Day'[valid_q1]))
 ```
 
-Format the first as a decimal number and the second as a percentage.
+Format PCS Average as `0.00`; format the other three as percentages. Put these
+measures in Values. Do not average the `pcs_average` column and do not display
+`q1_score_sum` as if it were the score. The correct score is score sum divided
+by valid-response count.
 
-## Fix an existing PCS query that says SUM is invalid
+For coaching, set **Table name** to `PCS Actions` and create:
 
-An older WFMHub query imported every CSV column as text. The CSV number itself
-is valid, but Excel cannot sum a text column.
+```text
+Coaching Opportunities := COUNTROWS('PCS Actions')
 
-1. Open **Data > Queries & Connections**.
-2. Right-click `PCS Agent Detail` and choose **Edit**.
-3. Open **Home > Advanced Editor**.
-4. Replace all the old code with the current
-   `templates/power_query/WFMHubCsv.pq`.
-5. Set `TABLE_FILE.csv` to `agent_day.csv`.
-6. Rename the query `PCS Agent Day` if you want the formulas above to work
-   without changing their table name.
-7. Confirm `q1_score_sum` has the **1.2** decimal-number icon and `valid_q1`,
-   `q1_nonblank`, and `pcs_status_1` have the **123** whole-number icon.
-8. Choose **Close & Load To... > Only Create Connection**, tick **Add this data
-   to the Data Model**, and then **Data > Refresh All**.
+Coaching Completed := CALCULATE(COUNTROWS('PCS Actions'), 'PCS Actions'[coaching_status] = "Completed")
 
-Remove the old value from the PivotTable and add it again. `Sum of
-q1_score_sum` will now work. For the actual PCS KPI, use the `PCS Average`
-measure instead of presenting the score sum by itself.
+Actions Rate := DIVIDE([Coaching Completed], [Coaching Opportunities])
+```
 
-### Service
+Format Actions Rate as a percentage.
 
-- Rows: `hour_start`
-- Columns: `service_group`
-- Filters/slicers: `business_date`, `service_group`
-- Values: summed additive counters. Calculate SL and availability from sums;
-  Ford OEM uses gross SL exactly like the original Flash. Check
-  `service_method` before creating the measure for another profile.
+## How coaching works
 
-### Attendance and staffing
+The original PCS workbook used this idea:
 
-- Attendance slicers: `lob`, `team_leader`, `call_action`
-- Staffing slicers: `lob`, `language`, `staffing_state`
+`Actions Rate = completed briefings / valid Q1 responses <= 3`
 
-### Bonus
+WFMHub makes it auditable. Every valid inbound Q1 at or below the configured
+threshold creates one row on the generated PCS workbook's `ACTIONS` sheet.
 
-- Slicers: `period`, `population`, `release_status`
-- Never use Scenario Payout as payroll while any release control is blocked.
+1. Open the newest generated workbook under `output\pcs`.
+2. In `ACTIONS`, edit only the blue columns: Coaching Status, Coaching Date,
+   Coach and Coaching Comment.
+3. Use `Completed`, `Pending`, or `Not required`. Old values `OK`, `Yes`, `Y`
+   and `Done` are accepted and normalized to Completed.
+4. Save the workbook.
+5. In WFMHub choose **Import PCS coaching decisions** and paste its path.
+6. Build PCS Performance again.
+7. Open the Excel master and choose **Refresh All**.
 
-## If Refresh All cannot find the files
+SQLite remembers the decisions. A later report does not erase them.
 
-1. Unhide `_AUDIT`.
-2. Find **Template model folder**.
-3. Confirm the path points to the matching folder under
-   `output/model_data/`.
-4. Save the workbook and refresh again.
+## Daily use after setup
 
-Also check `output/model_data/<report>/manifest.json`. It tells you which CSVs
-exist, the selected period, and the number of rows in each one. A master does
-not accumulate data by itself: it shows the period from the most recent build
-of that report.
+1. Add new untouched extracts.
+2. Run WFMHub Refresh or Build Reports for PCS.
+3. Check the generated static workbook before sending anything.
+4. Open `templates\reports\pcs.xlsx`.
+5. Choose **Data > Refresh All**.
+6. Wait until **Queries & Connections** stops refreshing.
+7. Check the newest date in the timeline or Trend PivotTable.
+8. Choose **File > Save As** and save the management copy you will email.
 
-## What to send
+The “every three hours” requirement is only the send/refresh rhythm. It never
+changes the daily and monthly formulas.
 
-After **Refresh All** finishes, use **File > Save As** and put the dated copy in
-the normal product folder under `output`. Send that copy, not the master. The
-generated static workbook is the immutable audit snapshot; the master is the
-interactive current view.
+## If something breaks
 
-The named Excel cell `pModelDataPath` points to this value. Each query reads one
-CSV directly, so there are no query-to-query privacy/firewall dependencies and
-no slow Power Query `DimDate` generation.
+- **SUM gives an error:** replace the query with the supplied `.pq` file. It
+  explicitly types counters as numbers.
+- **File not found:** unhide `_AUDIT` and check `Template current feed`, or open
+  `output\template_feeds\pcs\current\manifest.json`.
+- **No new dates:** WFMHub must rebuild PCS before Excel Refresh All.
+- **Refresh is slow:** load only `PCS Agent Day`; add the other three queries
+  only when needed. Do not load any query to a worksheet.
+- **A slicer does not control another PivotTable:** both PivotTables must use
+  the same Data Model table, or you must connect that slicer under **Report
+  Connections**. Do not accept automatic relationships just because Excel
+  proposes them.

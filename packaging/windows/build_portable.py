@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.10.1"
+DEFAULT_VERSION = "0.11.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -109,8 +109,18 @@ def validate_stage(stage: Path, expected_native: dict[str, str]) -> None:
         path for pattern in ("*.xlsx", "*.xlsm")
         for path in (stage / "templates" / "reports").glob(pattern)
     ]
-    if local_excel_masters:
+    allowed_starter = stage / "templates" / "reports" / "pcs.xlsx"
+    if [path for path in local_excel_masters if path != allowed_starter]:
         raise RuntimeError(f"Portable stage contains local Excel report masters: {local_excel_masters}")
+    if not allowed_starter.is_file():
+        raise RuntimeError("Portable stage is missing the reviewed data-free PCS starter")
+    with zipfile.ZipFile(allowed_starter) as workbook:
+        unsafe_parts = [
+            name for name in workbook.namelist()
+            if "externalLinks" in name or "pivotCache" in name or "connections.xml" in name
+        ]
+        if unsafe_parts:
+            raise RuntimeError(f"Public PCS starter contains unsafe cached/linked parts: {unsafe_parts}")
     unexpected_custom = [
         path for path in (stage / "custom").rglob("*")
         if path.is_file() and path.name not in {
@@ -186,6 +196,9 @@ def build(args) -> Path:
     for pattern in ("*.xlsx", "*.xlsm"):
         for master in report_template_dir.glob(pattern):
             master.unlink()
+    sys.path.insert(0, str(ROOT / "src"))
+    from wfmhub.starter_templates import build_pcs_starter
+    build_pcs_starter(report_template_dir / "pcs.xlsx")
     # Ship only reviewed underscore templates. Runnable local jobs can contain
     # business logic or data and must never leak into a public portable ZIP.
     (stage / "custom" / "jobs").mkdir(parents=True, exist_ok=True)

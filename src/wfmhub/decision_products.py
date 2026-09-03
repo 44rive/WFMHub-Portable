@@ -129,15 +129,22 @@ def _audit_rows(
     latest = conn.execute(
         "SELECT run_id, finished_at, details FROM meta.refresh_run WHERE status='SUCCESS' ORDER BY finished_at DESC LIMIT 1"
     ).fetchone()
-    return [
+    rows: list[Sequence[Any]] = [
         ("Report product", report_key, "One workbook = one operational decision"),
         ("Selected period", f"{start} to {end}", "Explicit report boundary"),
         ("Generated", datetime.now(), "Local work-machine time"),
         ("Refresh run", latest[0] if latest else None, latest[2] if latest else "No successful refresh metadata"),
         ("Calculation authority", "Python + SQLite", "Excel contains presentation only"),
         ("Template model folder", str(config.output / "model_data" / report_key), "Power Query: connection only + Add to Data Model"),
-        *list(extra),
     ]
+    if report_key == "pcs":
+        rows.append((
+            "Template current feed",
+            str(config.output / "template_feeds" / report_key / "current"),
+            "Stable filenames; refreshed atomically by WFMHub",
+        ))
+    rows.extend(extra)
+    return rows
 
 
 def _atomic_book(
@@ -165,7 +172,11 @@ def _finish(book: DecisionWorkbook, partial: Path, target: Path) -> Path:
     return target
 
 
-def _pcs_aggregate(conn: DatabaseConnection, period: NamedPeriod) -> tuple[Any, ...]:
+def _pcs_aggregate(
+    conn: DatabaseConnection,
+    config: Config,
+    period: NamedPeriod,
+) -> tuple[Any, ...]:
     row = conn.execute(
         """SELECT coalesce(sum(pcs_score_sum),0), coalesce(sum(survey_responses),0),
                   coalesce(sum(pcs_participation_responses),0), coalesce(sum(pcs_status_calls),0),
@@ -175,9 +186,73 @@ def _pcs_aggregate(conn: DatabaseConnection, period: NamedPeriod) -> tuple[Any, 
         [period.start, period.end],
     ).fetchone()
     score_sum, valid, participants, eligible, low, high, inbound = row
+    primary_score = f"question_{config.pcs.primary_score_question}_score"
+    allowed_scores = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
+    completed = conn.execute(
+        f"""SELECT count(*)
+            FROM core.clean_call_leg c
+            JOIN core.pcs_coaching_action a ON a.coaching_key=c.call_key
+            WHERE c.business_date BETWEEN ? AND ?
+              AND upper(coalesce(c.call_direction,''))='I'
+              AND c.{primary_score} IN ({allowed_scores})
+              AND c.{primary_score} <= ?
+              AND a.coaching_status='COMPLETED'""",
+        [period.start, period.end, config.pcs.negative_score_maximum],
+    ).fetchone()[0]
     return (
         period.label, period.start, period.end, _ratio(score_sum, valid),
         _ratio(participants, eligible), valid, eligible, low, high, inbound,
+        completed, _ratio(completed, low),
+    )
+
+
+def _pcs_coaching_rows(
+    conn: DatabaseConnection,
+    config: Config,
+    start: date,
+    end: date,
+) -> tuple[list[str], list[tuple[Any, ...]]]:
+    """Return one editable coaching opportunity per valid low Q1 response."""
+
+    primary = config.pcs.primary_score_question
+    primary_score = f"question_{primary}_score"
+    primary_answer = f"question_{primary}"
+    allowed_scores = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
+    return _query(
+        conn,
+        f"""SELECT c.call_key AS coaching_key,
+                   c.business_date, c.call_start,
+                   c.call_reference_number, c.call_id,
+                   c.agent_id,
+                   coalesce(d.canonical_name,c.agent_name) AS agent_name,
+                   d.team_leader, d.ops_manager,
+                   coalesce(d.lob,c.lob) AS lob,
+                   coalesce(d.language,c.language) AS language,
+                   c.queue,
+                   c.{primary_answer} AS q1_answer,
+                   c.{primary_score} AS q1_score,
+                   c.question_2 AS q2_answer,
+                   c.question_3 AS customer_comment,
+                   c.pcs_status, c.post_call_survey_mode,
+                   c.source_file,
+                   CASE coalesce(a.coaching_status,'PENDING')
+                       WHEN 'COMPLETED' THEN 'Completed'
+                       WHEN 'NOT_REQUIRED' THEN 'Not required'
+                       ELSE 'Pending'
+                   END AS coaching_status,
+                   a.coaching_date, a.coach, a.coaching_comment
+            FROM core.clean_call_leg c
+            LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
+            LEFT JOIN core.pcs_coaching_action a ON a.coaching_key=c.call_key
+            WHERE c.business_date BETWEEN ? AND ?
+              AND upper(coalesce(c.call_direction,''))='I'
+              AND c.{primary_score} IN ({allowed_scores})
+              AND c.{primary_score} <= ?
+            ORDER BY CASE coalesce(a.coaching_status,'PENDING')
+                         WHEN 'PENDING' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END,
+                     c.business_date DESC, d.team_leader,
+                     coalesce(d.canonical_name,c.agent_name), c.call_start""",
+        [start, end, config.pcs.negative_score_maximum],
     )
 
 
@@ -192,7 +267,7 @@ def build_pcs_performance_workbook(
 
     book, partial, target = _atomic_book(config, "pcs", "PCS PERFORMANCE", start, end, output)
     periods = _comparison_periods(start, end)
-    comparison = [_pcs_aggregate(conn, period) for period in periods]
+    comparison = [_pcs_aggregate(conn, config, period) for period in periods]
     by_label = {row[0]: row for row in comparison}
     latest = by_label["Latest day"]
     mtd = by_label["Current MTD"]
@@ -205,36 +280,53 @@ def build_pcs_performance_workbook(
             KpiCard("MTD PCS", mtd[3], "decimal", _delta(mtd[3], prior[3])),
             KpiCard("MTD participation", mtd[4], "percent", _delta(mtd[4], prior[4], True)),
             KpiCard("MTD valid responses", mtd[5], "integer", f"{mtd[9]:,} inbound call leg(s)"),
-            KpiCard("MTD PCSStatus=1", mtd[6], "integer", "Participation denominator"),
-            KpiCard("MTD score <= 3", mtd[7], "integer", "Follow-up population"),
-            KpiCard("MTD score > 3", mtd[8], "integer", "Positive population"),
+            KpiCard("MTD score <= 3", mtd[7], "integer", "Coaching opportunities"),
+            KpiCard("Coaching completed", mtd[10], "integer", "Completed low-score actions"),
+            KpiCard("Actions rate", mtd[11], "percent", "Completed / score <= 3"),
         ],
         status,
         status_text,
-        ["Period", "Start", "End", "PCS Average", "Participation %", "Valid Responses", "PCSStatus=1", "<=3", ">3", "Inbound Legs"],
+        ["Period", "Start", "End", "PCS Average", "Participation %", "Valid Responses", "PCSStatus=1", "<=3", ">3", "Inbound Legs", "Coaching Completed", "Actions Rate %"],
         comparison,
         [
             "The report can be generated every three hours, but the KPI scope remains daily and monthly.",
             "Current MTD is compared with the same number of calendar days in the previous month; a partial month is never compared only with a full month.",
             "PCS average and participation are ratios of summed counters, not averages of agent percentages.",
+            "Actions Rate follows the original report: completed coaching actions divided by valid Q1 responses <= 3.",
             "Use the Excel template model files for PivotTables and LOB / Team Leader / Agent slicers.",
         ],
         (("PCS Average", 3), ("Participation", 4)),
     )
 
+    primary_score = f"question_{config.pcs.primary_score_question}_score"
+    allowed_scores = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
     headers, rows = _query(
         conn,
-        """SELECT business_date, sum(pcs_score_sum) AS pcs_score_sum,
+        f"""SELECT p.business_date, sum(p.pcs_score_sum) AS pcs_score_sum,
                   sum(survey_responses) AS valid_responses,
                   sum(pcs_participation_responses) AS participating_responses,
                   sum(pcs_status_calls) AS eligible_calls,
                   CASE WHEN sum(survey_responses)>0 THEN sum(pcs_score_sum)*1.0/sum(survey_responses) END AS pcs_average,
                   CASE WHEN sum(pcs_status_calls)>0 THEN sum(pcs_participation_responses)*1.0/sum(pcs_status_calls) END AS participation_rate,
                   sum(low_score_responses) AS score_le_3,
-                  sum(top_box_responses) AS score_gt_3
-           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
-           GROUP BY business_date ORDER BY business_date""",
-        [min(period.start for period in periods), max(period.end for period in periods)],
+                  sum(top_box_responses) AS score_gt_3,
+                  coalesce(max(coaching.completed),0) AS coaching_completed,
+                  CASE WHEN sum(low_score_responses)>0
+                       THEN coalesce(max(coaching.completed),0)*1.0/sum(low_score_responses) END AS actions_rate
+           FROM mart.agent_pcs_day p
+           LEFT JOIN (
+               SELECT c.business_date, count(*) AS completed
+               FROM core.clean_call_leg c
+               JOIN core.pcs_coaching_action a ON a.coaching_key=c.call_key
+               WHERE upper(coalesce(c.call_direction,''))='I'
+                 AND c.{primary_score} IN ({allowed_scores})
+                 AND c.{primary_score} <= ?
+                 AND a.coaching_status='COMPLETED'
+               GROUP BY c.business_date
+           ) coaching ON coaching.business_date=p.business_date
+           WHERE p.business_date BETWEEN ? AND ?
+           GROUP BY p.business_date ORDER BY p.business_date""",
+        [config.pcs.negative_score_maximum, min(period.start for period in periods), max(period.end for period in periods)],
     )
     book.table("TREND", "PCS daily trend", "Daily governed counters for current and comparison periods.", headers, rows)
 
@@ -261,8 +353,32 @@ def build_pcs_performance_workbook(
     if rows:
         state_col = headers.index("sample_state")
         ws.conditional_format(4, state_col, 3 + len(rows), state_col, {"type": "text", "criteria": "containing", "value": "LOW_SAMPLE", "format": book.report.error})
-    actions = [row for row in rows if row[headers.index("score_le_3")] or row[headers.index("sample_state")] == "LOW_SAMPLE"]
-    book.table("ACTIONS", "PCS follow-up queue", "Agents with a low score or insufficient response sample. This is coaching evidence, not a penalty list.", headers, actions)
+    action_headers, actions = _pcs_coaching_rows(conn, config, start, end)
+    action_sheet = book.table(
+        "ACTIONS",
+        "PCS coaching queue",
+        "One row per valid inbound Q1 <= 3. Edit only the blue coaching columns, save, then import this workbook through WFMHub.",
+        action_headers,
+        actions,
+        editable_headers={"Coaching Status", "Coaching Date", "Coach", "Coaching Comment"},
+    )
+    if actions:
+        status_col = action_headers.index("coaching_status")
+        action_sheet.data_validation(
+            4, status_col, 3 + len(actions), status_col,
+            {
+                "validate": "list",
+                "source": ["Pending", "Completed", "Not required"],
+                "input_title": "Coaching status",
+                "input_message": "Choose one of the three governed statuses.",
+                "error_title": "Invalid status",
+                "error_message": "Use Pending, Completed or Not required.",
+            },
+        )
+        action_sheet.conditional_format(
+            4, status_col, 3 + len(actions), status_col,
+            {"type": "text", "criteria": "containing", "value": "Pending", "format": book.report.error},
+        )
     day_headers, day_rows = _query(
         conn,
         """SELECT business_date, agent_id, agent_name, team_leader, ops_manager,
@@ -284,11 +400,24 @@ def build_pcs_performance_workbook(
     # PivotTables. The visible AGENT_DETAIL sheet remains the simpler
     # selected-period agent summary.
     book.tables.append(ModelTable("AGENT_DAY", day_headers, day_rows))
+    book.tables.append(ModelTable(
+        "SUMMARY",
+        [
+            "period", "period_start", "period_end", "pcs_average",
+            "participation_rate", "valid_q1", "pcs_status_1", "score_le_3",
+            "score_gt_3", "inbound_call_legs", "coaching_completed", "actions_rate",
+        ],
+        comparison,
+    ))
     book.definitions([
         ("PCS Average", "Sum of valid inbound Q1 scores / valid inbound Q1 responses", "Customer experience result", "Only configured discrete Q1 scores are valid"),
         ("PCS Participation", "Inbound raw Q1 nonblank / inbound PCSStatus=1", "Survey participation opportunity", "Invalid nonblank Q1 remains in the numerator"),
         ("Score <= 3", "Count of valid Q1 responses at or below 3", "Follow-up volume", "A count, not a percentage"),
+        ("Actions Rate", "Completed coaching rows / valid inbound Q1 responses at or below 3", "Coaching completion", "One action row is generated for every low-score response"),
         ("Low sample", "Fewer than 20 valid responses in the selected period", "Interpretation warning", "Does not change the calculated score"),
+        ("Power Pivot PCS Average", "DIVIDE(SUM('PCS Agent Day'[q1_score_sum]), SUM('PCS Agent Day'[valid_q1]))", "Excel master measure", "Copy exactly; do not average agent percentages"),
+        ("Power Pivot Participation", "DIVIDE(SUM('PCS Agent Day'[q1_nonblank]), SUM('PCS Agent Day'[pcs_status_1]))", "Excel master measure", "Copy exactly; source columns are explicitly numeric"),
+        ("Stable Excel feed", str(config.output / "template_feeds" / "pcs" / "current"), "Power Query folder", "Load connection-only + Add to Data Model"),
     ])
     book.audit(_audit_rows(conn, config, "pcs", start, end))
     return _finish(book, partial, target)

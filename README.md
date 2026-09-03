@@ -72,6 +72,8 @@ Use `templates\FTE Count.xlsx` if you need the standard roster. Start with the
 | `output\corrections` | Completed-day residual gaps and shift visualization |
 | `output\absence` | Final Activities-only absence and shrinkage ledger |
 | `output\analysis` | On-demand domain analysis for any selected period |
+| `output\template_feeds\pcs\current` | Stable typed PCS CSVs consumed by the protected Excel master |
+| `output\template_feeds\pcs\archive` | Immutable copies of every PCS feed refresh |
 | `output\model_data\<product>` | Small CSV tables used by optional Excel Data Model masters |
 | `output\data_exports` | Explicit clean CSV/XLSX exports |
 | `output\custom` | Trusted custom Python/read-only SQL results |
@@ -84,11 +86,12 @@ product is presentation-ready and follows the same contract.
 Normal generated workbooks work immediately and do not need Power Query. If you
 want native PivotTables and slicers:
 
-1. In `WFMHub.cmd`, choose **Create an Excel Pivot/slicer master** once.
+1. Open the included data-free `templates\reports\pcs.xlsx` starter. For other
+   products, choose **Create an Excel Pivot/slicer master** once.
 2. Follow [Excel template setup](docs/EXCEL_TEMPLATE_GUIDE.md) to create direct
    CSV queries as **Connection Only + Add to Data Model**.
-3. On normal report days, WFMHub refreshes
-   `output\model_data\<product>` automatically.
+3. On normal PCS report days, WFMHub refreshes the stable filenames under
+   `output\template_feeds\pcs\current` and archives that refresh.
 4. Open the protected master in `templates\reports`, choose **Refresh All**, and
    then **Save As** the copy you will send.
 
@@ -137,6 +140,7 @@ python3 -m wfmhub --home . setup --source-root /path/to/extracts --non-interacti
 python3 -m wfmhub --home . rules catalog
 python3 -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31 --all-packs
 python3 -m wfmhub --home . import-bonus "TOLEARN/Bonus_Matrix_v1.2 (1).xlsx"
+python3 -m wfmhub --home . import-pcs-actions "output/pcs/EDITED_PCS_REPORT.xlsx"
 python3 -m wfmhub --home . analyze pcs --start 2026-08-01 --end 2026-08-31 --comparison previous_month
 python3 -m wfmhub --home . template-init --pack pcs --start 2026-08-01 --end 2026-08-31
 python3 -m unittest discover -s tests -v

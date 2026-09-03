@@ -2409,7 +2409,12 @@ def refresh_models(
         stage(13, "Building intraday actual and forecast")
         forecast, actual = _build_intraday(conn, start, end, mapping, metric_catalog)
         stage(14, "Building exact PCS counters")
-        pcs = _build_pcs(conn, config, metric_catalog, start, end)
+        # PCS management always needs current MTD and the previous full month,
+        # even when the user asks for Today or Current Week. Other operational
+        # marts retain the exact selected boundary.
+        previous_month_end = end.replace(day=1) - timedelta(days=1)
+        pcs_start = min(start, previous_month_end.replace(day=1))
+        pcs = _build_pcs(conn, config, metric_catalog, pcs_start, end)
         stage(15, "Building observed absence and shrinkage")
         absence, absence_events = _build_absence(
             conn, config, rulebook, metric_catalog, attendance, corrections,

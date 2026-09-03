@@ -28,6 +28,22 @@ Only inbound legs with an in-scope Agent ID enter the official PCS counters.
 Q2 does not affect the official score. `PostCallSurveyMode=2` is retained as a
 diagnostic count but is not the participation denominator.
 
+## Coaching and Actions Rate
+
+The original `OverView!S15` formula counted completed briefing rows from an
+external personal workbook and divided them by the agent/date count of valid
+Q1 scores `<=3`. WFMHub keeps that business meaning but removes the broken
+external link:
+
+- every valid inbound Q1 `<=3` creates one coaching opportunity;
+- each opportunity is identified by the stable deduplicated call-leg key;
+- `Actions Rate = completed coaching opportunities / all coaching opportunities`;
+- `OK`, `Yes`, `Y`, `Done` and `Completed` imports normalize to `COMPLETED`;
+- coaching decisions persist in SQLite and survive report regeneration.
+
+`Not required` remains in the denominator and is not counted as completed.
+Low sample is an interpretation warning, not a coaching opportunity by itself.
+
 At team and month level, counters are summed first and the ratios are then
 recalculated. Agent averages and percentages are never averaged together.
 

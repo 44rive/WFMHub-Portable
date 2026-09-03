@@ -66,3 +66,16 @@ Each current report also writes smaller presentation-grain CSV tables under
 `output\model_data\<report>`. Those files are for the optional Excel Data Model
 route and are not a second calculation layer. `manifest.json` records their
 period, row counts, hashes, and generation time.
+
+PCS has the stronger end-user template contract under
+`output\template_feeds\pcs\current`:
+
+- `PCS_AgentDay.csv`
+- `PCS_Summary.csv`
+- `PCS_Actions.csv`
+- `PCS_Trend.csv`
+- `manifest.json`
+
+Every file has a stable name and UTF-8 header. Numeric/date types are declared
+again in the supplied Power Query scripts. A complete copy of every published
+set is kept under `output\template_feeds\pcs\archive`.

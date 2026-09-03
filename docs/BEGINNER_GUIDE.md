@@ -79,13 +79,22 @@ column—not just the filename.
 
 Use this for management PCS updates. It shows the latest day, selected period,
 current MTD, comparable previous-month days, and previous full month.
+Choosing Today or Current Week does not cut off the month comparison; WFMHub
+automatically prepares the prior full month through the selected end date for
+PCS only.
 
 - PCS average = sum of valid inbound Q1 scores / count of valid inbound Q1.
 - Participation = inbound nonblank Q1 / inbound `PCSStatus=1`.
+- Every valid Q1 `<=3` creates one coaching row. Actions Rate is completed
+  coaching rows divided by those low-score rows.
 - A three-hour rhythm means you generate/send it every three hours. The formula
   and reporting period are still daily and monthly.
 
 Never average agent percentages. WFMHub divides the summed counters.
+
+To update coaching, open the newest PCS workbook, edit only the blue columns on
+`ACTIONS`, save it, then choose **Import PCS coaching decisions**. Build PCS
+again so Actions Rate and the template feeds include the saved decisions.
 
 ### Bonus Performance
 
@@ -194,8 +203,8 @@ interactive Excel master.
 4. Follow [EXCEL_TEMPLATE_GUIDE.md](EXCEL_TEMPLATE_GUIDE.md) once.
 5. Save the master.
 
-After that, normal report builds refresh only the small CSV tables under
-`output\model_data`. Open the master, click **Data > Refresh All**, then use
+After that, normal PCS builds refresh only the small stable CSV tables under
+`output\template_feeds\pcs\current`. Open the master, click **Data > Refresh All**, then use
 **Save As** for the file you will email. WFMHub never overwrites the master, so
 your PivotTables and slicers stay intact. Raw data is not loaded into sheets.
 

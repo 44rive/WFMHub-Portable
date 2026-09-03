@@ -63,6 +63,7 @@ def _display_header(name: str) -> str:
         "forecast_attainment": "Forecast Attainment %",
         "gross_sl_20s": "Gross SL 20s %", "adjusted_sl_20s": "Adjusted SL 20s %",
         "verint_reconciliation": "Verint Final Check",
+        "pcs_status": "PCS Status", "post_call_survey_mode": "Post Call Survey Mode",
     }
     return custom.get(name, name.replace("_", " ").title().replace("Id", "ID"))
 
@@ -125,7 +126,7 @@ class ExcelReport:
             worksheet.set_row(row_index, 20)
             for column, value in enumerate(values):
                 header = display[column]
-                fmt = self.editable_date if header == "Injected Date" and header in editable_headers else self.editable if header in editable_headers else self.body
+                fmt = self.editable_date if header in {"Injected Date", "Coaching Date"} and header in editable_headers else self.editable if header in editable_headers else self.body
                 if isinstance(value, datetime):
                     fmt = self.datetime
                 elif isinstance(value, date):

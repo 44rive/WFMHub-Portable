@@ -14,6 +14,7 @@ from . import __version__
 from .actions import import_actions
 from .analytics import load_analytics_rules, validate_analytics_rules
 from .bonus import import_bonus_matrix
+from .coaching import import_pcs_coaching
 from .config import ConfigError, ensure_user_config, load_config, write_source_root
 from .database import HubLockedError, backup_database, connect, migrate, write_session
 from .doctor import run_doctor
@@ -227,13 +228,20 @@ def initialize_excel_template(
     """Create a styled master that the user enriches once in desktop Excel."""
 
     config = load_config(home)
+    existing = excel_template(config, pack)
+    if existing.exists and pack == "pcs" and not force:
+        print(f"Excel starter : {existing.path}")
+        print(f"Current feed  : {existing.feed_folder}")
+        print("Status        : existing PCS master kept; WFMHub did not overwrite it.")
+        print(f"One-time steps: {config.home / 'docs' / 'EXCEL_TEMPLATE_GUIDE.md'}")
+        return 0
     template = require_new_template(config, pack, force)
     path = build_reports(
         home, start, end, (pack,), template.path, use_config_period,
         service_profile,
     )[0]
     print(f"Excel starter : {path}")
-    print(f"Model folder  : {template.model_folder}")
+    print(f"Current feed  : {template.feed_folder}")
     print("Protected rule: normal WFMHub refreshes never overwrite this master.")
     print(f"One-time steps: {config.home / 'docs' / 'EXCEL_TEMPLATE_GUIDE.md'}")
     return 0
@@ -363,6 +371,23 @@ def import_decisions(home: Path, workbook: Path) -> int:
         bar.fail(str(exc))
         raise
     print(f"Imported {count} correction decision(s).")
+    return 0
+
+
+def import_coaching_decisions(home: Path, workbook: Path) -> int:
+    config = load_config(home)
+    _logging(config)
+    bar = ProgressBar()
+    bar.update(0.1, "Reading PCS coaching decisions")
+    try:
+        with write_session(config) as conn:
+            count = import_pcs_coaching(conn, config, workbook)
+        bar.finish("PCS coaching decisions imported")
+    except Exception as exc:
+        bar.fail(str(exc))
+        raise
+    print(f"Imported {count} PCS coaching decision(s).")
+    print("Build PCS Performance again to refresh Actions Rate and the stable Excel feeds.")
     return 0
 
 
@@ -764,16 +789,17 @@ def menu(home: Path) -> int:
         print("    [5] Import Bonus Matrix v1.2")
         print("\n  CONTROL & REVIEW")
         print("    [6] Import attendance correction decisions")
-        print("    [7] Validate rules and build governance catalog")
-        print("    [8] Show source health and date coverage")
+        print("    [7] Import PCS coaching decisions")
+        print("    [8] Validate rules and build governance catalog")
+        print("    [9] Show source health and date coverage")
         print("\n  HUB TOOLS")
-        print("    [9] Create database backup")
-        print("   [10] Change source root")
-        print("   [11] Run system check")
-        print("   [12] Advanced: custom Python or read-only SQL")
-        print("   [13] Create an Excel Pivot/slicer master")
-        print("   [14] Exit")
-        choice = input("\n  Choose 1-14: ").strip()
+        print("   [10] Create database backup")
+        print("   [11] Change source root")
+        print("   [12] Run system check")
+        print("   [13] Advanced: custom Python or read-only SQL")
+        print("   [14] Create an Excel Pivot/slicer master")
+        print("   [15] Exit")
+        choice = input("\n  Choose 1-15: ").strip()
         try:
             if choice == "1":
                 group = _choose_source_group()
@@ -803,31 +829,34 @@ def menu(home: Path) -> int:
                 path = Path(input("Paste the edited Attendance Corrections workbook path: ").strip().strip('"'))
                 import_decisions(home, path)
             elif choice == "7":
-                rules_tool(home, "catalog")
+                path = Path(input("Paste the edited PCS Performance workbook path: ").strip().strip('"'))
+                import_coaching_decisions(home, path)
             elif choice == "8":
+                rules_tool(home, "catalog")
+            elif choice == "9":
                 show_status(home)
                 show_coverage(home)
-            elif choice == "9":
-                create_backup(home)
             elif choice == "10":
+                create_backup(home)
+            elif choice == "11":
                 path = Path(input("Paste the folder containing FTE, Storm and Verint: ").strip().strip('"'))
                 setup(home, path, True)
-            elif choice == "11":
-                run_doctor(home)
             elif choice == "12":
+                run_doctor(home)
+            elif choice == "13":
                 config = load_config(home)
                 kind, job = _choose_custom_job(config)
                 start, end, use_config = _choose_period()
                 run_custom(home, kind, job, start, end, use_config)
-            elif choice == "13":
+            elif choice == "14":
                 pack = _choose_template_pack()
                 start, end, use_config = _choose_period()
                 profile = _choose_service_profile(home) if pack == "service" else None
                 initialize_excel_template(home, pack, start, end, profile, use_config_period=use_config)
-            elif choice == "14":
+            elif choice == "15":
                 return 0
             else:
-                print("Please choose a number from 1 to 14.")
+                print("Please choose a number from 1 to 15.")
         except Exception as exc:
             print(f"\nERROR: {exc}")
             print("Nothing was changed in your extract files. Check the latest file in logs.")
@@ -869,6 +898,8 @@ def parser() -> argparse.ArgumentParser:
     custom_p.add_argument("--end", type=_date)
     import_p = commands.add_parser("import-actions", help="Import edited GAPS decision columns")
     import_p.add_argument("workbook", type=Path)
+    coaching_p = commands.add_parser("import-pcs-actions", help="Import edited PCS coaching columns")
+    coaching_p.add_argument("workbook", type=Path)
     bonus_p = commands.add_parser("import-bonus", help="Import Bonus Matrix v1.2 without changing the source")
     bonus_p.add_argument("workbook", type=Path)
     analysis_p = commands.add_parser("analyze", help="Run deterministic on-demand period analysis")
@@ -911,6 +942,8 @@ def main(argv: list[str] | None = None) -> int:
             return report_only(home, args.start, args.end, args.output, args.pack, service_profile=args.service_profile)
         if args.command == "import-actions":
             return import_decisions(home, args.workbook)
+        if args.command == "import-pcs-actions":
+            return import_coaching_decisions(home, args.workbook)
         if args.command == "import-bonus":
             return import_bonus_tool(home, args.workbook)
         if args.command == "analyze":

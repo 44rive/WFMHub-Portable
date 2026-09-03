@@ -90,6 +90,7 @@ details remain in one module.
 | `core.clean_call_leg` | Deduplicated active call-leg view by stable Call Key |
 | `core.dim_agent` | One operational Agent ID |
 | `core.correction_action` | One human decision per stable Correction ID |
+| `core.pcs_coaching_action` | One persistent coaching decision per low-score Call Key |
 | `mart.attendance_agent_day` | One scheduled Agent ID/day |
 | `mart.conformance_agent_day` | Legacy compatibility table; empty in v0.5 |
 | `mart.correction_candidate` | One observed LILO/status gap plus Verint-final check |
@@ -127,8 +128,8 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `absence` | `output/absence` | Activities-only final absence/shrinkage ledger |
 
 Every product uses the same `DASHBOARD`/detail/`DEFINITIONS`/hidden `_AUDIT`
-presentation shell. The Corrections `GAPS` sheet is the only workbook input
-accepted for correction-action import. Legacy `operations` and `quality_pcs`
+presentation shell. The Corrections `GAPS` sheet and PCS `ACTIONS` blue columns
+are the only generated-report inputs accepted for persistent decision import. Legacy `operations` and `quality_pcs`
 builders remain callable for compatibility but are absent from the menu;
 Intraday and Executive Scorecard keys remain disabled.
 
@@ -136,6 +137,13 @@ Each report also refreshes compact tables in `output/model_data/<product>`.
 Excel-authored masters query those CSVs directly as connection-only Data Model
 tables. WFMHub creates a starter once and never rewrites a master, protecting
 native PivotTables and slicers.
+
+PCS additionally publishes a strict stable-name contract under
+`output/template_feeds/pcs/current`: agent/day, named-period summary,
+call-level coaching actions, and daily trend. Each publication is also copied
+to `archive`, and the manifest is published after the atomic CSV replacements.
+This avoids direct SQLite/ODBC/native-driver dependencies on controlled work
+machines while preserving SQLite as the calculation authority.
 
 ## Agent scope and identity
 
@@ -196,7 +204,12 @@ scores (default `1,2,3,4,5`), and calculate `sum(valid Q1) / count(valid Q1)`.
 Counts `<=3` and `>3` remain counts. Participation is `inbound raw-Q1 nonblank /
 inbound PCSStatus=1`; invalid raw answers stay in that numerator and are
 separately counted. Q2 and Mode 2 are diagnostics only. Higher grains always
-sum counters before dividing. See [PCS logic](PCS_LOGIC.md).
+sum counters before dividing. A valid inbound Q1 `<=3` is one coaching
+opportunity. Coaching status is keyed by stable call key in
+`core.pcs_coaching_action`; Actions Rate is completed opportunities divided by
+all low-score opportunities. The PCS mart rebuild window expands to the first
+day of the previous month through the selected end date so Today/Current Week
+reports retain MTD and comparison context. See [PCS logic](PCS_LOGIC.md).
 
 ## Clean exports and Custom Lab
 

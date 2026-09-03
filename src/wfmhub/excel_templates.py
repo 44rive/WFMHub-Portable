@@ -23,6 +23,12 @@ class ExcelTemplate:
     def exists(self) -> bool:
         return self.path.is_file()
 
+    @property
+    def feed_folder(self) -> Path:
+        if self.report_key.casefold() == "pcs":
+            return self.model_folder.parents[1] / "template_feeds" / "pcs" / "current"
+        return self.model_folder
+
 
 def excel_template(config: Config, report_key: str) -> ExcelTemplate:
     """Return the stable master and model-data locations for one report."""

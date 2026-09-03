@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.11.0 — 2026-09-03
+
+- Rebuilt PCS follow-up at call-response grain: every valid inbound Q1 `<=3`
+  is one traceable coaching opportunity instead of an agent-level low-score or
+  low-sample warning.
+- Restored the original Actions Rate business meaning without its broken
+  external workbook: completed coaching divided by low-score opportunities.
+- Added persistent PCS coaching decisions in SQLite plus safe workbook import;
+  `OK`, `Yes`, `Y`, `Done`, and `Completed` normalize to completed.
+- Added stable typed PCS template feeds under
+  `output/template_feeds/pcs/current` and immutable refresh archives with
+  schema, row counts, and hashes in `manifest.json`.
+- Added one-file-per-query Power Query scripts, numeric/date typing, protected
+  Excel-master setup, exact Power Pivot measures, and a click-by-click beginner
+  guide. No data is loaded to a worksheet and no SQLite ODBC driver is needed.
+- Shipped a reviewed, data-free `templates/reports/pcs.xlsx` starter so the
+  release no longer opens to an empty template folder; packaging rejects
+  external links, connections, and Pivot caches in this public workbook.
+- Upgraded the PCS dashboard with coaching-completed and Actions Rate cards,
+  and added daily/current-MTD/prior-month coaching comparisons.
+- Made the PCS mart always retain the previous full month through the selected
+  end date, so choosing Today or Current Week still produces real MTD and
+  prior-month comparisons instead of silently showing only the selected days.
+
 ## 0.10.1 — 2026-09-03
 
 - Made Attendance Callouts honor the complete selected date range; choosing

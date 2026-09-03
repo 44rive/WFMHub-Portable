@@ -14,10 +14,16 @@ Expected optional master names:
 - `corrections.xlsx`
 - `absence.xlsx`
 
-Create one from menu option **Create an Excel Pivot/slicer master**, then follow
-`docs/EXCEL_TEMPLATE_GUIDE.md`. The master contains the named cell
-`pModelDataPath`; compact CSV files are refreshed under
-`output/model_data/<report>/`. No raw extract is loaded to a worksheet.
+The portable release includes a reviewed, data-free `pcs.xlsx` starter so this
+folder is no longer empty on first use. For other products, create one from
+menu option **Create an Excel Pivot/slicer master**, then follow
+`docs/EXCEL_TEMPLATE_GUIDE.md`. The PCS master contains the named cell
+`pFeedFolder` for PCS; its stable typed CSV files are refreshed under
+`output/template_feeds/pcs/current/`. No raw extract is loaded to a worksheet.
+
+The shipped PCS starter contains no source rows, Pivot caches, connections, or
+external links. Use the supplied one-query-per-file scripts under
+`templates/power_query` and follow `docs/EXCEL_TEMPLATE_GUIDE.md`.
 
 These master files are intentionally ignored by Git so a locally populated
 workbook cannot be published by accident.

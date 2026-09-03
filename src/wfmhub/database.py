@@ -25,7 +25,7 @@ class DatabaseFormatError(ConfigError):
 _SCHEMA_REFERENCE = re.compile(r"\b(meta|raw|core|mart)\.", re.IGNORECASE)
 _SQLITE_HEADER = b"SQLite format 3\x00"
 _APPLICATION_ID = 0x57464D48  # ASCII "WFMH"
-_STORAGE_VERSION = 2
+_STORAGE_VERSION = 3
 
 
 def _rewrite_sql(sql: str) -> str:

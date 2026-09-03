@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfoNotFoundError
 from openpyxl import Workbook, load_workbook
 
 from wfmhub.actions import import_actions
+from wfmhub.coaching import import_pcs_coaching
 from wfmhub.config import ensure_user_config, load_config, write_source_root
 from wfmhub.database import write_session
 from wfmhub.ingestion import ingest_all
@@ -142,6 +143,15 @@ def make_calls(path: Path):
             "[Hold Time]": "0:00:00", "[Total Wrap Time]": "0:00:00",
             "[Call Direction]": "I",
         })
+        writer.writerow({
+            "[Call Date/Time]": "8/1/2026 11:00", "[Call End Date/Time]": "8/1/2026 11:04",
+            "[Call ID]": "low-200", "[Call Reference Number]": "ref-low-200",
+            "[Agent ID]": "200", "[Agent]": "Agent 200", "[Talk Time]": "0:03:00",
+            "[Hold Time]": "0:00:30", "[Total Wrap Time]": "0:00:30",
+            "[Call Direction]": "I", "[PostCallSurveyMode]": "2", "[PCSStatus]": "1",
+            "[Question 1]": "2", "[Question 2]": "3", "[Question 3]": "Needs follow-up",
+            "[Queue]": "Queue",
+        })
         for call_id, direction, status, q1, q2 in (
             ("half-score", "I", "1", "4.5", "5"),
             ("outbound-score", "O", "1", "1", ""),
@@ -248,7 +258,7 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(conn.execute("SELECT count(*) FROM mart.conformance_agent_day").fetchone()[0], 0)
                 self.assertEqual(model.forecast_rows, 1)
                 self.assertEqual(model.intraday_rows, 2)
-                self.assertEqual(model.pcs_rows, 1)
+                self.assertEqual(model.pcs_rows, 2)
                 self.assertEqual(model.absence_rows, 4)
                 self.assertGreater(model.absence_event_rows, 0)
                 self.assertEqual(model.service_rows, 2)
@@ -296,8 +306,8 @@ class EndToEndTests(unittest.TestCase):
                 ).fetchone()
                 self.assertEqual(service[:2], (18, 22))
                 self.assertEqual(service[2], 2390)
-                self.assertEqual(conn.execute("SELECT count(*) FROM raw.call_leg").fetchone()[0], 12)
-                self.assertEqual(conn.execute("SELECT count(*) FROM core.clean_call_leg").fetchone()[0], 6)
+                self.assertEqual(conn.execute("SELECT count(*) FROM raw.call_leg").fetchone()[0], 14)
+                self.assertEqual(conn.execute("SELECT count(*) FROM core.clean_call_leg").fetchone()[0], 7)
                 pcs = conn.execute(
                     """SELECT survey_responses, pcs_average, average_handle_seconds,
                               pcs_status_calls, pcs_participation_responses,
@@ -315,6 +325,17 @@ class EndToEndTests(unittest.TestCase):
                         "SELECT metric_value FROM mart.metric_value WHERE metric_id='pcs_average'"
                     ).fetchone()[0],
                     pcs[1],
+                )
+
+                refresh_models(
+                    conn, config, "pcs-today-only", date(2026, 8, 2), date(2026, 8, 2),
+                    as_of=datetime(2026, 8, 2, 17, 0),
+                )
+                self.assertEqual(
+                    str(conn.execute(
+                        "SELECT min(business_date) FROM mart.agent_pcs_day"
+                    ).fetchone()[0]),
+                    "2026-08-01",
                 )
 
                 # A refresh during an active shift is provisional: the future
@@ -377,9 +398,9 @@ class EndToEndTests(unittest.TestCase):
                     conn, config, "calls", model.start, model.end,
                     progress=lambda current, total, label: export_progress.append((current, total, label)),
                 )
-                self.assertEqual(clean_calls.rows, 6)
+                self.assertEqual(clean_calls.rows, 7)
                 self.assertTrue(clean_calls.manifest.exists())
-                self.assertEqual(export_progress[-1], (6, 0, "Exported calls: 6 rows"))
+                self.assertEqual(export_progress[-1], (7, 0, "Exported calls: 7 rows"))
                 governed_service = export_dataset(
                     conn, config, "daily_service_lob", model.start, model.end,
                 )
@@ -436,6 +457,23 @@ class EndToEndTests(unittest.TestCase):
                 edited.close()
                 self.assertEqual(import_actions(conn, corrections_report), 1)
                 self.assertEqual(conn.execute("SELECT validation_status FROM core.correction_action").fetchone()[0], "Validated")
+
+                pcs_edit = load_workbook(focused_pcs_report)
+                pcs_actions = pcs_edit["ACTIONS"]
+                pcs_headers = {cell.value: cell.column for cell in pcs_actions[4]}
+                self.assertEqual(pcs_actions.max_row, 5)
+                self.assertEqual(pcs_actions.cell(5, pcs_headers["Agent ID"]).value, "200")
+                pcs_actions.cell(5, pcs_headers["Coaching Status"], "OK")
+                pcs_actions.cell(5, pcs_headers["Coaching Date"], date(2026, 8, 2))
+                pcs_actions.cell(5, pcs_headers["Coach"], "TL 1")
+                pcs_actions.cell(5, pcs_headers["Coaching Comment"], "Reviewed")
+                pcs_edit.save(focused_pcs_report)
+                pcs_edit.close()
+                self.assertEqual(import_pcs_coaching(conn, config, focused_pcs_report), 1)
+                self.assertEqual(
+                    conn.execute("SELECT coaching_status FROM core.pcs_coaching_action").fetchone()[0],
+                    "COMPLETED",
+                )
 
             self.assertTrue(report.exists())
             workbook = load_workbook(report, read_only=True, data_only=True)
@@ -500,6 +538,13 @@ class EndToEndTests(unittest.TestCase):
                 pcs_model_headers = next(csv.reader(handle))
             self.assertIn("business_date", pcs_model_headers)
             self.assertIn("q1_score_sum", pcs_model_headers)
+            pcs_feed = home / "output" / "template_feeds" / "pcs"
+            self.assertTrue((pcs_feed / "current" / "PCS_AgentDay.csv").exists())
+            self.assertTrue((pcs_feed / "current" / "PCS_Summary.csv").exists())
+            self.assertTrue((pcs_feed / "current" / "PCS_Actions.csv").exists())
+            self.assertTrue((pcs_feed / "current" / "PCS_Trend.csv").exists())
+            self.assertTrue((pcs_feed / "current" / "manifest.json").exists())
+            self.assertGreaterEqual(len(list((pcs_feed / "archive").glob("*/manifest.json"))), 1)
             for generated_report in (
                 report, corrections_report, pcs_report, focused_pcs_report,
                 attendance_report, absence_report,
