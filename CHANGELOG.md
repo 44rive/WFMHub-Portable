@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.15.0 — 2026-09-05
+
+- Rebuilt the public report suite around one WFM Hub visual identity and fixed
+  business-specific products: Attendance Callout, Staffing Gaps, OEM Flash,
+  Realisations, Attendance Review, Final Absenteeism, Bonus Management and PCS
+  Performance. Workbook metadata and footers identify Anass ASSRI as author.
+- Added fixed-name PCS and Absenteeism CSV feeds for long-lived shared Excel
+  files. PCS now has loaded-date periods, cascading LOB / Team Leader / Agent
+  selectors, filterable agent results, a permanent coaching log and a separate
+  refreshable opportunity queue keyed by Agent ID and Coaching Key.
+- Made Agent Status the primary detailed attendance evidence, retained LILO for
+  outer boundaries and sparse-data fallback, protected unfinished shifts from
+  early-leave logic, and kept exact separate gaps when an agent returns later.
+- Accepted parsed Activities Shift Assignment boundaries when a dedicated
+  StartEndTimes extract is unavailable, while raising a visible review finding
+  and continuing to use Activities as the post-correction final ledger.
+- Extended roster scope for operational extracts that contain a real Agent ID
+  when the unique matching FTE name has a blank Client ID. Ambiguous names stay
+  excluded; Active and effective-dated Leaver rules still apply.
+- Simplified Attendance Review to Logged, Break, Lunch and Gap evidence colors,
+  with exact unrounded Start/End timestamps kept in `VERINT_INJECTION` for each
+  continuous residual interval across every completed date selected.
+- Expanded Final Absenteeism with absence and shrinkage components, exact
+  activity detail, permanent review actions, uncoded-empty-shift controls and
+  finalized-coverage reporting so incomplete cases cannot dilute KPI rates.
+- Recreated Bonus Matrix v1.2 as the eight-sheet management workbook, including
+  the original policy/configuration structure, formula mechanics, management
+  controls, team analysis and WFM Hub charts without changing the source file.
+- Added the Flash OEM Realisations pilot with LOB/day facts plus monthly, ISO
+  week and quarterly trends for actual, forecast, service level, service
+  availability, AHT, staffing, final absence and shrinkage. Adherence remains
+  intentionally excluded.
+- Added regression coverage for shared-feed schemas, Activities schedule
+  fallback, blank-ID roster matching and report contracts. The release passes
+  72 automated tests and workbook external-link checks.
+
 ## 0.14.0 — 2026-09-04
 
 - Activated the governed `PTO` and `Away` sheets in the standard FTE workbook.

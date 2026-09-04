@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -64,6 +66,18 @@ def _evaluation_time(timezone_name: str, as_of: datetime | None) -> datetime:
 def _dicts(cursor: DatabaseCursor) -> list[dict[str, Any]]:
     columns = [item[0] for item in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def _agent_name_key(value: Any) -> str | None:
+    """Use the same accent/case-insensitive name key as roster scoping."""
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    decomposed = unicodedata.normalize("NFKD", text).casefold()
+    clean = "".join(char for char in decomposed if not unicodedata.combining(char))
+    words = re.findall(r"[a-z0-9]+", clean)
+    return " ".join(words) or None
 
 
 def _metric_evaluation(
@@ -144,12 +158,19 @@ def _load_schedules(conn: DatabaseConnection, start: date, end: date) -> list[di
                    f.modified_at,
                    dense_rank() OVER (
                        PARTITION BY r.schedule_date, coalesce(r.agent_id, 'NAME|' || upper(coalesce(r.agent_name,'')))
-                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC
+                       ORDER BY CASE
+                                  WHEN f.source_variant='START_END' AND r.parse_ok=true
+                                       AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL THEN 0
+                                  WHEN f.source_variant='ACTIVITIES' AND r.parse_ok=true
+                                       AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL THEN 1
+                                  WHEN f.source_variant='START_END' THEN 2 ELSE 3
+                                END,
+                                f.modified_at DESC NULLS LAST, f.file_name DESC
                    ) AS source_rank
             FROM raw.schedule_shift r
             JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
-                                       AND f.source_variant='START_END'
-            WHERE r.schedule_date BETWEEN ? AND ?
+            WHERE f.source_variant IN ('START_END','ACTIVITIES')
+              AND r.schedule_date BETWEEN ? AND ?
         ), dedup AS (
             SELECT *, row_number() OVER (
                 PARTITION BY schedule_date, coalesce(agent_id, 'NAME|' || upper(coalesce(agent_name,''))),
@@ -355,6 +376,42 @@ def _build_agents(conn: DatabaseConnection) -> dict[str, dict[str, Any]]:
         FROM ids LEFT JOIN roster USING(agent_id) LEFT JOIN actual_names USING(agent_id) LEFT JOIN fte USING(agent_id)
         """
     )
+    # A valid FTE roster may temporarily have blank Client IDs. Scoped source
+    # rows still preserve their Storm/Verint Agent ID after a unique name match.
+    # Attach the roster fields to that operational ID for reporting.
+    fte_rows = conn.execute(
+        """SELECT r.agent_name, r.employment_status, r.team_leader,
+                  r.ops_manager, r.lob, r.market, r.language, r.location,
+                  r.city, r.fte
+           FROM raw.fte_agent r
+           JOIN meta.source_file f ON f.file_id=r.source_file_id
+           WHERE f.active=true AND f.status='SUCCESS'
+             AND r.agent_id IS NULL
+             AND (
+                 upper(trim(coalesce(r.employment_status,'')))='ACTIVE'
+                 OR (upper(trim(coalesce(r.employment_status,'')))='LEAVER'
+                     AND r.end_date IS NOT NULL)
+             )"""
+    ).fetchall()
+    by_name: dict[str, list[tuple[Any, ...]]] = defaultdict(list)
+    for row in fte_rows:
+        key = _agent_name_key(row[0])
+        if key:
+            by_name[key].append(row)
+    for agent_id, canonical_name in conn.execute(
+        "SELECT agent_id, canonical_name FROM core.dim_agent"
+    ).fetchall():
+        candidates = by_name.get(_agent_name_key(canonical_name) or "", [])
+        if len(candidates) != 1:
+            continue
+        conn.execute(
+            """UPDATE core.dim_agent
+               SET canonical_name=?, employment_status=?, team_leader=?,
+                   ops_manager=?, lob=?, market=?, language=?, location=?,
+                   city=?, fte=?, match_method='Unique FTE name'
+               WHERE agent_id=?""",
+            [*candidates[0], agent_id],
+        )
     return {row["agent_id"]: row for row in _dicts(conn.execute("SELECT * FROM core.dim_agent"))}
 
 
@@ -1497,9 +1554,9 @@ def _build_verint_final_absence(
     end: date,
     as_of: datetime,
 ) -> tuple[int, int]:
-    # StartEndTimes is the authoritative roster of expected agent-days.  The
-    # post-day Activities export is left-attached below; this keeps completely
-    # empty or missing Verint rows visible instead of silently dropping them.
+    # Prefer StartEndTimes as the expected agent-day roster. If it is absent,
+    # use only the Shift Assignment boundary parsed from Activities. Activity
+    # events remain post-day final evidence and never become observed presence.
     shifts = _dicts(conn.execute(
         """
         WITH ranked AS (
@@ -1508,13 +1565,20 @@ def _build_verint_final_absence(
                    d.lob AS roster_lob, d.market, d.language, d.location,
                    row_number() OVER (
                        PARTITION BY r.schedule_date, r.agent_id
-                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
+                       ORDER BY CASE
+                                  WHEN f.source_variant='START_END' AND r.parse_ok=true
+                                       AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL THEN 0
+                                  WHEN f.source_variant='ACTIVITIES' AND r.parse_ok=true
+                                       AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL THEN 1
+                                  WHEN f.source_variant='START_END' THEN 2 ELSE 3
+                                END,
+                                f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
                    ) AS row_rank
             FROM raw.schedule_shift r
             JOIN meta.source_file f ON f.file_id=r.source_file_id
             LEFT JOIN core.dim_agent d ON d.agent_id=r.agent_id
             WHERE f.active=true AND f.status='SUCCESS'
-              AND f.source_variant='START_END'
+              AND f.source_variant IN ('START_END','ACTIVITIES')
               AND r.schedule_date BETWEEN ? AND ? AND r.agent_id IS NOT NULL
         )
         SELECT * FROM ranked WHERE row_rank=1
@@ -2546,11 +2610,55 @@ def _build_quality(
         ).fetchall() if row[0]
     }
     if "START_END" not in schedule_variants:
+        activity_assignments = conn.execute(
+            """SELECT count(*) FROM raw.schedule_shift r
+               JOIN meta.source_file f ON f.file_id=r.source_file_id
+               WHERE f.active=true AND f.status='SUCCESS'
+                 AND f.source_variant='ACTIVITIES' AND r.parse_ok=true
+                 AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL"""
+        ).fetchone()[0]
         add(
             "schedule", str(config.source_path("schedule_folder")), None, None,
-            "Missing StartEndTimes schedule", "ERROR",
-            "Operational attendance requires a StartEndTimes export. Activities is the corrected final ledger and cannot replace it.",
+            "Dedicated StartEndTimes schedule not loaded",
+            "REVIEW" if activity_assignments else "ERROR",
+            (
+                f"Using {activity_assignments:,} parsed Activities Shift Assignment boundaries; "
+                "load StartEndTimes when available for an independent schedule source."
+                if activity_assignments else
+                "No usable schedule boundary exists. Load StartEndTimes or an Activities export with Shift Assignment."
+            ),
         )
+    else:
+        fallback_assignments = conn.execute(
+            """SELECT count(*) FROM (
+                   SELECT DISTINCT r.schedule_date, r.agent_id
+                   FROM raw.schedule_shift r
+                   JOIN meta.source_file f ON f.file_id=r.source_file_id
+                   WHERE f.active=true AND f.status='SUCCESS'
+                     AND f.source_variant='ACTIVITIES' AND r.parse_ok=true
+                     AND r.agent_id IS NOT NULL
+                     AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL
+                     AND NOT EXISTS (
+                         SELECT 1 FROM raw.schedule_shift preferred
+                         JOIN meta.source_file preferred_file
+                           ON preferred_file.file_id=preferred.source_file_id
+                         WHERE preferred_file.active=true
+                           AND preferred_file.status='SUCCESS'
+                           AND preferred_file.source_variant='START_END'
+                           AND preferred.schedule_date=r.schedule_date
+                           AND preferred.agent_id=r.agent_id
+                           AND preferred.parse_ok=true
+                           AND preferred.scheduled_start IS NOT NULL
+                           AND preferred.scheduled_end IS NOT NULL
+                     )
+               )"""
+        ).fetchone()[0]
+        if fallback_assignments:
+            add(
+                "schedule", str(config.source_path("schedule_folder")), None, None,
+                "StartEndTimes coverage incomplete", "REVIEW",
+                f"Using Activities Shift Assignment boundaries for {fallback_assignments:,} agent-day row(s) not covered by a valid StartEndTimes row.",
+            )
     if "ACTIVITIES" not in schedule_variants:
         add(
             "schedule", str(config.source_path("schedule_folder")), None, None,
@@ -2907,7 +3015,7 @@ def refresh_models(
         metric_rows = build_metric_values(
             conn, metric_catalog, rulebook, run_id, start, end,
         )
-        stage(21, "Generating deterministic Python findings")
+        stage(21, "Preparing period findings")
         finding_rows = build_findings(
             conn, metric_catalog, analytics_rules, run_id, start, end,
         )

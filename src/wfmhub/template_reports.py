@@ -1,4 +1,4 @@
-"""Shared report shell for complete, replaceable WFM decision workbooks."""
+"""Shared visual shell for WFM decision workbooks."""
 
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ class DecisionWorkbook:
         ws.merge_range("A1:N1", self.title_text, self.report.title)
         ws.merge_range(
             "A2:N2",
-            f"Period {self.start:%Y-%m-%d} to {self.end:%Y-%m-%d}  |  generated {self.generated:%Y-%m-%d %H:%M}  |  WFM HUB",
+            f"Period {self.start:%Y-%m-%d} to {self.end:%Y-%m-%d}  |  data updated {self.generated:%Y-%m-%d %H:%M}  |  prepared by Anass ASSRI",
             self.report.subtitle,
         )
         ws.set_row(0, 34)
@@ -200,17 +200,17 @@ class DecisionWorkbook:
     def definitions(self, rows: Sequence[Sequence[Any]]) -> None:
         self.table(
             "DEFINITIONS",
-            "Definitions and operational interpretation",
-            "Every KPI is calculated by the governed Python/SQLite engine. Excel only presents the result.",
-            ["Metric", "Definition", "Operational use", "Guardrail"],
+            "Business definitions",
+            "Approved measures and how to use them.",
+            ["Metric", "Definition", "Operational use", "Important note"],
             rows,
         )
 
     def audit(self, rows: Sequence[Sequence[Any]]) -> None:
         ws = self.table(
             "_AUDIT",
-            "Audit and lineage",
-            "Hidden technical lineage. Unhide only for reconciliation or governance review.",
+            "Report controls",
+            "Technical details for reconciliation. This sheet is hidden by default.",
             ["Item", "Value", "Evidence"],
             rows,
         )
@@ -229,6 +229,6 @@ class DecisionWorkbook:
                     f"expected {expected}, created {actual}"
                 )
         for ws in self.report.workbook.worksheets():
-            ws.set_footer("&LWFM Hub | Anass ASSRI&CPage &P of &N&RConfidential")
+            ws.set_footer("&LPrepared by Anass ASSRI | WFM&CPage &P of &N&RConfidential")
         self.report.close()
         return self.path

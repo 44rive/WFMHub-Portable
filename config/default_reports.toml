@@ -1,22 +1,22 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.7"
-description = "One decision per workbook; each finished report is generated directly by Python and SQLite."
+version = "2026.09.9"
+description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
 key = "pcs"
 title = "PCS PERFORMANCE"
 purpose = "Interactive daily, MTD and previous-month PCS score, participation, and coaching."
 finding_domains = ["pcs", "data_quality"]
-sheets = ["DASHBOARD", "AGENT_RESULTS", "COACHING", "PCS_DATA", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
+sheets = ["DASHBOARD", "AGENT_RESULTS", "COACHING", "COACHING_QUEUE", "PCS_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
 
 [[packs]]
 key = "bonus"
-title = "BONUS PERFORMANCE"
-purpose = "Monthly bonus results, KPI diagnostics, simulations and release controls."
+title = "BONUS MANAGEMENT"
+purpose = "Monthly policy, KPI configuration, payout results and management analysis."
 finding_domains = ["bonus", "data_quality"]
-sheets = ["DASHBOARD", "AGENT_DETAIL", "KPI_ANALYSIS", "ACTIONS", "DEFINITIONS", "_AUDIT"]
+sheets = ["Policy_Decisions", "Control_Checks", "KPI_Config", "Raw_Data", "Results", "KPI_Analysis", "Team_Lead_Analysis", "Dashboard"]
 
 [[packs]]
 key = "service"
@@ -24,6 +24,13 @@ title = "OEM FLASH"
 purpose = "Email-ready OEM service control with queue, forecast and staffing evidence."
 finding_domains = ["service", "forecast", "data_quality"]
 sheets = ["FLASH", "HOURLY", "QUEUES", "EXCEPTIONS", "DATA_STATUS", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "realisations"
+title = "REALISATIONS"
+purpose = "Actual versus forecast, service, staffing and final capacity results for a mapped LOB."
+finding_domains = ["service", "forecast", "absence", "staffing", "data_quality"]
+sheets = ["DASHBOARD", "LOB_RESULTS", "TREND", "DATA", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "staffing"
@@ -51,7 +58,7 @@ key = "absence"
 title = "FINAL ABSENCE & SHRINKAGE"
 purpose = "Corrected Verint final absence and shrinkage ledger."
 finding_domains = ["absence", "data_quality"]
-sheets = ["DASHBOARD", "TREND", "AGENT_DETAIL", "EXCEPTIONS", "DEFINITIONS", "_AUDIT"]
+sheets = ["DASHBOARD", "TEAM_SUMMARY", "AGENT_RESULTS", "ACTIONS", "ABSENCE_COMPONENTS", "SHRINKAGE_COMPONENTS", "ACTIVITY_DETAIL", "ABSENCE_DATA", "HELP", "DEFINITIONS", "_AUDIT"]
 
 
 [[packs]]

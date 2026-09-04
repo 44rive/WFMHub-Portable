@@ -1,4 +1,4 @@
-"""Shared governed workbook sheets for findings, methods and provenance."""
+"""Shared workbook sheets for findings, methods and provenance."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ def validate_workbook_contract(report: ExcelReport, spec: ReportSpec) -> None:
     actual = tuple(sheet.get_name() for sheet in report.workbook.worksheets())
     if actual != spec.sheets:
         raise ValueError(
-            f"Report contract {spec.key!r} does not match the generated workbook. "
-            f"Expected {spec.sheets}; generated {actual}."
+        f"Report contract {spec.key!r} does not match the workbook. "
+        f"Expected {spec.sheets}; created {actual}."
         )
 
 
@@ -57,8 +57,8 @@ def add_findings_sheet(
     headers = [item[0] for item in cursor.description]
     rows = cursor.fetchall()
     ws = report.add_table_sheet(
-        "FINDINGS", "Deterministic Python findings",
-        "Every statement is generated from governed components and includes its evidence filter. No AI is used.",
+        "FINDINGS", "Period findings",
+        "Every statement includes the metric, comparison and evidence filter behind it.",
         headers, rows,
         exception_column="Severity",
     )
@@ -163,7 +163,7 @@ def add_domain_rules_sheet(
         ]
     report.add_table_sheet(
         "DOMAIN_RULES", "Invariant domain and evidence rules",
-        f"Generated from the domain engine and {rulebook.file.name} version {rulebook.version}.",
+        f"Current rules from {rulebook.file.name} version {rulebook.version}.",
         headers, rows,
     )
 
@@ -197,11 +197,11 @@ def add_provenance_sheet(
         ("Queue mapping", mapping.file.name, mapping.sha256),
         ("Report catalog", load_report_catalog(config.home, config.report_catalog).version,
          load_report_catalog(config.home, config.report_catalog).sha256),
-        ("Calculation authority", "Python + SQLite", "No KPI formula is calculated by Excel"),
+        ("Calculation source", "WFM Hub metric catalog", "Workbook values follow the listed KPI method"),
     ]
     report.add_table_sheet(
         "PROVENANCE", "Calculation and configuration provenance",
-        "Hashes make every result reproducible and expose configuration drift before management use.",
+        "Technical controls used to reconcile the workbook to its source and configuration.",
         ["item", "value", "evidence"], rows,
     )
 

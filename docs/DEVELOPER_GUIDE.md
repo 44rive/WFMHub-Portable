@@ -51,7 +51,7 @@ attendance, absence, correction, or payroll models.
 ## Windows portable build
 
 ```bash
-python3 packaging/windows/build_portable.py --version 0.14.0 --python-version 3.13.7
+python3 packaging/windows/build_portable.py --version 0.15.0 --python-version 3.13.7
 ```
 
 The builder always deletes and recreates stage and wheelhouse. It:
@@ -113,9 +113,9 @@ separate from integer row limits in `[report]`. The old `[report_packs]`
 settings are accepted only for compatibility and do not create report folders.
 `reports.build_report()` remains the Daily Operations compatibility API. Register
 builders through `build_report_pack`; do not import them directly in the CLI.
-The menu exposes only `pcs`, `bonus`, `service`, `staffing`, `attendance`,
-`corrections`, and `absence`. `operations` and `quality_pcs` remain compatibility
-API keys, not current product contracts.
+The menu exposes only `pcs`, `bonus`, `service`, `realisations`, `staffing`,
+`attendance`, `corrections`, and `absence`. `operations` and `quality_pcs`
+remain compatibility API keys, not current product contracts.
 
 Current products publish fixed names directly into `Reports`; the previous
 current copy is archived only after a complete replacement workbook exists. A
@@ -125,8 +125,10 @@ to workbooks.
 
 PCS is a normal generated report. Keep its `PCS_DATA` and `COACHING` sheets as
 real Excel Tables because the dashboard formulas and optional native Table
-slicers depend on their stable column names. Do not add Power Query, Data Model,
-ODBC, or refresh-connection requirements.
+slicers depend on their stable column names. The generated workbook must work
+without a connection. A user may optionally connect `PCS_DATA` and
+`COACHING_QUEUE` to the fixed CSV feeds with Power Query for a long-lived team
+file; do not require a Data Model or ODBC driver.
 
 Call-by-call uses a stable deterministic leg key. Full-history extracts may
 overlap, so `core.clean_call_leg` chooses the newest active row at that key.

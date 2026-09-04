@@ -233,7 +233,7 @@ def build_analysis_workbook(
         metric_headers,
         metrics,
         [
-            "This analysis is deterministic: every statement points to a governed metric and evidence dataset.",
+            "Every statement points to its metric, comparison and evidence dataset.",
             "A comparison is descriptive, not proof of causality. Validate operational drivers against the EVIDENCE sheet.",
             "For deeper writing help, attach only this finished workbook to the approved Copilot account and use the hub prompt file.",
         ],
@@ -244,10 +244,10 @@ def build_analysis_workbook(
     evidence_headers, evidence_rows = _evidence(conn, domain, start, end)
     book.table("EVIDENCE", "Analysis evidence", "Curated domain grain behind the findings; no untouched extract is copied here.", evidence_headers, evidence_rows)
     book.definitions([
-        ("Current value", "Ratio of summed governed numerator and denominator", "Selected period result", "Never average percentages"),
+        ("Current value", "Ratio of summed numerator and denominator", "Selected period result", "Never average percentages"),
         ("Reference value", reference_label, "Comparison context", "Not available until comparable data exists"),
         ("Delta", "Current minus reference", "Direction and magnitude", "Interpret with KPI direction"),
-        ("Finding", "Configured target/sample/trend rule", "Prioritized review", "No AI or causal claim"),
+        ("Finding", "Configured target, sample or trend rule", "Prioritized review", "A comparison is not proof of cause"),
     ])
     book.audit(_audit_rows(conn, config, f"analysis_{domain}", start, end, [
         ("Comparison mode", comparison, reference_label),

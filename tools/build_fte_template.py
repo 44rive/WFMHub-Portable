@@ -133,7 +133,7 @@ def build_template(
     workbook = Workbook()
     workbook.properties.title = "WFMHub standard FTE roster template"
     workbook.properties.subject = "Authoritative agent scope for WFMHub"
-    workbook.properties.creator = "WFMHub Portable"
+    workbook.properties.creator = "Anass ASSRI"
     workbook.properties.company = "WFM"
 
     guide = workbook.active
@@ -215,9 +215,9 @@ def build_template(
         "C2:C5000",
         FormulaRule(formula=['AND(COUNTA($A2:$L2)>0,$C2="")'], fill=MISSING_FILL),
     )
-    sheet["A1"].comment = Comment("Required. Store as text; keep leading zeros.", "WFMHub")
-    sheet["C1"].comment = Comment("Required. Use the agent name from operational exports when possible.", "WFMHub")
-    sheet["L1"].comment = Comment("Leave blank for active employees.", "WFMHub")
+    sheet["A1"].comment = Comment("Required. Store as text; keep leading zeros.", "Anass ASSRI")
+    sheet["C1"].comment = Comment("Required. Use the agent name from operational exports when possible.", "Anass ASSRI")
+    sheet["L1"].comment = Comment("Leave blank for active employees.", "Anass ASSRI")
 
     pto = _add_input_sheet(
         workbook, "PTO", PTO_HEADERS, PTO_ROW_FIELDS, "tblFTEPTO",
@@ -247,11 +247,11 @@ def build_template(
             f"{column}2:{column}5000",
             FormulaRule(formula=[f'AND(COUNTA($A2:$J2)>0,${column}2="")'], fill=MISSING_FILL),
         )
-    pto["A1"].comment = Comment("Required. Must match the Agent sheet Client ID / Verint Agent ID.", "WFMHub")
-    pto["D1"].comment = Comment("Inclusive. For one day, repeat the Start date.", "WFMHub")
-    pto["F1"].comment = Comment("Required only when Day coverage is Partial day.", "WFMHub")
-    pto["G1"].comment = Comment("Required only when Day coverage is Partial day.", "WFMHub")
-    pto["I1"].comment = Comment("Only Approved rows are eligible for operational use.", "WFMHub")
+    pto["A1"].comment = Comment("Required. Must match the Agent sheet Client ID / Verint Agent ID.", "Anass ASSRI")
+    pto["D1"].comment = Comment("Inclusive. For one day, repeat the Start date.", "Anass ASSRI")
+    pto["F1"].comment = Comment("Required only when Day coverage is Partial day.", "Anass ASSRI")
+    pto["G1"].comment = Comment("Required only when Day coverage is Partial day.", "Anass ASSRI")
+    pto["I1"].comment = Comment("Only Approved rows are eligible for operational use.", "Anass ASSRI")
 
     away = _add_input_sheet(
         workbook, "Away", AWAY_HEADERS, AWAY_ROW_FIELDS, "tblFTEAway",
@@ -278,9 +278,9 @@ def build_template(
             f"{column}2:{column}5000",
             FormulaRule(formula=[f'AND(COUNTA($A2:$G2)>0,${column}2="")'], fill=MISSING_FILL),
         )
-    away["A1"].comment = Comment("Required. Must match the Agent sheet Client ID / Verint Agent ID.", "WFMHub")
-    away["D1"].comment = Comment("Inclusive. Leave blank while an Active case is open.", "WFMHub")
-    away["F1"].comment = Comment("Cancelled rows are never eligible for operational use.", "WFMHub")
+    away["A1"].comment = Comment("Required. Must match the Agent sheet Client ID / Verint Agent ID.", "Anass ASSRI")
+    away["D1"].comment = Comment("Inclusive. Leave blank while an Active case is open.", "Anass ASSRI")
+    away["F1"].comment = Comment("Cancelled rows are never eligible for operational use.", "Anass ASSRI")
 
     workbook.active = 0
     workbook.save(target)

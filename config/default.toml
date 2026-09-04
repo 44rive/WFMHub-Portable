@@ -80,6 +80,7 @@ max_final_absence_event_rows = 100000
 pcs = "."
 bonus = "."
 service = "."
+realisations = "."
 staffing = "."
 attendance = "."
 corrections = "."

@@ -70,17 +70,19 @@ Current workbooks always have the same names:
 Reports\Attendance Callout.xlsx
 Reports\Staffing Gaps.xlsx
 Reports\OEM Flash.xlsx
+Reports\Realisations.xlsx
 Reports\Attendance Review.xlsx
 Reports\Final Absenteeism.xlsx
 Reports\Bonus Management.xlsx
 Reports\PCS Performance.xlsx
 ```
 
-When a generated report is replaced, WFMHub first saves its previous version in
+When a report is replaced, WFMHub first saves its previous version in
 `Reports\Archive`. You do not need to rename or move daily reports yourself.
 
-`Feed` is separate from `Reports`: it receives only the clean CSV/XLSX exports
-you explicitly request.
+`Feed` is separate from `Reports`: each successful refresh updates the fixed
+PCS and Absenteeism CSV feeds there. Any other clean CSV/XLSX export appears
+only when you explicitly request it.
 
 ## Choosing dates
 
@@ -138,6 +140,13 @@ The old Flash also contained manually sourced back-office counters. Until a
 reliable source is configured, WFMHub shows `NOT_CONFIGURED` instead of making
 up a number.
 
+## Realisations
+
+The first Realisations pilot follows Flash OEM. It puts one LOB/day row in
+`LOB_RESULTS`, with actual and forecast volume, service level, service
+availability, weighted AHT, staffing, absence, and shrinkage. `TREND` summarizes
+the same counters by month, ISO week, and quarter. Adherence is not included.
+
 ## Attendance Review
 
 Use this after the operating day is complete. Current Week includes every
@@ -157,7 +166,9 @@ Activities already cover each gap.
 ## Final Absenteeism
 
 This is the final payroll/reporting ledger. It uses corrected Verint Activities
-inside StartEndTimes boundaries. LILO and Agent Status detect operational gaps;
+inside the preferred StartEndTimes boundaries. If that dedicated file is not
+available, successfully parsed Activities Shift Assignment boundaries are used
+with a visible review warning. LILO and Agent Status detect operational gaps;
 they do not invent the final payroll category.
 
 Resolve every unmapped activity before using the report as final.
@@ -192,8 +203,9 @@ an absence KPI plus a second hidden penalty.
 
 ## PCS Performance
 
-Choose **PCS Performance**, select the dates, and open the generated workbook.
-There is no Power Query, Data Model, or Refresh All step.
+Choose **PCS Performance**, select the dates, and open the workbook. The first
+build gives you a complete working file. A one-time Power Query link to the
+fixed PCS feed is optional when the workbook will stay shared for a long time.
 
 On `DASHBOARD`, choose Latest day, Current/Previous week, Current MTD,
 Previous-month same days, Previous full month, or Custom period. Then choose
@@ -201,7 +213,7 @@ LOB, Team Leader, or Agent. The KPI cards, benchmark, and chart all recalculate
 from the included `PCS_DATA` table.
 
 Open `AGENT_RESULTS` and filter the Team Leader column for the ready-made TL
-realization list: latest day, current MTD, previous-month same-days, movement,
+realization list: latest day, selected period, previous-month same-days, movement,
 participation, sample, low scores, and next action.
 
 PCS formulas:
@@ -213,10 +225,19 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-For coaching, filter `COACHING` to your team and dates, then fill the five blue
-columns: status, coach, coaching date, due date, and comment. Save/send the
-workbook normally. When the Hub regenerates the same current report, those
-cells carry forward by Coaching Key. Nothing is imported into SQLite.
+For coaching, use `COACHING_QUEUE` to see all low-score opportunities. Work in
+`COACHING` and fill the five blue columns: status, coach, coaching date, due
+date, and comment. Save the workbook normally. When the Hub rebuilds the same
+closed workbook, those cells carry forward by Coaching Key.
+
+The stable input is `Feed\PCS\PCS_AGENT_DAY_CURRENT.csv`. Agent ID is the real
+matching key; Agent Selector is only the friendly `Name [ID]` label. To keep one
+shared workbook permanently, connect that CSV once to `tblPcsData` with Power
+Query and use **Data > Refresh All** after each Hub refresh. Do not regenerate
+the PCS workbook while colleagues are editing it.
+
+Follow [EXCEL_REFRESH_GUIDE.md](EXCEL_REFRESH_GUIDE.md) for every click in the
+one-time PCS and Absenteeism setup.
 
 If you prefer native slicers, click inside `PCS_DATA` or `COACHING` and choose
 **Table Design > Insert Slicer**.
@@ -224,7 +245,7 @@ If you prefer native slicers, click inside `PCS_DATA` or `COACHING` and choose
 ## Analysis and clean data
 
 **Analyze a period** creates a separate evidence workbook for a selected domain
-and comparison. It is deterministic Python/SQLite analysis, not AI.
+and comparison. Every observation points to its source metric and evidence.
 
 **Export clean data** creates CSV or XLSX for the selected dataset and dates.
 Use CSV for large Call by Call data.

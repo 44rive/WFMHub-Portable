@@ -119,7 +119,7 @@ class AgentScope:
 
 
 AGENT_SCOPED_FAMILIES = {"schedule", "lilo", "agent_status", "calls"}
-AGENT_SCOPE_POLICY_VERSION = "v2-active-or-leaver-through-leave-date"
+AGENT_SCOPE_POLICY_VERSION = "v3-active-or-leaver-id-or-unique-name"
 SCHEDULE_PARSER_POLICY_VERSION = "v2-explicit-start-end-vs-activities"
 FTE_PARSER_POLICY_VERSION = "v2-time-off-registers"
 
@@ -1221,27 +1221,30 @@ PARSERS: dict[str, Callable[[Path, str, AgentScope | None], ParseResult]] = {
 
 def _load_agent_scope(conn: DatabaseConnection) -> AgentScope:
     rows = conn.execute(
-        """SELECT r.agent_id, r.agent_name, r.employment_status, r.end_date
+        """SELECT r.source_file_id, r.source_row, r.agent_id, r.agent_name,
+                  r.employment_status, r.end_date
            FROM raw.fte_agent r
            JOIN meta.source_file f ON f.file_id=r.source_file_id
            WHERE f.active=true AND f.status='SUCCESS'"""
     ).fetchall()
     ranked: dict[str, tuple[str, date | None, str | None]] = {}
-    for agent_id, agent_name, status, end_date in rows:
+    for source_file_id, source_row, agent_id, agent_name, status, end_date in rows:
         normalized_id = normalize_id(agent_id)
+        name_key = _normalize_agent_name(agent_name)
         normalized_status = " ".join(str(status or "").strip().upper().replace("_", " ").split())
         parsed_end = parse_date(end_date)
-        if not normalized_id or normalized_status not in {"ACTIVE", "LEAVER"}:
+        if (not normalized_id and not name_key) or normalized_status not in {"ACTIVE", "LEAVER"}:
             continue
         if normalized_status == "LEAVER" and parsed_end is None:
             continue
-        candidate = (normalized_status, parsed_end, _normalize_agent_name(agent_name))
-        current = ranked.get(normalized_id)
+        roster_key = normalized_id or f"@NAME:{source_file_id}:{source_row}"
+        candidate = (normalized_status, parsed_end, name_key)
+        current = ranked.get(roster_key)
         if current is None or (
             (candidate[0] == "ACTIVE", candidate[1] or date.min)
             > (current[0] == "ACTIVE", current[1] or date.min)
         ):
-            ranked[normalized_id] = candidate
+            ranked[roster_key] = candidate
     ids = set(ranked)
     if not ids:
         raise SourceSchemaError(
@@ -1249,9 +1252,9 @@ def _load_agent_scope(conn: DatabaseConnection) -> AgentScope:
             "no worldwide rows were admitted."
         )
     names: dict[str, set[str]] = {}
-    for normalized_id, (_, _, name_key) in ranked.items():
-        if normalized_id and name_key:
-            names.setdefault(name_key, set()).add(normalized_id)
+    for roster_key, (_, _, name_key) in ranked.items():
+        if name_key:
+            names.setdefault(name_key, set()).add(roster_key)
     unique_names = {name: next(iter(matches)) for name, matches in names.items() if len(matches) == 1}
     payload = "\n".join([
         f"policy:{AGENT_SCOPE_POLICY_VERSION}",

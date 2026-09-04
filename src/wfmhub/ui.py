@@ -15,11 +15,11 @@ from .database import connect
 
 
 ASCII_LOGO = (
-    "W   W  FFFFF  M   M     H   H  U   U  BBBB ",
-    "W   W  F      MM MM     H   H  U   U  B   B",
-    "W W W  FFF    M M M     HHHHH  U   U  BBBB ",
-    "WW WW  F      M   M     H   H  U   U  B   B",
-    "W   W  F      M   M     H   H   UUU   BBBB ",
+    " __        __  _____   __  __      _   _   _   _   ____  ",
+    " \\ \\      / / |  ___| |  \\/  |    | | | | | | | | | __ ) ",
+    "  \\ \\ /\\ / /  | |_    | |\\/| |    | |_| | | | | | |  _ \\ ",
+    "   \\ V  V /   |  _|   | |  | |    |  _  | | |_| | | |_) |",
+    "    \\_/\\_/    |_|     |_|  |_|    |_| |_|  \\___/  |____/ ",
 )
 PANEL_INNER_WIDTH = 76
 
@@ -97,10 +97,11 @@ def load_dashboard_status(home: Path) -> DashboardStatus:
                FROM meta.refresh_run ORDER BY started_at DESC LIMIT 1"""
         ).fetchone()
         agents = conn.execute(
-            """SELECT count(DISTINCT r.agent_id)
+            """SELECT count(DISTINCT coalesce(r.agent_id, lower(trim(r.agent_name))))
                FROM raw.fte_agent r
                JOIN meta.source_file f ON f.file_id=r.source_file_id
-               WHERE f.active=true AND f.status='SUCCESS' AND r.agent_id IS NOT NULL
+               WHERE f.active=true AND f.status='SUCCESS'
+                 AND coalesce(r.agent_id, trim(r.agent_name)) IS NOT NULL
                  AND (
                      upper(trim(coalesce(r.employment_status,'')))='ACTIVE'
                      OR (

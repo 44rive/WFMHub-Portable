@@ -74,7 +74,7 @@ REPORT_PACKS = {
         default_folder="bonus",
         filename_prefix="WFMHub_Bonus_Performance",
         current_filename="Bonus Management.xlsx",
-        purpose="Governed monthly bonus calculation, diagnostics and release gates.",
+        purpose="Bonus Matrix v1.2 calculation, team analysis and management dashboard.",
     ),
     "service": ReportPack(
         key="service",
@@ -82,6 +82,13 @@ REPORT_PACKS = {
         filename_prefix="WFMHub_Service_Performance",
         current_filename="OEM Flash.xlsx",
         purpose="Mapped-LOB service level, availability, forecast deviation and AHT.",
+    ),
+    "realisations": ReportPack(
+        key="realisations",
+        default_folder="realisations",
+        filename_prefix="WFMHub_Realisations",
+        current_filename="Realisations.xlsx",
+        purpose="Actual versus forecast, service, staffing and final capacity results by mapped LOB.",
     ),
     "staffing": ReportPack(
         key="staffing",
@@ -108,7 +115,8 @@ REPORT_PACKS = {
 }
 
 IMPLEMENTED_REPORT_PACK_KEYS = (
-    "pcs", "bonus", "service", "staffing", "attendance", "corrections", "absence",
+    "pcs", "bonus", "service", "realisations", "staffing", "attendance",
+    "corrections", "absence",
 )
 
 
@@ -144,7 +152,7 @@ def publish_report(
     """Publish a complete workbook and archive the previous current copy.
 
     Explicit CLI output paths keep their existing replace semantics. Only the
-    governed fixed-name product is copied into Reports/Archive.
+    standard fixed-name product is copied into Reports/Archive.
     """
 
     if key not in REPORT_PACKS:
@@ -194,6 +202,12 @@ def build_report_pack(
         from .decision_products import build_service_performance_workbook
 
         return build_service_performance_workbook(conn, config, start, end, output, service_profile)
+    if key == "realisations":
+        from .decision_products import build_realisations_workbook
+
+        return build_realisations_workbook(
+            conn, config, start, end, output, service_profile,
+        )
     if key == "staffing":
         from .decision_products import build_staffing_coverage_workbook
 

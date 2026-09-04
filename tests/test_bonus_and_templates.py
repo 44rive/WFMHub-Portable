@@ -8,7 +8,7 @@ from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 
-from wfmhub.bonus import import_bonus_matrix
+from wfmhub.bonus import import_bonus_matrix, build_bonus_performance_workbook
 from wfmhub.config import load_config
 from wfmhub.database import connect, migrate
 from wfmhub.on_demand_analysis import build_analysis_workbook
@@ -38,11 +38,12 @@ def _bonus_source(path: Path) -> None:
         "PCS Score", "PCS % Participation", "QM", "Abs%", "VOC Detractor Count",
         "Currency", "Monthly Fixed Salary", "Target Bonus Rate",
         "Reference Bonus Override", "Eligible Days", "Scheduled Days",
-        "Employment Status", "Data Status", "Notes",
+        "Employment Status", "Data Status", "Notes", "Team Lead", "Ops Manager",
     ])
     raw.append([
         "007", "Agent Seven", "OEM", "2026-08", 440, 8, 4.5, .55, .95,
         .02, 0, "MAD", None, None, 2000, 31, 31, "Active", "VALIDATED", None,
+        "TL Seven", "Ops Seven",
     ])
     rules = workbook.create_sheet("KPI_Config")
     rules.append([
@@ -84,11 +85,50 @@ class BonusImportTests(unittest.TestCase):
                     conn.execute("SELECT agent_id FROM mart.bonus_agent_month").fetchone()[0],
                     "007",
                 )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT team_leader, ops_manager FROM mart.bonus_agent_month"
+                    ).fetchone(),
+                    ("TL Seven", "Ops Seven"),
+                )
                 self.assertEqual(conn.execute("SELECT count(*) FROM raw.bonus_import").fetchone()[0], 1)
                 self.assertEqual(conn.execute("SELECT count(*) FROM mart.bonus_agent_month").fetchone()[0], 1)
             finally:
                 conn.close()
             self.assertEqual(source.read_bytes(), before)
+
+    def test_bonus_report_keeps_v12_contract_and_wfm_visuals(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            home = _home(root)
+            source = root / "Bonus_Matrix_v1.2.xlsx"
+            _bonus_source(source)
+            config = load_config(home)
+            migrate(config)
+            conn = connect(config)
+            try:
+                import_bonus_matrix(conn, source)
+                path = build_bonus_performance_workbook(
+                    conn, config, date(2026, 8, 1), date(2026, 8, 31),
+                    home / "Bonus Management.xlsx",
+                )
+            finally:
+                conn.close()
+            workbook = load_workbook(path, read_only=False, data_only=False, keep_links=False)
+            try:
+                self.assertEqual(workbook.sheetnames, [
+                    "Policy_Decisions", "Control_Checks", "KPI_Config", "Raw_Data",
+                    "Results", "KPI_Analysis", "Team_Lead_Analysis", "Dashboard",
+                ])
+                self.assertEqual(workbook.active.title, "Dashboard")
+                self.assertGreaterEqual(len(workbook["Dashboard"]._charts), 1)
+                self.assertEqual(len(workbook._external_links), 0)
+                self.assertIn("tblKpiConfig", workbook["KPI_Config"].tables)
+                self.assertIn("Tier 1 Bonus %", [cell.value for cell in workbook["KPI_Config"][4]])
+                self.assertIn("Team Lead", [cell.value for cell in workbook["Raw_Data"][4]])
+                self.assertIn("Final Payout", [cell.value for cell in workbook["Results"][4]])
+            finally:
+                workbook.close()
 
 
 class ExcelTemplateTests(unittest.TestCase):

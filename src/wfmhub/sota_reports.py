@@ -70,8 +70,8 @@ def _add_catalog_sheets(
         ],
     )
     report.add_table_sheet(
-        "ANALYTICS_RULES", "Deterministic finding thresholds",
-        "Python findings compare governed values with targets and prior periods. No AI is called.",
+        "ANALYTICS_RULES", "Finding thresholds",
+        "Finding thresholds compare KPI values with targets and prior periods.",
         ["scope", "warning_delta", "critical_delta", "trend_delta", "version", "sha256"],
         [
             (f"unit:{unit}", item.warning_delta, item.critical_delta, item.trend_delta,
@@ -96,7 +96,7 @@ def _add_catalog_sheets(
     service_profiles = load_service_profiles(config.home, config.service_profiles)
     report.add_table_sheet(
         "SERVICE_PROFILES", "Effective-dated service and LOB profiles",
-        "Profiles select governed metric IDs and reporting scopes. KPI formulas and targets remain in METRIC_METHODS.",
+        "Profiles select metric IDs and reporting scopes. KPI formulas and targets remain in METRIC_METHODS.",
         [
             "profile_id", "label", "service_scopes", "source_systems",
             "service_level_metric", "availability_metric", "aht_metric",

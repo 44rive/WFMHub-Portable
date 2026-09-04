@@ -1,4 +1,4 @@
-# Deterministic WFM finding policies. No model or external service is used.
+# WFM exception thresholds used by the period-analysis workbook.
 
 [analytics]
 version = "2026.09.1"

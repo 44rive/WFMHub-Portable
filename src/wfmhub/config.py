@@ -270,6 +270,7 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
             "pcs": "pcs",
             "bonus": "bonus",
             "service": "service",
+            "realisations": "realisations",
             "staffing": "staffing",
             "attendance": "attendance",
             "absence": "absence",

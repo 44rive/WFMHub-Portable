@@ -30,6 +30,7 @@ from .rules import load_rulebook, validate_rulebook
 from .semantic import SOURCE_COMPONENTS
 from .sota_reports import build_kpi_catalog
 from .service_profiles import load_service_profiles, validate_service_profiles
+from .shared_feeds import publish_shared_feeds
 from .ui import clear_screen, render_dashboard
 
 
@@ -147,6 +148,10 @@ def refresh(
                     conn, config, run_id, start, end, use_config_period,
                     _phase_progress(bar, 0.55, 0.85),
                 )
+                bar.update(0.85, "Updating shared report data")
+                shared_feeds = publish_shared_feeds(
+                    conn, config, model.start, model.end,
+                )
                 report_paths = []
                 total_packs = len(packs)
                 for index, pack in enumerate(packs):
@@ -178,8 +183,9 @@ def refresh(
     print(f"Absence     : {model.absence_rows:,} agent-day + {model.absence_event_rows:,} evidence rows")
     print(f"Service     : {model.service_rows:,} actual + {model.forecast_rows:,} forecast rows")
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
-    print(f"Metrics     : {model.metric_rows:,} governed values")
-    print(f"Findings    : {model.finding_rows:,} deterministic observations")
+    print(f"Shared data : {sum(item.rows for item in shared_feeds):,} feed rows updated")
+    print(f"Metrics     : {model.metric_rows:,} calculated values")
+    print(f"Findings    : {model.finding_rows:,} checks and observations")
     print(f"Quality     : {model.quality_rows:,} issues")
     business = load_rulebook(home, config.business_rules)
     mapping = load_queue_mapping(config.queue_mapping)
@@ -229,6 +235,8 @@ def build_reports(
                 conn, config, f"report-{uuid.uuid4().hex}", start, end,
                 use_config_period, _phase_progress(bar, 0.05, 0.70),
             )
+            bar.update(0.70, "Updating shared report data")
+            publish_shared_feeds(conn, config, model.start, model.end)
             paths = []
             for index, pack in enumerate(packs):
                 report_start = 0.70 + (0.29 * index / max(1, len(packs)))
@@ -688,19 +696,20 @@ def menu(home: Path) -> int:
         print("    [2] Attendance Callout")
         print("    [3] Staffing Gaps")
         print("    [4] OEM Flash")
-        print("    [5] Attendance Review")
+        print("    [5] Realisations (Flash OEM pilot)")
+        print("    [6] Attendance Review")
         print("\n  MONTH")
-        print("    [6] Final Absenteeism")
-        print("    [7] Bonus Management")
+        print("    [7] Final Absenteeism")
+        print("    [8] Bonus Management")
         print("\n  PCS")
-        print("    [8] PCS Performance")
+        print("    [9] PCS Performance")
         print("\n  ANALYSE")
-        print("    [9] Analyze a period")
-        print("   [10] Export clean data")
+        print("   [10] Analyze a period")
+        print("   [11] Export clean data")
         print("\n  SETTINGS")
-        print("   [11] System and advanced tools")
-        print("   [12] Exit")
-        choice = input("\n  Choose 1-12: ").strip()
+        print("   [12] System and advanced tools")
+        print("   [13] Exit")
+        choice = input("\n  Choose 1-13: ").strip()
         try:
             if choice == "1":
                 group = _choose_source_group()
@@ -713,10 +722,12 @@ def menu(home: Path) -> int:
             elif choice == "4":
                 _build_menu_product(home, "service")
             elif choice == "5":
-                _build_menu_product(home, "corrections")
+                _build_menu_product(home, "realisations")
             elif choice == "6":
-                _build_menu_product(home, "absence")
+                _build_menu_product(home, "corrections")
             elif choice == "7":
+                _build_menu_product(home, "absence")
+            elif choice == "8":
                 print("\nBONUS MANAGEMENT")
                 print("1. Import Bonus Matrix v1.2, then build")
                 print("2. Build from the already imported matrix")
@@ -727,23 +738,23 @@ def menu(home: Path) -> int:
                 elif bonus_choice != "2":
                     raise ValueError("Please choose 1 or 2")
                 _build_menu_product(home, "bonus")
-            elif choice == "8":
-                _build_menu_product(home, "pcs")
             elif choice == "9":
+                _build_menu_product(home, "pcs")
+            elif choice == "10":
                 domain, comparison = _choose_analysis()
                 start, end, use_config = _choose_period()
                 analyze_period(home, domain, start, end, comparison, use_config_period=use_config)
-            elif choice == "10":
+            elif choice == "11":
                 dataset = _choose_dataset()
                 start, end, use_config = _choose_period()
                 file_format = input("Format CSV or XLSX [CSV]: ").strip().lower() or "csv"
                 export_clean(home, dataset, start, end, file_format, use_config_period=use_config)
-            elif choice == "11":
-                _advanced_menu(home)
             elif choice == "12":
+                _advanced_menu(home)
+            elif choice == "13":
                 return 0
             else:
-                print("Please choose a number from 1 to 12.")
+                print("Please choose a number from 1 to 13.")
         except Exception as exc:
             print(f"\nERROR: {exc}")
             print("Nothing was changed in your extract files. Check the latest file in logs.")
@@ -785,7 +796,7 @@ def parser() -> argparse.ArgumentParser:
     custom_p.add_argument("--end", type=_date)
     bonus_p = commands.add_parser("import-bonus", help="Import Bonus Matrix v1.2 without changing the source")
     bonus_p.add_argument("workbook", type=Path)
-    analysis_p = commands.add_parser("analyze", help="Run deterministic on-demand period analysis")
+    analysis_p = commands.add_parser("analyze", help="Run on-demand period analysis")
     analysis_p.add_argument("domain", choices=ANALYSIS_DOMAINS)
     analysis_p.add_argument("--start", type=_date)
     analysis_p.add_argument("--end", type=_date)
@@ -795,7 +806,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("coverage", help="Show available dates and row counts")
     commands.add_parser("backup", help="Create a database backup")
     commands.add_parser("doctor", help="Test the corporate runtime, SQLite and Excel libraries")
-    rules_p = commands.add_parser("rules", help="Validate, explain, test or compare governed methods")
+    rules_p = commands.add_parser("rules", help="Validate, explain, test or compare KPI methods")
     rules_p.add_argument(
         "action", choices=("validate", "catalog", "explain", "diff", "test"),
         nargs="?", default="validate",

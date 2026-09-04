@@ -61,6 +61,14 @@ def make_start_end_schedule(path: Path):
         writer.writerow(["Agent 300", "300", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ".ORG | Work 08/02/2026 8:00 AM-08/02/2026 4:00 PM"])
 
 
+def make_partial_start_end_schedule(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="cp1252", newline="") as handle:
+        writer = csv.writer(handle, delimiter="\t")
+        writer.writerow(["Name", "Data Source IDs", "08/01/2026"])
+        writer.writerow(["Agent 100", "100", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM"])
+
+
 def make_lilo(path: Path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -186,6 +194,102 @@ class EndToEndTests(unittest.TestCase):
         supplied = datetime(2026, 8, 1, 14)
         with patch("wfmhub.models.ZoneInfo", side_effect=ZoneInfoNotFoundError("missing")):
             self.assertEqual(_evaluation_time("Europe/Berlin", supplied), supplied)
+
+    def test_activities_shift_assignment_is_safe_schedule_fallback(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder) / "hub"
+            source = Path(folder) / "source"
+            (home / "config").mkdir(parents=True)
+            for name in (
+                "default.toml", "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml",
+            ):
+                shutil.copy2(REPO / "config" / name, home / "config" / name)
+            shutil.copytree(REPO / "sql", home / "sql")
+            make_fte(source / "FTE/FTE Count.xlsx")
+            make_schedule(source / "Verint/Schedules & Activities/Activities.txt")
+            make_lilo(source / "Storm/LILO/LILO 2026-08-01.csv", [
+                ["Agent 100", "100", "2026-08-01 08:00:00", "2026-08-01 16:00:00"],
+                ["Agent 200", "200", "", ""],
+                ["Agent 300", "300", "", ""],
+            ])
+
+            config_file = ensure_user_config(home)
+            write_source_root(config_file, source)
+            config = load_config(home)
+            with write_session(config) as conn:
+                self.assertEqual(ingest_all(conn, config).failed, 0)
+                refresh_models(
+                    conn, config, "activities-fallback",
+                    date(2026, 8, 1), date(2026, 8, 1),
+                    as_of=datetime(2026, 8, 1, 17, 0),
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT count(*) FROM meta.source_file "
+                        "WHERE source_family='schedule' AND active=true AND source_variant='START_END'"
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    conn.execute("SELECT count(*) FROM mart.attendance_agent_day").fetchone()[0],
+                    3,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT attendance_result FROM mart.attendance_agent_day WHERE agent_id='100'"
+                    ).fetchone()[0],
+                    "Present",
+                )
+                fallback_issue = conn.execute(
+                    "SELECT severity, details FROM meta.quality_issue "
+                    "WHERE issue_type='Dedicated StartEndTimes schedule not loaded'"
+                ).fetchone()
+                self.assertEqual(fallback_issue[0], "REVIEW")
+                self.assertIn("Activities Shift Assignment", fallback_issue[1])
+
+    def test_activities_fills_start_end_coverage_per_agent_day(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder) / "hub"
+            source = Path(folder) / "source"
+            (home / "config").mkdir(parents=True)
+            for name in (
+                "default.toml", "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml",
+            ):
+                shutil.copy2(REPO / "config" / name, home / "config" / name)
+            shutil.copytree(REPO / "sql", home / "sql")
+            make_fte(source / "FTE/FTE Count.xlsx")
+            schedule_folder = source / "Verint/Schedules & Activities"
+            make_partial_start_end_schedule(schedule_folder / "StartEndTimes.txt")
+            make_schedule(schedule_folder / "Activities.txt")
+            make_lilo(source / "Storm/LILO/LILO 2026-08-01.csv", [
+                ["Agent 100", "100", "2026-08-01 08:00:00", "2026-08-01 16:00:00"],
+                ["Agent 200", "200", "2026-08-01 08:00:00", "2026-08-01 16:00:00"],
+                ["Agent 300", "300", "2026-08-01 08:00:00", "2026-08-01 16:00:00"],
+            ])
+
+            config_file = ensure_user_config(home)
+            write_source_root(config_file, source)
+            config = load_config(home)
+            with write_session(config) as conn:
+                self.assertEqual(ingest_all(conn, config).failed, 0)
+                refresh_models(
+                    conn, config, "partial-start-end",
+                    date(2026, 8, 1), date(2026, 8, 1),
+                    as_of=datetime(2026, 8, 1, 17, 0),
+                )
+                self.assertEqual(
+                    conn.execute("SELECT count(*) FROM mart.attendance_agent_day").fetchone()[0],
+                    3,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT count(*) FROM meta.quality_issue "
+                        "WHERE issue_type='StartEndTimes coverage incomplete' AND severity='REVIEW'"
+                    ).fetchone()[0],
+                    1,
+                )
 
     def test_full_day_pto_drives_expected_work_and_verint_completeness(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -542,6 +646,10 @@ class EndToEndTests(unittest.TestCase):
                     "service", conn, config, model.start, model.end,
                     service_profile="ford_oem_fr",
                 )
+                realisations_report = build_report_pack(
+                    "realisations", conn, config, model.start, model.end,
+                    service_profile="ford_oem_fr",
+                )
                 attendance_report = build_report_pack("attendance", conn, config, model.start, model.end)
                 absence_report = build_report_pack("absence", conn, config, model.start, model.end)
                 export_progress = []
@@ -654,13 +762,16 @@ class EndToEndTests(unittest.TestCase):
             focused_pcs_book = load_workbook(focused_pcs_report, read_only=False, data_only=False)
             try:
                 self.assertEqual(focused_pcs_book.sheetnames, [
-                    "DASHBOARD", "AGENT_RESULTS", "COACHING", "PCS_DATA",
-                    "DEFINITIONS", "_LOOKUPS", "_AUDIT",
+                    "DASHBOARD", "AGENT_RESULTS", "COACHING", "COACHING_QUEUE",
+                    "PCS_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT",
                 ])
-                self.assertIn("SUMIFS(tblPcsData", focused_pcs_book["DASHBOARD"]["A11"].value)
+                self.assertIn("SUMPRODUCT", focused_pcs_book["DASHBOARD"]["A11"].value)
                 self.assertIn("tblPcsData", focused_pcs_book["PCS_DATA"].tables)
                 self.assertIn("tblCoaching", focused_pcs_book["COACHING"].tables)
+                self.assertIn("tblCoachingQueue", focused_pcs_book["COACHING_QUEUE"].tables)
+                self.assertIn("tblPcsData", focused_pcs_book["AGENT_RESULTS"]["I5"].value)
                 self.assertEqual(focused_pcs_book["_LOOKUPS"].sheet_state, "hidden")
+                pcs_table_headers = [cell.value for cell in focused_pcs_book["PCS_DATA"][4]]
                 defined = {
                     item.name: item.attr_text
                     for item in focused_pcs_book.defined_names.values()
@@ -681,17 +792,43 @@ class EndToEndTests(unittest.TestCase):
             absence_book = load_workbook(absence_report, read_only=False, data_only=True)
             try:
                 self.assertEqual(absence_book.sheetnames, [
-                    "DASHBOARD", "TREND", "AGENT_DETAIL", "EXCEPTIONS", "DEFINITIONS", "_AUDIT",
+                    "DASHBOARD", "TEAM_SUMMARY", "AGENT_RESULTS", "ACTIONS",
+                    "ABSENCE_COMPONENTS", "SHRINKAGE_COMPONENTS", "ACTIVITY_DETAIL",
+                    "ABSENCE_DATA", "HELP", "DEFINITIONS", "_AUDIT",
                 ])
-                self.assertIn("tblAgentDetail", absence_book["AGENT_DETAIL"].tables)
+                self.assertIn("tblAbsenceData", absence_book["ABSENCE_DATA"].tables)
+                self.assertIn("tblActions", absence_book["ACTIONS"].tables)
                 self.assertEqual(absence_book["_AUDIT"].sheet_state, "hidden")
+                absence_table_headers = [cell.value for cell in absence_book["ABSENCE_DATA"][4]]
             finally:
                 absence_book.close()
-            self.assertFalse((home / "_system" / "feeds").exists())
             self.assertTrue((home / "Feed").is_dir())
+            pcs_feed = home / "Feed" / "PCS" / "PCS_AGENT_DAY_CURRENT.csv"
+            absence_feed = home / "Feed" / "Absenteeism" / "ABSENCE_AGENT_DAY_CURRENT.csv"
+            self.assertTrue(pcs_feed.is_file())
+            self.assertTrue(absence_feed.is_file())
+            with pcs_feed.open("r", encoding="utf-8-sig", newline="") as handle:
+                self.assertEqual(
+                    next(csv.reader(handle)),
+                    pcs_table_headers,
+                )
+            with absence_feed.open("r", encoding="utf-8-sig", newline="") as handle:
+                self.assertEqual(
+                    next(csv.reader(handle)),
+                    absence_table_headers,
+                )
+            realisations_book = load_workbook(realisations_report, read_only=False, data_only=False)
+            try:
+                self.assertEqual(realisations_book.sheetnames, [
+                    "DASHBOARD", "LOB_RESULTS", "TREND", "DATA", "DEFINITIONS", "_AUDIT",
+                ])
+                self.assertIn("Processing Hours", [cell.value for cell in realisations_book["LOB_RESULTS"][4]])
+                self.assertGreaterEqual(len(realisations_book["DASHBOARD"]._charts), 1)
+            finally:
+                realisations_book.close()
             for generated_report in (
                 report, corrections_report, pcs_report, focused_pcs_report,
-                service_report, attendance_report, absence_report,
+                service_report, realisations_report, attendance_report, absence_report,
             ):
                 with zipfile.ZipFile(generated_report) as archive:
                     self.assertFalse(any("externalLinks" in name for name in archive.namelist()))

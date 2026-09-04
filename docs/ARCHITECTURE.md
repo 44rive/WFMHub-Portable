@@ -120,6 +120,7 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `pcs` | `Reports/PCS Performance.xlsx` | Selector-driven PCS performance and coaching workbook |
 | `bonus` | `Reports/Bonus Management.xlsx` | Imported Bonus Matrix result and release controls |
 | `service` | `Reports/OEM Flash.xlsx` | Ford OEM queue, forecast, service and staffing control |
+| `realisations` | `Reports/Realisations.xlsx` | Flash OEM actual/forecast and capacity results by period |
 | `staffing` | `Reports/Staffing Gaps.xlsx` | Selected-day roster LOB/language coverage |
 | `attendance` | `Reports/Attendance Callout.xlsx` | No-show/late/not-seen contact queue |
 | `corrections` | `Reports/Attendance Review.xlsx` | Selected-period completed-day residual gaps and shift visualization |
@@ -131,10 +132,12 @@ OEM Flash begins with `FLASH` and `HOURLY`; Corrections uses `VERINT_INJECTION` 
 `quality_pcs` builders remain callable under `_system/legacy_reports` but are
 absent from the menu.
 
-PCS is generated directly from SQLite. `PCS_DATA` and `COACHING` are ordinary
-visible Excel Tables. Dashboard selectors use Excel `SUMIFS`/`COUNTIFS`; users
-may add Table slicers manually. No Power Query, Data Model, ODBC driver, or
-refresh connection exists.
+PCS is generated directly from SQLite. `PCS_DATA`, `COACHING_QUEUE` and
+`COACHING` are ordinary visible Excel Tables. Dashboard selectors use Excel
+`SUMPRODUCT`; users may add Table slicers manually. A first build needs no
+Excel connection. For one long-lived shared file, the user may optionally link
+the two replaceable PCS tables to the fixed CSV feeds with Power Query. No Data
+Model or ODBC driver is required.
 
 ## Agent scope and identity
 
@@ -147,7 +150,9 @@ active raw layer:
 3. Exclude other statuses and undated Leavers.
 4. Normalize the source Agent ID and apply that effective-dated eligibility.
 5. Otherwise normalize accents, case, punctuation, and whitespace in the name.
-6. Keep it only when that name maps to exactly one eligible FTE Agent ID.
+6. Keep it only when that name maps to exactly one eligible FTE row. If the FTE
+   Client ID is blank, retain the real operational Agent ID and attach the
+   unique matching FTE organisation fields; ambiguous names stay excluded.
 7. Preserve a populated operational source ID. In particular, Verint `Data
    Source IDs` remains the schedule Agent ID.
 8. Apply the same gate to schedules, LILO, Agent Status, and Call-by-Call.

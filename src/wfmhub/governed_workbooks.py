@@ -276,7 +276,7 @@ def build_daily_operations_workbook(
                 "ATTENDANCE_CALLS is the calling queue. CALL_NOT_SEEN_NOW is provisional; CALL_NO_SHOW is final only after the shift has completed.",
                 "STAFFING_GAPS uses roster LOB/language and 15-minute agent-seconds. DATA_MISSING is unknown—not a zero and not a staffing shortage.",
                 "SERVICE_LEVEL contains APDE only. Service availability means answered / offered; service level is recalculated from summed counters.",
-                "This is a presentation of governed marts. No extract is edited and no raw row is loaded into this workbook.",
+                "This workbook reads prepared WFM data. Original extracts are not edited.",
             ],
             badge=coverage_badge,
         )
@@ -302,7 +302,7 @@ def build_daily_operations_workbook(
         )
         ws = report.add_table_sheet(
             "ATTENDANCE_CALLS", "Daily absence and lateness call list",
-            "Only governed rows requiring a call. Provisional current-day states are visibly separated from completed-shift outcomes.",
+            "Only rows requiring a call. Provisional current-day states are visibly separated from completed-shift outcomes.",
             headers, rows,
         )
         _color_statuses(report, ws, headers, rows, "call_action", {
@@ -444,7 +444,7 @@ def build_exact_pcs_workbook(
         headers, rows = _query(conn, agent_day_sql, [start, end, config.report_limits.get("max_pcs_agent_rows", 100000)])
         ws = report.add_table_sheet(
             "AGENT_DAY", "Exact PCS by agent and day",
-            "Governed counters plus ratios. LOW_SAMPLE is a coaching warning; it does not suppress the exact score.",
+            "Exact counters plus ratios. LOW_SAMPLE is a coaching warning; it does not suppress the score.",
             headers, rows,
         )
         _color_statuses(report, ws, headers, rows, "sample_flag", {"LOW_SAMPLE": "warn", "OK": "good"})
@@ -453,7 +453,7 @@ def build_exact_pcs_workbook(
         headers, rows = team_dataset.headers, team_dataset.rows
         report.add_table_sheet(
             "TEAM_DAY", "Exact PCS by team and day",
-            "Counters are additive; KPI values come from the effective-dated semantic metric engine.",
+            "Counters are additive; KPI values follow the method effective for the selected date.",
             headers, rows,
         )
 
@@ -555,171 +555,6 @@ def _floor_quarter(value: datetime) -> datetime:
 def _ceil_quarter(value: datetime) -> datetime:
     floored = _floor_quarter(value)
     return floored if floored == value else floored + timedelta(minutes=15)
-
-
-def _segment_code(segment: dict[str, Any]) -> str:
-    mismatch = str(segment.get("mismatch_type") or "").upper()
-    category = str(segment.get("actual_category") or "").upper()
-    source = str(segment.get("observed_source") or "").upper()
-    if "FUTURE" in mismatch:
-        return "F"
-    if mismatch == "NO_SHOW":
-        return "N"
-    if mismatch == "LATE":
-        return "T"
-    if mismatch == "EARLY_LEAVE":
-        return "E"
-    if mismatch == "LOGGED_OFF":
-        return "O"
-    if mismatch == "UNAVAILABLE":
-        return "U"
-    if bool(segment.get("is_gap")):
-        return "G"
-    if "LILO" in category or source == "LILO":
-        return "L"
-    if category == "PRODUCTIVE":
-        return "P"
-    if category == "AUXILIARY":
-        return "A"
-    if category in {"LUNCH", "BREAK"}:
-        return "B"
-    if category == "LOGGED OFF" or "LOGGED_OFF" in category:
-        return "O"
-    if category == "UNAVAILABLE":
-        return "U"
-    return "?"
-
-
-def _add_shift_view(
-    report: ExcelReport,
-    segments: list[dict[str, Any]],
-    period_start: date,
-    period_end: date,
-) -> None:
-    ws = report.workbook.add_worksheet("SHIFT_VIEW")
-    ws.set_tab_color(COLORS["purple"])
-    ws.hide_gridlines(2)
-    ws.set_zoom(75)
-    ws.merge_range("A1:X1", "WFM HUB  /  FULL-SHIFT EVIDENCE VIEW", report.title)
-    ws.merge_range("A2:X2", f"Selected completed dates {period_start:%Y-%m-%d} to {period_end:%Y-%m-%d}; one 15-minute row per agent and day.", report.subtitle)
-    legend = [
-        ("P", "Productive", COLORS["green"], COLORS["green_light"]),
-        ("A", "Auxiliary", COLORS["teal"], COLORS["teal_light"]),
-        ("B", "Break/Lunch", COLORS["amber"], COLORS["amber_light"]),
-        ("L", "LILO fallback", COLORS["blue"], COLORS["blue_light"]),
-        ("N", "No-show", COLORS["red"], COLORS["red_light"]),
-        ("T", "Late", COLORS["red"], COLORS["red_light"]),
-        ("E", "Early leave", COLORS["red"], COLORS["red_light"]),
-        ("G", "Other gap", COLORS["red"], COLORS["red_light"]),
-        ("O", "Logged off", COLORS["red"], COLORS["red_light"]),
-        ("U", "Unavailable", COLORS["purple"], COLORS["purple_light"]),
-        ("F", "Future", COLORS["future"], COLORS["future_light"]),
-        ("?", "Missing/unknown", COLORS["muted"], COLORS["future_light"]),
-    ]
-    code_formats: dict[str, Any] = {}
-    for index, (code, label, font, fill) in enumerate(legend):
-        code_formats[code] = report.workbook.add_format({
-            "font_name": "Aptos", "font_size": 9, "bold": True,
-            "font_color": font, "bg_color": fill, "align": "center",
-            "valign": "vcenter", "border": 1, "border_color": COLORS["white"],
-        })
-        column = index * 2
-        ws.write(3, column, code, code_formats[code])
-        ws.write(3, column + 1, label, report.note)
-
-    if not segments:
-        ws.merge_range("A7:X7", "No residual correction gaps exist in the selected completed-date range.", report.note)
-        ws.set_column("A:X", 10)
-        return
-
-    def as_date(value: Any) -> date:
-        if isinstance(value, datetime):
-            return value.date()
-        if isinstance(value, date):
-            return value
-        return date.fromisoformat(str(value)[:10])
-
-    def minute_offset(value: Any, business_day: date) -> float:
-        stamp = _as_datetime(value)
-        midnight = datetime.combine(business_day, datetime.min.time())
-        return (stamp - midnight).total_seconds() / 60.0
-
-    by_agent_day: dict[tuple[date, str, str], list[dict[str, Any]]] = defaultdict(list)
-    for segment in segments:
-        business_day = as_date(segment["business_date"])
-        by_agent_day[(business_day, str(segment["agent_id"]), str(segment.get("agent_name") or ""))].append(segment)
-    first_minute = min(
-        minute_offset(item["scheduled_start"], as_date(item["business_date"]))
-        for item in segments
-    )
-    last_minute = max(
-        minute_offset(item["scheduled_end"], as_date(item["business_date"]))
-        for item in segments
-    )
-    first_slot = int(first_minute // 15) * 15
-    last_slot = int((last_minute + 14.9999) // 15) * 15
-    slots = list(range(first_slot, min(last_slot, first_slot + 30 * 60), 15))
-
-    metadata = ["Date", "Agent ID", "Agent", "Team Leader", "LOB", "Language", "Scheduled Start", "Scheduled End", "Gap Minutes", "Source"]
-    header_row = 5
-    for column, value in enumerate(metadata):
-        ws.write(header_row, column, value, report.header)
-    rotated = report.workbook.add_format({
-        "font_name": "Aptos", "font_size": 8, "bold": True,
-        "font_color": COLORS["white"], "bg_color": COLORS["teal"],
-        "rotation": 90, "align": "center", "valign": "vcenter",
-    })
-    for index, slot in enumerate(slots, len(metadata)):
-        days_after = slot // 1440
-        minute_of_day = slot % 1440
-        label = f"{minute_of_day // 60:02d}:{minute_of_day % 60:02d}"
-        if days_after:
-            label += f"+{days_after}"
-        ws.write(header_row, index, label, rotated)
-    ws.set_row(header_row, 58)
-
-    for row_index, ((business_day, _agent_id, _agent_name), agent_segments) in enumerate(sorted(by_agent_day.items()), header_row + 1):
-        agent_segments.sort(key=lambda item: _as_datetime(item["segment_start"]))
-        base = agent_segments[0]
-        gap_minutes = sum(int(item.get("segment_minutes") or 0) for item in agent_segments if item.get("is_gap"))
-        source = "+".join(sorted({str(item.get("observed_source") or "") for item in agent_segments if item.get("observed_source")}))
-        meta_values = [
-            business_day, base["agent_id"], base.get("agent_name"), base.get("team_leader"),
-            base.get("lob"), base.get("language"), base.get("scheduled_start"),
-            base.get("scheduled_end"), gap_minutes, source,
-        ]
-        for column, value in enumerate(meta_values):
-            fmt = report.datetime if isinstance(value, datetime) else report.date if isinstance(value, date) else report.integer if column == 8 else report.body
-            ws.write(row_index, column, value, fmt)
-        for slot_index, slot in enumerate(slots, len(metadata)):
-            right = slot + 15
-            scheduled_start = minute_offset(base["scheduled_start"], business_day)
-            scheduled_end = minute_offset(base["scheduled_end"], business_day)
-            if right <= scheduled_start or slot >= scheduled_end:
-                continue
-            best = None
-            best_rank = (-1, 0.0)
-            for segment in agent_segments:
-                left_overlap = max(slot, minute_offset(segment["segment_start"], business_day))
-                right_overlap = min(right, minute_offset(segment["segment_end"], business_day))
-                overlap = max(0.0, right_overlap - left_overlap)
-                rank = (1 if bool(segment.get("is_gap")) else 0, overlap)
-                if overlap > 0 and rank > best_rank:
-                    best, best_rank = segment, rank
-            if best is not None:
-                code = _segment_code(best)
-                ws.write(row_index, slot_index, code, code_formats[code])
-        ws.set_row(row_index, 19)
-    ws.set_column(0, 0, 12)
-    ws.set_column(1, 1, 13)
-    ws.set_column(2, 5, 20)
-    ws.set_column(6, 7, 18)
-    ws.set_column(8, 8, 12)
-    ws.set_column(9, 9, 18)
-    if slots:
-        ws.set_column(len(metadata), len(metadata) + len(slots) - 1, 3.4)
-    ws.freeze_panes(header_row + 1, len(metadata))
-    ws.autofilter(header_row, 0, header_row + len(by_agent_day), len(metadata) - 1)
 
 
 def build_corrections_workbook(
@@ -840,7 +675,9 @@ def build_corrections_workbook(
             [report_day, config.report_limits.get("max_timeline_rows", 250000)],
         )
         timeline_dicts = [dict(zip(timeline_headers, row)) for row in timeline_rows]
-        _add_shift_view(report, timeline_dicts, report_day, report_day)
+        from .shift_view import add_shift_view
+
+        add_shift_view(report, timeline_dicts, report_day, report_day)
         report.add_table_sheet(
             "TIMELINE_DATA", "Exact full-shift timeline segments",
             "Audit data behind SHIFT_VIEW; planned versus observed segments remain exact, not rounded to the visual grid.",
@@ -938,7 +775,7 @@ def build_final_absence_workbook(
         )
         ws = report.add_table_sheet(
             "AGENT_DAY", "Final Verint absence by agent and day",
-            "This is the authoritative aggregation grain. All rates use capped, overlap-safe daily counters.",
+            "This is the reporting grain. All rates use capped, overlap-safe daily counters.",
             headers, rows,
         )
         _color_statuses(report, ws, headers, rows, "final_ledger_status", {

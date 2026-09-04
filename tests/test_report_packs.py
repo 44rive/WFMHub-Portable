@@ -18,12 +18,13 @@ from wfmhub.report_packs import (
 class ReportPackTests(unittest.TestCase):
     def test_independent_report_packs_are_registered(self):
         self.assertEqual(IMPLEMENTED_REPORT_PACK_KEYS, (
-            "pcs", "bonus", "service", "staffing", "attendance", "corrections", "absence",
+            "pcs", "bonus", "service", "realisations", "staffing", "attendance", "corrections", "absence",
         ))
         self.assertTrue(all(REPORT_PACKS[key].implemented for key in IMPLEMENTED_REPORT_PACK_KEYS))
         self.assertFalse(REPORT_PACKS["intraday"].implemented)
         self.assertEqual(REPORT_PACKS["pcs"].default_folder, "pcs")
         self.assertEqual(REPORT_PACKS["service"].default_folder, "service")
+        self.assertEqual(REPORT_PACKS["realisations"].default_folder, "realisations")
         self.assertEqual(REPORT_PACKS["attendance"].default_folder, "attendance")
         self.assertEqual(REPORT_PACKS["absence"].default_folder, "absence")
         self.assertEqual(REPORT_PACKS["corrections"].default_folder, "corrections")

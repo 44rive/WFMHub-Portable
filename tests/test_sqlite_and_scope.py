@@ -14,6 +14,7 @@ from openpyxl import Workbook
 from wfmhub.config import ensure_user_config, load_config, write_source_root
 from wfmhub.database import DatabaseFormatError, backup_database, connect, migrate, write_session
 from wfmhub.ingestion import AgentScope, ingest_all
+from wfmhub.models import _build_agents
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -137,6 +138,7 @@ class AgentScopeTests(unittest.TestCase):
             sheet.append(["100", "Active", "Active Agent", "TL", "Ops", "LOB", "M", "EN", "O", "C", 1, None])
             sheet.append(["200", "Leaver", "Leaver Agent", "TL", "Ops", "LOB", "M", "EN", "O", "C", 1, date(2026, 8, 1)])
             sheet.append(["300", "Transfer", "Transfer Agent", "TL", "Ops", "LOB", "M", "EN", "O", "C", 1, date(2026, 8, 1)])
+            sheet.append([None, "Active", "Name Only Agent", "TL 2", "Ops 2", "LOB 2", "M", "FR", "O", "C", 1, None])
             workbook.save(fte)
             lilo = source / "Storm" / "LILO" / "LILO 2026-08-01 - 2026-08-02.csv"
             lilo.parent.mkdir(parents=True)
@@ -144,21 +146,27 @@ class AgentScopeTests(unittest.TestCase):
                 writer = csv.writer(handle)
                 writer.writerow(["Date", "[Agent]", "[Agent ID]", "[First Log-on Time]", "[Last Log-off Time]"])
                 for day in ("2026-08-01", "2026-08-02"):
-                    for agent_id, name in (("100", "Active Agent"), ("200", "Leaver Agent"), ("300", "Transfer Agent")):
+                    for agent_id, name in (("100", "Active Agent"), ("200", "Leaver Agent"), ("300", "Transfer Agent"), ("400", "Name Only Agent")):
                         writer.writerow([day, name, agent_id, f"{day} 08:00:00", f"{day} 16:00:00"])
             config = load_config(home)
             with write_session(config) as conn:
                 result = ingest_all(conn, config)
+                agents = _build_agents(conn)
                 kept = conn.execute(
                     """SELECT r.agent_id, r.extract_date FROM raw.lilo r
                        JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
                        ORDER BY r.agent_id, r.extract_date"""
                 ).fetchall()
             self.assertEqual(result.failed, 0)
+            self.assertEqual(agents["400"]["team_leader"], "TL 2")
+            self.assertEqual(agents["400"]["lob"], "LOB 2")
+            self.assertEqual(agents["400"]["match_method"], "Unique FTE name")
             self.assertEqual(kept, [
                 ("100", date(2026, 8, 1)),
                 ("100", date(2026, 8, 2)),
                 ("200", date(2026, 8, 1)),
+                ("400", date(2026, 8, 1)),
+                ("400", date(2026, 8, 2)),
             ])
 
 

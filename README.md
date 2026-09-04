@@ -14,12 +14,12 @@ Normal users work from three obvious folders:
 ```text
 WFMHub/
   Reports/     finished Excel reports
-  Feed/        clean CSV/XLSX exports you explicitly request
+  Feed/        fixed shared-report feeds plus clean exports you request
   config/      business rules, KPI methods, queue maps, and source settings
   _system/     runtime, database, logs, backups, code, and documentation
 ```
 
-Every generated product has a fixed name. When WFMHub replaces one, it first
+Every report has a fixed name. When WFMHub replaces one, it first
 copies the previous version into `Reports\Archive\YYYY-MM-DD`.
 
 Technical files live under `_system`. You normally do not open that folder.
@@ -31,6 +31,7 @@ Technical files live under `_system`. You normally do not open that folder.
 | Attendance Callout | Who must be contacted for absence, lateness, or not-seen status? |
 | Staffing Gaps | Where is scheduled capacity missing by LOB, language, and interval? |
 | OEM Flash | What is Ford OEM service, demand, forecast, and staffing state? |
+| Realisations | How did actual volume, service, forecast, staffing, absence, and shrinkage perform by LOB and period? |
 | Attendance Review | Which gaps across the selected completed dates still need a Verint correction? |
 | Final Absenteeism | What does corrected Verint contain for final absence and shrinkage? |
 | Bonus Management | What did Bonus Matrix v1.2 calculate, and is it safe to release? |
@@ -48,7 +49,7 @@ never agent availability.
 | Source | Used for |
 |---|---|
 | FTE roster | Date-aware in-scope agents, organisation fields, approved PTO, and Away planning |
-| Verint StartEndTimes | Scheduled start/end and assignment boundaries |
+| Verint StartEndTimes | Preferred scheduled start/end and assignment boundaries |
 | Storm LILO | First/last presence evidence, including loaded blank rows |
 | Storm Agent Status | Observed attendance and interval staffing evidence |
 | Verint Activities | Post-correction final absence and shrinkage |
@@ -60,6 +61,11 @@ never agent availability.
 Multi-day files are supported. Row dates are authoritative; filename dates are
 only fallback hints. Missing evidence remains missing and is never converted to
 a false no-show or zero.
+
+If a dedicated StartEndTimes file is unavailable, WFMHub can use successfully
+parsed Shift Assignment boundaries from the Activities export and raises a
+visible review finding. The activity intervals in that same export remain the
+post-correction final absence/shrinkage evidence.
 
 FTE scope is effective-dated: `Active` rows are admitted; `Leaver` rows are
 admitted only through `End date if leaver`; other statuses and undated leavers
@@ -81,7 +87,9 @@ the final payroll/absence authority.
 6. Choose the report you need from Today, Month, PCS, or Analyse.
 7. Open it directly from `Reports`.
 
-See the [beginner guide](docs/BEGINNER_GUIDE.md) for the exact clicks.
+See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
+[Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the optional one-time
+Power Query setup used by shared PCS and Absenteeism files.
 
 ## OEM Flash pilot
 
@@ -100,8 +108,8 @@ The Flash contains:
 `Forecast attainment = actual offered / forecast`.
 `Variance calls = actual offered - forecast`.
 
-The reference workbook's back-office counters do not yet have a governed raw
-source. WFMHub labels that section `NOT_CONFIGURED` rather than fabricating it.
+The reference workbook's back-office counters do not yet have an agreed source.
+WFMHub labels that section `NOT_CONFIGURED` until the source is added.
 
 Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in
@@ -109,9 +117,9 @@ Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 
 ## PCS Performance
 
-PCS is generated directly by Python and SQLite like every other report. There
-is no Power Query, Data Model, refresh connection, setup workbook, or Hub-side
-coaching sync.
+PCS is a normal Excel workbook with a clean `PCS_DATA` table, selector formulas,
+and a shared coaching action table. Refreshing source data also replaces three
+stable CSV feeds under `Feed\PCS`; the file names never change.
 
 `Reports\PCS Performance.xlsx` contains:
 
@@ -119,14 +127,19 @@ coaching sync.
   custom dates, LOB, team leader, and Agent ID;
 - KPI cards that recalculate in desktop Excel from the included clean table;
 - a selector-driven trend and a ready-made `AGENT_RESULTS` realization list;
-- a `COACHING` table containing every valid low-score opportunity;
+- a collaborative `COACHING` action plan and separate `COACHING_QUEUE`;
 - a visible `PCS_DATA` Excel Table at agent/day grain.
 
 Choose values in the boxes on `DASHBOARD`. To add native slicers manually,
-click inside `PCS_DATA` or `COACHING`, then choose **Table Design > Insert
-Slicer**. The team fills the five blue coaching columns and saves/sends that
-workbook. When the current report is regenerated, Excel actions carry forward
-by Coaching Key; they are never imported into SQLite.
+click inside `PCS_DATA`, `COACHING_QUEUE`, or `COACHING`, then choose **Table
+Design > Insert Slicer**. The team fills the five blue coaching columns and
+saves the shared workbook. Use a personal Sheet View before filtering. When the
+report is rebuilt while closed, action fields carry forward by Coaching Key.
+
+For a long-lived team file, make a one-time Power Query from
+`Feed\PCS\PCS_AGENT_DAY_CURRENT.csv` into the existing `tblPcsData` table. After
+that, **Data > Refresh All** updates the dashboard without replacing coaching
+work. The `HELP` sheet gives the exact operating steps.
 
 ## Configurable logic
 
@@ -134,7 +147,7 @@ by Coaching Key; they are never imported into SQLite.
 |---|---|
 | `config\wfm_rules.toml` | Attendance and absence evidence classification |
 | `config\metric_catalog.toml` | Effective-dated KPI formulas, targets, units, and aggregation |
-| `config\analytics_rules.toml` | Deterministic analysis thresholds |
+| `config\analytics_rules.toml` | Period-analysis thresholds |
 | `config\queue_mapping.csv` | Queue-to-LOB and forecast comparison mapping |
 | `config\service_profiles.toml` | Flash/service scope and queue groups |
 
@@ -144,11 +157,13 @@ use ratios of summed components; WFMHub never averages agent percentages.
 ## Analysis and clean exports
 
 **Analyze a period** creates an evidence-backed workbook for PCS, service,
-forecast, staffing, attendance, final absence, or bonus. It uses deterministic
-Python/SQLite logic, not AI.
+forecast, staffing, attendance, final absence, or bonus. Every finding includes
+its metric, comparison, and evidence filter.
 
-**Export clean data** produces explicit CSV or XLSX data under `Feed` for a selected period.
-Large call datasets should use CSV. The original extract is unchanged.
+Every successful refresh updates the fixed PCS and Absenteeism CSV feeds under
+`Feed`. **Export clean data** produces any additional CSV or XLSX dataset you
+request for a selected period. Large call datasets should use CSV. The original
+extract is unchanged.
 
 The optional prompt under `prompts` can be used manually with an approved
 Microsoft Copilot account after attaching only an approved finished report.

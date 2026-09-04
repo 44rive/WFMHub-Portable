@@ -1,4 +1,4 @@
-"""Create a restrained, curated Excel workbook; never export raw source rows."""
+"""Create the shared WFM Hub Excel visual system."""
 
 from __future__ import annotations
 
@@ -69,13 +69,32 @@ def _display_header(name: str) -> str:
         "score_le_3": "Score <= 3", "score_gt_3": "Score > 3",
         "inbound_call_legs": "Inbound Call Legs", "invalid_q1": "Invalid Q1",
         "sample_state": "Sample State", "coaching_key": "Coaching Key",
-        "agent_key": "Agent Key", "latest_day_average": "Latest Day PCS Average",
+        "agent_key": "Agent Selector", "agent_selector": "Agent Selector",
+        "latest_day_average": "Latest Day PCS Average",
         "current_mtd_average": "Current MTD PCS Average",
         "prior_mtd_average": "Prior MTD PCS Average",
         "coaching_status": "Coaching Status", "coaching_date": "Coaching Date",
         "coaching_comment": "Coaching Comment",
+        "team_lead": "Team Lead", "ops_manager": "Ops Manager",
+        "tier_1_bonus_percent": "Tier 1 Bonus %",
+        "tier_2_bonus_percent": "Tier 2 Bonus %",
+        "tier_1_target": "Tier 1 Target", "tier_2_target": "Tier 2 Target",
+        "pcs_participation": "PCS % Participation",
+        "absence_percent": "Abs%", "count_value": "Count / Value",
     }
-    return custom.get(name, name.replace("_", " ").title().replace("Id", "ID"))
+    if name in custom:
+        return custom[name]
+    lowered = name.casefold()
+    if lowered in custom:
+        return custom[lowered]
+    title = name.replace("_", " ").title()
+    acronyms = {
+        "Id": "ID", "Lob": "LOB", "Aht": "AHT", "Pcs": "PCS",
+        "Kpi": "KPI", "Qm": "QM", "Voc": "VOC", "Fte": "FTE",
+        "Pto": "PTO", "Mtd": "MTD", "Rta": "RTA", "Asa": "ASA",
+        "Sl": "SL", "Iso": "ISO",
+    }
+    return " ".join(acronyms.get(word, word) for word in title.split())
 
 
 class ExcelReport:
@@ -86,10 +105,11 @@ class ExcelReport:
         # real Excel Tables, so report row limits are enforced in configuration.
         self.workbook = xlsxwriter.Workbook(path)
         self.workbook.set_properties({
-            "title": "WFMHub Portable Report",
-            "subject": "Curated WFMHub report pack",
+            "title": "WFM Hub Report",
+            "subject": "Workforce Management reporting",
             "author": "Anass ASSRI",
             "company": "WFM",
+            "comments": "Prepared by Anass ASSRI",
         })
         self.title = self.workbook.add_format({"font_name": "Aptos Display", "font_size": 18, "bold": True, "font_color": COLORS["white"], "bg_color": COLORS["dark"], "align": "left", "valign": "vcenter", "indent": 1})
         self.subtitle = self.workbook.add_format({"font_name": "Aptos", "font_size": 9, "font_color": COLORS["white"], "bg_color": COLORS["teal"], "align": "left", "valign": "vcenter", "indent": 1})
@@ -102,6 +122,7 @@ class ExcelReport:
         self.integer = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": "#,##0", "bottom": 1, "bottom_color": COLORS["thin"]})
         self.decimal = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": "#,##0.00", "bottom": 1, "bottom_color": COLORS["thin"]})
         self.percent = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": "0.0%", "bottom": 1, "bottom_color": COLORS["thin"]})
+        self.money = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": '#,##0.00 "MAD"', "bottom": 1, "bottom_color": COLORS["thin"]})
         self.date = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": "yyyy-mm-dd", "bottom": 1, "bottom_color": COLORS["thin"]})
         self.datetime = self.workbook.add_format({"font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"], "num_format": "yyyy-mm-dd hh:mm:ss", "bottom": 1, "bottom_color": COLORS["thin"]})
         self.kpi_label = self.workbook.add_format({"font_name": "Aptos", "font_size": 9, "bold": True, "font_color": COLORS["muted"], "bg_color": COLORS["canvas"], "align": "center", "valign": "vcenter", "top": 1, "left": 1, "right": 1, "top_color": COLORS["thin"], "left_color": COLORS["thin"], "right_color": COLORS["thin"]})
@@ -141,9 +162,11 @@ class ExcelReport:
                     fmt = self.datetime
                 elif isinstance(value, date):
                     fmt = self.editable_date if header in editable_headers else self.date
-                elif header.endswith(" %") or any(token in header for token in (" Rate", "Participation", "Availability", "Service Level")):
+                elif header.endswith(" %") or any(token in header for token in (" Rate", "Participation", "Availability", "Service Level", "Achievement", "Proration")):
                     fmt = self.percent
-                elif isinstance(value, (int, float)) and not isinstance(value, bool) and any(token in header for token in ("Average", "Hours", "FTE", "Variance", "Movement")):
+                elif any(token in header for token in ("Payout", "Bonus Amount", "Salary", "Deduction")):
+                    fmt = self.money
+                elif any(token in header for token in ("Average", "Hours", "FTE", "Variance", "Movement")):
                     fmt = self.decimal
                 elif isinstance(value, (int, float)) and not isinstance(value, bool):
                     fmt = self.integer
@@ -182,8 +205,8 @@ class ExcelReport:
 def _summary_sheet(report: ExcelReport, conn: DatabaseConnection, start: date, end: date) -> None:
     worksheet = report.workbook.add_worksheet("SUMMARY")
     worksheet.hide_gridlines(2)
-    worksheet.merge_range("A1:F1", "WFMHub summary", report.title)
-    worksheet.merge_range("A2:F2", f"Curated results for {start:%Y-%m-%d} through {end:%Y-%m-%d}. No raw extracts are stored in this workbook.", report.subtitle)
+    worksheet.merge_range("A1:F1", "WFM HUB SUMMARY", report.title)
+    worksheet.merge_range("A2:F2", f"Reporting period {start:%Y-%m-%d} through {end:%Y-%m-%d}.", report.subtitle)
     metrics = [
         ("Scheduled agent-days", "SELECT count(*) FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND assignment_type <> 'Off'", [start, end]),
         ("Scheduled hours", "SELECT coalesce(sum(scheduled_minutes),0)/60.0 FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ? AND assignment_type <> 'Off'", [start, end]),
@@ -225,8 +248,8 @@ def _summary_sheet(report: ExcelReport, conn: DatabaseConnection, start: date, e
 def _start_sheet(report: ExcelReport, config: Config, start: date, end: date, generated: datetime) -> None:
     ws = report.workbook.add_worksheet("START_HERE")
     ws.hide_gridlines(2)
-    ws.merge_range("A1:H1", "WFMHub Portable", report.title)
-    ws.merge_range("A2:H2", f"Generated {generated:%Y-%m-%d %H:%M}; period {start:%Y-%m-%d} to {end:%Y-%m-%d}", report.subtitle)
+    ws.merge_range("A1:H1", "WFM HUB", report.title)
+    ws.merge_range("A2:H2", f"Last refreshed {generated:%Y-%m-%d %H:%M}; period {start:%Y-%m-%d} to {end:%Y-%m-%d}", report.subtitle)
     sections = [
         (4, "Daily routine", [
             "1. Put untouched exports in their normal source folders.",
