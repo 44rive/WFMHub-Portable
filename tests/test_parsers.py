@@ -73,13 +73,23 @@ class ParserTests(unittest.TestCase):
         template = Path(__file__).resolve().parents[1] / "templates" / "FTE Count.xlsx"
         workbook = load_workbook(template, read_only=False, data_only=False)
         try:
-            self.assertEqual(workbook.sheetnames[:2], ["START_HERE", "Agent"])
+            self.assertEqual(workbook.sheetnames, ["START_HERE", "Agent", "PTO", "Away"])
             headers = [cell.value for cell in workbook["Agent"][1]]
             self.assertEqual(headers, [
                 "Client ID", "Status", "Name", "Team leader", "Ops Manager", "LOB",
                 "Market", "Language", "Location", "City", "FTE", "End date if leaver",
             ])
             self.assertIn("tblFTEAgents", workbook["Agent"].tables)
+            self.assertEqual([cell.value for cell in workbook["PTO"][1]], [
+                "Client ID", "Name", "Start date", "End date", "Day coverage",
+                "Start time", "End time", "PTO type", "Approval status", "Comment",
+            ])
+            self.assertIn("tblFTEPTO", workbook["PTO"].tables)
+            self.assertEqual([cell.value for cell in workbook["Away"][1]], [
+                "Client ID", "Name", "Start date", "End date", "Away type",
+                "Case status", "Comment",
+            ])
+            self.assertIn("tblFTEAway", workbook["Away"].tables)
         finally:
             workbook.close()
 

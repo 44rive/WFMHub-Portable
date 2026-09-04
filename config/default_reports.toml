@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.5"
+version = "2026.09.6"
 description = "One decision per workbook; each finished report is generated directly by Python and SQLite."
 
 [[packs]]
@@ -42,9 +42,9 @@ sheets = ["DASHBOARD", "ACTIONS", "TREND", "DEFINITIONS", "_AUDIT"]
 [[packs]]
 key = "corrections"
 title = "ATTENDANCE REVIEW"
-purpose = "Completed-day residual gaps and full-shift evidence for Verint correction."
+purpose = "Completed-day exact residual intervals and full-shift evidence for Verint correction."
 finding_domains = ["attendance", "data_quality"]
-sheets = ["DASHBOARD", "GAPS", "SHIFT_VIEW", "DEFINITIONS", "_AUDIT"]
+sheets = ["DASHBOARD", "VERINT_INJECTION", "SHIFT_VIEW", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "absence"

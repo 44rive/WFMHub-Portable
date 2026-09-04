@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.1 — 2026-09-04
+
+- Replaced the editable correction-decision sheet with `VERINT_INJECTION`: one
+  row per exact continuous residual interval, with second-level start/end
+  timestamps, injection suggestion, evidence, schedule context and stable
+  lineage keys.
+- Stopped bridging separate Agent Status gaps across a real return to service.
+  The tolerance now suppresses only tiny individual gaps; it never manufactures
+  one longer interval that would be unsafe to inject in Verint.
+- Removed correction-decision import from the user-facing CLI. The next Verint
+  Activities export is the only reconciliation signal and automatically clears
+  covered residual intervals.
+- Expanded the blank FTE template with governed `PTO` and `Away` Excel Tables,
+  leading-zero-safe Agent IDs, date/time formats, dropdowns, required-field
+  highlighting and plain-language instructions. The registers are ready to be
+  populated before their calculation overlay is enabled.
+
 ## 0.13.0 — 2026-09-04
 
 - Replaced the PCS Power Query/Data Model master with one self-contained

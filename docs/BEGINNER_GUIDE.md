@@ -40,6 +40,12 @@ The FTE roster is the authority:
 This check uses the date of each schedule, LILO, Agent Status, or Call by Call
 row. Historical work before a person's leave date therefore remains valid.
 
+The standard `FTE Count.xlsx` template also has `PTO` and `Away` registers.
+Populate them now using the dropdowns and inclusive dates, but note that
+v0.13.1 does not yet apply those registers to attendance or staffing. Until
+that overlay is released, they are controlled planning inputs rather than Hub
+calculation evidence.
+
 ## The normal daily routine
 
 1. Add the new extracts to their normal folders.
@@ -138,12 +144,13 @@ excluded so an unfinished shift can never become an early-leave correction.
 WFMHub compares schedule with LILO and Agent Status, then checks whether Verint
 Activities already cover each gap.
 
-1. Open `GAPS`.
-2. Review the complete shift on `SHIFT_VIEW`.
-3. Edit only the pale-blue decision columns.
-4. Save the workbook.
-5. Use **System and advanced tools > Import edited attendance correction
-   decisions**.
+1. Open `VERINT_INJECTION`.
+2. Each row is one exact continuous interval; use **Start to inject** and
+   **End to inject** without rounding or combining rows.
+3. Use `SHIFT_VIEW` only when you need to verify the complete shift evidence.
+4. Correct the intervals in Verint.
+5. Export Activities again and refresh WFMHub. Corrected intervals disappear
+   automatically; never import this workbook back into the Hub.
 
 ## Final Absenteeism
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import datetime
 
+from wfmhub.models import _exact_status_gaps
 from wfmhub.utils import classify_status, parse_verint_interval, subtract_intervals
 
 
@@ -24,6 +25,17 @@ class UtilsTests(unittest.TestCase):
         end = datetime(2026, 8, 1, 8, 20)
         result = subtract_intervals(start, end, [(start, datetime(2026, 8, 1, 8, 10))])
         self.assertEqual(result, [(datetime(2026, 8, 1, 8, 10), end)])
+
+    def test_exact_status_gaps_never_bridge_a_real_return(self):
+        result = _exact_status_gaps([
+            (datetime(2026, 8, 1, 12, 0), datetime(2026, 8, 1, 12, 20)),
+            # The agent returned for two minutes before going offline again.
+            (datetime(2026, 8, 1, 12, 22), datetime(2026, 8, 1, 13, 0)),
+        ], minimum_minutes=5)
+        self.assertEqual(result, [
+            (datetime(2026, 8, 1, 12, 0), datetime(2026, 8, 1, 12, 20)),
+            (datetime(2026, 8, 1, 12, 22), datetime(2026, 8, 1, 13, 0)),
+        ])
 
 
 if __name__ == "__main__":

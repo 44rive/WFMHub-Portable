@@ -85,7 +85,7 @@ details remain in one module.
 | `raw.bonus_policy` | One imported policy decision row |
 | `core.clean_call_leg` | Deduplicated active call-leg view by stable Call Key |
 | `core.dim_agent` | One operational Agent ID |
-| `core.correction_action` | One human decision per stable Correction ID |
+| `core.correction_action` | Legacy compatibility table; correction workbooks are no longer imported |
 | `core.pcs_coaching_action` | Legacy compatibility table; generated PCS coaching stays in Excel |
 | `mart.attendance_agent_day` | One scheduled Agent ID/day |
 | `mart.conformance_agent_day` | Legacy compatibility table; empty in v0.5 |
@@ -124,7 +124,7 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `absence` | `Reports/Final Absenteeism.xlsx` | Activities-only final absence/shrinkage ledger |
 
 Products share the same visual identity but use purpose-specific layouts. The
-OEM Flash begins with `FLASH` and `HOURLY`; Corrections uses `GAPS` and
+OEM Flash begins with `FLASH` and `HOURLY`; Corrections uses `VERINT_INJECTION` and
 `SHIFT_VIEW`; Attendance remains an action list. Legacy `operations` and
 `quality_pcs` builders remain callable under `_system/legacy_reports` but are
 absent from the menu.
@@ -371,7 +371,8 @@ forecast exports are valid; absent forecast measures remain NULL.
 Current releases use SQLite and do not convert or open v0.1 DuckDB data.
 Install the portable release in a new folder, point it at the same untouched
 source root, and let it rebuild SQLite. Preserve the entire old folder. Saved
-Attendance Review workbooks can re-import correction decisions.
+Attendance Review is a one-way injection queue. Re-exported Verint Activities
+are the automatic reconciliation signal; the workbook is never imported back.
 
 Within the SQLite generation, migrations are additive and never edited after
 release. Config upgrades create a timestamped TOML backup. Database upgrades

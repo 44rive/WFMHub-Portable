@@ -13,7 +13,6 @@ from zoneinfo import ZoneInfoNotFoundError
 
 from openpyxl import Workbook, load_workbook
 
-from wfmhub.actions import import_actions
 from wfmhub.config import ensure_user_config, load_config, write_source_root
 from wfmhub.database import write_session
 from wfmhub.ingestion import ingest_all
@@ -482,31 +481,6 @@ class EndToEndTests(unittest.TestCase):
                 finally:
                     filtered.close()
 
-                bad_report = home / "output" / "bad-actions.xlsx"
-                shutil.copy2(corrections_report, bad_report)
-                bad = load_workbook(bad_report)
-                bad_gap_sheet = bad["GAPS"]
-                bad_headers = {cell.value: cell.column for cell in bad_gap_sheet[4]}
-                self.assertGreaterEqual(bad_gap_sheet.max_row, 6)
-                bad_gap_sheet.cell(5, bad_headers["Validation Status"], "Validated")
-                bad_gap_sheet.cell(5, bad_headers["Owner"], "WFM")
-                bad_gap_sheet.cell(6, bad_headers["Injected Date"], "not-a-date")
-                bad.save(bad_report)
-                bad.close()
-                with self.assertRaises(ValueError):
-                    import_actions(conn, bad_report)
-                self.assertEqual(conn.execute("SELECT count(*) FROM core.correction_action").fetchone()[0], 0)
-
-                edited = load_workbook(corrections_report)
-                gap_sheet = edited["GAPS"]
-                gap_headers = {cell.value: cell.column for cell in gap_sheet[4]}
-                gap_sheet.cell(5, gap_headers["Validation Status"], "Validated")
-                gap_sheet.cell(5, gap_headers["Owner"], "WFM")
-                edited.save(corrections_report)
-                edited.close()
-                self.assertEqual(import_actions(conn, corrections_report), 1)
-                self.assertEqual(conn.execute("SELECT validation_status FROM core.correction_action").fetchone()[0], "Validated")
-
                 pcs_edit = load_workbook(focused_pcs_report)
                 pcs_actions = pcs_edit["COACHING"]
                 pcs_headers = {cell.value: cell.column for cell in pcs_actions[4]}
@@ -533,9 +507,25 @@ class EndToEndTests(unittest.TestCase):
             corrections_book = load_workbook(corrections_report, read_only=True, data_only=True)
             try:
                 self.assertEqual(corrections_book.sheetnames, [
-                    "DASHBOARD", "GAPS", "SHIFT_VIEW", "DEFINITIONS", "_AUDIT",
+                    "DASHBOARD", "VERINT_INJECTION", "SHIFT_VIEW", "DEFINITIONS", "_AUDIT",
                 ])
                 self.assertIn("2026-08-01 to 2026-08-02", corrections_book["DASHBOARD"]["A2"].value)
+                injection = corrections_book["VERINT_INJECTION"]
+                injection_headers = [cell.value for cell in injection[4]]
+                self.assertIn("Start To Inject", injection_headers)
+                self.assertIn("End To Inject", injection_headers)
+                self.assertNotIn("Validation Status", injection_headers)
+                start_column = injection_headers.index("Start To Inject")
+                end_column = injection_headers.index("End To Inject")
+                exact_intervals = {
+                    (row[start_column], row[end_column])
+                    for row in injection.iter_rows(min_row=5, values_only=True)
+                    if row[start_column] is not None
+                }
+                self.assertIn(
+                    (datetime(2026, 8, 1, 12, 0), datetime(2026, 8, 1, 13, 0)),
+                    exact_intervals,
+                )
                 self.assertEqual(corrections_book["_AUDIT"].sheet_state, "hidden")
             finally:
                 corrections_book.close()

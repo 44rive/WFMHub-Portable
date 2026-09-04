@@ -1194,48 +1194,36 @@ def build_attendance_corrections_workbook(
         [
             f"The selected range is {start:%Y-%m-%d} to {end:%Y-%m-%d}; every completed date through {completed_through:%Y-%m-%d} is included, not only yesterday.",
             "Today is excluded from correction review, so an unfinished shift can never become an early-leave correction.",
-            "GAPS is the editable action list. Pale-blue columns are the only human decisions accepted for import.",
-            "SHIFT_VIEW visualizes the full planned-versus-observed shift; every selected completed date remains in the workbook evidence.",
+            "VERINT_INJECTION contains one row per exact continuous residual interval; Start to inject and End to inject are never rounded to a 15-minute grid.",
+            "After injection, export Activities again and refresh. Corrected coverage disappears automatically; no decision workbook is imported back into the Hub.",
+            "SHIFT_VIEW is supporting evidence for the listed agents: schedule versus Agent Status/LILO over the full shift.",
             "Verint Activities verify whether an observed gap is corrected; they never create the original gap.",
         ],
     )
     headers, rows = _query(
         conn,
-        """SELECT r.residual_id, r.correction_id, r.business_date,
-                  r.agent_id, c.agent_name, c.team_leader, c.ops_manager,
-                  c.lob, d.language, c.scheduled_start, c.scheduled_end,
-                  c.detected_issue, r.residual_start AS gap_start,
-                  r.residual_end AS gap_end, r.residual_minutes AS gap_minutes,
-                  c.confidence, r.suggested_activity, r.observed_source,
-                  r.verint_reconciliation, c.verint_activity,
-                  c.verint_overlap_minutes, c.validation_status,
-                  c.confirmed_activity, c.owner, c.comment, c.injected_date,
-                  r.source_file
+        """SELECT r.business_date, r.agent_id, c.agent_name, c.team_leader,
+                  c.ops_manager, c.lob, d.language,
+                  c.detected_issue AS incoherence,
+                  r.residual_start AS start_to_inject,
+                  r.residual_end AS end_to_inject,
+                  r.residual_minutes AS minutes,
+                  r.suggested_activity, c.confidence,
+                  r.verint_reconciliation, r.observed_source,
+                  c.scheduled_start, c.scheduled_end,
+                  r.source_file, r.correction_id, r.residual_id AS segment_id
            FROM mart.correction_residual_segment r
            JOIN mart.correction_candidate c ON c.correction_id=r.correction_id
            LEFT JOIN core.dim_agent d ON d.agent_id=r.agent_id
            WHERE r.business_date BETWEEN ? AND ? AND r.business_date<?
-             AND coalesce(c.validation_status,'Open') NOT IN ('Injected','Rejected')
            ORDER BY r.business_date, c.priority, r.residual_minutes DESC, r.agent_id, r.residual_start""",
         [start, end, today],
     )
-    ws = book.table(
-        "GAPS", "Residual gaps ready for Verint correction",
-        "Edit only Confirmed Activity, Validation Status, Owner, Comment and Injected Date; then import this workbook.",
+    book.table(
+        "VERINT_INJECTION", "Exact residual intervals ready for Verint",
+        "One row is one continuous interval still uncovered in the latest Activities export. Use the exact timestamps shown; do not round or combine separate rows.",
         headers, rows,
-        editable_headers={"Confirmed Activity", "Validation Status", "Owner", "Comment", "Injected Date"},
     )
-    if rows:
-        display = [value.replace("_", " ").title().replace("Id", "ID") for value in headers]
-        status_col = display.index("Validation Status")
-        ws.data_validation(4, status_col, 3 + len(rows), status_col, {
-            "validate": "list", "source": ["Open", "Validated", "Injected", "Rejected"],
-        })
-        suggestions = sorted({str(row[headers.index("suggested_activity")]) for row in rows if row[headers.index("suggested_activity")]})
-        activities = list(dict.fromkeys([*suggestions, "Absent", "Late", "Early Leave", "Unpaid Leave", "Vacation"]))[:20]
-        if activities:
-            activity_col = display.index("Confirmed Activity")
-            ws.data_validation(4, activity_col, 3 + len(rows), activity_col, {"validate": "list", "source": activities})
 
     timeline_headers, timeline_rows = _query(
         conn,
@@ -1259,8 +1247,10 @@ def build_attendance_corrections_workbook(
     book.definitions([
         ("Observed gap", "Scheduled time minus unioned LILO/Agent Status evidence", "Correction candidate", "Activities cannot create the gap"),
         ("Residual gap", "Observed gap minus unioned corrected Verint Activities", "Minutes still requiring review", "Overlap-safe"),
+        ("Start/End to inject", "Exact physical boundaries of one continuous residual interval", "Manual Verint entry", "Never rounded and never bridges a real return to service"),
         ("Current-day tail", "Future portion of an unfinished shift", "No action", "Never early leave"),
-        ("Correction ID", "Stable action key", "Import decisions", "One correction may have several residual segments"),
+        ("Correction ID", "Stable detected-gap lineage key", "Audit and reconciliation", "One correction may have several residual segments"),
+        ("Segment ID", "Stable exact residual-interval key", "Trace one injection row", "Changes only when its physical residual interval changes"),
     ])
     book.audit(_audit_rows(
         conn, config, "corrections", start, end,

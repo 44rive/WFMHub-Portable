@@ -729,16 +729,22 @@ def _build_conformance(
     return output, exclusive_by_key
 
 
-def _nearby_merge(intervals: Iterable[tuple[datetime, datetime]], tolerance_minutes: int) -> list[tuple[datetime, datetime]]:
-    ordered = sorted(intervals)
-    merged: list[list[datetime]] = []
-    tolerance = timedelta(minutes=tolerance_minutes)
-    for start, end in ordered:
-        if not merged or start > merged[-1][1] + tolerance:
-            merged.append([start, end])
-        else:
-            merged[-1][1] = max(merged[-1][1], end)
-    return [(a, b) for a, b in merged]
+def _exact_status_gaps(
+    intervals: Iterable[tuple[datetime, datetime]],
+    minimum_minutes: int,
+) -> list[tuple[datetime, datetime]]:
+    """Keep physical status boundaries; never bridge a real return to service.
+
+    The configured tolerance suppresses tiny individual gaps. It must not join
+    two separate Logged Off/Unavailable spells across even a short active
+    interval, because Verint needs one correction per exact continuous spell.
+    """
+
+    return [
+        (start, end)
+        for start, end in merge_intervals(intervals)
+        if int((end - start).total_seconds() // 60) > minimum_minutes
+    ]
 
 
 CORRECTION_COLUMNS = [
@@ -842,11 +848,13 @@ def _build_corrections(
         exclusive = row.get("_status_exclusive", [])
         for category, issue, priority in (("Logged Off", "Mid-shift logged off", 4), ("Unavailable", "Unavailable in shift", 7)):
             raw = [(item["interval_start"], item["interval_end"]) for item in exclusive if item["actual_category"] == category]
-            for hit_start, hit_end in clip_intervals(actual_first, actual_last, _nearby_merge(raw, status_tolerance)):
+            exact_gaps = _exact_status_gaps(raw, status_tolerance)
+            for hit_start, hit_end in clip_intervals(actual_first, actual_last, exact_gaps):
                 minutes = int((hit_end - hit_start).total_seconds() // 60)
-                if minutes > status_tolerance:
-                    confidence = "High" if category == "Logged Off" else "Review"
-                    add(row, issue, hit_start, hit_end, minutes, priority, confidence, "General Unavailability", "AGENT_STATUS", row["status_source"])
+                if minutes <= status_tolerance:
+                    continue
+                confidence = "High" if category == "Logged Off" else "Review"
+                add(row, issue, hit_start, hit_end, minutes, priority, confidence, "General Unavailability", "AGENT_STATUS", row["status_source"])
 
     by_key = {row["agent_day_key"]: row for row in attendance}
     residual_rows: list[dict[str, Any]] = []

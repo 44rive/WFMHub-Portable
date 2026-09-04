@@ -60,7 +60,7 @@ REPORT_PACKS = {
         default_folder="corrections",
         filename_prefix="WFMHub_Attendance_Review",
         current_filename="Attendance Review.xlsx",
-        purpose="Selected-period residual gaps, decisions, and a full-shift evidence timeline.",
+        purpose="Selected-period exact residual intervals and a full-shift evidence timeline.",
     ),
     "pcs": ReportPack(
         key="pcs",

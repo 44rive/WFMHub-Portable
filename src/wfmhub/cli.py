@@ -11,7 +11,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import __version__
-from .actions import import_actions
 from .analytics import load_analytics_rules, validate_analytics_rules
 from .bonus import import_bonus_matrix
 from .config import ConfigError, ensure_user_config, load_config, write_source_root
@@ -317,22 +316,6 @@ def run_custom(
     print(f"Output      : {result.output_dir}")
     if result.result is not None:
         print(f"Result      : {result.result}")
-    return 0
-
-
-def import_decisions(home: Path, workbook: Path) -> int:
-    config = load_config(home)
-    _logging(config)
-    bar = ProgressBar()
-    bar.update(0.1, "Reading correction decisions")
-    try:
-        with write_session(config) as conn:
-            count = import_actions(conn, workbook)
-        bar.finish("Decisions imported")
-    except Exception as exc:
-        bar.fail(str(exc))
-        raise
-    print(f"Imported {count} correction decision(s).")
     return 0
 
 
@@ -667,36 +650,32 @@ def _build_menu_product(home: Path, pack: str, *, service_profile: str | None = 
 def _advanced_menu(home: Path) -> None:
     print("\nSYSTEM & SETTINGS")
     print("1. Show source health and date coverage")
-    print("2. Import edited attendance correction decisions")
-    print("3. Validate rules and build governance catalog")
-    print("4. Create database backup")
-    print("5. Change source root")
-    print("6. Run system check")
-    print("7. Run custom Python or read-only SQL")
-    print("8. Back")
-    choice = input("Choose 1-8: ").strip()
+    print("2. Validate rules and build governance catalog")
+    print("3. Create database backup")
+    print("4. Change source root")
+    print("5. Run system check")
+    print("6. Run custom Python or read-only SQL")
+    print("7. Back")
+    choice = input("Choose 1-7: ").strip()
     if choice == "1":
         show_status(home)
         show_coverage(home)
     elif choice == "2":
-        path = Path(input("Paste the edited Attendance Review workbook path: ").strip().strip('"'))
-        import_decisions(home, path)
-    elif choice == "3":
         rules_tool(home, "catalog")
-    elif choice == "4":
+    elif choice == "3":
         create_backup(home)
-    elif choice == "5":
+    elif choice == "4":
         path = Path(input("Paste the folder containing FTE, Storm and Verint: ").strip().strip('"'))
         setup(home, path, True)
-    elif choice == "6":
+    elif choice == "5":
         run_doctor(home)
-    elif choice == "7":
+    elif choice == "6":
         config = load_config(home)
         kind, job = _choose_custom_job(config)
         start, end, use_config = _choose_period()
         run_custom(home, kind, job, start, end, use_config)
-    elif choice != "8":
-        raise ValueError("Please choose a number from 1 to 8")
+    elif choice != "7":
+        raise ValueError("Please choose a number from 1 to 7")
 
 
 def menu(home: Path) -> int:
@@ -804,8 +783,6 @@ def parser() -> argparse.ArgumentParser:
     custom_p.add_argument("job", type=Path)
     custom_p.add_argument("--start", type=_date)
     custom_p.add_argument("--end", type=_date)
-    import_p = commands.add_parser("import-actions", help="Import edited GAPS decision columns")
-    import_p.add_argument("workbook", type=Path)
     bonus_p = commands.add_parser("import-bonus", help="Import Bonus Matrix v1.2 without changing the source")
     bonus_p.add_argument("workbook", type=Path)
     analysis_p = commands.add_parser("analyze", help="Run deterministic on-demand period analysis")
@@ -840,8 +817,6 @@ def main(argv: list[str] | None = None) -> int:
             return refresh(home, args.start, args.end, packs, args.source_group, service_profile=args.service_profile)
         if args.command == "report":
             return report_only(home, args.start, args.end, args.output, args.pack, service_profile=args.service_profile)
-        if args.command == "import-actions":
-            return import_decisions(home, args.workbook)
         if args.command == "import-bonus":
             return import_bonus_tool(home, args.workbook)
         if args.command == "analyze":
