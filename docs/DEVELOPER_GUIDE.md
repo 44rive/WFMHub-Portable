@@ -51,7 +51,7 @@ attendance, absence, correction, or payroll models.
 ## Windows portable build
 
 ```bash
-python3 packaging/windows/build_portable.py --version 0.12.0 --python-version 3.13.7
+python3 packaging/windows/build_portable.py --version 0.13.0 --python-version 3.13.7
 ```
 
 The builder always deletes and recreates stage and wheelhouse. It:
@@ -91,7 +91,7 @@ At minimum, verify:
 - ZIP checksum and native inventory match the builder result.
 
 The historical DuckDB CLI probe remains in the repository only as evidence of
-the rejected compatibility path. It is not part of v0.3.0 or its runtime.
+the rejected compatibility path. It is not part of the current portable runtime.
 
 ## FTE template and report packs
 
@@ -123,11 +123,10 @@ builder must create the exact ordered sheets declared in
 `default_reports.toml` and keep `_AUDIT` hidden. Do not add raw extract tables
 to workbooks.
 
-Only PCS publishes compact model tables under `_system/feeds/pcs`. The
-`template-init` command may create its styled `.xlsx` starter. After a user adds Excel
-Data Model, PivotTable, or slicer parts, Python must never open or rewrite that
-master. Daily jobs update only the stable compact CSV package; Excel performs
-Refresh All. Local masters are Git-ignored.
+PCS is a normal generated report. Keep its `PCS_DATA` and `COACHING` sheets as
+real Excel Tables because the dashboard formulas and optional native Table
+slicers depend on their stable column names. Do not add Power Query, Data Model,
+ODBC, or refresh-connection requirements.
 
 Call-by-call uses a stable deterministic leg key. Full-history extracts may
 overlap, so `core.clean_call_leg` chooses the newest active row at that key.

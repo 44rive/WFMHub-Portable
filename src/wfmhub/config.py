@@ -48,6 +48,7 @@ class Config:
     database: Path
     output: Path
     reports: Path
+    feed: Path
     system: Path
     logs: Path
     backups: Path
@@ -116,7 +117,88 @@ def ensure_user_config(home: Path) -> Path:
             print("WFMHub upgraded the standard database setting to database/wfm.sqlite3.")
             print(f"Previous config backup: {backup}")
             print(f"Old DuckDB remains untouched: {home / 'database' / 'wfm.duckdb'}")
+        # An in-place upgrade from the former portable layout must not keep
+        # using visible root-level technical folders. This migration runs only
+        # inside a packaged release, never in a development checkout.
+        if (home / "VERSION.txt").is_file() and (home / "_system" / "runtime").is_dir():
+            text = target.read_text(encoding="utf-8")
+            replacements = {
+                'database = "database/wfm.sqlite3"': 'database = "_system/database/wfm.sqlite3"',
+                'output = "output"': 'output = "_system/output"',
+                'logs = "logs"': 'logs = "_system/logs"',
+                'backups = "backups"': 'backups = "_system/backups"',
+                'input = "input"': 'input = "_system/input"',
+                'custom = "custom"': 'custom = "_system/custom"',
+            }
+            upgraded = text
+            for old, new in replacements.items():
+                upgraded = upgraded.replace(old, new, 1)
+            required = {
+                "reports": 'reports = "Reports"',
+                "feed": 'feed = "Feed"',
+                "system": 'system = "_system"',
+            }
+            lines = upgraded.splitlines()
+            path_start = next((index for index, line in enumerate(lines) if line.strip() == "[paths]"), None)
+            if path_start is not None:
+                path_end = next((index for index in range(path_start + 1, len(lines)) if lines[index].strip().startswith("[")), len(lines))
+                existing = {
+                    line.split("=", 1)[0].strip()
+                    for line in lines[path_start + 1:path_end]
+                    if "=" in line and not line.lstrip().startswith("#")
+                }
+                additions = [value for key, value in required.items() if key not in existing]
+                lines[path_end:path_end] = additions
+                upgraded = "\n".join(lines) + "\n"
+            if upgraded != text:
+                stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                backup = config_dir / f"wfmhub_pre_layout_{stamp}.toml"
+                shutil.copy2(target, backup)
+                target.write_text(upgraded, encoding="utf-8")
+                _migrate_packaged_layout(home, stamp)
+                print("WFMHub moved the old technical folders under _system.")
+                print(f"Previous config backup: {backup}")
     return target
+
+
+def _migrate_packaged_layout(home: Path, stamp: str) -> None:
+    """Move old portable state without deleting conflicts or user extracts."""
+
+    system = home / "_system"
+    archive = system / "legacy_layout" / stamp
+    for name in ("database", "output", "logs", "backups", "input", "custom"):
+        source = home / name
+        target = system / name
+        if not source.is_dir() or source.resolve() == target.resolve():
+            continue
+        target.mkdir(parents=True, exist_ok=True)
+        for item in list(source.iterdir()):
+            destination = target / item.name
+            if destination.exists():
+                fallback = archive / name / item.name
+                fallback.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(item), str(fallback))
+            else:
+                shutil.move(str(item), str(destination))
+        source.rmdir()
+    for name in ("runtime", "app", "docs", "prompts", "templates"):
+        source = home / name
+        if source.is_dir():
+            destination = archive / "old_program" / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(destination))
+    for name in ("CHANGELOG.md", "RUNTIME_MANIFEST.sha256", "RUNTIME_ORIGIN.txt"):
+        source = home / name
+        if source.is_file():
+            destination = archive / "old_program" / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(destination))
+    for old_name in ("PCS Team.xlsx", "Yesterday Corrections.xlsx"):
+        old_report = home / "Reports" / old_name
+        if old_report.is_file():
+            destination = archive / "old_reports" / old_report.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_report), str(destination))
 
 
 def load_config(home: Path, config_file: Path | None = None) -> Config:
@@ -136,14 +218,15 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         file=file,
         timezone=str(raw.get("app", {}).get("timezone", "Europe/Berlin")),
         source_root=_portable_path(home, str(paths.get("source_root", "extracts"))),
-        database=_portable_path(home, str(paths.get("database", "database/wfm.sqlite3"))),
-        output=_portable_path(home, str(paths.get("output", "output"))),
+        database=_portable_path(home, str(paths.get("database", "_system/database/wfm.sqlite3"))),
+        output=_portable_path(home, str(paths.get("output", "_system/output"))),
         reports=_portable_path(home, str(paths.get("reports", "Reports"))),
+        feed=_portable_path(home, str(paths.get("feed", "Feed"))),
         system=_portable_path(home, str(paths.get("system", "_system"))),
-        logs=_portable_path(home, str(paths.get("logs", "logs"))),
-        backups=_portable_path(home, str(paths.get("backups", "backups"))),
-        input=_portable_path(home, str(paths.get("input", "input"))),
-        custom=_portable_path(home, str(paths.get("custom", "custom"))),
+        logs=_portable_path(home, str(paths.get("logs", "_system/logs"))),
+        backups=_portable_path(home, str(paths.get("backups", "_system/backups"))),
+        input=_portable_path(home, str(paths.get("input", "_system/input"))),
+        custom=_portable_path(home, str(paths.get("custom", "_system/custom"))),
         business_rules=_portable_path(home, str(paths.get("business_rules", "config/wfm_rules.toml"))),
         metric_catalog=_portable_path(home, str(paths.get("metric_catalog", "config/metric_catalog.toml"))),
         analytics_rules=_portable_path(home, str(paths.get("analytics_rules", "config/analytics_rules.toml"))),
@@ -224,7 +307,7 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
     if cfg.database.suffix.lower() == ".duckdb":
         raise ConfigError(
             "This corporate-compatible release uses SQLite. Change paths.database "
-            "in config\\wfmhub.toml to database/wfm.sqlite3; the old DuckDB file is preserved."
+            "in config\\wfmhub.toml to _system/database/wfm.sqlite3; the old DuckDB file is preserved."
         )
     from .analytics import ensure_analytics_rules, load_analytics_rules
     from .mapping import ensure_queue_mapping, load_queue_mapping
@@ -261,7 +344,7 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         low_score_maximum=business.pcs_low_score_maximum,
     ))
     for path in (
-        cfg.database.parent, cfg.output, cfg.reports, cfg.system,
+        cfg.database.parent, cfg.output, cfg.reports, cfg.feed, cfg.system,
         cfg.logs, cfg.backups, cfg.input, cfg.custom,
     ):
         path.mkdir(parents=True, exist_ok=True)

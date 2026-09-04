@@ -20,11 +20,8 @@ files are never edited.
 WFMHub/
 ├── WFMHub.cmd                  daily menu
 ├── SETUP.cmd                   system check and first setup
-├── runtime/                    official embedded CPython + pure-Python packages
-├── RUNTIME_MANIFEST.sha256     reviewed native-file hashes
-├── app/wfmhub/                 application code
-├── app/sql/migrations/         versioned SQL schema
-├── templates/FTE Count.xlsx    blank standard roster workbook
+├── Reports/                    fixed-name reports + dated archive
+├── Feed/                       explicit clean CSV/XLSX exports
 ├── config/default.toml         shipped defaults
 ├── config/wfmhub.toml          user configuration
 ├── config/default_rules.toml   shipped evidence/domain defaults
@@ -39,16 +36,15 @@ WFMHub/
 ├── config/queue_mapping.csv    editable queue/file/scope mapping
 ├── config/default_service_profiles.toml shipped service-product defaults
 ├── config/service_profiles.toml editable effective-dated service profiles
-├── Reports/                    current fixed-name workbooks + dated archive
-│   └── PCS Team.xlsx           protected persistent Excel-authored master
-├── templates/power_query/      direct-CSV Power Query source patterns
-├── prompts/                    optional manual Copilot handoff prompt
-└── _system/                    database, feeds, logs, backups and advanced tools
+└── _system/
+    ├── runtime/                official embedded CPython + pure-Python packages
+    ├── app/wfmhub/             application code
+    ├── app/sql/migrations/     versioned SQL schema
+    ├── templates/              blank FTE and technical templates
+    ├── docs/                   user/developer documentation
+    ├── prompts/                optional manual Copilot handoff prompt
+    └── database, logs, backups, output, input and custom tools
 ```
-
-Setup renders the PCS query patterns into `_system/power_query` with the exact
-local feed path. Each query then has a single file data source and does not use
-`Excel.CurrentWorkbook`, preventing the privacy-firewall dependency chain.
 
 The work computer runs no installer or `pip`. SQLite is Python's standard
 `sqlite3` module. Only pure-Python `openpyxl`, `XlsxWriter`, and `et_xmlfile`
@@ -90,7 +86,7 @@ details remain in one module.
 | `core.clean_call_leg` | Deduplicated active call-leg view by stable Call Key |
 | `core.dim_agent` | One operational Agent ID |
 | `core.correction_action` | One human decision per stable Correction ID |
-| `core.pcs_coaching_action` | One persistent coaching decision per low-score Call Key |
+| `core.pcs_coaching_action` | Legacy compatibility table; generated PCS coaching stays in Excel |
 | `mart.attendance_agent_day` | One scheduled Agent ID/day |
 | `mart.conformance_agent_day` | Legacy compatibility table; empty in v0.5 |
 | `mart.correction_candidate` | One observed LILO/status gap plus Verint-final check |
@@ -119,12 +115,12 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 
 | Pack | Current file | Scope |
 |---|---|---|
-| `pcs` | `Reports/PCS Performance.xlsx` | Static PCS calculation check |
+| `pcs` | `Reports/PCS Performance.xlsx` | Selector-driven PCS performance and coaching workbook |
 | `bonus` | `Reports/Bonus Management.xlsx` | Imported Bonus Matrix result and release controls |
 | `service` | `Reports/OEM Flash.xlsx` | Ford OEM queue, forecast, service and staffing control |
 | `staffing` | `Reports/Staffing Gaps.xlsx` | Selected-day roster LOB/language coverage |
 | `attendance` | `Reports/Attendance Callout.xlsx` | No-show/late/not-seen contact queue |
-| `corrections` | `Reports/Yesterday Corrections.xlsx` | Completed-day residual gaps and shift visualization |
+| `corrections` | `Reports/Attendance Review.xlsx` | Selected-period completed-day residual gaps and shift visualization |
 | `absence` | `Reports/Final Absenteeism.xlsx` | Activities-only final absence/shrinkage ledger |
 
 Products share the same visual identity but use purpose-specific layouts. The
@@ -133,14 +129,10 @@ OEM Flash begins with `FLASH` and `HOURLY`; Corrections uses `GAPS` and
 `quality_pcs` builders remain callable under `_system/legacy_reports` but are
 absent from the menu.
 
-Only PCS publishes Data Model inputs. Its strict stable-name contract is under
-`_system/feeds/pcs/current`: agent-day fact, coaching-call fact, Agent
-dimension, and Date dimension. Each publication is copied to the feed archive,
-and the manifest is published after the atomic CSV replacements. The protected
-master is `Reports/PCS Team.xlsx`; WFMHub reads its `COACHING_LOG` but never
-rewrites the file during normal operation.
-This avoids direct SQLite/ODBC/native-driver dependencies on controlled work
-machines while preserving SQLite as the calculation authority.
+PCS is generated directly from SQLite. `PCS_DATA` and `COACHING` are ordinary
+visible Excel Tables. Dashboard selectors use Excel `SUMIFS`/`COUNTIFS`; users
+may add Table slicers manually. No Power Query, Data Model, ODBC driver, or
+refresh connection exists.
 
 ## Agent scope and identity
 
@@ -205,9 +197,9 @@ Counts `<=3` and `>3` remain counts. Participation is `inbound raw-Q1 nonblank /
 inbound PCSStatus=1`; invalid raw answers stay in that numerator and are
 separately counted. Q2 and Mode 2 are diagnostics only. Higher grains always
 sum counters before dividing. A valid inbound Q1 `<=3` is one coaching
-opportunity. Coaching status is keyed by stable call key in
-`core.pcs_coaching_action`; Actions Rate is completed opportunities divided by
-all low-score opportunities. The PCS mart rebuild window expands to the first
+opportunity. The generated `COACHING` sheet carries those calls plus four blue
+manual columns. Actions Rate is completed workbook rows divided by all
+low-score opportunities. The PCS mart rebuild window expands to the first
 day of the previous month through the selected end date so Today/Current Week
 reports retain MTD and comparison context. See [PCS logic](PCS_LOGIC.md).
 
@@ -231,7 +223,7 @@ domain and comparison. Its workbook contains `FINDINGS`, `METRICS`, and curated
 `EVIDENCE`; a period change is descriptive and never presented as proof of
 causality.
 
-`prompts/COPILOT_WFM_ANALYST.md` is a static manual aid. A user may attach a
+`_system/prompts/COPILOT_WFM_ANALYST.md` is a static manual aid. A user may attach a
 chosen finished workbook to an approved Copilot account. The runtime never
 connects Copilot to SQLite or raw extracts, and Copilot is never a calculation
 authority.
@@ -255,8 +247,9 @@ no terminal package and redirected output is never cleared.
 The order is deliberate:
 
 1. Select the Verint StartEndTimes schedule boundary for Agent ID/day.
-2. Collect LILO and Agent Status evidence clipped to that boundary.
-3. Use the earliest/last active evidence for late and early-leave detection.
+2. Build an exclusive Agent Status timeline clipped to that boundary.
+3. Use Agent Status as the primary boundary when its elapsed-shift coverage is
+   sufficient; use LILO only as a sparse-status outer-boundary fallback.
 4. Use exclusive Agent Status `Logged Off`/`Unavailable` intervals between those
    boundaries for mid-shift gap detection.
 5. Build gaps before reading any final Verint activity.
@@ -264,9 +257,16 @@ The order is deliberate:
 7. Label it `CORRECTED`, `PARTIAL`, or `NOT_CORRECTED` without changing the
    observed interval.
 
-“No show” requires a loaded daily LILO row with both boundaries blank, a
-scheduled non-Off shift, and no active Agent Status evidence. Missing files,
+“No show” requires a completed scheduled working shift plus positive evidence:
+either a loaded daily LILO row with both boundaries blank, or sufficient Agent
+Status coverage in which every observed interval is Logged Off. Missing files,
 missing rows, and incomplete evidence are never a no-show.
+
+A logout followed by a later active status is an internal gap. The later return
+extends the actual presence boundary, so the earlier logout cannot become an
+early leave. Leading logout intervals are late; trailing logout intervals are
+early leave only after the scheduled end; multiple reconnect cycles remain
+separate gaps unless they are within the configured merge tolerance.
 
 Final Verint activities are deliberately not subtracted from late, early or
 status gaps. Doing so would hide the original problem immediately after it was
@@ -317,6 +317,16 @@ The absence engine:
 8. groups consecutive absence days into spells and calculates Bradford;
 9. surfaces uncorrected gaps and Verint-only activities for review.
 
+The final Verint ledger also cross-checks operational attendance completeness.
+A completed working shift with neither a final non-working code nor reliable
+Agent Status/LILO evidence is `UNCODED_EMPTY_SHIFT`. An evidence-backed gap
+with no code is `UNCORRECTED_OBSERVED_GAP`; incomplete Verint coverage is
+`PARTIAL_CORRECTION_REVIEW`; a code without a matching observed gap is
+`VERINT_WITHOUT_OBSERVED_GAP`; an unfinished shift is `PROVISIONAL_DAY`.
+All of these block final-ready status but do not invent a payroll absence type.
+Headline final-absence ratios use only `CLEAR` and `ABSENCE_RECORDED` rows, so
+exceptions and current-day provisional shifts cannot dilute the percentage.
+
 An uncorrected observed gap is never silently assigned a sickness/vacation
 reason. A corrected Verint activity can supply that final business category,
 but it cannot create the underlying attendance gap.
@@ -361,7 +371,7 @@ forecast exports are valid; absent forecast measures remain NULL.
 Current releases use SQLite and do not convert or open v0.1 DuckDB data.
 Install the portable release in a new folder, point it at the same untouched
 source root, and let it rebuild SQLite. Preserve the entire old folder. Saved
-Yesterday Corrections workbooks can re-import correction decisions.
+Attendance Review workbooks can re-import correction decisions.
 
 Within the SQLite generation, migrations are additive and never edited after
 release. Config upgrades create a timestamped TOML backup. Database upgrades

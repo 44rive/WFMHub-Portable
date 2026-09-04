@@ -202,7 +202,9 @@ def _records(conn: DatabaseConnection, source_model: str, start: date, end: date
                       planned_net_minutes, final_absence_minutes, final_vacation_minutes,
                       final_unpaid_minutes, final_shrinkage_minutes
                FROM mart.verint_final_absence_agent_day
-               WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id""",
+               WHERE business_date BETWEEN ? AND ?
+                 AND final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')
+               ORDER BY business_date, agent_id""",
             [start, end],
         )
         names = (

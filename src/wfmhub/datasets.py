@@ -224,6 +224,7 @@ def final_absence_lob_month(
                   sum(CASE WHEN final_absence_day THEN 1 ELSE 0 END)
            FROM mart.verint_final_absence_agent_day
            WHERE business_date BETWEEN ? AND ?
+             AND final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')
            GROUP BY substr(business_date,1,7), coalesce(lob,'(blank)'),
                     coalesce(language,'(blank)') ORDER BY month_key, lob, language""",
         [start, end],

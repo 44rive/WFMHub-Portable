@@ -377,7 +377,7 @@ def export_dataset(
     period = f"{start:%Y-%m-%d}_to_{end:%Y-%m-%d}" if dataset.dated else "current"
     output = (
         output
-        or config.output / "data_exports" / dataset.key
+        or config.feed / dataset.key
         / f"{_safe_name(dataset.key)}_{period}_{stamp}.{file_format}"
     ).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

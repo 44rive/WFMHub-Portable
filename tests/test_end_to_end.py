@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfoNotFoundError
 from openpyxl import Workbook, load_workbook
 
 from wfmhub.actions import import_actions
-from wfmhub.coaching import import_pcs_coaching
 from wfmhub.config import ensure_user_config, load_config, write_source_root
 from wfmhub.database import write_session
 from wfmhub.ingestion import ingest_all
@@ -47,10 +46,10 @@ def make_schedule(path: Path):
         writer.writerow(["08/01/2026", "", "", "", "", "", ""])
         writer.writerow(["Agent 100", "100", "August", "", "", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ".ORG | Late 08/01/2026 8:00 AM-08/01/2026 8:10 AM;"])
         writer.writerow(["Agent 200", "200", "August", "", "", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ""])
-        writer.writerow(["Agent 300", "300", "August", "", "", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ""])
+        writer.writerow(["Agent 300", "300", "August", "", "", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ".ORG | Late 08/01/2026 8:00 AM-08/01/2026 8:10 AM;"])
         writer.writerow(["Worldwide Agent", "999", "August", "", "", ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM", ""])
         writer.writerow(["08/02/2026", "", "", "", "", "", ""])
-        writer.writerow(["Agent 300", "300", "August", "", "", ".ORG | Work 08/02/2026 8:00 AM-08/02/2026 4:00 PM", ".ORG | Late 08/02/2026 8:00 AM-08/02/2026 8:10 AM;"])
+        writer.writerow(["Agent 300", "300", "August", "", "", ".ORG | Work 08/02/2026 8:00 AM-08/02/2026 4:00 PM", ""])
 
 
 def make_start_end_schedule(path: Path):
@@ -76,9 +75,18 @@ def make_status(path: Path):
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(["[Serial Number]", "[Status]", "[Status Start Date and Time]", "[Agent]", "[Agent ID]", "[Status Duration]", "[Queue]"])
-        writer.writerow(["one", "Available", "8/1/2026 9:00", "Agent 100", "100", "1:00:00", "Queue"])
-        writer.writerow(["two", "Logged Off", "8/1/2026 12:00", "Agent 100", "100", "0:15:00", "Queue"])
+        writer.writerow(["one", "Available", "8/1/2026 8:20", "Agent 100", "100", "3:40:00", "Queue"])
+        writer.writerow(["two", "Logged Off", "8/1/2026 12:00", "Agent 100", "100", "1:00:00", "Queue"])
+        writer.writerow(["three", "Available", "8/1/2026 13:00", "Agent 100", "100", "3:00:00", "Queue"])
         writer.writerow(["world", "Available", "8/1/2026 9:00", "Worldwide Agent", "999", "1:00:00", "Queue"])
+
+
+def make_logged_off_status(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["[Serial Number]", "[Status]", "[Status Start Date and Time]", "[Agent]", "[Agent ID]", "[Status Duration]", "[Queue]"])
+        writer.writerow(["off", "Logged Off", "8/1/2026 8:00", "Agent 200", "200", "8:00:00", "Queue"])
 
 
 def make_forecast(path: Path):
@@ -195,7 +203,7 @@ class EndToEndTests(unittest.TestCase):
             make_start_end_schedule(source / "Verint/Schedules & Activities/StartEndTimes.txt")
             make_schedule(source / "Verint/Schedules & Activities/Activities.txt")
             make_lilo(source / "Storm/LILO/AP-Historical-Report---Agent-Login 2026-08-01.csv", [
-                ["Agent 100", "100", "2026-08-01 08:20:00", "2026-08-01 16:00:00"],
+                ["Agent 100", "100", "2026-08-01 08:20:00", "2026-08-01 12:00:00"],
                 ["Agent 200", "200", "", ""],
                 ["Worldwide Agent", "999", "2026-08-01 08:00:00", "2026-08-01 16:00:00"],
             ])
@@ -203,6 +211,7 @@ class EndToEndTests(unittest.TestCase):
                 ["Agent 300", "300", "2026-08-02 08:00:00", "2026-08-02 16:00:00"],
             ])
             make_status(source / "Storm/Agent Status/AP-Historical-Report---Agent-Status 2026-08-01.csv")
+            make_logged_off_status(source / "Storm/Agent Status/AP-Historical-Report---Agent-Status logged-off 2026-08-01.csv")
             make_forecast(source / "Verint/Forecast/forecast.txt")
             make_apbe(source / "Storm/APBE ALL WFM/apbe.xlsx")
             make_apfr(source / "Storm/APFR KPI SUIVI JOUR/apfr.xlsx")
@@ -219,9 +228,9 @@ class EndToEndTests(unittest.TestCase):
                     progress=lambda current, total, label: ingest_progress.append((current, total, label)),
                 )
                 self.assertEqual(ingest.failed, 0)
-                self.assertEqual(ingest.loaded, 11)
+                self.assertEqual(ingest.loaded, 12)
                 self.assertEqual(ingest.scoped_out, 5)
-                self.assertEqual(ingest_progress[-1][:2], (11, 11))
+                self.assertEqual(ingest_progress[-1][:2], (12, 12))
                 self.assertTrue(any(total == 0 and "Call by Call" in label for _, total, label in ingest_progress))
                 for table in ("raw.schedule_shift", "raw.lilo", "raw.agent_status", "raw.call_leg"):
                     self.assertEqual(conn.execute(f"SELECT count(*) FROM {table} WHERE agent_id='999'").fetchone()[0], 0)
@@ -254,7 +263,19 @@ class EndToEndTests(unittest.TestCase):
                 status_gap = conn.execute(
                     "SELECT gap_minutes, observed_source, verint_reconciliation FROM mart.correction_candidate WHERE agent_id='100' AND detected_issue='Mid-shift logged off'"
                 ).fetchone()
-                self.assertEqual(status_gap, (15, "AGENT_STATUS", "NOT_CORRECTED"))
+                self.assertEqual(status_gap, (60, "AGENT_STATUS", "NOT_CORRECTED"))
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT uncoded_early_leave_minutes FROM mart.attendance_agent_day WHERE agent_day_key='20260801-100'"
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertGreater(
+                    conn.execute(
+                        "SELECT count(*) FROM mart.staffing_interval WHERE staffing_state='DATA_PARTIAL'"
+                    ).fetchone()[0],
+                    0,
+                )
                 self.assertEqual(conn.execute("SELECT count(*) FROM mart.conformance_agent_day").fetchone()[0], 0)
                 self.assertEqual(model.forecast_rows, 1)
                 self.assertEqual(model.intraday_rows, 2)
@@ -287,8 +308,20 @@ class EndToEndTests(unittest.TestCase):
                 absence_100 = conn.execute(
                     "SELECT absence_minutes, absence_rate FROM mart.absence_agent_day WHERE agent_day_key='20260801-100'"
                 ).fetchone()
-                self.assertEqual(absence_100[0], 35)
-                self.assertAlmostEqual(absence_100[1], 35 / 480)
+                self.assertEqual(absence_100[0], 80)
+                self.assertAlmostEqual(absence_100[1], 80 / 480)
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_day_key='20260801-200'"
+                    ).fetchone()[0],
+                    "UNCODED_EMPTY_SHIFT",
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_day_key='20260801-100'"
+                    ).fetchone()[0],
+                    "PARTIAL_CORRECTION_REVIEW",
+                )
                 self.assertEqual(
                     conn.execute("SELECT count(*) FROM mart.absence_event WHERE evidence_type IN ('SHIFT_EVENT','SHIFT_ASSIGNMENT')").fetchone()[0],
                     0,
@@ -300,6 +333,12 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(
                     conn.execute("SELECT exception_type FROM mart.verint_final_exception WHERE agent_id='300'").fetchone()[0],
                     "VERINT_FINAL_WITHOUT_OBSERVED_GAP",
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_day_key='20260801-300'"
+                    ).fetchone()[0],
+                    "VERINT_WITHOUT_OBSERVED_GAP",
                 )
                 service = conn.execute(
                     "SELECT sum(answered), sum(offered), sum(handled_seconds) FROM mart.service_interval"
@@ -357,6 +396,12 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     conn.execute(
+                        "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_id='200'"
+                    ).fetchone()[0],
+                    "PROVISIONAL_DAY",
+                )
+                self.assertEqual(
+                    conn.execute(
                         """SELECT count(*) FROM mart.correction_candidate
                            WHERE detected_issue IN ('Early leave','No show')"""
                     ).fetchone()[0],
@@ -388,7 +433,7 @@ class EndToEndTests(unittest.TestCase):
                 report = build_report(conn, config, model.start, model.end)
                 self.assertEqual(report.parent, home / "_system" / "legacy_reports")
                 self.assertEqual(report.name, "Legacy Daily Operations.xlsx")
-                corrections_report = build_report_pack("corrections", conn, config, model.start, model.start)
+                corrections_report = build_report_pack("corrections", conn, config, model.start, model.end)
                 pcs_report = build_report_pack("quality_pcs", conn, config, model.start, model.end)
                 focused_pcs_report = build_report_pack("pcs", conn, config, model.start, model.end)
                 service_report = build_report_pack(
@@ -463,21 +508,17 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(conn.execute("SELECT validation_status FROM core.correction_action").fetchone()[0], "Validated")
 
                 pcs_edit = load_workbook(focused_pcs_report)
-                pcs_actions = pcs_edit["ACTIONS"]
+                pcs_actions = pcs_edit["COACHING"]
                 pcs_headers = {cell.value: cell.column for cell in pcs_actions[4]}
                 self.assertEqual(pcs_actions.max_row, 5)
                 self.assertEqual(pcs_actions.cell(5, pcs_headers["Agent ID"]).value, "200")
-                pcs_actions.cell(5, pcs_headers["Coaching Status"], "OK")
+                pcs_actions.cell(5, pcs_headers["Coaching Status"], "Completed")
                 pcs_actions.cell(5, pcs_headers["Coaching Date"], date(2026, 8, 2))
                 pcs_actions.cell(5, pcs_headers["Coach"], "TL 1")
                 pcs_actions.cell(5, pcs_headers["Coaching Comment"], "Reviewed")
                 pcs_edit.save(focused_pcs_report)
                 pcs_edit.close()
-                self.assertEqual(import_pcs_coaching(conn, config, focused_pcs_report), 1)
-                self.assertEqual(
-                    conn.execute("SELECT coaching_status FROM core.pcs_coaching_action").fetchone()[0],
-                    "COMPLETED",
-                )
+                self.assertEqual(conn.execute("SELECT count(*) FROM core.pcs_coaching_action").fetchone()[0], 0)
 
             self.assertTrue(report.exists())
             workbook = load_workbook(report, read_only=True, data_only=True)
@@ -494,6 +535,7 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(corrections_book.sheetnames, [
                     "DASHBOARD", "GAPS", "SHIFT_VIEW", "DEFINITIONS", "_AUDIT",
                 ])
+                self.assertIn("2026-08-01 to 2026-08-02", corrections_book["DASHBOARD"]["A2"].value)
                 self.assertEqual(corrections_book["_AUDIT"].sheet_state, "hidden")
             finally:
                 corrections_book.close()
@@ -516,11 +558,15 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(attendance_book["_AUDIT"].sheet_state, "hidden")
             finally:
                 attendance_book.close()
-            focused_pcs_book = load_workbook(focused_pcs_report, read_only=True, data_only=True)
+            focused_pcs_book = load_workbook(focused_pcs_report, read_only=False, data_only=False)
             try:
                 self.assertEqual(focused_pcs_book.sheetnames, [
-                    "DASHBOARD", "TREND", "AGENT_DETAIL", "ACTIONS", "DEFINITIONS", "_AUDIT",
+                    "DASHBOARD", "TEAM_VIEW", "AGENT_VIEW", "TREND", "COACHING",
+                    "PCS_DATA", "DEFINITIONS", "_AUDIT",
                 ])
+                self.assertIn("SUMIFS(tblPcsData", focused_pcs_book["DASHBOARD"]["A11"].value)
+                self.assertIn("tblPcsData", focused_pcs_book["PCS_DATA"].tables)
+                self.assertIn("tblCoaching", focused_pcs_book["COACHING"].tables)
             finally:
                 focused_pcs_book.close()
             service_book = load_workbook(service_report, read_only=True, data_only=True)
@@ -542,20 +588,8 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(absence_book["_AUDIT"].sheet_state, "hidden")
             finally:
                 absence_book.close()
-            self.assertFalse((home / "_system" / "feeds" / "corrections").exists())
-            pcs_feed = home / "_system" / "feeds" / "pcs"
-            pcs_model_folder = pcs_feed / "current"
-            self.assertTrue((pcs_model_folder / "PCS_AgentDay.csv").exists())
-            with (pcs_model_folder / "PCS_AgentDay.csv").open(encoding="utf-8-sig", newline="") as handle:
-                pcs_model_headers = next(csv.reader(handle))
-            self.assertIn("business_date", pcs_model_headers)
-            self.assertIn("q1_score_sum", pcs_model_headers)
-            self.assertTrue((pcs_feed / "current" / "PCS_AgentDay.csv").exists())
-            self.assertTrue((pcs_feed / "current" / "PCS_Calls.csv").exists())
-            self.assertTrue((pcs_feed / "current" / "PCS_Agents.csv").exists())
-            self.assertTrue((pcs_feed / "current" / "PCS_Dates.csv").exists())
-            self.assertTrue((pcs_feed / "current" / "manifest.json").exists())
-            self.assertGreaterEqual(len(list((pcs_feed / "archive").glob("*/manifest.json"))), 1)
+            self.assertFalse((home / "_system" / "feeds").exists())
+            self.assertTrue((home / "Feed").is_dir())
             for generated_report in (
                 report, corrections_report, pcs_report, focused_pcs_report,
                 service_report, attendance_report, absence_report,

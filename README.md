@@ -9,27 +9,18 @@ product you need**. Extract files are never moved or edited.
 
 ## What you see
 
-Normal users work from one folder:
+Normal users work from three obvious folders:
 
 ```text
-Reports/
-  Attendance Callout.xlsx
-  Staffing Gaps.xlsx
-  OEM Flash.xlsx
-  Yesterday Corrections.xlsx
-  Final Absenteeism.xlsx
-  Bonus Management.xlsx
-  PCS Performance.xlsx
-  PCS Team.xlsx
-  Archive/
+WFMHub/
+  Reports/     finished Excel reports
+  Feed/        clean CSV/XLSX exports you explicitly request
+  config/      business rules, KPI methods, queue maps, and source settings
+  _system/     runtime, database, logs, backups, code, and documentation
 ```
 
 Every generated product has a fixed name. When WFMHub replaces one, it first
 copies the previous version into `Reports\Archive\YYYY-MM-DD`.
-
-`PCS Team.xlsx` is different only in behaviour: it is the persistent team
-workspace. WFMHub never overwrites it during a normal refresh, so its
-PivotTables, slicers, layout, and `COACHING_LOG` survive.
 
 Technical files live under `_system`. You normally do not open that folder.
 
@@ -40,10 +31,10 @@ Technical files live under `_system`. You normally do not open that folder.
 | Attendance Callout | Who must be contacted for absence, lateness, or not-seen status? |
 | Staffing Gaps | Where is scheduled capacity missing by LOB, language, and interval? |
 | OEM Flash | What is Ford OEM service, demand, forecast, and staffing state? |
-| Yesterday Corrections | Which completed-day gaps still need a Verint correction? |
+| Attendance Review | Which gaps across the selected completed dates still need a Verint correction? |
 | Final Absenteeism | What does corrected Verint contain for final absence and shrinkage? |
 | Bonus Management | What did Bonus Matrix v1.2 calculate, and is it safe to release? |
-| PCS Team | How are PCS, participation, low scores, and coaching moving daily and monthly? |
+| PCS Performance | How are PCS, participation, low scores, and coaching moving by date, month, LOB, team, and agent? |
 
 The products use one visual identity but not one generic layout. The Flash is an
 intraday control page, Attendance is a call list, Corrections is a shift
@@ -82,7 +73,7 @@ Call by Call for each row's business date.
 3. Paste the folder containing `FTE`, `Storm`, and `Verint`.
 4. Double-click `WFMHub.cmd`.
 5. Choose **Refresh source data once**.
-6. Choose the report you need from Today, Month, PCS Team, or Analyse.
+6. Choose the report you need from Today, Month, PCS, or Analyse.
 7. Open it directly from `Reports`.
 
 See the [beginner guide](docs/BEGINNER_GUIDE.md) for the exact clicks.
@@ -111,36 +102,24 @@ Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in
 `config\metric_catalog.toml`.
 
-## PCS Team and Excel Data Model
+## PCS Performance
 
-PCS is the only product that uses Power Query and the Excel Data Model. The
-master is `Reports\PCS Team.xlsx`; its four small input files are hidden under
-`_system\feeds\pcs\current`:
+PCS is generated directly by Python and SQLite like every other report. There
+is no Power Query, Data Model, refresh connection, setup workbook, or Hub-side
+coaching sync.
 
-- `PCS_AgentDay.csv` — fact table, one agent/day;
-- `PCS_Calls.csv` — fact table, one low-score coaching opportunity;
-- `PCS_Agents.csv` — agent/team/LOB/language dimension;
-- `PCS_Dates.csv` — small generated calendar dimension.
+`Reports\PCS Performance.xlsx` contains:
 
-The queries load as **Only Create Connection + Add to Data Model**. They do not
-load rows to a worksheet. Follow the one-time
-[PCS Excel setup guide](docs/EXCEL_TEMPLATE_GUIDE.md).
+- selector boxes for period view, custom dates, LOB, team leader, and agent;
+- KPI cards that recalculate in desktop Excel from the included clean table;
+- daily trend plus team and agent views;
+- a `COACHING` table containing every valid low-score opportunity;
+- a visible `PCS_DATA` Excel Table at agent/day grain.
 
-Setup writes the four ready-to-paste query scripts under
-`_system\power_query`. Their local path is literal, so the queries do not
-reference one another or combine the workbook with a file source.
-
-Normal PCS routine:
-
-1. Choose **Sync and refresh PCS Team** in WFMHub.
-2. Open `Reports\PCS Team.xlsx`.
-3. Choose **Data > Refresh All**.
-4. Use the PivotTables and slicers.
-5. Enter completed coaching in `COACHING_LOG`.
-6. On the next sync, WFMHub imports those decisions before refreshing the feed.
-
-The generated `PCS Performance.xlsx` is a static calculation check. The team
-master remains the collaborative workbook.
+Choose values in the boxes on `DASHBOARD`. To add native slicers manually,
+click inside `PCS_DATA` or `COACHING`, then choose **Table Design > Insert
+Slicer**. The team fills the four blue coaching columns and saves/sends that
+workbook; WFMHub does not need to read it back.
 
 ## Configurable logic
 
@@ -161,7 +140,7 @@ use ratios of summed components; WFMHub never averages agent percentages.
 forecast, staffing, attendance, final absence, or bonus. It uses deterministic
 Python/SQLite logic, not AI.
 
-**Export clean data** produces explicit CSV or XLSX data for a selected period.
+**Export clean data** produces explicit CSV or XLSX data under `Feed` for a selected period.
 Large call datasets should use CSV. The original extract is unchanged.
 
 The optional prompt under `prompts` can be used manually with an approved
@@ -176,11 +155,11 @@ python3 -m pip install -e .
 python3 -m wfmhub --home . setup --source-root /path/to/extracts --non-interactive
 python3 -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31 --no-report
 python3 -m wfmhub --home . report --pack service --start 2026-08-31 --end 2026-08-31
-python3 -m wfmhub --home . pcs-team --start 2026-08-01 --end 2026-08-31
+python3 -m wfmhub --home . report --pack pcs --start 2026-08-01 --end 2026-08-31
 python3 -m wfmhub --home . analyze pcs --start 2026-08-01 --end 2026-08-31 --comparison previous_month
 python3 -m unittest discover -s tests -v
 ```
 
-For implementation details, see [Architecture](docs/ARCHITECTURE.md),
-[PCS logic](docs/PCS_LOGIC.md), and the
-[metric catalog guide](docs/METRIC_CATALOG_GUIDE.md).
+For implementation details in the portable package, see
+`_system\docs\ARCHITECTURE.md`, `_system\docs\PCS_LOGIC.md`, and
+`_system\docs\METRIC_CATALOG_GUIDE.md`.

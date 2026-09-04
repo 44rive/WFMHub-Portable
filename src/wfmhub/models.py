@@ -424,6 +424,11 @@ ATTENDANCE_COLUMNS = [
     "shift_state", "call_action", "requires_call", "is_provisional", "evaluation_as_of",
 ]
 
+UNRELIABLE_ATTENDANCE_RESULTS = {
+    "Schedule parse error", "Data not loaded", "Missing actual evidence",
+    "Incomplete actual evidence", "No schedule overlap",
+}
+
 
 def _insert_dicts(conn: DatabaseConnection, table: str, columns: list[str], rows: list[dict[str, Any]]) -> None:
     if not rows:
@@ -449,6 +454,7 @@ def _build_attendance(
     statuses_by_day: dict[tuple[date, str], list[dict[str, Any]]],
     status_loaded_dates: set[date],
     as_of: datetime,
+    minimum_status_coverage: float,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     tolerance = rulebook.late_tolerance_minutes
@@ -480,16 +486,32 @@ def _build_attendance(
             required_status_dates = {shift["schedule_date"]}
         status_source_loaded = required_status_dates <= status_loaded_dates
         status_sources = "; ".join(sorted({row["source_file"] for row in statuses})) or None
-        active_status = [
+        # Any non-Logged-Off state proves the agent is connected, including an
+        # Unavailable state that may still require its own correction. Using
+        # the complete interval timeline means a logout followed by a later
+        # return is an internal gap, never a false early leave.
+        status_presence = [
             row for row in status_exclusive
-            if row["actual_category"] in {"Productive", "Auxiliary", "Lunch", "Break"}
+            if row["actual_category"] != "Logged Off"
         ]
-        status_first = min((row["interval_start"] for row in active_status), default=None)
-        status_last = max((row["interval_end"] for row in active_status), default=None)
+        status_first = min((row["interval_start"] for row in status_presence), default=None)
+        status_last = max((row["interval_end"] for row in status_presence), default=None)
         bounded_first = first if first is not None and first <= as_of else None
-        bounded_last = min(last, as_of) if last is not None and bounded_first is not None else None
-        actual_first = min((value for value in (bounded_first, status_first) if value is not None), default=None)
-        actual_last = max((value for value in (bounded_last, status_last) if value is not None), default=None)
+        bounded_last = min(last, as_of) if last is not None else None
+        elapsed_minutes = (
+            max(0, int((min(end, as_of) - start).total_seconds() // 60))
+            if start and end and as_of > start else 0
+        )
+        status_coverage_ratio = status_covered / elapsed_minutes if elapsed_minutes else 0.0
+        status_is_primary = bool(statuses) and status_coverage_ratio >= minimum_status_coverage
+        if status_is_primary and status_first is not None:
+            actual_first = status_first
+        else:
+            actual_first = min((value for value in (bounded_first, status_first) if value is not None), default=None)
+        if status_is_primary and status_last is not None:
+            actual_last = status_last
+        else:
+            actual_last = max((value for value in (bounded_last, status_last) if value is not None), default=None)
         shift_not_started = bool(start and as_of < start)
         shift_in_progress = bool(start and end and start <= as_of < end)
         shift_complete = bool(end and as_of >= end)
@@ -499,8 +521,8 @@ def _build_attendance(
         if statuses:
             evidence_parts.append("AGENT_STATUS")
         actual_evidence = "+".join(evidence_parts) or "NONE"
-        raw_late = max(0, int((bounded_first - start).total_seconds() // 60)) if bounded_first and start else 0
-        raw_early = max(0, int((end - last).total_seconds() // 60)) if last and end and shift_complete else 0
+        raw_late = max(0, int((actual_first - start).total_seconds() // 60)) if actual_first and start else 0
+        raw_early = max(0, int((end - actual_last).total_seconds() // 60)) if actual_last and end and shift_complete else 0
         usable_pair = bool(actual_first and actual_last and start and end and actual_last >= actual_first and actual_last > start and actual_first < end)
         late_segments = [(start, min(actual_first, end))] if usable_pair and actual_first > start else []
         early_segments = [(max(actual_last, start), end)] if usable_pair and shift_complete and end > actual_last else []
@@ -508,9 +530,20 @@ def _build_attendance(
         early = sum(int((b - a).total_seconds() // 60) for a, b in early_segments)
         late = 0 if late <= tolerance else late
         early = 0 if early <= tolerance else early
+        # Two independent sources can prove a completed no-show:
+        #   1. LILO contains the scheduled agent/day but both boundaries are blank.
+        #   2. Agent Status covers enough of the shift and every observed interval
+        #      is explicitly Logged Off.
+        # Merely missing from an otherwise loaded extract is not proof of absence;
+        # that stays Missing actual evidence and is surfaced as a data exception.
+        blank_lilo_row = bool(source_loaded and row_present and first is None and last is None)
+        status_proves_disconnected = bool(
+            status_exclusive and not status_presence
+            and status_coverage_ratio >= minimum_status_coverage
+        )
         no_show = scheduled_minutes if (
-            source_loaded and row_present and first is None and last is None
-            and not active_status and shift["assignment_type"] not in {"Off", "Planned absence"}
+            (blank_lilo_row or status_proves_disconnected)
+            and shift["assignment_type"] not in {"Off", "Planned absence"}
             and shift_complete
         ) else 0
         worked_span = int((actual_last - actual_first).total_seconds() // 60) if actual_first and actual_last and actual_last >= actual_first else 0
@@ -590,6 +623,8 @@ def _build_attendance(
             "evaluation_as_of": as_of,
             "_events": events, "_late_segments": late_segments, "_early_segments": early_segments,
             "_status_exclusive": status_exclusive, "_status_category": status_category,
+            "_status_is_primary": status_is_primary,
+            "_evidence_complete": result not in UNRELIABLE_ATTENDANCE_RESULTS,
             "_schedule_source_file_id": shift["source_file_id"],
         })
     conn.execute("DELETE FROM mart.attendance_agent_day")
@@ -977,7 +1012,7 @@ def _build_staffing(
             if scheduled:
                 bucket["scheduled_ids"].add(row["agent_id"])
                 bucket["scheduled_seconds"] += scheduled
-                if row.get("source_loaded"):
+                if row.get("source_loaded") and row.get("_evidence_complete"):
                     bucket["source_available_seconds"] += scheduled
                 bucket["elapsed_scheduled_seconds"] += elapsed
 
@@ -1102,10 +1137,18 @@ def _build_shift_timeline(
             source_file = chosen.get("source_file") if chosen else None
             if left >= as_of:
                 category, mismatch, is_gap, source = "FUTURE", "FUTURE", False, "NONE"
+            elif row["attendance_result"] == "No show":
+                category, mismatch, is_gap, source = "NO_ACTIVITY", "NO_SHOW", True, row["actual_evidence"]
+                source_file = row["lilo_source"] or row["status_source"]
             elif chosen is not None:
                 category = chosen["actual_category"]
                 if category == "Logged Off":
-                    mismatch, is_gap = "LOGGED_OFF", True
+                    if row["actual_first_seen"] and right <= row["actual_first_seen"]:
+                        mismatch, is_gap = "LATE", True
+                    elif row["actual_last_seen"] and left >= row["actual_last_seen"] and as_of >= end:
+                        mismatch, is_gap = "EARLY_LEAVE", True
+                    else:
+                        mismatch, is_gap = "LOGGED_OFF", True
                 elif category == "Unavailable":
                     mismatch, is_gap = "UNAVAILABLE", True
                 else:
@@ -1116,9 +1159,6 @@ def _build_shift_timeline(
                 source_file = row["lilo_source"] or row["status_source"]
             elif row["actual_last_seen"] and left >= row["actual_last_seen"] and as_of >= end:
                 category, mismatch, is_gap, source = "NO_ACTIVITY", "EARLY_LEAVE", True, row["actual_evidence"]
-                source_file = row["lilo_source"] or row["status_source"]
-            elif row["attendance_result"] == "No show":
-                category, mismatch, is_gap, source = "NO_ACTIVITY", "NO_SHOW", True, row["actual_evidence"]
                 source_file = row["lilo_source"] or row["status_source"]
             elif not exclusive and row["actual_first_seen"] and row["actual_last_seen"]:
                 category, mismatch, is_gap, source = "LILO_PRESENT", "MATCH", False, "LILO"
@@ -1174,6 +1214,7 @@ def _build_verint_final_absence(
     metric_catalog: MetricCatalog,
     start: date,
     end: date,
+    as_of: datetime,
 ) -> tuple[int, int]:
     shifts = _dicts(conn.execute(
         """
@@ -1208,6 +1249,33 @@ def _build_verint_final_absence(
     events_by_row: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
     for event in events:
         events_by_row[(event["source_file_id"], event["source_row"])].append(event)
+    attendance_by_key = {
+        row["agent_day_key"]: row
+        for row in _dicts(conn.execute(
+            """SELECT agent_day_key, attendance_result, actual_evidence,
+                      source_loaded, shift_state
+               FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ?""",
+            [start, end],
+        ))
+    }
+    residual_by_key = {
+        f"{row['business_date']:%Y%m%d}-{row['agent_id']}": int(row["minutes"] or 0)
+        for row in _dicts(conn.execute(
+            """SELECT business_date, agent_id, sum(residual_minutes) AS minutes
+               FROM mart.correction_residual_segment
+               WHERE business_date BETWEEN ? AND ? GROUP BY business_date, agent_id""",
+            [start, end],
+        ))
+    }
+    verint_without_observed_gap = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT DISTINCT agent_day_key FROM mart.verint_final_exception
+               WHERE business_date BETWEEN ? AND ?
+                 AND exception_type='VERINT_FINAL_WITHOUT_OBSERVED_GAP'""",
+            [start, end],
+        ).fetchall()
+    }
 
     event_rows: list[dict[str, Any]] = []
     day_rows: list[dict[str, Any]] = []
@@ -1315,6 +1383,36 @@ def _build_verint_final_absence(
                 "planned_net_minutes": planned_net_minutes,
             },
         )
+        attendance = attendance_by_key.get(agent_day_key)
+        unresolved_observed_minutes = residual_by_key.get(agent_day_key, 0)
+        final_code_present = bool(
+            absence_minutes or vacation_minutes or unpaid_minutes
+            or shrinkage_minutes or unmapped_minutes
+        )
+        working_shift = shift.get("assignment_type") not in {"Off", "Planned absence"}
+        shift_is_complete = bool(
+            attendance.get("shift_state") == "COMPLETE"
+            if attendance is not None else shift_end <= as_of
+        )
+        provisional_day = bool(working_shift and not shift_is_complete)
+        missing_operational_evidence = bool(
+            attendance is None
+            or str(attendance.get("attendance_result") or "")
+            in ({"No show"} | UNRELIABLE_ATTENDANCE_RESULTS)
+        )
+        uncoded_empty_shift = bool(
+            working_shift and shift_is_complete
+            and not final_code_present and missing_operational_evidence
+        )
+        uncorrected_observed_gap = bool(
+            working_shift and shift_is_complete and not final_code_present
+            and not uncoded_empty_shift and unresolved_observed_minutes > 0
+        )
+        partially_corrected_gap = bool(
+            working_shift and shift_is_complete
+            and final_code_present and unresolved_observed_minutes > 0
+        )
+        unsupported_verint_code = agent_day_key in verint_without_observed_gap
         day_rows.append({
             "agent_day_key": agent_day_key, "business_date": shift["schedule_date"],
             "agent_id": shift["agent_id"],
@@ -1334,6 +1432,11 @@ def _build_verint_final_absence(
             "final_absence_day": absence_minutes > 0,
             "final_ledger_status": (
                 "UNMAPPED_REVIEW" if unmapped_minutes
+                else "PROVISIONAL_DAY" if provisional_day
+                else "VERINT_WITHOUT_OBSERVED_GAP" if unsupported_verint_code
+                else "UNCODED_EMPTY_SHIFT" if uncoded_empty_shift
+                else "UNCORRECTED_OBSERVED_GAP" if uncorrected_observed_gap
+                else "PARTIAL_CORRECTION_REVIEW" if partially_corrected_gap
                 else "ABSENCE_RECORDED" if absence_minutes
                 else "CLEAR"
             ),
@@ -2403,6 +2506,7 @@ def refresh_models(
         attendance = _build_attendance(
             conn, rulebook, schedules, events_by_agent, lilo, loaded_dates, seen_ids,
             agents, statuses, status_loaded_dates, evaluation_as_of,
+            config.rules.minimum_status_coverage,
         )
         stage(8, "Keeping adherence disabled")
         conn.execute("DELETE FROM mart.conformance_agent_day")
@@ -2431,7 +2535,7 @@ def refresh_models(
         )
         stage(16, "Building corrected Verint final absence")
         final_absence_events, final_absence = _build_verint_final_absence(
-            conn, rulebook, metric_catalog, start, end,
+            conn, rulebook, metric_catalog, start, end, evaluation_as_of,
         )
         stage(17, "Building service performance")
         service = _build_service(conn, rulebook, metric_catalog, mapping, start, end)

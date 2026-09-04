@@ -55,6 +55,7 @@ class ReportPackTests(unittest.TestCase):
             self.assertEqual(archives[0].read_bytes(), b"old")
             self.assertEqual(current.name, "Attendance Callout.xlsx")
             self.assertEqual(report_current_path(config, "service").name, "OEM Flash.xlsx")
+            self.assertEqual(report_current_path(config, "corrections").name, "Attendance Review.xlsx")
 
 
 if __name__ == "__main__":

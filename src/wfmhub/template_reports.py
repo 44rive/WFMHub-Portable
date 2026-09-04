@@ -1,32 +1,14 @@
-"""Shared report shell plus the compact PCS-only Excel Data Model feed.
-
-Operational reports are complete replaceable snapshots. PCS is intentionally
-different: its stable team-authored workbook connects to the small star-schema
-CSV files written here and therefore retains native PivotTables, slicers, and
-coaching notes across refreshes.
-"""
+"""Shared report shell for complete, replaceable WFM decision workbooks."""
 
 from __future__ import annotations
 
-import csv
-import hashlib
-import json
-import shutil
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 from .config import Config
 from .reports import COLORS, ExcelReport
-
-
-_PCS_FEED_FILES = {
-    "AGENT_DAY": "PCS_AgentDay.csv",
-    "ACTIONS": "PCS_Calls.csv",
-    "DIM_AGENT": "PCS_Agents.csv",
-    "DIM_DATE": "PCS_Dates.csv",
-}
 
 
 @dataclass(frozen=True)
@@ -42,120 +24,6 @@ class KpiCard:
     value: Any
     kind: str = "integer"
     comparison: str | None = None
-
-
-def _csv_value(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat(sep=" ", timespec="seconds")
-    if isinstance(value, date):
-        return value.isoformat()
-    if isinstance(value, bool):
-        return 1 if value else 0
-    return "" if value is None else value
-
-
-def _column_type(header: str, values: Sequence[Any]) -> str:
-    name = header.casefold()
-    if name in {"date", "business_date", "period_start", "period_end", "coaching_date"}:
-        return "date"
-    if name in {"call_start", "call_end", "generated_at"} or name.endswith("_at"):
-        return "datetime"
-    if name in {
-        "inbound_call_legs", "pcs_status_1", "q1_nonblank", "valid_q1",
-        "score_le_3", "score_gt_3", "invalid_q1", "valid_responses",
-        "participating_responses", "eligible_calls", "coaching_completed",
-        "year", "month_number", "iso_week", "day_of_month",
-    }:
-        return "integer"
-    if name in {
-        "q1_score", "q1_score_sum", "pcs_score_sum", "pcs_average",
-        "participation_rate", "actions_rate",
-    }:
-        return "number"
-    present = [value for value in values if value is not None and value != ""]
-    if present and all(isinstance(value, bool) for value in present):
-        return "boolean"
-    if present and all(isinstance(value, int) and not isinstance(value, bool) for value in present):
-        return "integer"
-    if present and all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in present):
-        return "number"
-    return "text"
-
-
-def _write_pcs_feed_folder(
-    folder: Path,
-    start: date,
-    end: date,
-    generated: datetime,
-    tables: Sequence[ModelTable],
-) -> list[dict[str, Any]]:
-    folder.mkdir(parents=True, exist_ok=True)
-    files: list[dict[str, Any]] = []
-    for table in tables:
-        filename = _PCS_FEED_FILES.get(table.key)
-        if filename is None:
-            continue
-        target = folder / filename
-        with target.open("w", encoding="utf-8-sig", newline="") as handle:
-            writer = csv.writer(handle, lineterminator="\n")
-            writer.writerow(table.headers)
-            writer.writerows([_csv_value(value) for value in row] for row in table.rows)
-        columns = []
-        for index, header in enumerate(table.headers):
-            values = [row[index] for row in table.rows if index < len(row)]
-            columns.append({"name": str(header), "type": _column_type(str(header), values)})
-        files.append({
-            "table": table.key,
-            "file": filename,
-            "rows": len(table.rows),
-            "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
-            "columns": columns,
-        })
-    manifest = folder / "manifest.json"
-    manifest.write_text(json.dumps({
-        "schema_version": 2,
-        "report_key": "pcs",
-        "period_start": start.isoformat(),
-        "period_end": end.isoformat(),
-        "generated_at": generated.isoformat(timespec="seconds"),
-        "calculation_authority": "WFMHub Python + SQLite",
-        "excel_load": "Power Query connection-only + Add to Data Model",
-        "files": files,
-    }, indent=2), encoding="utf-8")
-    return files
-
-
-def write_pcs_template_feed(
-    config: Config,
-    start: date,
-    end: date,
-    generated: datetime,
-    tables: Iterable[ModelTable],
-) -> Path:
-    """Publish stable current PCS files and an immutable refresh archive."""
-
-    root = config.system / "feeds" / "pcs"
-    stamp = generated.strftime("%Y%m%d_%H%M%S_%f")
-    staging = root / f".staging_{stamp}"
-    archive = root / "archive" / f"{start:%Y-%m-%d}_to_{end:%Y-%m-%d}_{stamp}"
-    current = root / "current"
-    table_list = [table for table in tables if table.key in _PCS_FEED_FILES]
-    try:
-        _write_pcs_feed_folder(staging, start, end, generated, table_list)
-        archive.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(staging, archive)
-        current.mkdir(parents=True, exist_ok=True)
-        expected = {"manifest.json", *(_PCS_FEED_FILES[table.key] for table in table_list)}
-        for existing in current.iterdir():
-            if existing.is_file() and existing.name not in expected:
-                existing.unlink()
-        # Replace data files first and publish the manifest last. Each file
-        # replacement is atomic on the local volume used by the portable hub.
-        for source in sorted(staging.iterdir(), key=lambda item: item.name == "manifest.json"):
-            source.replace(current / source.name)
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
-    return current
 
 
 class DecisionWorkbook:
@@ -341,8 +209,8 @@ class DecisionWorkbook:
     def audit(self, rows: Sequence[Sequence[Any]]) -> None:
         ws = self.table(
             "_AUDIT",
-            "Audit and template connection",
-            "Hidden technical lineage. Unhide only for reconciliation or template maintenance.",
+            "Audit and lineage",
+            "Hidden technical lineage. Unhide only for reconciliation or governance review.",
             ["Item", "Value", "Evidence"],
             rows,
         )
@@ -363,9 +231,4 @@ class DecisionWorkbook:
         for ws in self.report.workbook.worksheets():
             ws.set_footer("&LWFM Hub | Anass ASSRI&CPage &P of &N&RConfidential")
         self.report.close()
-        if self.report_key == "pcs":
-            write_pcs_template_feed(
-                self.config, self.start, self.end, self.generated,
-                (table for table in self.tables if table.key != "_AUDIT"),
-            )
         return self.path

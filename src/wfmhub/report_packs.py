@@ -58,9 +58,9 @@ REPORT_PACKS = {
     "corrections": ReportPack(
         key="corrections",
         default_folder="corrections",
-        filename_prefix="WFMHub_Yesterday_Corrections",
-        current_filename="Yesterday Corrections.xlsx",
-        purpose="Residual observed gaps, decisions, and a full-shift evidence timeline.",
+        filename_prefix="WFMHub_Attendance_Review",
+        current_filename="Attendance Review.xlsx",
+        purpose="Selected-period residual gaps, decisions, and a full-shift evidence timeline.",
     ),
     "pcs": ReportPack(
         key="pcs",

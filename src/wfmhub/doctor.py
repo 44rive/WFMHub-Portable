@@ -31,13 +31,13 @@ def _database_path(home: Path) -> Path:
     if not config_file.exists():
         config_file = home / "config" / "default.toml"
     with config_file.open("rb") as handle:
-        value = str(tomllib.load(handle).get("paths", {}).get("database", "database/wfm.sqlite3"))
+        value = str(tomllib.load(handle).get("paths", {}).get("database", "_system/database/wfm.sqlite3"))
     configured = Path(value)
     return configured.resolve() if configured.is_absolute() else (home / configured).resolve()
 
 
 def _check_runtime_manifest(home: Path) -> tuple[bool, str]:
-    manifest = home / "RUNTIME_MANIFEST.sha256"
+    manifest = home / "_system" / "RUNTIME_MANIFEST.sha256"
     if not manifest.exists():
         return True, "development checkout; packaged runtime manifest not present"
     checked = 0
@@ -45,7 +45,7 @@ def _check_runtime_manifest(home: Path) -> tuple[bool, str]:
         if not line.strip():
             continue
         expected, relative = line.split("  ", 1)
-        path = home / "runtime" / relative
+        path = home / "_system" / "runtime" / relative
         if not path.is_file():
             return False, f"missing reviewed runtime file: {path}"
         actual = _sha256(path)
@@ -122,7 +122,7 @@ def run_doctor(home: Path) -> bool:
     configured_database = _database_path(home)
     if configured_database.suffix.lower() == ".duckdb":
         print(f"Old setting : {configured_database} (setup will preserve it and select SQLite)")
-        database = home / "database" / "wfm.sqlite3"
+        database = home / "_system" / "database" / "wfm.sqlite3"
     else:
         database = configured_database
     database.parent.mkdir(parents=True, exist_ok=True)

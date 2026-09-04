@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.12.0"
+DEFAULT_VERSION = "0.13.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -87,7 +87,7 @@ def validate_stage(stage: Path, expected_native: dict[str, str]) -> None:
     ]
     if banned:
         raise RuntimeError(f"Banned runtime content remains: {[str(path) for path in banned[:10]]}")
-    actual_native = native_manifest(stage / "runtime")
+    actual_native = native_manifest(stage / "_system" / "runtime")
     if actual_native != expected_native:
         added = sorted(set(actual_native) - set(expected_native))
         missing = sorted(set(expected_native) - set(actual_native))
@@ -109,20 +109,10 @@ def validate_stage(stage: Path, expected_native: dict[str, str]) -> None:
         raise RuntimeError("Portable stage contains user configuration or database data")
     local_excel_masters = [
         path for pattern in ("*.xlsx", "*.xlsm")
-        for path in (stage / "templates" / "reports").glob(pattern)
+        for path in (stage / "_system" / "templates" / "reports").glob(pattern)
     ]
     if local_excel_masters:
         raise RuntimeError(f"Portable stage contains local Excel report masters: {local_excel_masters}")
-    allowed_starter = stage / "Reports" / "PCS Team.xlsx"
-    if not allowed_starter.is_file():
-        raise RuntimeError("Portable stage is missing the reviewed data-free PCS starter")
-    with zipfile.ZipFile(allowed_starter) as workbook:
-        unsafe_parts = [
-            name for name in workbook.namelist()
-            if "externalLinks" in name or "pivotCache" in name or "connections.xml" in name
-        ]
-        if unsafe_parts:
-            raise RuntimeError(f"Public PCS starter contains unsafe cached/linked parts: {unsafe_parts}")
     unexpected_custom = [
         path for path in (stage / "_system" / "custom").rglob("*")
         if path.is_file() and path.name not in {
@@ -131,6 +121,13 @@ def validate_stage(stage: Path, expected_native: dict[str, str]) -> None:
     ]
     if unexpected_custom:
         raise RuntimeError(f"Portable stage contains runnable/user custom jobs: {unexpected_custom}")
+    allowed_root = {
+        "WFMHub.cmd", "SETUP.cmd", "README.md", "VERSION.txt",
+        "Reports", "Feed", "config", "_system",
+    }
+    unexpected_root = sorted(path.name for path in stage.iterdir() if path.name not in allowed_root)
+    if unexpected_root:
+        raise RuntimeError(f"Portable root is cluttered: {unexpected_root}")
 
 
 def copy_tree(source: Path, target: Path) -> None:
@@ -149,7 +146,7 @@ def build(args) -> Path:
     if build_root.exists():
         shutil.rmtree(build_root)
     stage.mkdir(parents=True, exist_ok=True)
-    runtime = stage / "runtime"
+    runtime = stage / "_system" / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
 
     embed_name = f"python-{args.python_version}-embed-amd64.zip"
@@ -187,21 +184,21 @@ def build(args) -> Path:
         lines.append("site-packages")
     pth.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    copy_tree(ROOT / "src" / "wfmhub", stage / "app" / "wfmhub")
-    copy_tree(ROOT / "sql", stage / "app" / "sql")
-    copy_tree(ROOT / "docs", stage / "docs")
-    copy_tree(ROOT / "prompts", stage / "prompts")
-    copy_tree(ROOT / "templates", stage / "templates")
+    copy_tree(ROOT / "src" / "wfmhub", stage / "_system" / "app" / "wfmhub")
+    copy_tree(ROOT / "sql", stage / "_system" / "app" / "sql")
+    copy_tree(ROOT / "docs", stage / "_system" / "docs")
+    copy_tree(ROOT / "prompts", stage / "_system" / "prompts")
+    copy_tree(ROOT / "templates", stage / "_system" / "templates")
     # Excel-authored masters are local user assets and can contain refreshed
     # operational data. Ship the instructions/query pattern, never the files.
-    report_template_dir = stage / "templates" / "reports"
+    report_template_dir = stage / "_system" / "templates" / "reports"
     for pattern in ("*.xlsx", "*.xlsm"):
         for master in report_template_dir.glob(pattern):
             master.unlink()
-    sys.path.insert(0, str(ROOT / "src"))
-    from wfmhub.starter_templates import build_pcs_starter
-    build_pcs_starter(stage / "Reports" / "PCS Team.xlsx")
+    (stage / "Reports").mkdir(parents=True, exist_ok=True)
+    (stage / "Feed").mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / "Reports" / "README.txt", stage / "Reports" / "README.txt")
+    shutil.copy2(ROOT / "Feed" / "README.txt", stage / "Feed" / "README.txt")
     # Ship only reviewed underscore templates. Runnable local jobs can contain
     # business logic or data and must never leak into a public portable ZIP.
     (stage / "_system" / "custom" / "jobs").mkdir(parents=True, exist_ok=True)
@@ -226,19 +223,26 @@ def build(args) -> Path:
     shutil.copy2(ROOT / "WFMHub.cmd", stage / "WFMHub.cmd")
     shutil.copy2(ROOT / "SETUP.cmd", stage / "SETUP.cmd")
     shutil.copy2(ROOT / "README.md", stage / "README.md")
-    shutil.copy2(ROOT / "CHANGELOG.md", stage / "CHANGELOG.md")
+    packaged_readme = stage / "README.md"
+    packaged_readme.write_text(
+        packaged_readme.read_text(encoding="utf-8").replace(
+            "](docs/", "](_system/docs/"
+        ),
+        encoding="utf-8",
+    )
+    shutil.copy2(ROOT / "CHANGELOG.md", stage / "_system" / "CHANGELOG.md")
     (stage / "VERSION.txt").write_text(args.version + "\n", encoding="utf-8")
     manifest_lines = [f"{digest}  {name}" for name, digest in sorted(expected_native.items())]
-    (stage / "RUNTIME_MANIFEST.sha256").write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
-    (stage / "RUNTIME_ORIGIN.txt").write_text(
+    (stage / "_system" / "RUNTIME_MANIFEST.sha256").write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
+    (stage / "_system" / "RUNTIME_ORIGIN.txt").write_text(
         f"Official CPython {args.python_version} Windows embeddable x64 ZIP\n"
         f"Archive SHA-256: {PYTHON_EMBED_SHA256[args.python_version]}\n"
         "Only pure-Python report libraries are added under runtime/site-packages.\n",
         encoding="utf-8",
     )
     for folder in (
-        "Reports/Archive", "_system/database", "_system/backups",
-        "_system/logs", "_system/output", "_system/input", "extracts",
+        "Reports/Archive", "Feed", "_system/database", "_system/backups",
+        "_system/logs", "_system/output", "_system/input",
     ):
         (stage / folder).mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / "input" / "README.md", stage / "_system" / "input" / "README.md")

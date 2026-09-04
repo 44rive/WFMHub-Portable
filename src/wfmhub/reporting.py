@@ -124,7 +124,7 @@ def add_domain_rules_sheet(
              "Running shifts remain provisional"),
             ("Staffing interval", "observed agent-seconds / 900", "LOB/language/15 minutes",
              "Future or missing evidence stays blank"),
-            ("No-show", "completed working shift + loaded blank LILO + no active status", "agent/day",
+            ("No-show", "completed shift + blank LILO row, or sufficient all-Logged-Off Agent Status coverage", "agent/day",
              "All gates must pass"),
         ]
     elif spec.key == "quality_pcs":

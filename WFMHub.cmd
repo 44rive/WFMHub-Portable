@@ -3,7 +3,7 @@ setlocal EnableExtensions
 title WFMHub Portable
 if not defined NO_COLOR color 0B
 for %%I in ("%~dp0.") do set "WFMHUB_HOME=%%~fI"
-set "WFMHUB_PYTHON=%WFMHUB_HOME%\runtime\python.exe"
+set "WFMHUB_PYTHON=%WFMHUB_HOME%\_system\runtime\python.exe"
 
 if not exist "%WFMHUB_PYTHON%" goto :missing_runtime
 
@@ -18,7 +18,7 @@ echo ERROR: WFMHub's embedded Python is missing:
 echo   "%WFMHUB_PYTHON%"
 echo.
 echo Download the WFMHub-Portable Windows ZIP from GitHub Releases,
-echo choose Extract All, and keep WFMHub.cmd beside the runtime folder.
+echo choose Extract All, and keep WFMHub.cmd beside the _system folder.
 echo Do not use GitHub's Source code ZIP and do not copy WFMHub.cmd by itself.
 echo.
 pause

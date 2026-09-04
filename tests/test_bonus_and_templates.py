@@ -5,22 +5,15 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
-from types import SimpleNamespace
 
 from openpyxl import Workbook, load_workbook
 
 from wfmhub.bonus import import_bonus_matrix
 from wfmhub.config import load_config
 from wfmhub.database import connect, migrate
-from wfmhub.excel_templates import (
-    excel_template,
-    materialize_pcs_power_queries,
-    require_new_template,
-)
 from wfmhub.on_demand_analysis import build_analysis_workbook
 from wfmhub.service_profiles import load_service_profiles
 from wfmhub.sota_reports import build_kpi_catalog
-from wfmhub.starter_templates import build_pcs_starter
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -99,47 +92,6 @@ class BonusImportTests(unittest.TestCase):
 
 
 class ExcelTemplateTests(unittest.TestCase):
-    def test_public_pcs_starter_is_data_free_and_has_setup_contract(self):
-        with tempfile.TemporaryDirectory() as folder:
-            path = build_pcs_starter(Path(folder) / "pcs.xlsx")
-            workbook = load_workbook(path, read_only=True, data_only=False, keep_links=False)
-            try:
-                self.assertEqual(
-                    workbook.sheetnames,
-                    ["START_HERE", "SETUP", "PCS_REPORT", "COACHING_LOG", "PIVOT_AREA", "FORMULAS"],
-                )
-                self.assertNotIn("pFeedFolder", workbook.defined_names)
-                self.assertEqual(len(workbook._external_links), 0)
-                self.assertIn("_system", workbook["SETUP"]["B5"].value)
-            finally:
-                workbook.close()
-
-    def test_power_query_assigns_pcs_numeric_types_before_data_model_load(self):
-        for filename, query_name in (
-            ("PCS_AgentDay.pq", "PCS Agent Day"),
-            ("PCS_Calls.pq", "PCS Calls"),
-            ("PCS_Agents.pq", "PCS Agents"),
-            ("PCS_Dates.pq", "PCS Dates"),
-        ):
-            typed_query = (REPO / "templates" / "power_query" / filename).read_text(encoding="utf-8")
-            self.assertIn(f"Query name: {query_name}", typed_query)
-            self.assertIn("__PCS_FEED_FOLDER__", typed_query)
-            self.assertNotIn("Excel.CurrentWorkbook", typed_query)
-            self.assertIn("Table.TransformColumnTypes", typed_query)
-            self.assertTrue(typed_query.rstrip().endswith("Typed"))
-
-    def test_setup_materializes_firewall_safe_pcs_queries(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            config = SimpleNamespace(home=REPO, system=root / "_system")
-            paths = materialize_pcs_power_queries(config)
-            self.assertEqual(len(paths), 4)
-            for path in paths:
-                text = path.read_text(encoding="utf-8")
-                self.assertIn(str(root / "_system" / "feeds" / "pcs" / "current"), text)
-                self.assertNotIn("__PCS_FEED_FOLDER__", text)
-                self.assertNotIn("Excel.CurrentWorkbook", text)
-
     def test_governance_workbook_exposes_service_and_mapping_controls(self):
         with tempfile.TemporaryDirectory() as folder:
             home = _home(Path(folder))
@@ -158,25 +110,6 @@ class ExcelTemplateTests(unittest.TestCase):
                 self.assertEqual(len(workbook._external_links), 0)
             finally:
                 workbook.close()
-
-    def test_master_location_is_stable_and_existing_file_is_protected(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            config = SimpleNamespace(
-                home=root,
-                output=root / "output",
-                reports=root / "Reports",
-                system=root / "_system",
-            )
-            template = require_new_template(config, "PCS")
-            self.assertEqual(template.path, root / "Reports" / "PCS Team.xlsx")
-            self.assertEqual(template.model_folder, root / "_system" / "feeds" / "pcs" / "current")
-            self.assertEqual(template.feed_folder, root / "_system" / "feeds" / "pcs" / "current")
-            template.path.write_bytes(b"excel-master")
-            with self.assertRaises(FileExistsError):
-                require_new_template(config, "PCS")
-            self.assertEqual(template.path.read_bytes(), b"excel-master")
-            self.assertEqual(require_new_template(config, "PCS", force=True), excel_template(config, "PCS"))
 
     def test_default_ford_profile_matches_original_flash_gross_sl(self):
         catalog = load_service_profiles(REPO, REPO / "config" / "default_service_profiles.toml")

@@ -149,12 +149,15 @@ class ProcessLock:
 
 
 def project_sql_dir(config: Config) -> Path:
-    direct = config.home / "sql"
-    if direct.exists():
-        return direct
-    packaged = config.home / "app" / "sql"
-    if packaged.exists():
-        return packaged
+    candidates = (
+        config.home / "sql",
+        config.home / "app" / "sql",
+        config.system / "app" / "sql",
+        Path(__file__).resolve().parents[1] / "sql",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
     raise FileNotFoundError("Cannot locate the sql directory")
 
 

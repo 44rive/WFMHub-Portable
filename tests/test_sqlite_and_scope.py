@@ -388,6 +388,45 @@ class SQLiteLifecycleTests(unittest.TestCase):
             self.assertEqual(legacy.read_bytes(), b"duckdb stays")
             self.assertEqual(len(list((home / "config").glob("wfmhub_pre_sqlite_*.toml"))), 1)
 
+    def test_packaged_upgrade_moves_legacy_state_under_system(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder) / "WFMHub"
+            (home / "config").mkdir(parents=True)
+            default = (REPO / "config" / "default.toml").read_text(encoding="utf-8")
+            legacy = (
+                default
+                .replace('database = "_system/database/wfm.sqlite3"', 'database = "database/wfm.sqlite3"')
+                .replace('output = "_system/output"', 'output = "output"')
+                .replace('logs = "_system/logs"', 'logs = "logs"')
+                .replace('backups = "_system/backups"', 'backups = "backups"')
+                .replace('input = "_system/input"', 'input = "input"')
+                .replace('custom = "_system/custom"', 'custom = "custom"')
+                .replace('feed = "Feed"\n', '')
+            )
+            (home / "config" / "default.toml").write_text(default, encoding="utf-8")
+            (home / "config" / "wfmhub.toml").write_text(legacy, encoding="utf-8")
+            (home / "VERSION.txt").write_text("0.13.0\n", encoding="utf-8")
+            (home / "_system" / "runtime").mkdir(parents=True)
+            (home / "database").mkdir()
+            (home / "database" / "wfm.sqlite3").write_bytes(b"preserved")
+            (home / "docs").mkdir()
+            (home / "docs" / "old.txt").write_text("old", encoding="utf-8")
+            (home / "Reports").mkdir()
+            (home / "Reports" / "PCS Team.xlsx").write_bytes(b"old pcs")
+            (home / "Reports" / "Yesterday Corrections.xlsx").write_bytes(b"old corrections")
+
+            ensure_user_config(home)
+
+            upgraded = (home / "config" / "wfmhub.toml").read_text(encoding="utf-8")
+            self.assertIn('database = "_system/database/wfm.sqlite3"', upgraded)
+            self.assertIn('feed = "Feed"', upgraded)
+            self.assertEqual((home / "_system" / "database" / "wfm.sqlite3").read_bytes(), b"preserved")
+            self.assertFalse((home / "database").exists())
+            self.assertFalse((home / "docs").exists())
+            self.assertTrue(list((home / "_system" / "legacy_layout").glob("*/old_program/docs/old.txt")))
+            self.assertTrue(list((home / "_system" / "legacy_layout").glob("*/old_reports/PCS Team.xlsx")))
+            self.assertTrue(list((home / "_system" / "legacy_layout").glob("*/old_reports/Yesterday Corrections.xlsx")))
+
 
 if __name__ == "__main__":
     unittest.main()

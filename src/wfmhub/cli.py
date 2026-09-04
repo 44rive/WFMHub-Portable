@@ -14,11 +14,9 @@ from . import __version__
 from .actions import import_actions
 from .analytics import load_analytics_rules, validate_analytics_rules
 from .bonus import import_bonus_matrix
-from .coaching import import_pcs_coaching
 from .config import ConfigError, ensure_user_config, load_config, write_source_root
 from .database import HubLockedError, backup_database, connect, migrate, write_session
 from .doctor import run_doctor
-from .excel_templates import excel_template, materialize_pcs_power_queries, require_new_template
 from .exports import DATASETS, export_dataset
 from .ingestion import ingest_all
 from .models import refresh_models
@@ -102,7 +100,6 @@ def setup(home: Path, source_root: Path | None, non_interactive: bool) -> int:
         log = _logging(config)
         bar.update(0.4, "Preparing folders and database")
         migrations = migrate(config)
-        pcs_queries = materialize_pcs_power_queries(config)
         bar.finish("Setup ready")
     except Exception as exc:
         bar.fail(str(exc))
@@ -115,9 +112,9 @@ def setup(home: Path, source_root: Path | None, non_interactive: bool) -> int:
     print(f"Analytics   : {config.analytics_rules}")
     print(f"Report specs: {config.report_catalog}")
     print(f"Reports     : {config.reports}")
+    print(f"Clean feed  : {config.feed}")
     print(f"Queue map   : {config.queue_mapping}")
     print(f"Service LOBs: {config.service_profiles}")
-    print(f"PCS queries : {pcs_queries[0].parent}")
     print(f"Log         : {log}")
     if migrations:
         print(f"Database migrations applied: {', '.join(migrations)}")
@@ -195,9 +192,6 @@ def refresh(
             print(f"- {error}")
     for pack, report_path in zip(packs, report_paths):
         print(f"Report      : {report_path}")
-        template = excel_template(config, pack)
-        if template.exists:
-            print(f"Excel master: {template.path} (open it and choose Refresh All)")
     return 2 if ingested.failed else 0
 
 
@@ -212,83 +206,6 @@ def report_only(
 ) -> int:
     paths = build_reports(home, start, end, (pack,), output, use_config_period, service_profile)
     print(f"Report created: {paths[0]}")
-    template = excel_template(load_config(home), pack)
-    if template.exists and paths[0].resolve() != template.path:
-        print(f"Excel master  : {template.path}")
-        print("Next step     : open the master in Excel, choose Refresh All, then Save As.")
-    return 0
-
-
-def initialize_excel_template(
-    home: Path,
-    pack: str,
-    start: date | None,
-    end: date | None,
-    service_profile: str | None = None,
-    force: bool = False,
-    use_config_period: bool = True,
-) -> int:
-    """Create the one protected Excel master used by the PCS team."""
-
-    config = load_config(home)
-    if pack != "pcs":
-        raise ValueError("PCS is the only report that uses a persistent Excel Data Model master")
-    materialize_pcs_power_queries(config)
-    existing = excel_template(config, pack)
-    if existing.exists and not force:
-        print(f"PCS Team      : {existing.path}")
-        print(f"Current feed  : {existing.feed_folder}")
-        print("Status        : existing team workbook kept; coaching and PivotTables are safe.")
-        print(f"One-time steps: {config.home / 'docs' / 'EXCEL_TEMPLATE_GUIDE.md'}")
-        return 0
-    template = require_new_template(config, pack, force)
-    from .starter_templates import build_pcs_starter
-
-    path = build_pcs_starter(template.path)
-    print(f"PCS Team      : {path}")
-    print(f"Current feed  : {template.feed_folder}")
-    print("Protected rule: WFMHub never overwrites this workbook during a normal refresh.")
-    print(f"One-time steps: {config.home / 'docs' / 'EXCEL_TEMPLATE_GUIDE.md'}")
-    return 0
-
-
-def refresh_pcs_team(
-    home: Path,
-    start: date | None,
-    end: date | None,
-    use_config_period: bool = True,
-) -> int:
-    """Sync the fixed PCS workbook inputs and republish its model feeds."""
-
-    config = load_config(home)
-    materialize_pcs_power_queries(config)
-    master = excel_template(config, "pcs")
-    if not master.exists:
-        from .starter_templates import build_pcs_starter
-
-        build_pcs_starter(master.path)
-        print(f"Created PCS Team workbook: {master.path}")
-
-    # The persistent workbook may contain team-entered coaching decisions.
-    # Importing a blank log is harmless and avoids a separate path prompt.
-    try:
-        with write_session(config) as conn:
-            coaching_count = import_pcs_coaching(conn, config, master.path)
-    except ValueError as exc:
-        # A user may still have the previous data-free starter. Preserve it and
-        # continue publishing PCS data instead of blocking the reporting day.
-        if "COACHING_LOG or ACTIONS" not in str(exc):
-            raise
-        coaching_count = 0
-        print("PCS Team workbook uses the earlier layout; coaching sync was skipped.")
-
-    report = build_reports(
-        home, start, end, ("pcs",), use_config_period=use_config_period,
-    )[0]
-    print(f"PCS data check : {report}")
-    print(f"PCS Team       : {master.path}")
-    print(f"Coaching synced: {coaching_count:,} decision(s)")
-    print("Next step      : open PCS Team.xlsx and choose Data > Refresh All.")
     return 0
 
 
@@ -416,23 +333,6 @@ def import_decisions(home: Path, workbook: Path) -> int:
         bar.fail(str(exc))
         raise
     print(f"Imported {count} correction decision(s).")
-    return 0
-
-
-def import_coaching_decisions(home: Path, workbook: Path) -> int:
-    config = load_config(home)
-    _logging(config)
-    bar = ProgressBar()
-    bar.update(0.1, "Reading PCS coaching decisions")
-    try:
-        with write_session(config) as conn:
-            count = import_pcs_coaching(conn, config, workbook)
-        bar.finish("PCS coaching decisions imported")
-    except Exception as exc:
-        bar.fail(str(exc))
-        raise
-    print(f"Imported {count} PCS coaching decision(s).")
-    print("Build PCS Performance again to refresh Actions Rate and the stable Excel feeds.")
     return 0
 
 
@@ -773,14 +673,13 @@ def _advanced_menu(home: Path) -> None:
     print("5. Change source root")
     print("6. Run system check")
     print("7. Run custom Python or read-only SQL")
-    print("8. Create PCS Team workbook if missing")
-    print("9. Back")
-    choice = input("Choose 1-9: ").strip()
+    print("8. Back")
+    choice = input("Choose 1-8: ").strip()
     if choice == "1":
         show_status(home)
         show_coverage(home)
     elif choice == "2":
-        path = Path(input("Paste the edited Attendance Corrections workbook path: ").strip().strip('"'))
+        path = Path(input("Paste the edited Attendance Review workbook path: ").strip().strip('"'))
         import_decisions(home, path)
     elif choice == "3":
         rules_tool(home, "catalog")
@@ -796,10 +695,8 @@ def _advanced_menu(home: Path) -> None:
         kind, job = _choose_custom_job(config)
         start, end, use_config = _choose_period()
         run_custom(home, kind, job, start, end, use_config)
-    elif choice == "8":
-        initialize_excel_template(home, "pcs", None, None)
-    elif choice != "9":
-        raise ValueError("Please choose a number from 1 to 9")
+    elif choice != "8":
+        raise ValueError("Please choose a number from 1 to 8")
 
 
 def menu(home: Path) -> int:
@@ -812,12 +709,12 @@ def menu(home: Path) -> int:
         print("    [2] Attendance Callout")
         print("    [3] Staffing Gaps")
         print("    [4] OEM Flash")
-        print("    [5] Yesterday Corrections")
+        print("    [5] Attendance Review")
         print("\n  MONTH")
         print("    [6] Final Absenteeism")
         print("    [7] Bonus Management")
-        print("\n  PCS TEAM")
-        print("    [8] Sync and refresh PCS Team")
+        print("\n  PCS")
+        print("    [8] PCS Performance")
         print("\n  ANALYSE")
         print("    [9] Analyze a period")
         print("   [10] Export clean data")
@@ -852,8 +749,7 @@ def menu(home: Path) -> int:
                     raise ValueError("Please choose 1 or 2")
                 _build_menu_product(home, "bonus")
             elif choice == "8":
-                start, end, use_config = _choose_period()
-                refresh_pcs_team(home, start, end, use_config)
+                _build_menu_product(home, "pcs")
             elif choice == "9":
                 domain, comparison = _choose_analysis()
                 start, end, use_config = _choose_period()
@@ -910,8 +806,6 @@ def parser() -> argparse.ArgumentParser:
     custom_p.add_argument("--end", type=_date)
     import_p = commands.add_parser("import-actions", help="Import edited GAPS decision columns")
     import_p.add_argument("workbook", type=Path)
-    coaching_p = commands.add_parser("import-pcs-actions", help="Import edited PCS coaching columns")
-    coaching_p.add_argument("workbook", type=Path)
     bonus_p = commands.add_parser("import-bonus", help="Import Bonus Matrix v1.2 without changing the source")
     bonus_p.add_argument("workbook", type=Path)
     analysis_p = commands.add_parser("analyze", help="Run deterministic on-demand period analysis")
@@ -920,15 +814,6 @@ def parser() -> argparse.ArgumentParser:
     analysis_p.add_argument("--end", type=_date)
     analysis_p.add_argument("--comparison", choices=COMPARISON_MODES, default="previous_equal")
     analysis_p.add_argument("--output", type=Path)
-    template_p = commands.add_parser("template-init", help="Create the protected PCS Team workbook")
-    template_p.add_argument("--pack", choices=("pcs",), default="pcs")
-    template_p.add_argument("--start", type=_date)
-    template_p.add_argument("--end", type=_date)
-    template_p.add_argument("--service-profile", help="Effective service profile id for the service report")
-    template_p.add_argument("--force", action="store_true", help="Replace an existing master intentionally")
-    pcs_team_p = commands.add_parser("pcs-team", help="Sync coaching and refresh the PCS Team feeds")
-    pcs_team_p.add_argument("--start", type=_date)
-    pcs_team_p.add_argument("--end", type=_date)
     commands.add_parser("status", help="Show source health")
     commands.add_parser("coverage", help="Show available dates and row counts")
     commands.add_parser("backup", help="Create a database backup")
@@ -957,18 +842,10 @@ def main(argv: list[str] | None = None) -> int:
             return report_only(home, args.start, args.end, args.output, args.pack, service_profile=args.service_profile)
         if args.command == "import-actions":
             return import_decisions(home, args.workbook)
-        if args.command == "import-pcs-actions":
-            return import_coaching_decisions(home, args.workbook)
         if args.command == "import-bonus":
             return import_bonus_tool(home, args.workbook)
         if args.command == "analyze":
             return analyze_period(home, args.domain, args.start, args.end, args.comparison, args.output)
-        if args.command == "template-init":
-            return initialize_excel_template(
-                home, args.pack, args.start, args.end, args.service_profile, args.force,
-            )
-        if args.command == "pcs-team":
-            return refresh_pcs_team(home, args.start, args.end)
         if args.command == "export":
             return export_clean(home, args.dataset, args.start, args.end, args.format, args.output)
         if args.command == "custom":

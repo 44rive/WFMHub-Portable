@@ -64,6 +64,13 @@ def _display_header(name: str) -> str:
         "gross_sl_20s": "Gross SL 20s %", "adjusted_sl_20s": "Adjusted SL 20s %",
         "verint_reconciliation": "Verint Final Check",
         "pcs_status": "PCS Status", "post_call_survey_mode": "Post Call Survey Mode",
+        "pcs_status_1": "PCS Status 1", "q1_nonblank": "Q1 Nonblank",
+        "valid_q1": "Valid Q1", "q1_score_sum": "Q1 Score Sum",
+        "score_le_3": "Score <= 3", "score_gt_3": "Score > 3",
+        "inbound_call_legs": "Inbound Call Legs", "invalid_q1": "Invalid Q1",
+        "sample_state": "Sample State", "coaching_key": "Coaching Key",
+        "coaching_status": "Coaching Status", "coaching_date": "Coaching Date",
+        "coaching_comment": "Coaching Comment",
     }
     return custom.get(name, name.replace("_", " ").title().replace("Id", "ID"))
 

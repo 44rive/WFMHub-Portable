@@ -1,15 +1,15 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.4"
-description = "One decision per workbook; OEM Flash is purpose-built and only PCS publishes Excel Data Model feeds."
+version = "2026.09.5"
+description = "One decision per workbook; each finished report is generated directly by Python and SQLite."
 
 [[packs]]
 key = "pcs"
 title = "PCS PERFORMANCE"
-purpose = "Daily, MTD and previous-month PCS score and participation."
+purpose = "Interactive daily, MTD and previous-month PCS score, participation, and coaching."
 finding_domains = ["pcs", "data_quality"]
-sheets = ["DASHBOARD", "TREND", "AGENT_DETAIL", "ACTIONS", "DEFINITIONS", "_AUDIT"]
+sheets = ["DASHBOARD", "TEAM_VIEW", "AGENT_VIEW", "TREND", "COACHING", "PCS_DATA", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "bonus"
@@ -41,7 +41,7 @@ sheets = ["DASHBOARD", "ACTIONS", "TREND", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "corrections"
-title = "ATTENDANCE CORRECTIONS"
+title = "ATTENDANCE REVIEW"
 purpose = "Completed-day residual gaps and full-shift evidence for Verint correction."
 finding_domains = ["attendance", "data_quality"]
 sheets = ["DASHBOARD", "GAPS", "SHIFT_VIEW", "DEFINITIONS", "_AUDIT"]

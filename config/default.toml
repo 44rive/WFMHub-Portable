@@ -5,9 +5,10 @@ timezone = "Europe/Berlin"
 # Relative paths are resolved from the WFMHub folder.
 source_root = "extracts"
 database = "_system/database/wfm.sqlite3"
-# Reports is the only normal user-facing destination. Internal feeds and
-# compatibility artifacts stay under _system.
+# Reports contains finished workbooks. Feed contains clean exports that can be
+# opened, filtered, or shared without touching the original extracts.
 reports = "Reports"
+feed = "Feed"
 system = "_system"
 output = "_system/output"
 logs = "_system/logs"

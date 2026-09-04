@@ -38,7 +38,7 @@ cannot silently substitute for the operational schedule.
 | `pcs_agent_day` | Agent/day | PCS detail |
 | `pcs_team_day` | Team/LOB/language/day | PCS team summary |
 | `pcs_agent_month` | Agent/month | PCS monthly view |
-| `yesterday_gap_actions` | One uncovered correction interval | Yesterday injection list |
+| `yesterday_gap_actions` | One uncovered correction interval | Selected-period completed-day review |
 | `shift_evidence_timeline` | Exact shift segment | Verint-like shift visual |
 | `verint_final_absence_events` | Corrected Activities evidence interval | Final audit detail |
 | `verint_final_absence_day` | Agent/day | Final absenteeism |
@@ -52,29 +52,28 @@ Status has precedence; LILO fills only intervals where Agent Status has no
 state. Explicit Logged Off or Unavailable time remains a gap. Future interval
 gap and variance values are NULL.
 
-`yesterday_gap_actions` contains only the residual pieces not already covered
+`yesterday_gap_actions` is a legacy export key. It contains only the residual pieces not already covered
 by the union of corrected Activities intervals. A partially corrected original
 gap can therefore produce one or more exact residual rows.
 
-Final absenteeism is independent of LILO and Agent Status. It is built only
-from the selected Activities snapshot, clips evidence to its Activities shift,
-unions overlaps, caps planned net minutes at the configured standard day
-(default 8.75 hours), and caps each daily classified numerator to that planned
-net value. A final rate therefore cannot exceed 100%.
+Final absenteeism amounts and categories are built only from the selected
+Activities snapshot. Evidence is clipped to the Activities shift, overlaps are
+unioned, planned net minutes are capped at the configured standard day (default
+8.75 hours), and each daily classified numerator is capped to that planned net
+value. A final rate therefore cannot exceed 100%.
+
+LILO and Agent Status do not create a payroll category, but they are used as a
+completeness control. `UNCODED_EMPTY_SHIFT`, `UNCORRECTED_OBSERVED_GAP`,
+`PARTIAL_CORRECTION_REVIEW`, `VERINT_WITHOUT_OBSERVED_GAP`, and
+`PROVISIONAL_DAY` remain exceptions. Finalized
+summary rates and the LOB/month export include only `CLEAR` and
+`ABSENCE_RECORDED` agent-days, preventing incomplete rows from acting like zero
+absence.
 
 Run an export from `WFMHub.cmd > Export clean data`. Each CSV/XLSX is written
-under the configured internal export area with a manifest containing its period,
+under the visible `Feed` folder with a manifest containing its period,
 row count, rule version, and rule hash.
 
-Only PCS writes Excel Data Model feeds. Its end-user template contract is under
-`_system\feeds\pcs\current`:
-
-- `PCS_AgentDay.csv`
-- `PCS_Calls.csv`
-- `PCS_Agents.csv`
-- `PCS_Dates.csv`
-- `manifest.json`
-
-Every file has a stable name and UTF-8 header. Numeric/date types are declared
-again in the supplied Power Query scripts. A complete copy of every published
-set is kept under `_system\feeds\pcs\archive`.
+PCS does not use a separate feed contract. Its generated workbook contains a
+visible `PCS_DATA` Excel Table and a visible `COACHING` Excel Table. Dashboard
+formulas read those tables directly, so there is no connection or refresh step.

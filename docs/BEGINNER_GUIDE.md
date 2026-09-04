@@ -63,18 +63,17 @@ Current workbooks always have the same names:
 Reports\Attendance Callout.xlsx
 Reports\Staffing Gaps.xlsx
 Reports\OEM Flash.xlsx
-Reports\Yesterday Corrections.xlsx
+Reports\Attendance Review.xlsx
 Reports\Final Absenteeism.xlsx
 Reports\Bonus Management.xlsx
 Reports\PCS Performance.xlsx
-Reports\PCS Team.xlsx
 ```
 
 When a generated report is replaced, WFMHub first saves its previous version in
 `Reports\Archive`. You do not need to rename or move daily reports yourself.
 
-`PCS Team.xlsx` is protected: WFMHub refreshes its small data files but does not
-replace the workbook.
+`Feed` is separate from `Reports`: it receives only the clean CSV/XLSX exports
+you explicitly request.
 
 ## Choosing dates
 
@@ -89,13 +88,19 @@ rows instead of assuming the filename contains one day.
 
 This is the list used to call or follow up agents.
 
-- **Call no-show** requires a completed working shift, a loaded blank LILO row,
-  and no active Agent Status evidence.
+- **Call no-show** requires a completed working shift and positive evidence:
+  either a loaded blank LILO row or enough Agent Status coverage showing the
+  agent remained Logged Off.
 - **Call late** means the first observed evidence is after scheduled start plus
   the configured tolerance.
 - **Not seen now** is a provisional same-day warning.
 - An unfinished shift is never marked as early leave.
 - A missing source is **missing evidence**, never a no-show.
+
+Agent Status is the detailed evidence. A temporary Logged Off or Unavailable
+interval becomes an internal gap. If the agent returns later, that return is
+kept and the case is not labelled early leave. LILO is used only to complete
+the outer login/logout boundaries when Agent Status coverage is too sparse.
 
 Choose Current Week to receive every actionable case in the week, not only
 yesterday.
@@ -125,11 +130,13 @@ The old Flash also contained manually sourced back-office counters. Until a
 reliable source is configured, WFMHub shows `NOT_CONFIGURED` instead of making
 up a number.
 
-## Yesterday Corrections
+## Attendance Review
 
-Use this after the operating day is complete. WFMHub compares schedule with
-LILO and Agent Status, then checks whether Verint Activities already cover each
-gap.
+Use this after the operating day is complete. Current Week includes every
+completed date from Monday through yesterday—not just yesterday. Today is
+excluded so an unfinished shift can never become an early-leave correction.
+WFMHub compares schedule with LILO and Agent Status, then checks whether Verint
+Activities already cover each gap.
 
 1. Open `GAPS`.
 2. Review the complete shift on `SHIFT_VIEW`.
@@ -145,6 +152,19 @@ inside StartEndTimes boundaries. LILO and Agent Status detect operational gaps;
 they do not invent the final payroll category.
 
 Resolve every unmapped activity before using the report as final.
+Resolve every final-ledger exception:
+
+- `UNCODED_EMPTY_SHIFT`: completed working shift, no final Verint code, and no
+  reliable Agent Status/LILO work evidence;
+- `UNCORRECTED_OBSERVED_GAP`: the operational evidence proves a gap but Verint
+  has no final code;
+- `PARTIAL_CORRECTION_REVIEW`: Verint has a code but it does not cover the whole
+  observed gap;
+- `VERINT_WITHOUT_OBSERVED_GAP`: Verint contains a final code but the operational
+  evidence does not support that interval;
+- `PROVISIONAL_DAY`: the shift is not complete and cannot be finalized yet.
+
+These rows are never allowed to dilute the headline rate as silent zero absence.
 
 ## Bonus Management
 
@@ -157,21 +177,15 @@ WFMHub hashes and reads the source without changing it. Scenario Payout remains
 separate from Released Payout. Absence must have one financial consequence—not
 an absence KPI plus a second hidden penalty.
 
-## PCS Team
+## PCS Performance
 
-PCS is the only Power Query/Data Model workbook.
+Choose **PCS Performance**, select the dates, and open the generated workbook.
+There is no Power Query, Data Model, or Refresh All step.
 
-On a normal reporting cycle:
-
-1. Choose **Sync and refresh PCS Team**.
-2. Choose the desired period.
-3. Open `Reports\PCS Team.xlsx`.
-4. Click **Data > Refresh All**.
-5. Use your PivotTables and slicers.
-
-The first setup is described in [EXCEL_TEMPLATE_GUIDE.md](EXCEL_TEMPLATE_GUIDE.md).
-Use the ready-to-paste scripts under `_system\power_query`; the copies under
-`templates` are source patterns, not the installation-specific scripts.
+On `DASHBOARD`, use the boxes for Period View, custom dates, LOB, Team Leader,
+and Agent. The KPI cards recalculate in Excel from the included `PCS_DATA`
+table. The report also includes ready-made team, agent, trend, and coaching
+views.
 
 PCS formulas:
 
@@ -182,14 +196,12 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-For coaching:
+For coaching, filter `COACHING` to your team and dates, then fill the four blue
+columns: status, date, coach, and comment. Save/send the workbook normally.
+Nothing must be synced back into WFMHub.
 
-1. Find the low-score call in the PCS Calls PivotTable.
-2. Copy its Coaching Key to `COACHING_LOG`.
-3. Enter status, date, coach, and comment.
-4. Save normally.
-5. The next **Sync and refresh PCS Team** imports the entry into SQLite and
-   republishes the model feeds.
+If you prefer native slicers, click inside `PCS_DATA` or `COACHING` and choose
+**Table Design > Insert Slicer**.
 
 ## Analysis and clean data
 
@@ -209,5 +221,5 @@ Use CSV for large Call by Call data.
 - **Red INCOMPLETE badge:** fix the missing or stale source; do not replace the
   blank with zero.
 
-Technical data, feeds, logs, and backups are under `_system`. Normal daily work
-belongs in `Reports`.
+Technical data, logs, and backups are under `_system`. Finished workbooks belong
+in `Reports`; requested clean exports belong in `Feed`.

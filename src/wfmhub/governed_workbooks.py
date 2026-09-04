@@ -590,13 +590,18 @@ def _segment_code(segment: dict[str, Any]) -> str:
     return "?"
 
 
-def _add_shift_view(report: ExcelReport, segments: list[dict[str, Any]], report_day: date) -> None:
+def _add_shift_view(
+    report: ExcelReport,
+    segments: list[dict[str, Any]],
+    period_start: date,
+    period_end: date,
+) -> None:
     ws = report.workbook.add_worksheet("SHIFT_VIEW")
     ws.set_tab_color(COLORS["purple"])
     ws.hide_gridlines(2)
     ws.set_zoom(75)
     ws.merge_range("A1:X1", "WFM HUB  /  FULL-SHIFT EVIDENCE VIEW", report.title)
-    ws.merge_range("A2:X2", f"Latest evidence-complete day {report_day:%Y-%m-%d}; 15-minute view for agents with residual correction gaps.", report.subtitle)
+    ws.merge_range("A2:X2", f"Selected completed dates {period_start:%Y-%m-%d} to {period_end:%Y-%m-%d}; one 15-minute row per agent and day.", report.subtitle)
     legend = [
         ("P", "Productive", COLORS["green"], COLORS["green_light"]),
         ("A", "Auxiliary", COLORS["teal"], COLORS["teal_light"]),
@@ -623,22 +628,39 @@ def _add_shift_view(report: ExcelReport, segments: list[dict[str, Any]], report_
         ws.write(3, column + 1, label, report.note)
 
     if not segments:
-        ws.merge_range("A7:X7", "No residual correction gaps exist on the latest evidence-complete day.", report.note)
+        ws.merge_range("A7:X7", "No residual correction gaps exist in the selected completed-date range.", report.note)
         ws.set_column("A:X", 10)
         return
 
-    by_agent: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
-    for segment in segments:
-        by_agent[(str(segment["agent_id"]), str(segment.get("agent_name") or ""))].append(segment)
-    first = min(_as_datetime(item["scheduled_start"]) for item in segments)
-    last = max(_as_datetime(item["scheduled_end"]) for item in segments)
-    cursor = _floor_quarter(first)
-    slots: list[datetime] = []
-    while cursor < _ceil_quarter(last) and len(slots) < 120:
-        slots.append(cursor)
-        cursor += timedelta(minutes=15)
+    def as_date(value: Any) -> date:
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        return date.fromisoformat(str(value)[:10])
 
-    metadata = ["Agent ID", "Agent", "Team Leader", "LOB", "Language", "Scheduled Start", "Scheduled End", "Gap Minutes", "Source"]
+    def minute_offset(value: Any, business_day: date) -> float:
+        stamp = _as_datetime(value)
+        midnight = datetime.combine(business_day, datetime.min.time())
+        return (stamp - midnight).total_seconds() / 60.0
+
+    by_agent_day: dict[tuple[date, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for segment in segments:
+        business_day = as_date(segment["business_date"])
+        by_agent_day[(business_day, str(segment["agent_id"]), str(segment.get("agent_name") or ""))].append(segment)
+    first_minute = min(
+        minute_offset(item["scheduled_start"], as_date(item["business_date"]))
+        for item in segments
+    )
+    last_minute = max(
+        minute_offset(item["scheduled_end"], as_date(item["business_date"]))
+        for item in segments
+    )
+    first_slot = int(first_minute // 15) * 15
+    last_slot = int((last_minute + 14.9999) // 15) * 15
+    slots = list(range(first_slot, min(last_slot, first_slot + 30 * 60), 15))
+
+    metadata = ["Date", "Agent ID", "Agent", "Team Leader", "LOB", "Language", "Scheduled Start", "Scheduled End", "Gap Minutes", "Source"]
     header_row = 5
     for column, value in enumerate(metadata):
         ws.write(header_row, column, value, report.header)
@@ -648,35 +670,39 @@ def _add_shift_view(report: ExcelReport, segments: list[dict[str, Any]], report_
         "rotation": 90, "align": "center", "valign": "vcenter",
     })
     for index, slot in enumerate(slots, len(metadata)):
-        day_suffix = "+1" if slot.date() > report_day else ""
-        ws.write(header_row, index, slot.strftime("%H:%M") + day_suffix, rotated)
+        days_after = slot // 1440
+        minute_of_day = slot % 1440
+        label = f"{minute_of_day // 60:02d}:{minute_of_day % 60:02d}"
+        if days_after:
+            label += f"+{days_after}"
+        ws.write(header_row, index, label, rotated)
     ws.set_row(header_row, 58)
 
-    for row_index, ((_agent_id, _agent_name), agent_segments) in enumerate(sorted(by_agent.items()), header_row + 1):
+    for row_index, ((business_day, _agent_id, _agent_name), agent_segments) in enumerate(sorted(by_agent_day.items()), header_row + 1):
         agent_segments.sort(key=lambda item: _as_datetime(item["segment_start"]))
         base = agent_segments[0]
         gap_minutes = sum(int(item.get("segment_minutes") or 0) for item in agent_segments if item.get("is_gap"))
         source = "+".join(sorted({str(item.get("observed_source") or "") for item in agent_segments if item.get("observed_source")}))
         meta_values = [
-            base["agent_id"], base.get("agent_name"), base.get("team_leader"),
+            business_day, base["agent_id"], base.get("agent_name"), base.get("team_leader"),
             base.get("lob"), base.get("language"), base.get("scheduled_start"),
             base.get("scheduled_end"), gap_minutes, source,
         ]
         for column, value in enumerate(meta_values):
-            fmt = report.datetime if isinstance(value, datetime) else report.integer if column == 7 else report.body
+            fmt = report.datetime if isinstance(value, datetime) else report.date if isinstance(value, date) else report.integer if column == 8 else report.body
             ws.write(row_index, column, value, fmt)
         for slot_index, slot in enumerate(slots, len(metadata)):
-            right = slot + timedelta(minutes=15)
-            scheduled_start = _as_datetime(base["scheduled_start"])
-            scheduled_end = _as_datetime(base["scheduled_end"])
+            right = slot + 15
+            scheduled_start = minute_offset(base["scheduled_start"], business_day)
+            scheduled_end = minute_offset(base["scheduled_end"], business_day)
             if right <= scheduled_start or slot >= scheduled_end:
                 continue
             best = None
             best_rank = (-1, 0.0)
             for segment in agent_segments:
-                left_overlap = max(slot, _as_datetime(segment["segment_start"]))
-                right_overlap = min(right, _as_datetime(segment["segment_end"]))
-                overlap = max(0.0, (right_overlap - left_overlap).total_seconds())
+                left_overlap = max(slot, minute_offset(segment["segment_start"], business_day))
+                right_overlap = min(right, minute_offset(segment["segment_end"], business_day))
+                overlap = max(0.0, right_overlap - left_overlap)
                 rank = (1 if bool(segment.get("is_gap")) else 0, overlap)
                 if overlap > 0 and rank > best_rank:
                     best, best_rank = segment, rank
@@ -684,15 +710,16 @@ def _add_shift_view(report: ExcelReport, segments: list[dict[str, Any]], report_
                 code = _segment_code(best)
                 ws.write(row_index, slot_index, code, code_formats[code])
         ws.set_row(row_index, 19)
-    ws.set_column(0, 0, 13)
-    ws.set_column(1, 4, 20)
-    ws.set_column(5, 6, 18)
-    ws.set_column(7, 7, 12)
-    ws.set_column(8, 8, 18)
+    ws.set_column(0, 0, 12)
+    ws.set_column(1, 1, 13)
+    ws.set_column(2, 5, 20)
+    ws.set_column(6, 7, 18)
+    ws.set_column(8, 8, 12)
+    ws.set_column(9, 9, 18)
     if slots:
         ws.set_column(len(metadata), len(metadata) + len(slots) - 1, 3.4)
     ws.freeze_panes(header_row + 1, len(metadata))
-    ws.autofilter(header_row, 0, header_row + len(by_agent), len(metadata) - 1)
+    ws.autofilter(header_row, 0, header_row + len(by_agent_day), len(metadata) - 1)
 
 
 def build_corrections_workbook(
@@ -813,7 +840,7 @@ def build_corrections_workbook(
             [report_day, config.report_limits.get("max_timeline_rows", 250000)],
         )
         timeline_dicts = [dict(zip(timeline_headers, row)) for row in timeline_rows]
-        _add_shift_view(report, timeline_dicts, report_day)
+        _add_shift_view(report, timeline_dicts, report_day, report_day)
         report.add_table_sheet(
             "TIMELINE_DATA", "Exact full-shift timeline segments",
             "Audit data behind SHIFT_VIEW; planned versus observed segments remain exact, not rounded to the visual grid.",

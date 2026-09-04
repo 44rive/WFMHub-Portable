@@ -132,12 +132,6 @@ def _audit_rows(
         ("Refresh run", latest[0] if latest else None, latest[2] if latest else "No successful refresh metadata"),
         ("Calculation authority", "Python + SQLite", "Excel contains presentation only"),
     ]
-    if report_key == "pcs":
-        rows.append((
-            "PCS current feed",
-            str(config.system / "feeds" / report_key / "current"),
-            "Power Query: connection only + Add to Data Model",
-        ))
     rows.extend(extra)
     return rows
 
@@ -181,23 +175,9 @@ def _pcs_aggregate(
         [period.start, period.end],
     ).fetchone()
     score_sum, valid, participants, eligible, low, high, inbound = row
-    primary_score = f"question_{config.pcs.primary_score_question}_score"
-    allowed_scores = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
-    completed = conn.execute(
-        f"""SELECT count(*)
-            FROM core.clean_call_leg c
-            JOIN core.pcs_coaching_action a ON a.coaching_key=c.call_key
-            WHERE c.business_date BETWEEN ? AND ?
-              AND upper(coalesce(c.call_direction,''))='I'
-              AND c.{primary_score} IN ({allowed_scores})
-              AND c.{primary_score} <= ?
-              AND a.coaching_status='COMPLETED'""",
-        [period.start, period.end, config.pcs.negative_score_maximum],
-    ).fetchone()[0]
     return (
         period.label, period.start, period.end, _ratio(score_sum, valid),
         _ratio(participants, eligible), valid, eligible, low, high, inbound,
-        completed, _ratio(completed, low),
     )
 
 
@@ -207,7 +187,7 @@ def _pcs_coaching_rows(
     start: date,
     end: date,
 ) -> tuple[list[str], list[tuple[Any, ...]]]:
-    """Return one editable coaching opportunity per valid low Q1 response."""
+    """Return a self-contained coaching queue; manual fields stay in Excel."""
 
     primary = config.pcs.primary_score_question
     primary_score = f"question_{primary}_score"
@@ -230,25 +210,199 @@ def _pcs_coaching_rows(
                    c.question_3 AS customer_comment,
                    c.pcs_status, c.post_call_survey_mode,
                    c.source_file,
-                   CASE coalesce(a.coaching_status,'PENDING')
-                       WHEN 'COMPLETED' THEN 'Completed'
-                       WHEN 'NOT_REQUIRED' THEN 'Not required'
-                       ELSE 'Pending'
-                   END AS coaching_status,
-                   a.coaching_date, a.coach, a.coaching_comment
+                   'Pending' AS coaching_status,
+                   NULL AS coaching_date, NULL AS coach, NULL AS coaching_comment
             FROM core.clean_call_leg c
             LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
-            LEFT JOIN core.pcs_coaching_action a ON a.coaching_key=c.call_key
             WHERE c.business_date BETWEEN ? AND ?
               AND upper(coalesce(c.call_direction,''))='I'
               AND c.{primary_score} IN ({allowed_scores})
               AND c.{primary_score} <= ?
-            ORDER BY CASE coalesce(a.coaching_status,'PENDING')
-                         WHEN 'PENDING' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END,
-                     c.business_date DESC, d.team_leader,
+            ORDER BY c.business_date DESC, d.team_leader,
                      coalesce(d.canonical_name,c.agent_name), c.call_start""",
         [start, end, config.pcs.negative_score_maximum],
     )
+
+
+def _pcs_sum_formula(column: str) -> str:
+    criteria = (
+        'tblPcsData[Date],">="&PCS_From,'
+        'tblPcsData[Date],"<="&PCS_To,'
+        'tblPcsData[LOB],IF(DASHBOARD!$K$6="All","*",DASHBOARD!$K$6),'
+        'tblPcsData[Team Leader],IF(DASHBOARD!$N$6="All","*",DASHBOARD!$N$6),'
+        'tblPcsData[Agent],IF(DASHBOARD!$Q$6="All","*",DASHBOARD!$Q$6)'
+    )
+    return f"SUMIFS(tblPcsData[{column}],{criteria})"
+
+
+def _pcs_completed_formula() -> str:
+    criteria = (
+        'tblCoaching[Date],">="&PCS_From,'
+        'tblCoaching[Date],"<="&PCS_To,'
+        'tblCoaching[LOB],IF(DASHBOARD!$K$6="All","*",DASHBOARD!$K$6),'
+        'tblCoaching[Team Leader],IF(DASHBOARD!$N$6="All","*",DASHBOARD!$N$6),'
+        'tblCoaching[Agent],IF(DASHBOARD!$Q$6="All","*",DASHBOARD!$Q$6),'
+        'tblCoaching[Coaching Status],"Completed"'
+    )
+    return f"COUNTIFS({criteria})"
+
+
+def _add_pcs_dashboard(
+    book: DecisionWorkbook,
+    status: str,
+    status_text: str,
+    start: date,
+    end: date,
+    comparison: Sequence[Sequence[Any]],
+    lobs: Sequence[str],
+    team_leaders: Sequence[str],
+    agents: Sequence[str],
+    trend_rows: Sequence[Sequence[Any]],
+) -> None:
+    """Create an Excel-native selector cockpit without Power Query or macros."""
+
+    wb = book.report.workbook
+    wb.set_calc_mode("auto")
+    ws = wb.add_worksheet("DASHBOARD")
+    ws.hide_gridlines(2)
+    ws.set_tab_color(COLORS["gold"])
+    ws.set_zoom(85)
+    ws.set_landscape()
+    ws.fit_to_pages(1, 1)
+    ws.freeze_panes(4, 0)
+    ws.merge_range("A1:R1", "PCS  /  PERFORMANCE & COACHING CONTROL", book.report.title)
+    ws.merge_range(
+        "A2:R2",
+        f"Generated {book.generated:%Y-%m-%d %H:%M}  |  available selector window includes previous month through {end:%Y-%m-%d}",
+        book.report.subtitle,
+    )
+    badge = status if status in book.badge_formats else "INCOMPLETE"
+    ws.merge_range("A4:R4", f"{badge}  /  {status_text}", book.badge_formats[badge])
+
+    selector_label = wb.add_format({
+        "font_name": "Aptos", "font_size": 8, "bold": True,
+        "font_color": COLORS["muted"], "bg_color": COLORS["canvas"],
+        "align": "left", "valign": "vcenter", "indent": 1,
+    })
+    selector = wb.add_format({
+        "font_name": "Aptos Display", "font_size": 11, "bold": True,
+        "font_color": COLORS["dark"], "bg_color": COLORS["white"],
+        "border": 1, "border_color": COLORS["teal"], "align": "left",
+        "valign": "vcenter", "indent": 1, "num_format": "yyyy-mm-dd",
+    })
+    for label, label_range, value_range, value in (
+        ("PERIOD VIEW", "A5:C5", "A6:C7", "Selected period"),
+        ("CUSTOM FROM", "E5:F5", "E6:F7", start),
+        ("CUSTOM TO", "H5:I5", "H6:I7", end),
+        ("LOB", "K5:L5", "K6:L7", "All"),
+        ("TEAM LEADER", "N5:O5", "N6:O7", "All"),
+        ("AGENT", "Q5:R5", "Q6:R7", "All"),
+    ):
+        ws.merge_range(label_range, label, selector_label)
+        if isinstance(value, date):
+            ws.merge_range(value_range, value, selector)
+        else:
+            ws.merge_range(value_range, value, selector)
+    ws.set_row(5, 22)
+    ws.set_row(6, 22)
+    ws.data_validation("A6", {"validate": "list", "source": ["Selected period", "Latest day", "Current MTD", "Previous month"]})
+    ws.data_validation("E6", {"validate": "date", "criteria": "between", "minimum": start, "maximum": end})
+    ws.data_validation("H6", {"validate": "date", "criteria": "between", "minimum": start, "maximum": end})
+
+    lists = ((23, ["All", *lobs]), (24, ["All", *team_leaders]), (25, ["All", *agents]))
+    for column, values in lists:
+        for row, value in enumerate(values):
+            ws.write(row, column, value)
+    ws.set_column(23, 25, None, None, {"hidden": True})
+    ws.data_validation("K6", {"validate": "list", "source": f"=DASHBOARD!$X$1:$X${len(lobs) + 1}"})
+    ws.data_validation("N6", {"validate": "list", "source": f"=DASHBOARD!$Y$1:$Y${len(team_leaders) + 1}"})
+    ws.data_validation("Q6", {"validate": "list", "source": f"=DASHBOARD!$Z$1:$Z${len(agents) + 1}"})
+
+    month_start = end.replace(day=1)
+    previous_end = month_start - timedelta(days=1)
+    previous_start = previous_end.replace(day=1)
+    wb.define_name(
+        "PCS_From",
+        "=IF(DASHBOARD!$A$6=\"Latest day\",DATE(%d,%d,%d),"
+        "IF(DASHBOARD!$A$6=\"Current MTD\",DATE(%d,%d,1),"
+        "IF(DASHBOARD!$A$6=\"Previous month\",DATE(%d,%d,1),DASHBOARD!$E$6)))"
+        % (end.year, end.month, end.day, end.year, end.month, previous_start.year, previous_start.month),
+    )
+    wb.define_name(
+        "PCS_To",
+        "=IF(DASHBOARD!$A$6=\"Latest day\",DATE(%d,%d,%d),"
+        "IF(DASHBOARD!$A$6=\"Current MTD\",DATE(%d,%d,%d),"
+        "IF(DASHBOARD!$A$6=\"Previous month\",DATE(%d,%d,%d),DASHBOARD!$H$6)))"
+        % (end.year, end.month, end.day, end.year, end.month, end.day,
+           previous_end.year, previous_end.month, previous_end.day),
+    )
+
+    score_sum = _pcs_sum_formula("Q1 Score Sum")
+    valid = _pcs_sum_formula("Valid Q1")
+    participating = _pcs_sum_formula("Q1 Nonblank")
+    eligible = _pcs_sum_formula("PCS Status 1")
+    low = _pcs_sum_formula("Score <= 3")
+    positive = _pcs_sum_formula("Score > 3")
+    inbound = _pcs_sum_formula("Inbound Call Legs")
+    completed = _pcs_completed_formula()
+    cards = [
+        ("PCS AVERAGE", f"=IFERROR({score_sum}/{valid},0)", book.card_decimal, "Weighted score / valid responses"),
+        ("PARTICIPATION", f"=IFERROR({participating}/{eligible},0)", book.card_percent, "Q1 nonblank / PCS Status 1"),
+        ("VALID RESPONSES", f"={valid}", book.card_integer, "Configured valid Q1 scores"),
+        ("INBOUND CALL LEGS", f"={inbound}", book.card_integer, "Inbound legs in selected scope"),
+        ("SCORE <= 3", f"={low}", book.card_integer, "Coaching opportunities"),
+        ("POSITIVE > 3", f"={positive}", book.card_integer, "Positive valid responses"),
+        ("COACHING COMPLETED", f"={completed}", book.card_integer, "Updates as the team fills COACHING"),
+        ("ACTIONS RATE", f"=IFERROR({completed}/{low},0)", book.card_percent, "Completed / score <= 3"),
+    ]
+    for index, (label, formula, fmt, note) in enumerate(cards):
+        row = 9 if index < 4 else 14
+        column = (index % 4) * 4
+        ws.merge_range(row, column, row, column + 2, label, book.report.kpi_label)
+        ws.merge_range(row + 1, column, row + 2, column + 2, "", fmt)
+        ws.write_formula(row + 1, column, formula, fmt)
+        ws.merge_range(row + 3, column, row + 3, column + 2, note, book.card_compare)
+        ws.set_row(row + 1, 26)
+        ws.set_row(row + 2, 26)
+
+    table_row = 20
+    ws.merge_range(table_row, 0, table_row, 9, "PERIOD BENCHMARK", book.report.section)
+    compare_headers = ["Period", "Start", "End", "PCS Average", "Participation %", "Valid Responses", "PCS Status 1", "Score <= 3", "Score > 3", "Inbound Legs"]
+    for column, header in enumerate(compare_headers):
+        ws.write(table_row + 2, column, header, book.report.header)
+    for offset, values in enumerate(comparison):
+        for column, value in enumerate(values):
+            fmt = book.report.date if isinstance(value, date) else book.report.percent if column == 4 else book.report.decimal if column == 3 else book.report.integer if isinstance(value, (int, float)) else book.report.body
+            ws.write(table_row + 3 + offset, column, value, fmt)
+
+    chart = wb.add_chart({"type": "line"})
+    for name, column, color, secondary in (
+        ("PCS Average", 5, COLORS["teal"], False),
+        ("Participation", 6, COLORS["gold"], True),
+    ):
+        chart.add_series({
+            "name": name,
+            "categories": ["TREND", 4, 0, 3 + len(trend_rows), 0],
+            "values": ["TREND", 4, column, 3 + len(trend_rows), column],
+            "line": {"color": color, "width": 2.25},
+            "marker": {"type": "circle", "size": 4, "border": {"color": color}, "fill": {"color": COLORS["white"]}},
+            "y2_axis": secondary,
+        })
+    chart.set_title({"name": "Daily PCS & participation"})
+    chart.set_legend({"position": "bottom"})
+    chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    chart.set_y_axis({"min": 1, "max": 5, "major_unit": 1, "major_gridlines": {"visible": False}, "name": "PCS score"})
+    chart.set_y2_axis({"min": 0, "max": 1, "major_unit": 0.2, "num_format": "0%", "name": "Participation"})
+    ws.insert_chart("L21", chart, {"x_scale": 1.15, "y_scale": 1.05})
+
+    note_row = table_row + 4 + max(len(comparison), 7)
+    ws.merge_range(note_row, 0, note_row, 17, "HOW TO USE THIS PAGE", book.report.section)
+    ws.merge_range(note_row + 1, 0, note_row + 1, 17, "Choose a period, LOB, team leader, or agent in the boxes above. Custom dates apply only when Period View is Selected period.", book.report.note)
+    ws.merge_range(note_row + 2, 0, note_row + 2, 17, "For native slicers: click inside the PCS_DATA or COACHING Excel Table, then Table Design > Insert Slicer. No refresh, connection, or Data Model is required.", book.report.note)
+    ws.set_column("A:R", 11)
+    ws.set_column("A:A", 13)
+    ws.set_column("K:R", 13)
 
 
 def build_pcs_performance_workbook(
@@ -258,72 +412,64 @@ def build_pcs_performance_workbook(
     end: date,
     output: Path | None = None,
 ) -> Path:
-    """Build the daily/MTD/monthly PCS decision product."""
+    """Build one polished, self-contained PCS workbook with Excel selectors."""
 
     book, partial, target = _atomic_book(config, "pcs", "PCS PERFORMANCE", start, end, output)
     periods = _comparison_periods(start, end)
     comparison = [_pcs_aggregate(conn, config, period) for period in periods]
-    by_label = {row[0]: row for row in comparison}
-    latest = by_label["Latest day"]
-    mtd = by_label["Current MTD"]
-    prior = by_label["Prior-month same days"]
     status, status_text = _source_state(conn, ("fte", "calls"), end)
-    book.dashboard(
-        [
-            KpiCard("Latest-day PCS", latest[3], "decimal", str(end)),
-            KpiCard("Latest-day participation", latest[4], "percent", f"{latest[5]:,} valid response(s)"),
-            KpiCard("MTD PCS", mtd[3], "decimal", _delta(mtd[3], prior[3])),
-            KpiCard("MTD participation", mtd[4], "percent", _delta(mtd[4], prior[4], True)),
-            KpiCard("MTD valid responses", mtd[5], "integer", f"{mtd[9]:,} inbound call leg(s)"),
-            KpiCard("MTD score <= 3", mtd[7], "integer", "Coaching opportunities"),
-            KpiCard("Coaching completed", mtd[10], "integer", "Completed low-score actions"),
-            KpiCard("Actions rate", mtd[11], "percent", "Completed / score <= 3"),
-        ],
-        status,
-        status_text,
-        ["Period", "Start", "End", "PCS Average", "Participation %", "Valid Responses", "PCSStatus=1", "<=3", ">3", "Inbound Legs", "Coaching Completed", "Actions Rate %"],
-        comparison,
-        [
-            "The report can be generated every three hours, but the KPI scope remains daily and monthly.",
-            "Current MTD is compared with the same number of calendar days in the previous month; a partial month is never compared only with a full month.",
-            "PCS average and participation are ratios of summed counters, not averages of agent percentages.",
-            "Actions Rate follows the original report: completed coaching actions divided by valid Q1 responses <= 3.",
-            "Use the Excel template model files for PivotTables and LOB / Team Leader / Agent slicers.",
-        ],
-        (("PCS Average", 3), ("Participation", 4)),
-    )
-
-    primary_score = f"question_{config.pcs.primary_score_question}_score"
-    allowed_scores = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
+    previous_start, _previous_end = _previous_month(end)
+    data_start = min(start, previous_start)
     headers, rows = _query(
         conn,
-        f"""SELECT p.business_date, sum(p.pcs_score_sum) AS pcs_score_sum,
+        """SELECT p.business_date, sum(p.pcs_score_sum) AS pcs_score_sum,
                   sum(survey_responses) AS valid_responses,
                   sum(pcs_participation_responses) AS participating_responses,
                   sum(pcs_status_calls) AS eligible_calls,
                   CASE WHEN sum(survey_responses)>0 THEN sum(pcs_score_sum)*1.0/sum(survey_responses) END AS pcs_average,
                   CASE WHEN sum(pcs_status_calls)>0 THEN sum(pcs_participation_responses)*1.0/sum(pcs_status_calls) END AS participation_rate,
                   sum(low_score_responses) AS score_le_3,
-                  sum(top_box_responses) AS score_gt_3,
-                  coalesce(max(coaching.completed),0) AS coaching_completed,
-                  CASE WHEN sum(low_score_responses)>0
-                       THEN coalesce(max(coaching.completed),0)*1.0/sum(low_score_responses) END AS actions_rate
+                  sum(top_box_responses) AS score_gt_3
            FROM mart.agent_pcs_day p
-           LEFT JOIN (
-               SELECT c.business_date, count(*) AS completed
-               FROM core.clean_call_leg c
-               JOIN core.pcs_coaching_action a ON a.coaching_key=c.call_key
-               WHERE upper(coalesce(c.call_direction,''))='I'
-                 AND c.{primary_score} IN ({allowed_scores})
-                 AND c.{primary_score} <= ?
-                 AND a.coaching_status='COMPLETED'
-               GROUP BY c.business_date
-           ) coaching ON coaching.business_date=p.business_date
            WHERE p.business_date BETWEEN ? AND ?
            GROUP BY p.business_date ORDER BY p.business_date""",
-        [config.pcs.negative_score_maximum, min(period.start for period in periods), max(period.end for period in periods)],
+        [data_start, end],
     )
-    book.table("TREND", "PCS daily trend", "Daily governed counters for current and comparison periods.", headers, rows)
+    trend_headers, trend_rows = headers, rows
+
+    selector_rows = conn.execute(
+        """SELECT DISTINCT coalesce(lob,''), coalesce(team_leader,''), coalesce(agent_name,'')
+           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?""",
+        [data_start, end],
+    ).fetchall()
+    lobs = sorted({str(row[0]) for row in selector_rows if row[0]})
+    team_leaders = sorted({str(row[1]) for row in selector_rows if row[1]})
+    agents = sorted({str(row[2]) for row in selector_rows if row[2]})
+    _add_pcs_dashboard(book, status, status_text, start, end, comparison, lobs, team_leaders, agents, trend_rows)
+
+    headers, rows = _query(
+        conn,
+        """SELECT max(lob) AS lob, max(team_leader) AS team_leader,
+                  count(DISTINCT agent_id) AS agents,
+                  sum(inbound_calls) AS inbound_call_legs,
+                  sum(pcs_status_calls) AS pcs_status_1,
+                  sum(pcs_participation_responses) AS q1_nonblank,
+                  sum(survey_responses) AS valid_q1,
+                  sum(pcs_score_sum) AS q1_score_sum,
+                  CASE WHEN sum(survey_responses)>0 THEN sum(pcs_score_sum)*1.0/sum(survey_responses) END AS pcs_average,
+                  CASE WHEN sum(pcs_status_calls)>0 THEN sum(pcs_participation_responses)*1.0/sum(pcs_status_calls) END AS participation_rate,
+                  sum(low_score_responses) AS score_le_3,
+                  sum(top_box_responses) AS score_gt_3,
+                  CASE WHEN sum(survey_responses)<20 THEN 'LOW_SAMPLE' ELSE 'OK' END AS sample_state
+           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
+           GROUP BY coalesce(lob,''), coalesce(team_leader,'')
+           ORDER BY max(lob), max(team_leader)""",
+        [start, end],
+    )
+    team_sheet = book.table("TEAM_VIEW", "PCS team performance", "Selected report period; filter this Excel Table or add native Table slicers.", headers, rows)
+    if rows:
+        state_col = headers.index("sample_state")
+        team_sheet.conditional_format(4, state_col, 3 + len(rows), state_col, {"type": "text", "criteria": "containing", "value": "LOW_SAMPLE", "format": book.report.error})
 
     headers, rows = _query(
         conn,
@@ -344,23 +490,26 @@ def build_pcs_performance_workbook(
            GROUP BY agent_id ORDER BY max(lob), max(team_leader), max(agent_name)""",
         [start, end],
     )
-    ws = book.table("AGENT_DETAIL", "PCS agent detail", "Selected-period agent results; filter by LOB, Team Leader or Agent.", headers, rows)
+    ws = book.table("AGENT_VIEW", "PCS agent performance", "Selected report period; click the table to filter or insert native slicers.", headers, rows)
     if rows:
         state_col = headers.index("sample_state")
         ws.conditional_format(4, state_col, 3 + len(rows), state_col, {"type": "text", "criteria": "containing", "value": "LOW_SAMPLE", "format": book.report.error})
-    action_headers, actions = _pcs_coaching_rows(conn, config, start, end)
+    book.table("TREND", "PCS daily trend", "Daily governed counters covering the selected and previous-month comparison window.", trend_headers, trend_rows)
+
+    action_headers, actions = _pcs_coaching_rows(conn, config, data_start, end)
+    action_rows = actions or [tuple(None for _ in action_headers)]
     action_sheet = book.table(
-        "ACTIONS",
-        "PCS coaching queue",
-        "One row per valid inbound Q1 <= 3. Edit only the blue coaching columns, save, then import this workbook through WFMHub.",
+        "COACHING",
+        "PCS coaching action plan",
+        "Filter to your team and dates. The team fills only the four blue columns; no Hub import or refresh is required.",
         action_headers,
-        actions,
+        action_rows,
         editable_headers={"Coaching Status", "Coaching Date", "Coach", "Coaching Comment"},
     )
-    if actions:
+    if action_rows:
         status_col = action_headers.index("coaching_status")
         action_sheet.data_validation(
-            4, status_col, 3 + len(actions), status_col,
+            4, status_col, 3 + len(action_rows), status_col,
             {
                 "validate": "list",
                 "source": ["Pending", "Completed", "Not required"],
@@ -371,10 +520,10 @@ def build_pcs_performance_workbook(
             },
         )
         action_sheet.conditional_format(
-            4, status_col, 3 + len(actions), status_col,
+            4, status_col, 3 + len(action_rows), status_col,
             {"type": "text", "criteria": "containing", "value": "Pending", "format": book.report.error},
         )
-    day_headers, day_rows = _query(
+    data_headers, data_rows = _query(
         conn,
         """SELECT business_date, agent_id, agent_name, team_leader, ops_manager,
                   lob, language, inbound_calls AS inbound_call_legs,
@@ -389,57 +538,17 @@ def build_pcs_performance_workbook(
                   CASE WHEN survey_responses<20 THEN 'LOW_SAMPLE' ELSE 'OK' END AS sample_state
            FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
            ORDER BY business_date, lob, team_leader, agent_name""",
-        [min(period.start for period in periods), max(period.end for period in periods)],
+        [data_start, end],
     )
-    # Model-only daily grain for real date slicers and current/prior-month
-    # PivotTables. The visible AGENT_DETAIL sheet remains the simpler
-    # selected-period agent summary.
-    book.tables.append(ModelTable("AGENT_DAY", day_headers, day_rows))
-    dim_agent_headers, dim_agent_rows = _query(
-        conn,
-        """SELECT p.agent_id,
-                  max(coalesce(d.canonical_name,p.agent_name)) AS agent_name,
-                  max(coalesce(d.team_leader,p.team_leader)) AS team_leader,
-                  max(coalesce(d.ops_manager,p.ops_manager)) AS ops_manager,
-                  max(coalesce(d.lob,p.lob)) AS lob,
-                  max(coalesce(d.language,p.language)) AS language
-           FROM mart.agent_pcs_day p
-           LEFT JOIN core.dim_agent d ON d.agent_id=p.agent_id
-           WHERE p.business_date BETWEEN ? AND ?
-           GROUP BY p.agent_id ORDER BY p.agent_id""",
-        [min(period.start for period in periods), max(period.end for period in periods)],
-    )
-    book.tables.append(ModelTable("DIM_AGENT", dim_agent_headers, dim_agent_rows))
-    date_start = min(period.start for period in periods)
-    date_end = max(period.end for period in periods)
-    dim_date_rows = []
-    current_date = date_start
-    while current_date <= date_end:
-        dim_date_rows.append((
-            current_date,
-            current_date.year,
-            current_date.month,
-            current_date.strftime("%Y-%m"),
-            current_date.strftime("%b %Y"),
-            current_date.isocalendar().week,
-            current_date.strftime("%A"),
-            current_date.day,
-        ))
-        current_date += timedelta(days=1)
-    book.tables.append(ModelTable(
-        "DIM_DATE",
-        ["date", "year", "month_number", "month_key", "month_label", "iso_week", "weekday", "day_of_month"],
-        dim_date_rows,
-    ))
+    book.table("PCS_DATA", "PCS clean calculation table", "One agent/day. Use the table filters or Table Design > Insert Slicer; formulas on DASHBOARD read this table directly.", data_headers, data_rows or [tuple(None for _ in data_headers)])
     book.definitions([
         ("PCS Average", "Sum of valid inbound Q1 scores / valid inbound Q1 responses", "Customer experience result", "Only configured discrete Q1 scores are valid"),
         ("PCS Participation", "Inbound raw Q1 nonblank / inbound PCSStatus=1", "Survey participation opportunity", "Invalid nonblank Q1 remains in the numerator"),
         ("Score <= 3", "Count of valid Q1 responses at or below 3", "Follow-up volume", "A count, not a percentage"),
-        ("Actions Rate", "Completed coaching rows / valid inbound Q1 responses at or below 3", "Coaching completion", "One action row is generated for every low-score response"),
+        ("Actions Rate", "Completed rows in COACHING / valid Q1 responses at or below 3", "Coaching completion", "Team entry stays in the workbook; WFMHub does not import it"),
         ("Low sample", "Fewer than 20 valid responses in the selected period", "Interpretation warning", "Does not change the calculated score"),
-        ("Power Pivot PCS Average", "DIVIDE(SUM('PCS Agent Day'[q1_score_sum]), SUM('PCS Agent Day'[valid_q1]))", "Excel master measure", "Copy exactly; do not average agent percentages"),
-        ("Power Pivot Participation", "DIVIDE(SUM('PCS Agent Day'[q1_nonblank]), SUM('PCS Agent Day'[pcs_status_1]))", "Excel master measure", "Copy exactly; source columns are explicitly numeric"),
-        ("Stable Excel feed", str(config.system / "feeds" / "pcs" / "current"), "Power Query folder", "Load connection-only + Add to Data Model"),
+        ("Selector mechanics", "Excel SUMIFS and COUNTIFS over the visible PCS_DATA and COACHING tables", "Interactive management view", "No Power Query, connection, macro, or Data Model"),
+        ("Native slicers", "Click an Excel Table, then Table Design > Insert Slicer", "Optional manual filtering", "Slicers filter the selected table; dashboard selector boxes drive KPI cards"),
     ])
     book.audit(_audit_rows(conn, config, "pcs", start, end))
     return _finish(book, partial, target)
@@ -757,7 +866,10 @@ def build_attendance_today_workbook(
                   coalesce(sum(CASE WHEN call_action='CALL_NO_SHOW' THEN 1 ELSE 0 END),0),
                   coalesce(sum(CASE WHEN call_action='CALL_LATE' THEN 1 ELSE 0 END),0),
                   coalesce(sum(CASE WHEN call_action='CALL_NOT_SEEN_NOW' THEN 1 ELSE 0 END),0),
-                  coalesce(sum(CASE WHEN source_loaded=false THEN 1 ELSE 0 END),0)
+                  coalesce(sum(CASE WHEN attendance_result IN
+                    ('Schedule parse error','Data not loaded','Missing actual evidence',
+                     'Incomplete actual evidence','No schedule overlap')
+                    THEN 1 ELSE 0 END),0)
            FROM mart.attendance_agent_day
            WHERE business_date BETWEEN ? AND ?
              AND assignment_type NOT IN ('Off','Planned absence')""",
@@ -784,8 +896,8 @@ def build_attendance_today_workbook(
             "This workbook is the selected-period callout register; it is not an adherence report.",
             "Choose Today for a live queue or Current Week for every callout case and daily trend in that week.",
             "An unfinished shift can be late or not seen, but can never be marked as early leave.",
-            "No-show requires a completed working shift, a loaded blank LILO row, and no active Agent Status evidence.",
-            "Use Attendance Corrections only after the operating day is complete.",
+            "No-show requires completed-shift evidence: either a loaded blank LILO row or sufficiently covered Agent Status that stays Logged Off.",
+            "Use Attendance Review only after the operating day is complete.",
         ],
         (("Agents", 1),),
         "column",
@@ -825,7 +937,7 @@ def build_attendance_today_workbook(
     )
     book.table("TREND", "Attendance action trend", "Daily counts for the requested range; today remains provisional until shifts close.", trend_headers, trend_rows)
     book.definitions([
-        ("Call no-show", "Completed shift + loaded blank LILO + no active status", "Call and validate absence", "Missing source is never a no-show"),
+        ("Call no-show", "Completed shift + blank LILO row, or sufficient all-Logged-Off Agent Status coverage", "Call and validate absence", "Missing source is never a no-show"),
         ("Call late", "First observed evidence after scheduled start plus tolerance", "Contact / record explanation", "Current shift may still be running"),
         ("Not seen now", "Shift started, no observed evidence yet", "Immediate operational check", "Always provisional"),
         ("Early leave", "Last observed evidence before completed scheduled end", "Historical correction only", "Never evaluated before shift end"),
@@ -915,32 +1027,57 @@ def build_final_absence_product_workbook(
                   coalesce(sum(final_vacation_minutes),0), coalesce(sum(final_unpaid_minutes),0),
                   coalesce(sum(final_shrinkage_minutes),0), coalesce(sum(final_unmapped_minutes),0),
                   coalesce(sum(CASE WHEN final_absence_day THEN 1 ELSE 0 END),0)
-           FROM mart.verint_final_absence_agent_day WHERE business_date BETWEEN ? AND ?""",
+           FROM mart.verint_final_absence_agent_day
+           WHERE business_date BETWEEN ? AND ?
+             AND final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')""",
         [start, end],
     ).fetchone()
     planned, absence, vacation, unpaid, shrinkage, unmapped, absence_days = totals
+    unmapped = conn.execute(
+        """SELECT coalesce(sum(final_unmapped_minutes),0)
+           FROM mart.verint_final_absence_agent_day
+           WHERE business_date BETWEEN ? AND ?""",
+        [start, end],
+    ).fetchone()[0]
+    ledger_exceptions = conn.execute(
+        """SELECT count(*) FROM mart.verint_final_absence_agent_day
+           WHERE business_date BETWEEN ? AND ?
+             AND final_ledger_status NOT IN ('CLEAR','ABSENCE_RECORDED')""",
+        [start, end],
+    ).fetchone()[0]
+    uncoded_empty = conn.execute(
+        """SELECT count(*) FROM mart.verint_final_absence_agent_day
+           WHERE business_date BETWEEN ? AND ? AND final_ledger_status='UNCODED_EMPTY_SHIFT'""",
+        [start, end],
+    ).fetchone()[0]
     status, status_text = _source_state(conn, ("fte", "start_end", "activities"), end, final=True)
     if unmapped:
         status, status_text = "INCOMPLETE", f"{unmapped / 60:,.2f} hour(s) of Verint Activities are unmapped"
+    if uncoded_empty:
+        status, status_text = "INCOMPLETE", f"{uncoded_empty:,} scheduled shift(s) have no final code and no reliable work evidence"
+    elif ledger_exceptions:
+        status, status_text = "INCOMPLETE", f"{ledger_exceptions:,} final-ledger row(s) still require review"
     period_rows = []
     for period in _comparison_periods(start, end):
         row = conn.execute(
             """SELECT coalesce(sum(planned_net_minutes),0), coalesce(sum(final_absence_minutes),0),
                       coalesce(sum(final_vacation_minutes),0), coalesce(sum(final_shrinkage_minutes),0)
-               FROM mart.verint_final_absence_agent_day WHERE business_date BETWEEN ? AND ?""",
+               FROM mart.verint_final_absence_agent_day
+               WHERE business_date BETWEEN ? AND ?
+                 AND final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')""",
             [period.start, period.end],
         ).fetchone()
         period_rows.append((period.label, period.start, period.end, row[0] / 60, row[1] / 60, _ratio(row[1], row[0]), row[2] / 60, _ratio(row[3], row[0])))
     book.dashboard(
         [
-            KpiCard("Planned net hours", planned / 60, "decimal"),
+            KpiCard("Finalized planned hours", planned / 60, "decimal"),
             KpiCard("Final absence hours", absence / 60, "decimal"),
             KpiCard("Final absence rate", _ratio(absence, planned), "percent"),
             KpiCard("Absence agent-days", absence_days, "integer"),
             KpiCard("Vacation hours", vacation / 60, "decimal"),
             KpiCard("Unpaid hours", unpaid / 60, "decimal"),
             KpiCard("Shrinkage rate", _ratio(shrinkage, planned), "percent"),
-            KpiCard("Unmapped hours", unmapped / 60, "decimal", "Must be resolved before payroll"),
+            KpiCard("Ledger exceptions", ledger_exceptions, "integer", f"{uncoded_empty:,} uncoded empty shift(s)"),
         ],
         status,
         status_text,
@@ -949,6 +1086,10 @@ def build_final_absence_product_workbook(
         [
             "This is the final corrected ledger: Verint Activities only, clipped to StartEndTimes schedule boundaries.",
             "LILO and Agent Status detect operational gaps but do not create final payroll categories.",
+            "A scheduled working shift with neither a final Verint code nor reliable operational evidence is UNCODED_EMPTY_SHIFT, never a silent zero.",
+            "Observed Agent Status/LILO gaps without complete Verint coverage remain ledger exceptions until corrected.",
+            "A Verint code with no matching observed gap remains an exception too; the final ledger never assumes it is valid.",
+            "Headline rates include finalized CLEAR/ABSENCE_RECORDED rows only; exception and current provisional rows cannot dilute the result.",
             "Overlapping Activities are unioned before totals; never sum event evidence directly.",
         ],
         (("Absence Rate", 5), ("Shrinkage Rate", 7)),
@@ -963,6 +1104,7 @@ def build_final_absence_product_workbook(
                   sum(final_shrinkage_minutes)/60.0 AS shrinkage_hours,
                   CASE WHEN sum(planned_net_minutes)>0 THEN sum(final_shrinkage_minutes)*1.0/sum(planned_net_minutes) END AS shrinkage_rate
            FROM mart.verint_final_absence_agent_day WHERE business_date BETWEEN ? AND ?
+             AND final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')
            GROUP BY business_date ORDER BY business_date""",
         [start, end],
     )
@@ -982,13 +1124,21 @@ def build_final_absence_product_workbook(
         [start, end],
     )
     book.table("AGENT_DETAIL", "Final absence agent ledger", "Authoritative agent/day grain for payroll and Operations.", detail_headers, detail_rows)
-    exceptions = [row for row in detail_rows if row[detail_headers.index("final_unmapped_hours")] or row[detail_headers.index("final_ledger_status")] == "UNMAPPED_REVIEW"]
-    book.table("EXCEPTIONS", "Final-ledger exceptions", "Unmapped classifications must be resolved before payroll use.", detail_headers, exceptions)
+    exceptions = [
+        row for row in detail_rows
+        if row[detail_headers.index("final_unmapped_hours")]
+        or row[detail_headers.index("final_ledger_status")] not in {"CLEAR", "ABSENCE_RECORDED"}
+    ]
+    book.table("EXCEPTIONS", "Final-ledger exceptions", "Unmapped, unsupported, empty, uncorrected and partially corrected rows must be resolved before payroll use.", detail_headers, exceptions)
     book.definitions([
         ("Final absence rate", "Unioned classified absence minutes / planned net minutes", "Payroll absence", "Activities-only final ledger"),
         ("Final shrinkage rate", "Unioned configured shrinkage minutes / planned net minutes", "Capacity loss", "Includes configured nonproductive categories"),
         ("Planned net", "Scheduled span capped by configured standard day", "Common denominator", "StartEndTimes only"),
         ("Unmapped", "Verint Activity without an approved classification", "Rulebook action", "Blocks final status"),
+        ("Uncoded empty shift", "Working shift with no final code and no reliable Agent Status/LILO evidence", "Correction completeness check", "Blocks final status; never treated as zero absence"),
+        ("Uncorrected observed gap", "Agent Status/LILO proves a gap but Verint has no final code", "Correction completeness check", "Blocks final status"),
+        ("Partial correction review", "Verint has a code but some observed gap minutes remain uncovered", "Correction completeness check", "Blocks final status"),
+        ("Verint without observed gap", "A final Verint code has no matching Agent Status/LILO gap", "Correction validity check", "Blocks final status"),
     ])
     book.audit(_audit_rows(conn, config, "absence", start, end))
     return _finish(book, partial, target)
@@ -1001,27 +1151,32 @@ def build_attendance_corrections_workbook(
     end: date,
     output: Path | None = None,
 ) -> Path:
-    """Build a completed-day correction queue with the Verint-style timeline."""
+    """Build the selected period's completed-day correction queue and timeline."""
 
-    from .governed_workbooks import _add_shift_view, _completed_timeline_day
+    from .governed_workbooks import _add_shift_view
 
-    report_day = _completed_timeline_day(conn, end)
+    today = date.today()
+    completed_through = min(end, today - timedelta(days=1))
     book, partial, target = _atomic_book(
-        config, "corrections", "ATTENDANCE CORRECTIONS", report_day, report_day, output,
+        config, "corrections", "ATTENDANCE REVIEW", start, end, output,
     )
     gap_count, gap_minutes, agents = conn.execute(
         """SELECT count(*), coalesce(sum(residual_minutes),0), count(DISTINCT agent_id)
-           FROM mart.correction_residual_segment WHERE business_date=?""",
-        [report_day],
+           FROM mart.correction_residual_segment
+           WHERE business_date BETWEEN ? AND ? AND business_date<?""",
+        [start, end, today],
     ).fetchone()
     missing = conn.execute(
         """SELECT count(*) FROM mart.attendance_agent_day
-           WHERE business_date=? AND assignment_type NOT IN ('Off','Planned absence')
-             AND source_loaded=false""",
-        [report_day],
+           WHERE business_date BETWEEN ? AND ? AND business_date<?
+             AND assignment_type NOT IN ('Off','Planned absence')
+             AND attendance_result IN
+               ('Schedule parse error','Data not loaded','Missing actual evidence',
+                'Incomplete actual evidence','No schedule overlap')""",
+        [start, end, today],
     ).fetchone()[0]
     status, status_text = _source_state(
-        conn, ("fte", "start_end", "lilo", "agent_status", "activities"), report_day, final=True,
+        conn, ("fte", "start_end", "lilo", "agent_status", "activities"), completed_through, final=True,
     )
     if missing:
         status, status_text = "INCOMPLETE", f"{missing:,} scheduled row(s) lack complete observed evidence"
@@ -1037,9 +1192,10 @@ def build_attendance_corrections_workbook(
         ["Measure", "Value"],
         [("Residual segments", gap_count), ("Residual gap hours", gap_minutes / 60 if gap_minutes else 0), ("Agents to review", agents), ("Missing evidence", missing)],
         [
-            "Only completed-day residual gaps appear here; an unfinished current-day shift cannot become an early-leave correction.",
+            f"The selected range is {start:%Y-%m-%d} to {end:%Y-%m-%d}; every completed date through {completed_through:%Y-%m-%d} is included, not only yesterday.",
+            "Today is excluded from correction review, so an unfinished shift can never become an early-leave correction.",
             "GAPS is the editable action list. Pale-blue columns are the only human decisions accepted for import.",
-            "SHIFT_VIEW visualizes the full planned-versus-observed shift; the exact segment data is exported to the template model package.",
+            "SHIFT_VIEW visualizes the full planned-versus-observed shift; every selected completed date remains in the workbook evidence.",
             "Verint Activities verify whether an observed gap is corrected; they never create the original gap.",
         ],
     )
@@ -1058,10 +1214,10 @@ def build_attendance_corrections_workbook(
            FROM mart.correction_residual_segment r
            JOIN mart.correction_candidate c ON c.correction_id=r.correction_id
            LEFT JOIN core.dim_agent d ON d.agent_id=r.agent_id
-           WHERE r.business_date=?
+           WHERE r.business_date BETWEEN ? AND ? AND r.business_date<?
              AND coalesce(c.validation_status,'Open') NOT IN ('Injected','Rejected')
-           ORDER BY c.priority, r.residual_minutes DESC, r.agent_id, r.residual_start""",
-        [report_day],
+           ORDER BY r.business_date, c.priority, r.residual_minutes DESC, r.agent_id, r.residual_start""",
+        [start, end, today],
     )
     ws = book.table(
         "GAPS", "Residual gaps ready for Verint correction",
@@ -1088,16 +1244,17 @@ def build_attendance_corrections_workbook(
                   segment_start, segment_end, segment_minutes, planned_state,
                   actual_status, actual_category, mismatch_type, is_gap,
                   observed_source, source_file, evaluation_as_of
-           FROM mart.shift_timeline_segment t WHERE business_date=?
+           FROM mart.shift_timeline_segment t
+           WHERE business_date BETWEEN ? AND ? AND business_date<?
              AND EXISTS (
                  SELECT 1 FROM mart.correction_residual_segment r
                  WHERE r.business_date=t.business_date AND r.agent_id=t.agent_id
              )
-           ORDER BY agent_id, segment_start""",
-        [report_day],
+           ORDER BY business_date, agent_id, segment_start""",
+        [start, end, today],
     )
     timeline_dicts = [dict(zip(timeline_headers, row)) for row in timeline_rows]
-    _add_shift_view(book.report, timeline_dicts, report_day)
+    _add_shift_view(book.report, timeline_dicts, start, completed_through)
     book.tables.append(ModelTable("TIMELINE", timeline_headers, timeline_rows))
     book.definitions([
         ("Observed gap", "Scheduled time minus unioned LILO/Agent Status evidence", "Correction candidate", "Activities cannot create the gap"),
@@ -1105,5 +1262,8 @@ def build_attendance_corrections_workbook(
         ("Current-day tail", "Future portion of an unfinished shift", "No action", "Never early leave"),
         ("Correction ID", "Stable action key", "Import decisions", "One correction may have several residual segments"),
     ])
-    book.audit(_audit_rows(conn, config, "corrections", report_day, report_day))
+    book.audit(_audit_rows(
+        conn, config, "corrections", start, end,
+        (("Completed-date cutoff", completed_through, "Today is excluded from correction review"),),
+    ))
     return _finish(book, partial, target)

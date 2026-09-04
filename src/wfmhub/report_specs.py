@@ -61,12 +61,15 @@ def ensure_report_catalog(home: Path, target: Path | None = None) -> Path:
             default_meta = tomllib.loads(default.read_text(encoding="utf-8")).get("catalog", {})
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             current_meta, default_meta = {}, {}
-        if (
-            str(current_meta.get("version", "")) == "2026.09.3"
-            and str(default_meta.get("version", "")) == "2026.09.4"
-        ):
+        current_version = str(current_meta.get("version", ""))
+        default_version = str(default_meta.get("version", ""))
+        if (current_version, default_version) in {
+            ("2026.09.3", "2026.09.4"),
+            ("2026.09.4", "2026.09.5"),
+        }:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            shutil.copy2(target, target.with_name(f"{target.stem}_pre_2026_09_4_{stamp}{target.suffix}"))
+            safe_version = default_version.replace(".", "_")
+            shutil.copy2(target, target.with_name(f"{target.stem}_pre_{safe_version}_{stamp}{target.suffix}"))
             shutil.copy2(default, target)
     return target
 

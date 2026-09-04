@@ -15,11 +15,11 @@ from .database import connect
 
 
 ASCII_LOGO = (
-    " __        _______ __  __   _   _ _   _ ____ ",
-    " \\ \\      / /  ___|  \\/  | | | | | | | | __ )",
-    "  \\ \\ /\\ / /| |_  | |\\/| | | |_| | | | |  _ \\",
-    "   \\ V  V / |  _| | |  | | |  _  | |_| | |_) |",
-    "    \\_/\\_/  |_|   |_|  |_| |_| |_|\\___/|____/ ",
+    "W   W  FFFFF  M   M     H   H  U   U  BBBB ",
+    "W   W  F      MM MM     H   H  U   U  B   B",
+    "W W W  FFF    M M M     HHHHH  U   U  BBBB ",
+    "WW WW  F      M   M     H   H  U   U  B   B",
+    "W   W  F      M   M     H   H   UUU   BBBB ",
 )
 PANEL_INNER_WIDTH = 76
 
