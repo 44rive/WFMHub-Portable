@@ -9,6 +9,7 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 
 from wfmhub.ingestion import AgentScope, SourceSchemaError, parse_agent_status, parse_calls, parse_forecast, parse_fte, parse_lilo, parse_queue_actual, parse_schedule
+from tools.build_fte_template import standardize_source
 
 
 class ParserTests(unittest.TestCase):
@@ -92,6 +93,45 @@ class ParserTests(unittest.TestCase):
             self.assertIn("tblFTEAway", workbook["Away"].tables)
         finally:
             workbook.close()
+
+    def test_fte_parses_governed_pto_and_away_registers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "FTE Count.xlsx"
+            workbook = Workbook()
+            agent = workbook.active
+            agent.title = "Agent"
+            agent.append(["Client ID", "Status", "Name"])
+            agent.append(["00123", "Active", "Jane Agent"])
+            pto = workbook.create_sheet("PTO")
+            pto.append([
+                "Client ID", "Name", "Start date", "End date", "Day coverage",
+                "Start time", "End time", "PTO type", "Approval status", "Comment",
+            ])
+            pto.append(["00123", "Jane Agent", date(2026, 8, 1), date(2026, 8, 1), "Partial day", "08:00", "10:00", "Vacation", "Approved", "OK"])
+            pto.append(["00123", "Jane Agent", date(2026, 8, 2), date(2026, 8, 2), "Partial day", None, None, "Vacation", "Approved", "bad"])
+            away = workbook.create_sheet("Away")
+            away.append(["Client ID", "Name", "Start date", "End date", "Away type", "Case status", "Comment"])
+            away.append(["00123", "Jane Agent", date(2026, 8, 3), None, "Long sickness", "Active", None])
+            workbook.save(path)
+
+            result = parse_fte(path, "file")
+            rows = result.tables["raw.fte_time_off"]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["agent_id"], "00123")
+            self.assertEqual(rows[0]["day_coverage"], "PARTIAL_DAY")
+            self.assertEqual(rows[1]["source_kind"], "AWAY")
+            self.assertIsNone(rows[1]["end_date"])
+            self.assertEqual(len(result.rejected), 1)
+            self.assertIn("Partial day PTO requires", result.rejected[0])
+
+            standardized = Path(folder) / "Standardized FTE Count.xlsx"
+            standardize_source(path, standardized)
+            preserved = parse_fte(standardized, "standardized")
+            self.assertEqual(len(preserved.tables["raw.fte_time_off"]), 2)
+            self.assertEqual(
+                {row["source_kind"] for row in preserved.tables["raw.fte_time_off"]},
+                {"PTO", "AWAY"},
+            )
 
     def test_fte_finds_renamed_sheet_offset_header_and_aliases(self):
         with tempfile.TemporaryDirectory() as folder:

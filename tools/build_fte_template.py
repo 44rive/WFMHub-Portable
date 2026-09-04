@@ -154,7 +154,7 @@ def build_template(
         "7. Save this file as FTE Count.xlsx inside the configured FTE folder.",
         "8. Never paste worldwide LILO, Agent Status, schedule, or call data into this workbook.",
         "9. WFMHub scopes extracts through the Agent sheet by Agent ID or one unique normalized-name match.",
-        "10. PTO/Away are population-ready registers; this release does not apply them to attendance or staffing calculations yet.",
+        "10. Approved PTO and Active/Closed Away change expected work. Planned Away affects future staffing only; Verint Activities stay the final payroll record.",
     ]
     guide["A3"] = "How to use it"
     guide["A3"].font = Font(name="Calibri", size=12, bold=True, color="0F3B42")
@@ -291,8 +291,29 @@ def standardize_source(source: Path, target: Path) -> Path:
     sys.path.insert(0, str(ROOT / "src"))
     from wfmhub.ingestion import parse_fte
 
-    rows = parse_fte(source.resolve(), "standardized-template").tables["raw.fte_agent"]
-    return build_template(target.resolve(), rows)
+    parsed = parse_fte(source.resolve(), "standardized-template")
+    agents = parsed.tables["raw.fte_agent"]
+    pto_rows = []
+    away_rows = []
+    for row in parsed.tables.get("raw.fte_time_off", []):
+        common = {
+            "agent_id": row["agent_id"], "agent_name": row["agent_name"],
+            "start_date": row["start_date"], "end_date": row["end_date"],
+            "comment": row["comment"],
+        }
+        if row["source_kind"] == "PTO":
+            pto_rows.append({
+                **common, "day_coverage": row["day_coverage"].replace("_", " ").title(),
+                "start_time": row["start_time"], "end_time": row["end_time"],
+                "pto_type": row["absence_type"],
+                "approval_status": row["record_status"].title(),
+            })
+        else:
+            away_rows.append({
+                **common, "away_type": row["absence_type"],
+                "case_status": row["record_status"].title(),
+            })
+    return build_template(target.resolve(), agents, pto_rows, away_rows)
 
 
 if __name__ == "__main__":

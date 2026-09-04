@@ -69,6 +69,9 @@ def _display_header(name: str) -> str:
         "score_le_3": "Score <= 3", "score_gt_3": "Score > 3",
         "inbound_call_legs": "Inbound Call Legs", "invalid_q1": "Invalid Q1",
         "sample_state": "Sample State", "coaching_key": "Coaching Key",
+        "agent_key": "Agent Key", "latest_day_average": "Latest Day PCS Average",
+        "current_mtd_average": "Current MTD PCS Average",
+        "prior_mtd_average": "Prior MTD PCS Average",
         "coaching_status": "Coaching Status", "coaching_date": "Coaching Date",
         "coaching_comment": "Coaching Comment",
     }
@@ -133,14 +136,14 @@ class ExcelReport:
             worksheet.set_row(row_index, 20)
             for column, value in enumerate(values):
                 header = display[column]
-                fmt = self.editable_date if header in {"Injected Date", "Coaching Date"} and header in editable_headers else self.editable if header in editable_headers else self.body
+                fmt = self.editable_date if header in {"Injected Date", "Coaching Date", "Due Date"} and header in editable_headers else self.editable if header in editable_headers else self.body
                 if isinstance(value, datetime):
                     fmt = self.datetime
                 elif isinstance(value, date):
-                    fmt = self.date
+                    fmt = self.editable_date if header in editable_headers else self.date
                 elif header.endswith(" %") or any(token in header for token in (" Rate", "Participation", "Availability", "Service Level")):
                     fmt = self.percent
-                elif isinstance(value, (int, float)) and not isinstance(value, bool) and any(token in header for token in ("Average", "Hours", "FTE", "Variance")):
+                elif isinstance(value, (int, float)) and not isinstance(value, bool) and any(token in header for token in ("Average", "Hours", "FTE", "Variance", "Movement")):
                     fmt = self.decimal
                 elif isinstance(value, (int, float)) and not isinstance(value, bool):
                     fmt = self.integer

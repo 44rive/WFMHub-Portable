@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.6"
+version = "2026.09.7"
 description = "One decision per workbook; each finished report is generated directly by Python and SQLite."
 
 [[packs]]
@@ -9,7 +9,7 @@ key = "pcs"
 title = "PCS PERFORMANCE"
 purpose = "Interactive daily, MTD and previous-month PCS score, participation, and coaching."
 finding_domains = ["pcs", "data_quality"]
-sheets = ["DASHBOARD", "TEAM_VIEW", "AGENT_VIEW", "TREND", "COACHING", "PCS_DATA", "DEFINITIONS", "_AUDIT"]
+sheets = ["DASHBOARD", "AGENT_RESULTS", "COACHING", "PCS_DATA", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
 
 [[packs]]
 key = "bonus"

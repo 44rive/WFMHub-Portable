@@ -121,6 +121,7 @@ class AgentScope:
 AGENT_SCOPED_FAMILIES = {"schedule", "lilo", "agent_status", "calls"}
 AGENT_SCOPE_POLICY_VERSION = "v2-active-or-leaver-through-leave-date"
 SCHEDULE_PARSER_POLICY_VERSION = "v2-explicit-start-end-vs-activities"
+FTE_PARSER_POLICY_VERSION = "v2-time-off-registers"
 
 
 FILENAME_DATE_RE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
@@ -128,6 +129,11 @@ FILENAME_DATE_RE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
 
 TABLE_COLUMNS: dict[str, list[str]] = {
     "raw.fte_agent": ["source_file_id", "source_row", "agent_id", "employment_status", "agent_name", "team_leader", "ops_manager", "lob", "market", "language", "location", "city", "fte", "end_date"],
+    "raw.fte_time_off": [
+        "source_file_id", "source_sheet", "source_row", "source_kind",
+        "agent_id", "agent_name", "start_date", "end_date", "day_coverage",
+        "start_time", "end_time", "absence_type", "record_status", "comment",
+    ],
     "raw.schedule_shift": ["source_file_id", "source_row", "schedule_date", "agent_id_raw", "agent_id", "agent_name", "scheduling_period", "shift_assignment", "assignment", "assignment_type", "scheduled_start", "scheduled_end", "shift_events", "parse_ok"],
     "raw.schedule_event": ["source_file_id", "source_row", "event_index", "schedule_date", "agent_id", "agent_name", "activity", "activity_type", "event_start", "event_end", "parse_ok"],
     "raw.lilo": ["source_file_id", "source_row", "extract_date", "agent_id", "agent_name", "first_login", "raw_last_logout", "last_logout", "overnight_adjusted"],
@@ -320,6 +326,136 @@ def _find_fte_table(workbook, path: Path) -> tuple[str, int, Any, dict[str, int]
     )
 
 
+def _fte_register_sheet(workbook, names: set[str], label: str):
+    matches = [sheet for sheet in workbook.worksheets if normalize_header(sheet.title) in names]
+    if len(matches) > 1:
+        raise SourceSchemaError(
+            f"FTE workbook contains multiple {label} sheets: "
+            + ", ".join(repr(sheet.title) for sheet in matches)
+        )
+    return matches[0] if matches else None
+
+
+def _register_header(sheet, required: set[str], label: str) -> tuple[int, dict[str, int], Any]:
+    rows = sheet.iter_rows(values_only=True)
+    for header_row, values in enumerate(rows, 1):
+        if header_row > 25:
+            break
+        normalized = {
+            normalize_header(value): index
+            for index, value in enumerate(values)
+            if str(value or "").strip()
+        }
+        if required <= normalized.keys():
+            return header_row, normalized, rows
+    raise SourceSchemaError(
+        f"FTE {label} sheet {sheet.title!r} is missing required template headers. "
+        "Copy the current standard FTE template and keep its headers unchanged."
+    )
+
+
+def _parse_fte_registers(workbook, file_id: str) -> tuple[list[dict[str, Any]], list[str]]:
+    output: list[dict[str, Any]] = []
+    rejected: list[str] = []
+
+    pto = _fte_register_sheet(workbook, {"PTO", "PTOS"}, "PTO")
+    if pto is not None:
+        required = {
+            "CLIENTID", "STARTDATE", "ENDDATE", "DAYCOVERAGE", "STARTTIME",
+            "ENDTIME", "PTOTYPE", "APPROVALSTATUS",
+        }
+        header_row, indexes, rows = _register_header(pto, required, "PTO")
+        for source_row, values in enumerate(rows, header_row + 1):
+            get = lambda header: values[indexes[header]] if indexes[header] < len(values) else None
+            if not any(value not in (None, "") for value in values):
+                continue
+            agent_id = normalize_id(get("CLIENTID"))
+            start_date = parse_date(get("STARTDATE"))
+            end_date = parse_date(get("ENDDATE"))
+            coverage_text = " ".join(str(get("DAYCOVERAGE") or "").strip().upper().replace("_", " ").split())
+            coverage = {"FULL DAY": "FULL_DAY", "PARTIAL DAY": "PARTIAL_DAY"}.get(coverage_text)
+            start_time = parse_time(get("STARTTIME"))
+            end_time = parse_time(get("ENDTIME"))
+            absence_type = _clean(get("PTOTYPE"))
+            status = str(get("APPROVALSTATUS") or "").strip().upper()
+            problems = []
+            if not agent_id:
+                problems.append("Client ID is required")
+            if start_date is None or end_date is None:
+                problems.append("valid Start date and End date are required")
+            elif end_date < start_date:
+                problems.append("End date is before Start date")
+            if coverage is None:
+                problems.append("Day coverage must be Full day or Partial day")
+            if coverage == "PARTIAL_DAY":
+                if start_date is not None and end_date is not None and start_date != end_date:
+                    problems.append("Partial day PTO must use the same Start date and End date")
+                if start_time is None or end_time is None or end_time <= start_time:
+                    problems.append("Partial day PTO requires Start time before End time")
+            if not absence_type:
+                problems.append("PTO type is required")
+            if status not in {"APPROVED", "PENDING", "CANCELLED"}:
+                problems.append("Approval status must be Approved, Pending or Cancelled")
+            if problems:
+                rejected.append(f"{pto.title} row {source_row}: {'; '.join(problems)}")
+                continue
+            output.append({
+                "source_file_id": file_id, "source_sheet": pto.title,
+                "source_row": source_row, "source_kind": "PTO",
+                "agent_id": agent_id,
+                "agent_name": _clean(values[indexes["NAME"]]) if "NAME" in indexes and indexes["NAME"] < len(values) else None,
+                "start_date": start_date, "end_date": end_date,
+                "day_coverage": coverage,
+                "start_time": start_time if coverage == "PARTIAL_DAY" else None,
+                "end_time": end_time if coverage == "PARTIAL_DAY" else None,
+                "absence_type": absence_type, "record_status": status,
+                "comment": _clean(values[indexes["COMMENT"]]) if "COMMENT" in indexes and indexes["COMMENT"] < len(values) else None,
+            })
+
+    away = _fte_register_sheet(
+        workbook, {"AWAY", "AWAYPEOPLE", "LONGABSENCE", "LONGABSENCES"}, "Away",
+    )
+    if away is not None:
+        required = {"CLIENTID", "STARTDATE", "ENDDATE", "AWAYTYPE", "CASESTATUS"}
+        header_row, indexes, rows = _register_header(away, required, "Away")
+        for source_row, values in enumerate(rows, header_row + 1):
+            get = lambda header: values[indexes[header]] if indexes[header] < len(values) else None
+            if not any(value not in (None, "") for value in values):
+                continue
+            agent_id = normalize_id(get("CLIENTID"))
+            start_date = parse_date(get("STARTDATE"))
+            end_date = parse_date(get("ENDDATE"))
+            absence_type = _clean(get("AWAYTYPE"))
+            status = str(get("CASESTATUS") or "").strip().upper()
+            problems = []
+            if not agent_id:
+                problems.append("Client ID is required")
+            if start_date is None:
+                problems.append("a valid Start date is required")
+            if start_date is not None and end_date is not None and end_date < start_date:
+                problems.append("End date is before Start date")
+            if not absence_type:
+                problems.append("Away type is required")
+            if status not in {"ACTIVE", "PLANNED", "CLOSED", "CANCELLED"}:
+                problems.append("Case status must be Active, Planned, Closed or Cancelled")
+            if end_date is None and status != "ACTIVE":
+                problems.append("only an Active case may have a blank End date")
+            if problems:
+                rejected.append(f"{away.title} row {source_row}: {'; '.join(problems)}")
+                continue
+            output.append({
+                "source_file_id": file_id, "source_sheet": away.title,
+                "source_row": source_row, "source_kind": "AWAY",
+                "agent_id": agent_id,
+                "agent_name": _clean(values[indexes["NAME"]]) if "NAME" in indexes and indexes["NAME"] < len(values) else None,
+                "start_date": start_date, "end_date": end_date,
+                "day_coverage": "FULL_DAY", "start_time": None, "end_time": None,
+                "absence_type": absence_type, "record_status": status,
+                "comment": _clean(values[indexes["COMMENT"]]) if "COMMENT" in indexes and indexes["COMMENT"] < len(values) else None,
+            })
+    return output, rejected
+
+
 def parse_fte(path: Path, file_id: str) -> ParseResult:
     workbook = load_workbook(path, read_only=True, data_only=True, keep_links=False)
     try:
@@ -349,7 +485,8 @@ def parse_fte(path: Path, file_id: str) -> ParseResult:
             raise SourceSchemaError(
                 f"FTE agent table on sheet {sheet_name!r} has headers but no populated agent rows: {path.name}"
             )
-        return ParseResult({"raw.fte_agent": output})
+        time_off, rejected = _parse_fte_registers(workbook, file_id)
+        return ParseResult({"raw.fte_agent": output, "raw.fte_time_off": time_off}, rejected)
     finally:
         workbook.close()
 
@@ -1179,6 +1316,10 @@ def ingest_all(
                 progress(index, total, f"Failed {candidate.family}: {path.name}")
             continue
         scope_fingerprint = scope.fingerprint if scope is not None else ""
+        if candidate.family == "fte":
+            # A parser upgrade must re-read an unchanged workbook so newly
+            # governed worksheets do not remain invisible in an older DB.
+            scope_fingerprint = FTE_PARSER_POLICY_VERSION
         if candidate.family == "schedule":
             scope_fingerprint = f"{scope_fingerprint}|{SCHEDULE_PARSER_POLICY_VERSION}"
         existing = conn.execute(
@@ -1253,24 +1394,29 @@ def ingest_all(
                     for table, rows in result.tables.items():
                         _insert_rows(conn, table, rows)
                 source_variant = result.source_variant if result is not None else None
+                load_note = (
+                    "; ".join(result.rejected[:20])
+                    if result is not None and result.rejected else None
+                )
                 conn.execute(
                     """INSERT INTO meta.source_file(
                            file_id, source_family, source_path, file_name, sha256, size_bytes,
                            modified_at, discovered_at, loaded_at, active, status, row_count,
                            rejected_count, error_message, scope_fingerprint, scoped_out_count,
                            source_variant
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, 'SUCCESS', ?, ?, NULL, ?, ?, ?)
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, 'SUCCESS', ?, ?, ?, ?, ?, ?)
                        ON CONFLICT(file_id) DO UPDATE SET
                            source_family=excluded.source_family, source_path=excluded.source_path,
                            file_name=excluded.file_name, sha256=excluded.sha256,
                            size_bytes=excluded.size_bytes, modified_at=excluded.modified_at,
                            discovered_at=excluded.discovered_at, loaded_at=excluded.loaded_at,
                            active=true, status='SUCCESS', row_count=excluded.row_count,
-                           rejected_count=excluded.rejected_count, error_message=NULL,
+                           rejected_count=excluded.rejected_count,
+                           error_message=excluded.error_message,
                            scope_fingerprint=excluded.scope_fingerprint,
                            scoped_out_count=excluded.scoped_out_count,
                            source_variant=excluded.source_variant""",
-                    [file_id, candidate.family, path_text, path.name, sha256, stat.st_size, modified_at, discovered_at, datetime.now(), row_count, rejected_count, scope_fingerprint, scoped_out_count, source_variant],
+                    [file_id, candidate.family, path_text, path.name, sha256, stat.st_size, modified_at, discovered_at, datetime.now(), row_count, rejected_count, load_note, scope_fingerprint, scoped_out_count, source_variant],
                 )
                 conn.execute("COMMIT")
             except Exception:

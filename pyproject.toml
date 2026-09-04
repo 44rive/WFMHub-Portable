@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wfmhub-portable"
-version = "0.13.1"
+version = "0.14.0"
 description = "Corporate-compatible portable SQLite WFM data hub and Excel report generator"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"

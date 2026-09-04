@@ -67,6 +67,10 @@ def ensure_report_catalog(home: Path, target: Path | None = None) -> Path:
             ("2026.09.3", "2026.09.4"),
             ("2026.09.4", "2026.09.5"),
             ("2026.09.5", "2026.09.6"),
+            ("2026.09.3", "2026.09.7"),
+            ("2026.09.4", "2026.09.7"),
+            ("2026.09.5", "2026.09.7"),
+            ("2026.09.6", "2026.09.7"),
         }:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             safe_version = default_version.replace(".", "_")

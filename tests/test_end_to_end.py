@@ -187,6 +187,109 @@ class EndToEndTests(unittest.TestCase):
         with patch("wfmhub.models.ZoneInfo", side_effect=ZoneInfoNotFoundError("missing")):
             self.assertEqual(_evaluation_time("Europe/Berlin", supplied), supplied)
 
+    def test_full_day_pto_drives_expected_work_and_verint_completeness(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder) / "hub"
+            source = Path(folder) / "source"
+            (home / "config").mkdir(parents=True)
+            for name in (
+                "default.toml", "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml",
+            ):
+                shutil.copy2(REPO / "config" / name, home / "config" / name)
+            shutil.copytree(REPO / "sql", home / "sql")
+
+            fte = source / "FTE/FTE Count.xlsx"
+            make_fte(fte)
+            workbook = load_workbook(fte)
+            pto = workbook.create_sheet("PTO")
+            pto.append([
+                "Client ID", "Name", "Start date", "End date", "Day coverage",
+                "Start time", "End time", "PTO type", "Approval status", "Comment",
+            ])
+            pto.append(["200", "Agent 200", date(2026, 8, 1), date(2026, 8, 1), "Full day", None, None, "Vacation", "Approved", "Approved request"])
+            pto.append(["100", "Agent 100", date(2026, 8, 1), date(2026, 8, 1), "Partial day", "12:00", "13:00", "Personal leave", "Approved", "Appointment"])
+            pto.append(["300", "Agent 300", date(2026, 8, 1), date(2026, 8, 1), "Partial day", "10:00", "11:00", "Personal leave", "Approved", "Appointment"])
+            away = workbook.create_sheet("Away")
+            away.append(["Client ID", "Name", "Start date", "End date", "Away type", "Case status", "Comment"])
+            away.append(["300", "Agent 300", date(2026, 8, 1), date(2026, 8, 1), "Long sickness", "Planned", "Future planning only"])
+            workbook.save(fte)
+            workbook.close()
+            make_start_end_schedule(source / "Verint/Schedules & Activities/StartEndTimes.txt")
+            make_lilo(source / "Storm/LILO/LILO 2026-08-01.csv", [
+                ["Agent 100", "100", "2026-08-01 08:00:00", "2026-08-01 16:00:00"],
+                ["Agent 200", "200", "", ""],
+                ["Agent 300", "300", "", ""],
+            ])
+            status_path = source / "Storm/Agent Status/Status 2026-08-01.csv"
+            status_path.parent.mkdir(parents=True, exist_ok=True)
+            with status_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["[Serial Number]", "[Status]", "[Status Start Date and Time]", "[Agent]", "[Agent ID]", "[Status Duration]", "[Queue]"])
+                writer.writerow(["pto-gap", "Logged Off", "8/1/2026 12:00", "Agent 100", "100", "1:00:00", "Queue"])
+
+            config_file = ensure_user_config(home)
+            write_source_root(config_file, source)
+            config = load_config(home)
+            with write_session(config) as conn:
+                self.assertEqual(ingest_all(conn, config).failed, 0)
+                refresh_models(
+                    conn, config, "pto-test", date(2026, 8, 1), date(2026, 8, 1),
+                    as_of=datetime(2026, 8, 1, 17, 0),
+                )
+                attendance = conn.execute(
+                    """SELECT attendance_result, planned_work_minutes,
+                              planning_overlay_minutes, requires_call
+                       FROM mart.attendance_agent_day WHERE agent_id='200'"""
+                ).fetchone()
+                self.assertEqual(attendance, ("PTO", 0, 480, 0))
+                self.assertEqual(
+                    conn.execute("SELECT count(*) FROM mart.correction_candidate WHERE agent_id='200'").fetchone()[0],
+                    0,
+                )
+                partial = conn.execute(
+                    """SELECT planned_work_minutes, planning_overlay_minutes
+                       FROM mart.attendance_agent_day WHERE agent_id='100'"""
+                ).fetchone()
+                self.assertEqual(partial, (420, 60))
+                planned_past = conn.execute(
+                    """SELECT attendance_result, planning_overlay_minutes, no_show_minutes
+                       FROM mart.attendance_agent_day WHERE agent_id='300'"""
+                ).fetchone()
+                self.assertNotEqual(planned_past[0], "Away")
+                self.assertEqual(planned_past, ("No show - partial time off", 60, 420))
+                split_gaps = conn.execute(
+                    """SELECT time(gap_start), time(gap_end), gap_minutes
+                       FROM mart.correction_candidate WHERE agent_id='300'
+                       ORDER BY gap_start"""
+                ).fetchall()
+                self.assertEqual(split_gaps, [
+                    ("08:00:00", "10:00:00", 120),
+                    ("11:00:00", "16:00:00", 300),
+                ])
+                self.assertEqual(
+                    conn.execute("SELECT count(*) FROM mart.correction_candidate WHERE agent_id='100'").fetchone()[0],
+                    0,
+                )
+                staffing = conn.execute(
+                    """SELECT gross_scheduled_fte, planned_time_off_fte, scheduled_fte
+                       FROM mart.staffing_interval WHERE time(interval_start)='08:00:00'
+                         AND lob='RSA' AND language='EN'"""
+                ).fetchone()
+                self.assertEqual(staffing, (3.0, 1.0, 2.0))
+                noon_staffing = conn.execute(
+                    """SELECT gross_scheduled_fte, planned_time_off_fte, scheduled_fte
+                       FROM mart.staffing_interval WHERE time(interval_start)='12:00:00'
+                         AND lob='RSA' AND language='EN'"""
+                ).fetchone()
+                self.assertEqual(noon_staffing, (3.0, 2.0, 1.0))
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_id='200'"
+                    ).fetchone()[0],
+                    "PLANNED_TIME_OFF_NOT_IN_VERINT",
+                )
+
     def test_refresh_builds_safe_attendance_gaps_and_excel(self):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "hub"
@@ -551,12 +654,18 @@ class EndToEndTests(unittest.TestCase):
             focused_pcs_book = load_workbook(focused_pcs_report, read_only=False, data_only=False)
             try:
                 self.assertEqual(focused_pcs_book.sheetnames, [
-                    "DASHBOARD", "TEAM_VIEW", "AGENT_VIEW", "TREND", "COACHING",
-                    "PCS_DATA", "DEFINITIONS", "_AUDIT",
+                    "DASHBOARD", "AGENT_RESULTS", "COACHING", "PCS_DATA",
+                    "DEFINITIONS", "_LOOKUPS", "_AUDIT",
                 ])
                 self.assertIn("SUMIFS(tblPcsData", focused_pcs_book["DASHBOARD"]["A11"].value)
                 self.assertIn("tblPcsData", focused_pcs_book["PCS_DATA"].tables)
                 self.assertIn("tblCoaching", focused_pcs_book["COACHING"].tables)
+                self.assertEqual(focused_pcs_book["_LOOKUPS"].sheet_state, "hidden")
+                defined = {
+                    item.name: item.attr_text
+                    for item in focused_pcs_book.defined_names.values()
+                }
+                self.assertIn("Current week", defined["PCS_From"])
             finally:
                 focused_pcs_book.close()
             service_book = load_workbook(service_report, read_only=True, data_only=True)

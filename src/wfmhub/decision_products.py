@@ -8,6 +8,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from openpyxl import load_workbook
+
 from .config import Config
 from .database import DatabaseConnection
 from .metrics import MetricCatalog, evaluate_metric, load_metric_catalog
@@ -195,42 +197,44 @@ def _pcs_coaching_rows(
     allowed_scores = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
     return _query(
         conn,
-        f"""SELECT c.call_key AS coaching_key,
-                   c.business_date, c.call_start,
-                   c.call_reference_number, c.call_id,
-                   c.agent_id,
+        f"""SELECT CASE WHEN c.{primary_score}<=2 THEN 'HIGH' ELSE 'NORMAL' END AS priority,
+                   d.team_leader,
                    coalesce(d.canonical_name,c.agent_name) AS agent_name,
-                   d.team_leader, d.ops_manager,
+                   coalesce(d.canonical_name,c.agent_name) || ' [' || c.agent_id || ']' AS agent_key,
+                   c.agent_id, c.business_date, c.call_start,
+                   c.{primary_score} AS q1_score,
+                   c.question_3 AS customer_comment,
+                   c.call_reference_number,
                    coalesce(d.lob,c.lob) AS lob,
                    coalesce(d.language,c.language) AS language,
-                   c.queue,
-                   c.{primary_answer} AS q1_answer,
-                   c.{primary_score} AS q1_score,
-                   c.question_2 AS q2_answer,
-                   c.question_3 AS customer_comment,
-                   c.pcs_status, c.post_call_survey_mode,
-                   c.source_file,
                    'Pending' AS coaching_status,
-                   NULL AS coaching_date, NULL AS coach, NULL AS coaching_comment
+                   NULL AS coach, NULL AS coaching_date, NULL AS due_date,
+                   NULL AS coaching_comment,
+                   c.call_key AS coaching_key,
+                   c.call_id, c.queue,
+                   c.{primary_answer} AS q1_answer,
+                   c.question_2 AS q2_answer,
+                   c.pcs_status, c.post_call_survey_mode, c.source_file,
+                   d.ops_manager
             FROM core.clean_call_leg c
             LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
             WHERE c.business_date BETWEEN ? AND ?
               AND upper(coalesce(c.call_direction,''))='I'
               AND c.{primary_score} IN ({allowed_scores})
               AND c.{primary_score} <= ?
-            ORDER BY c.business_date DESC, d.team_leader,
+            ORDER BY priority, c.business_date DESC, d.team_leader,
                      coalesce(d.canonical_name,c.agent_name), c.call_start""",
         [start, end, config.pcs.negative_score_maximum],
     )
 
 
-def _pcs_sum_formula(column: str) -> str:
+def _pcs_sum_formula(column: str, from_name: str = "PCS_From", to_name: str = "PCS_To") -> str:
     criteria = (
-        'tblPcsData[Date],">="&PCS_From,'
-        'tblPcsData[Date],"<="&PCS_To,'
+        f'tblPcsData[Date],">="&{from_name},'
+        f'tblPcsData[Date],"<="&{to_name},'
         'tblPcsData[LOB],IF(DASHBOARD!$K$6="All","*",DASHBOARD!$K$6),'
         'tblPcsData[Team Leader],IF(DASHBOARD!$N$6="All","*",DASHBOARD!$N$6),'
-        'tblPcsData[Agent],IF(DASHBOARD!$Q$6="All","*",DASHBOARD!$Q$6)'
+        'tblPcsData[Agent Key],IF(DASHBOARD!$Q$6="All","*",DASHBOARD!$Q$6)'
     )
     return f"SUMIFS(tblPcsData[{column}],{criteria})"
 
@@ -241,7 +245,7 @@ def _pcs_completed_formula() -> str:
         'tblCoaching[Date],"<="&PCS_To,'
         'tblCoaching[LOB],IF(DASHBOARD!$K$6="All","*",DASHBOARD!$K$6),'
         'tblCoaching[Team Leader],IF(DASHBOARD!$N$6="All","*",DASHBOARD!$N$6),'
-        'tblCoaching[Agent],IF(DASHBOARD!$Q$6="All","*",DASHBOARD!$Q$6),'
+        'tblCoaching[Agent Key],IF(DASHBOARD!$Q$6="All","*",DASHBOARD!$Q$6),'
         'tblCoaching[Coaching Status],"Completed"'
     )
     return f"COUNTIFS({criteria})"
@@ -253,11 +257,14 @@ def _add_pcs_dashboard(
     status_text: str,
     start: date,
     end: date,
-    comparison: Sequence[Sequence[Any]],
     lobs: Sequence[str],
     team_leaders: Sequence[str],
     agents: Sequence[str],
-    trend_rows: Sequence[Sequence[Any]],
+    data_start: date,
+    latest: date,
+    trend_count: int,
+    minimum_sample: int,
+    default_values: dict[str, float | int | None],
 ) -> None:
     """Create an Excel-native selector cockpit without Power Query or macros."""
 
@@ -273,7 +280,7 @@ def _add_pcs_dashboard(
     ws.merge_range("A1:R1", "PCS  /  PERFORMANCE & COACHING CONTROL", book.report.title)
     ws.merge_range(
         "A2:R2",
-        f"Generated {book.generated:%Y-%m-%d %H:%M}  |  available selector window includes previous month through {end:%Y-%m-%d}",
+        f"Generated {book.generated:%Y-%m-%d %H:%M}  |  latest PCS data {latest:%Y-%m-%d}  |  calculations are weighted ratios of sums",
         book.report.subtitle,
     )
     badge = status if status in book.badge_formats else "INCOMPLETE"
@@ -291,7 +298,7 @@ def _add_pcs_dashboard(
         "valign": "vcenter", "indent": 1, "num_format": "yyyy-mm-dd",
     })
     for label, label_range, value_range, value in (
-        ("PERIOD VIEW", "A5:C5", "A6:C7", "Selected period"),
+        ("PERIOD VIEW", "A5:C5", "A6:C7", "Current MTD"),
         ("CUSTOM FROM", "E5:F5", "E6:F7", start),
         ("CUSTOM TO", "H5:I5", "H6:I7", end),
         ("LOB", "K5:L5", "K6:L7", "All"),
@@ -305,9 +312,13 @@ def _add_pcs_dashboard(
             ws.merge_range(value_range, value, selector)
     ws.set_row(5, 22)
     ws.set_row(6, 22)
-    ws.data_validation("A6", {"validate": "list", "source": ["Selected period", "Latest day", "Current MTD", "Previous month"]})
-    ws.data_validation("E6", {"validate": "date", "criteria": "between", "minimum": start, "maximum": end})
-    ws.data_validation("H6", {"validate": "date", "criteria": "between", "minimum": start, "maximum": end})
+    period_choices = [
+        "Latest day", "Current week", "Previous week", "Current MTD",
+        "Previous-month same days", "Previous full month", "Custom period",
+    ]
+    ws.data_validation("A6", {"validate": "list", "source": period_choices})
+    ws.data_validation("E6", {"validate": "date", "criteria": "between", "minimum": data_start, "maximum": latest})
+    ws.data_validation("H6", {"validate": "date", "criteria": "between", "minimum": data_start, "maximum": latest})
 
     lists = ((23, ["All", *lobs]), (24, ["All", *team_leaders]), (25, ["All", *agents]))
     for column, values in lists:
@@ -318,23 +329,56 @@ def _add_pcs_dashboard(
     ws.data_validation("N6", {"validate": "list", "source": f"=DASHBOARD!$Y$1:$Y${len(team_leaders) + 1}"})
     ws.data_validation("Q6", {"validate": "list", "source": f"=DASHBOARD!$Z$1:$Z${len(agents) + 1}"})
 
-    month_start = end.replace(day=1)
+    month_start = latest.replace(day=1)
     previous_end = month_start - timedelta(days=1)
     previous_start = previous_end.replace(day=1)
+    prior_same_end = previous_start + timedelta(days=min(latest.day, previous_end.day) - 1)
+    week_start = latest - timedelta(days=latest.weekday())
+    previous_week_start = week_start - timedelta(days=7)
+    previous_week_end = week_start - timedelta(days=1)
     wb.define_name(
         "PCS_From",
         "=IF(DASHBOARD!$A$6=\"Latest day\",DATE(%d,%d,%d),"
+        "IF(DASHBOARD!$A$6=\"Current week\",DATE(%d,%d,%d),"
+        "IF(DASHBOARD!$A$6=\"Previous week\",DATE(%d,%d,%d),"
         "IF(DASHBOARD!$A$6=\"Current MTD\",DATE(%d,%d,1),"
-        "IF(DASHBOARD!$A$6=\"Previous month\",DATE(%d,%d,1),DASHBOARD!$E$6)))"
-        % (end.year, end.month, end.day, end.year, end.month, previous_start.year, previous_start.month),
+        "IF(DASHBOARD!$A$6=\"Previous-month same days\",DATE(%d,%d,1),"
+        "IF(DASHBOARD!$A$6=\"Previous full month\",DATE(%d,%d,1),DASHBOARD!$E$6))))))"
+        % (
+            latest.year, latest.month, latest.day,
+            week_start.year, week_start.month, week_start.day,
+            previous_week_start.year, previous_week_start.month, previous_week_start.day,
+            latest.year, latest.month,
+            previous_start.year, previous_start.month,
+            previous_start.year, previous_start.month,
+        ),
     )
     wb.define_name(
         "PCS_To",
         "=IF(DASHBOARD!$A$6=\"Latest day\",DATE(%d,%d,%d),"
+        "IF(DASHBOARD!$A$6=\"Current week\",DATE(%d,%d,%d),"
+        "IF(DASHBOARD!$A$6=\"Previous week\",DATE(%d,%d,%d),"
         "IF(DASHBOARD!$A$6=\"Current MTD\",DATE(%d,%d,%d),"
-        "IF(DASHBOARD!$A$6=\"Previous month\",DATE(%d,%d,%d),DASHBOARD!$H$6)))"
-        % (end.year, end.month, end.day, end.year, end.month, end.day,
-           previous_end.year, previous_end.month, previous_end.day),
+        "IF(DASHBOARD!$A$6=\"Previous-month same days\",DATE(%d,%d,%d),"
+        "IF(DASHBOARD!$A$6=\"Previous full month\",DATE(%d,%d,%d),DASHBOARD!$H$6))))))"
+        % (
+            latest.year, latest.month, latest.day,
+            latest.year, latest.month, latest.day,
+            previous_week_end.year, previous_week_end.month, previous_week_end.day,
+            latest.year, latest.month, latest.day,
+            prior_same_end.year, prior_same_end.month, prior_same_end.day,
+            previous_end.year, previous_end.month, previous_end.day,
+        ),
+    )
+    wb.define_name("PCS_Prior_From", f"=DATE({previous_start.year},{previous_start.month},1)")
+    wb.define_name("PCS_Prior_To", f"=DATE({prior_same_end.year},{prior_same_end.month},{prior_same_end.day})")
+
+    scope_count = _pcs_sum_formula("Valid Q1")
+    ws.merge_range("A8:R8", "", book.report.note)
+    ws.write_formula(
+        "A8", f'=IF({scope_count}=0,"NO MATCHING PCS DATA - CHECK THE SELECTORS",'
+        f'"Showing "&TEXT(PCS_From,"yyyy-mm-dd")&" to "&TEXT(PCS_To,"yyyy-mm-dd"))',
+        book.report.note, "Showing current MTD",
     )
 
     score_sum = _pcs_sum_formula("Q1 Score Sum")
@@ -346,21 +390,21 @@ def _add_pcs_dashboard(
     inbound = _pcs_sum_formula("Inbound Call Legs")
     completed = _pcs_completed_formula()
     cards = [
-        ("PCS AVERAGE", f"=IFERROR({score_sum}/{valid},0)", book.card_decimal, "Weighted score / valid responses"),
-        ("PARTICIPATION", f"=IFERROR({participating}/{eligible},0)", book.card_percent, "Q1 nonblank / PCS Status 1"),
-        ("VALID RESPONSES", f"={valid}", book.card_integer, "Configured valid Q1 scores"),
-        ("INBOUND CALL LEGS", f"={inbound}", book.card_integer, "Inbound legs in selected scope"),
-        ("SCORE <= 3", f"={low}", book.card_integer, "Coaching opportunities"),
-        ("POSITIVE > 3", f"={positive}", book.card_integer, "Positive valid responses"),
-        ("COACHING COMPLETED", f"={completed}", book.card_integer, "Updates as the team fills COACHING"),
-        ("ACTIONS RATE", f"=IFERROR({completed}/{low},0)", book.card_percent, "Completed / score <= 3"),
+        ("PCS AVERAGE", f'=IFERROR({score_sum}/{valid},"")', book.card_decimal, "Weighted score / valid responses", default_values.get("pcs_average")),
+        ("PARTICIPATION", f'=IFERROR({participating}/{eligible},"")', book.card_percent, "Q1 nonblank / PCS Status 1", default_values.get("participation")),
+        ("VALID RESPONSES", f"={valid}", book.card_integer, f"Low sample below {minimum_sample}", default_values.get("valid")),
+        ("INBOUND CALL LEGS", f"={inbound}", book.card_integer, "Inbound legs in selected scope", default_values.get("inbound")),
+        ("SCORE <= 3", f"={low}", book.card_integer, "Coaching opportunities", default_values.get("low")),
+        ("POSITIVE > 3", f"={positive}", book.card_integer, "Positive valid responses", default_values.get("positive")),
+        ("COACHING COMPLETED", f"={completed}", book.card_integer, "Updates as the team fills COACHING", 0),
+        ("ACTIONS RATE", f'=IFERROR({completed}/{low},"")', book.card_percent, "Completed / score <= 3", 0),
     ]
-    for index, (label, formula, fmt, note) in enumerate(cards):
+    for index, (label, formula, fmt, note, cached) in enumerate(cards):
         row = 9 if index < 4 else 14
         column = (index % 4) * 4
         ws.merge_range(row, column, row, column + 2, label, book.report.kpi_label)
         ws.merge_range(row + 1, column, row + 2, column + 2, "", fmt)
-        ws.write_formula(row + 1, column, formula, fmt)
+        ws.write_formula(row + 1, column, formula, fmt, cached if cached is not None else "")
         ws.merge_range(row + 3, column, row + 3, column + 2, note, book.card_compare)
         ws.set_row(row + 1, 26)
         ws.set_row(row + 2, 26)
@@ -370,10 +414,31 @@ def _add_pcs_dashboard(
     compare_headers = ["Period", "Start", "End", "PCS Average", "Participation %", "Valid Responses", "PCS Status 1", "Score <= 3", "Score > 3", "Inbound Legs"]
     for column, header in enumerate(compare_headers):
         ws.write(table_row + 2, column, header, book.report.header)
-    for offset, values in enumerate(comparison):
+    current_values = [
+        "Selected scope", "=PCS_From", "=PCS_To",
+        f'=IFERROR({_pcs_sum_formula("Q1 Score Sum")}/{_pcs_sum_formula("Valid Q1")},"")',
+        f'=IFERROR({_pcs_sum_formula("Q1 Nonblank")}/{_pcs_sum_formula("PCS Status 1")},"")',
+        f'={_pcs_sum_formula("Valid Q1")}', f'={_pcs_sum_formula("PCS Status 1")}',
+        f'={_pcs_sum_formula("Score <= 3")}', f'={_pcs_sum_formula("Score > 3")}',
+        f'={_pcs_sum_formula("Inbound Call Legs")}',
+    ]
+    prior_values = [
+        "Previous-month same days", "=PCS_Prior_From", "=PCS_Prior_To",
+        f'=IFERROR({_pcs_sum_formula("Q1 Score Sum", "PCS_Prior_From", "PCS_Prior_To")}/{_pcs_sum_formula("Valid Q1", "PCS_Prior_From", "PCS_Prior_To")},"")',
+        f'=IFERROR({_pcs_sum_formula("Q1 Nonblank", "PCS_Prior_From", "PCS_Prior_To")}/{_pcs_sum_formula("PCS Status 1", "PCS_Prior_From", "PCS_Prior_To")},"")',
+        f'={_pcs_sum_formula("Valid Q1", "PCS_Prior_From", "PCS_Prior_To")}',
+        f'={_pcs_sum_formula("PCS Status 1", "PCS_Prior_From", "PCS_Prior_To")}',
+        f'={_pcs_sum_formula("Score <= 3", "PCS_Prior_From", "PCS_Prior_To")}',
+        f'={_pcs_sum_formula("Score > 3", "PCS_Prior_From", "PCS_Prior_To")}',
+        f'={_pcs_sum_formula("Inbound Call Legs", "PCS_Prior_From", "PCS_Prior_To")}',
+    ]
+    for offset, values in enumerate((current_values, prior_values)):
         for column, value in enumerate(values):
-            fmt = book.report.date if isinstance(value, date) else book.report.percent if column == 4 else book.report.decimal if column == 3 else book.report.integer if isinstance(value, (int, float)) else book.report.body
-            ws.write(table_row + 3 + offset, column, value, fmt)
+            fmt = book.report.date if column in {1, 2} else book.report.percent if column == 4 else book.report.decimal if column == 3 else book.report.integer if column >= 5 else book.report.body
+            if isinstance(value, str) and value.startswith("="):
+                ws.write_formula(table_row + 3 + offset, column, value, fmt)
+            else:
+                ws.write(table_row + 3 + offset, column, value, fmt)
 
     chart = wb.add_chart({"type": "line"})
     for name, column, color, secondary in (
@@ -382,8 +447,8 @@ def _add_pcs_dashboard(
     ):
         chart.add_series({
             "name": name,
-            "categories": ["TREND", 4, 0, 3 + len(trend_rows), 0],
-            "values": ["TREND", 4, column, 3 + len(trend_rows), column],
+            "categories": ["_LOOKUPS", 1, 0, trend_count, 0],
+            "values": ["_LOOKUPS", 1, column, trend_count, column],
             "line": {"color": color, "width": 2.25},
             "marker": {"type": "circle", "size": 4, "border": {"color": color}, "fill": {"color": COLORS["white"]}},
             "y2_axis": secondary,
@@ -396,13 +461,109 @@ def _add_pcs_dashboard(
     chart.set_y2_axis({"min": 0, "max": 1, "major_unit": 0.2, "num_format": "0%", "name": "Participation"})
     ws.insert_chart("L21", chart, {"x_scale": 1.15, "y_scale": 1.05})
 
-    note_row = table_row + 4 + max(len(comparison), 7)
+    note_row = table_row + 11
     ws.merge_range(note_row, 0, note_row, 17, "HOW TO USE THIS PAGE", book.report.section)
-    ws.merge_range(note_row + 1, 0, note_row + 1, 17, "Choose a period, LOB, team leader, or agent in the boxes above. Custom dates apply only when Period View is Selected period.", book.report.note)
-    ws.merge_range(note_row + 2, 0, note_row + 2, 17, "For native slicers: click inside the PCS_DATA or COACHING Excel Table, then Table Design > Insert Slicer. No refresh, connection, or Data Model is required.", book.report.note)
+    ws.merge_range(note_row + 1, 0, note_row + 1, 17, "1. Choose a period and your Team Leader name. Every KPI, benchmark and chart on this page follows those selectors.", book.report.note)
+    ws.merge_range(note_row + 2, 0, note_row + 2, 17, "2. Open AGENT_RESULTS for the realization list, then COACHING to fill the blue action fields. No refresh, Power Query, connection, macro or Data Model is required.", book.report.note)
     ws.set_column("A:R", 11)
     ws.set_column("A:A", 13)
     ws.set_column("K:R", 13)
+
+
+def _previous_coaching_values(path: Path) -> dict[str, dict[str, Any]]:
+    """Carry the team's editable cells forward without importing them to SQLite."""
+    if not path.exists():
+        return {}
+    try:
+        workbook = load_workbook(path, read_only=True, data_only=False, keep_links=False)
+    except Exception:
+        return {}
+    try:
+        if "COACHING" not in workbook.sheetnames:
+            return {}
+        sheet = workbook["COACHING"]
+        headers = {
+            str(cell.value).strip(): index
+            for index, cell in enumerate(next(sheet.iter_rows(min_row=4, max_row=4)), 1)
+            if cell.value is not None
+        }
+        key_column = headers.get("Coaching Key")
+        editable = ("Coaching Status", "Coach", "Coaching Date", "Due Date", "Coaching Comment")
+        if key_column is None:
+            return {}
+        output: dict[str, dict[str, Any]] = {}
+        for values in sheet.iter_rows(min_row=5, values_only=True):
+            key = values[key_column - 1] if key_column <= len(values) else None
+            if not key:
+                continue
+            output[str(key)] = {
+                field: values[column - 1] if column <= len(values) else None
+                for field in editable
+                if (column := headers.get(field)) is not None
+            }
+        return output
+    finally:
+        workbook.close()
+
+
+def _carry_coaching_forward(
+    headers: Sequence[str],
+    rows: Sequence[Sequence[Any]],
+    previous: dict[str, dict[str, Any]],
+) -> list[tuple[Any, ...]]:
+    display = [header.replace("_", " ").title().replace("Id", "ID") for header in headers]
+    indexes = {header: index for index, header in enumerate(display)}
+    key_index = indexes.get("Coaching Key")
+    if key_index is None:
+        return [tuple(row) for row in rows]
+    output = []
+    for raw in rows:
+        values = list(raw)
+        saved = previous.get(str(values[key_index]), {})
+        for field in ("Coaching Status", "Coach", "Coaching Date", "Due Date", "Coaching Comment"):
+            if field in indexes and saved.get(field) not in (None, ""):
+                values[indexes[field]] = saved[field]
+        output.append(tuple(values))
+    return output
+
+
+def _add_pcs_lookups(
+    book: DecisionWorkbook,
+    dates: Sequence[date],
+) -> None:
+    """Hidden selector-driven chart calculations, using classic Excel formulas."""
+    ws = book.report.workbook.add_worksheet("_LOOKUPS")
+    headers = [
+        "Date", "Q1 Score Sum", "Valid Q1", "Q1 Nonblank", "PCS Status 1",
+        "PCS Average", "Participation",
+    ]
+    for column, header in enumerate(headers):
+        ws.write(0, column, header)
+    for row_index, business_date in enumerate(dates, 1):
+        excel_row = row_index + 1
+        ws.write_datetime(row_index, 0, datetime.combine(business_date, datetime.min.time()))
+        criteria = (
+            f'tblPcsData[Date],$A${excel_row},'
+            'tblPcsData[LOB],IF(DASHBOARD!$K$6="All","*",DASHBOARD!$K$6),'
+            'tblPcsData[Team Leader],IF(DASHBOARD!$N$6="All","*",DASHBOARD!$N$6),'
+            'tblPcsData[Agent Key],IF(DASHBOARD!$Q$6="All","*",DASHBOARD!$Q$6)'
+        )
+        for column, source in enumerate(
+            ("Q1 Score Sum", "Valid Q1", "Q1 Nonblank", "PCS Status 1"), 1,
+        ):
+            ws.write_formula(
+                row_index, column,
+                f'=IF(OR($A${excel_row}<PCS_From,$A${excel_row}>PCS_To),NA(),SUMIFS(tblPcsData[{source}],{criteria}))',
+            )
+        ws.write_formula(
+            row_index, 5,
+            f'=IFERROR($B${excel_row}/$C${excel_row},NA())',
+        )
+        ws.write_formula(
+            row_index, 6,
+            f'=IFERROR($D${excel_row}/$E${excel_row},NA())',
+        )
+    ws.hide()
 
 
 def build_pcs_performance_workbook(
@@ -415,96 +576,120 @@ def build_pcs_performance_workbook(
     """Build one polished, self-contained PCS workbook with Excel selectors."""
 
     book, partial, target = _atomic_book(config, "pcs", "PCS PERFORMANCE", start, end, output)
-    periods = _comparison_periods(start, end)
-    comparison = [_pcs_aggregate(conn, config, period) for period in periods]
-    status, status_text = _source_state(conn, ("fte", "calls"), end)
-    previous_start, _previous_end = _previous_month(end)
+    latest_value = conn.execute(
+        "SELECT max(business_date) FROM mart.agent_pcs_day"
+    ).fetchone()[0]
+    latest = latest_value or end
+    if isinstance(latest, str):
+        latest = date.fromisoformat(latest[:10])
+    metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
+    pcs_method = metric_catalog.method_for("pcs_average", latest, {})
+    minimum_sample = int(pcs_method.minimum_sample) if pcs_method is not None else 1
+    status, status_text = _source_state(conn, ("fte", "calls"), latest)
+    previous_start, previous_end = _previous_month(latest)
     data_start = min(start, previous_start)
-    headers, rows = _query(
-        conn,
-        """SELECT p.business_date, sum(p.pcs_score_sum) AS pcs_score_sum,
-                  sum(survey_responses) AS valid_responses,
-                  sum(pcs_participation_responses) AS participating_responses,
-                  sum(pcs_status_calls) AS eligible_calls,
-                  CASE WHEN sum(survey_responses)>0 THEN sum(pcs_score_sum)*1.0/sum(survey_responses) END AS pcs_average,
-                  CASE WHEN sum(pcs_status_calls)>0 THEN sum(pcs_participation_responses)*1.0/sum(pcs_status_calls) END AS participation_rate,
-                  sum(low_score_responses) AS score_le_3,
-                  sum(top_box_responses) AS score_gt_3
-           FROM mart.agent_pcs_day p
-           WHERE p.business_date BETWEEN ? AND ?
-           GROUP BY p.business_date ORDER BY p.business_date""",
-        [data_start, end],
-    )
-    trend_headers, trend_rows = headers, rows
-
     selector_rows = conn.execute(
-        """SELECT DISTINCT coalesce(lob,''), coalesce(team_leader,''), coalesce(agent_name,'')
+        """SELECT DISTINCT coalesce(lob,''), coalesce(team_leader,''),
+                  coalesce(agent_name,'') || ' [' || agent_id || ']'
            FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?""",
-        [data_start, end],
+        [data_start, latest],
     ).fetchall()
     lobs = sorted({str(row[0]) for row in selector_rows if row[0]})
     team_leaders = sorted({str(row[1]) for row in selector_rows if row[1]})
     agents = sorted({str(row[2]) for row in selector_rows if row[2]})
-    _add_pcs_dashboard(book, status, status_text, start, end, comparison, lobs, team_leaders, agents, trend_rows)
-
-    headers, rows = _query(
-        conn,
-        """SELECT max(lob) AS lob, max(team_leader) AS team_leader,
-                  count(DISTINCT agent_id) AS agents,
-                  sum(inbound_calls) AS inbound_call_legs,
-                  sum(pcs_status_calls) AS pcs_status_1,
-                  sum(pcs_participation_responses) AS q1_nonblank,
-                  sum(survey_responses) AS valid_q1,
-                  sum(pcs_score_sum) AS q1_score_sum,
-                  CASE WHEN sum(survey_responses)>0 THEN sum(pcs_score_sum)*1.0/sum(survey_responses) END AS pcs_average,
-                  CASE WHEN sum(pcs_status_calls)>0 THEN sum(pcs_participation_responses)*1.0/sum(pcs_status_calls) END AS participation_rate,
-                  sum(low_score_responses) AS score_le_3,
-                  sum(top_box_responses) AS score_gt_3,
-                  CASE WHEN sum(survey_responses)<20 THEN 'LOW_SAMPLE' ELSE 'OK' END AS sample_state
-           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
-           GROUP BY coalesce(lob,''), coalesce(team_leader,'')
-           ORDER BY max(lob), max(team_leader)""",
-        [start, end],
+    month_start = latest.replace(day=1)
+    default_period = NamedPeriod("Current MTD", month_start, latest)
+    default_aggregate = _pcs_aggregate(conn, config, default_period)
+    default_values = {
+        "pcs_average": default_aggregate[3], "participation": default_aggregate[4],
+        "valid": default_aggregate[5], "low": default_aggregate[7],
+        "positive": default_aggregate[8], "inbound": default_aggregate[9],
+    }
+    trend_dates = [
+        data_start + timedelta(days=offset)
+        for offset in range((latest - data_start).days + 1)
+    ] or [latest]
+    _add_pcs_dashboard(
+        book, status, status_text, start, end, lobs, team_leaders, agents,
+        data_start, latest, len(trend_dates), minimum_sample, default_values,
     )
-    team_sheet = book.table("TEAM_VIEW", "PCS team performance", "Selected report period; filter this Excel Table or add native Table slicers.", headers, rows)
-    if rows:
-        state_col = headers.index("sample_state")
-        team_sheet.conditional_format(4, state_col, 3 + len(rows), state_col, {"type": "text", "criteria": "containing", "value": "LOW_SAMPLE", "format": book.report.error})
 
-    headers, rows = _query(
+    prior_same_end = previous_start + timedelta(days=min(latest.day, previous_end.day) - 1)
+    agent_headers, agent_raw = _query(
         conn,
-        """SELECT agent_id, max(agent_name) AS agent_name, max(team_leader) AS team_leader,
-                  max(ops_manager) AS ops_manager, max(lob) AS lob, max(language) AS language,
-                  sum(inbound_calls) AS inbound_call_legs,
-                  sum(pcs_status_calls) AS pcs_status_1,
-                  sum(pcs_participation_responses) AS q1_nonblank,
-                  sum(survey_responses) AS valid_q1,
-                  sum(pcs_score_sum) AS q1_score_sum,
-                  CASE WHEN sum(survey_responses)>0 THEN sum(pcs_score_sum)*1.0/sum(survey_responses) END AS pcs_average,
-                  CASE WHEN sum(pcs_status_calls)>0 THEN sum(pcs_participation_responses)*1.0/sum(pcs_status_calls) END AS participation_rate,
-                  sum(low_score_responses) AS score_le_3,
-                  sum(top_box_responses) AS score_gt_3,
-                  sum(pcs_invalid_responses) AS invalid_q1,
-                  CASE WHEN sum(survey_responses)<20 THEN 'LOW_SAMPLE' ELSE 'OK' END AS sample_state
+        """SELECT agent_id, max(agent_name) AS agent_name,
+                  max(team_leader) AS team_leader, max(lob) AS lob,
+                  max(language) AS language,
+                  sum(CASE WHEN business_date=? THEN pcs_score_sum ELSE 0 END) AS day_score,
+                  sum(CASE WHEN business_date=? THEN survey_responses ELSE 0 END) AS day_valid,
+                  sum(CASE WHEN business_date BETWEEN ? AND ? THEN pcs_score_sum ELSE 0 END) AS mtd_score,
+                  sum(CASE WHEN business_date BETWEEN ? AND ? THEN survey_responses ELSE 0 END) AS mtd_valid,
+                  sum(CASE WHEN business_date BETWEEN ? AND ? THEN pcs_participation_responses ELSE 0 END) AS mtd_participating,
+                  sum(CASE WHEN business_date BETWEEN ? AND ? THEN pcs_status_calls ELSE 0 END) AS mtd_eligible,
+                  sum(CASE WHEN business_date BETWEEN ? AND ? THEN low_score_responses ELSE 0 END) AS mtd_low,
+                  sum(CASE WHEN business_date BETWEEN ? AND ? THEN pcs_score_sum ELSE 0 END) AS prior_score,
+                  sum(CASE WHEN business_date BETWEEN ? AND ? THEN survey_responses ELSE 0 END) AS prior_valid
            FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
            GROUP BY agent_id ORDER BY max(lob), max(team_leader), max(agent_name)""",
-        [start, end],
+        [
+            latest, latest,
+            month_start, latest, month_start, latest,
+            month_start, latest, month_start, latest, month_start, latest,
+            previous_start, prior_same_end, previous_start, prior_same_end,
+            data_start, latest,
+        ],
     )
-    ws = book.table("AGENT_VIEW", "PCS agent performance", "Selected report period; click the table to filter or insert native slicers.", headers, rows)
-    if rows:
-        state_col = headers.index("sample_state")
-        ws.conditional_format(4, state_col, 3 + len(rows), state_col, {"type": "text", "criteria": "containing", "value": "LOW_SAMPLE", "format": book.report.error})
-    book.table("TREND", "PCS daily trend", "Daily governed counters covering the selected and previous-month comparison window.", trend_headers, trend_rows)
+    del agent_headers
+    agent_rows = []
+    for values in agent_raw:
+        (agent_id, agent_name, tl, lob, language, day_score, day_valid,
+         mtd_score, mtd_valid, mtd_participating, mtd_eligible, mtd_low,
+         prior_score, prior_valid) = values
+        day_pcs = _ratio(day_score, day_valid)
+        mtd_pcs = _ratio(mtd_score, mtd_valid)
+        prior_pcs = _ratio(prior_score, prior_valid)
+        if not mtd_valid:
+            priority = "NO RESPONSE"
+        elif mtd_valid < minimum_sample:
+            priority = "LOW SAMPLE"
+        elif mtd_low:
+            priority = "COACH"
+        else:
+            priority = "ON TRACK"
+        agent_rows.append((
+            priority, tl, agent_id, agent_name, lob, language,
+            day_pcs, mtd_pcs, prior_pcs,
+            (mtd_pcs - prior_pcs) if mtd_pcs is not None and prior_pcs is not None else None,
+            _ratio(mtd_participating, mtd_eligible), mtd_valid, mtd_eligible,
+            mtd_low, "Open COACHING" if mtd_low else "Monitor",
+        ))
+    agent_result_headers = [
+        "priority", "team_leader", "agent_id", "agent_name", "lob", "language",
+        "latest_day_average", "current_mtd_average", "prior_mtd_average", "movement",
+        "participation_rate", "valid_q1", "pcs_status_1", "score_le_3", "next_action",
+    ]
+    ws = book.table(
+        "AGENT_RESULTS", "PCS agent realizations",
+        f"Ready for TL use: filter Team Leader. Latest day is {latest}; MTD is {month_start} to {latest}; prior comparison is {previous_start} to {prior_same_end}.",
+        agent_result_headers, agent_rows or [tuple(None for _ in agent_result_headers)],
+    )
+    if agent_rows:
+        ws.conditional_format(4, 0, 3 + len(agent_rows), 0, {
+            "type": "text", "criteria": "containing", "value": "COACH", "format": book.report.error,
+        })
 
     action_headers, actions = _pcs_coaching_rows(conn, config, data_start, end)
+    actions = _carry_coaching_forward(
+        action_headers, actions, _previous_coaching_values(target),
+    )
     action_rows = actions or [tuple(None for _ in action_headers)]
     action_sheet = book.table(
         "COACHING",
         "PCS coaching action plan",
-        "Filter to your team and dates. The team fills only the four blue columns; no Hub import or refresh is required.",
+        "Filter Team Leader and fill only the five blue action columns. Saved actions carry forward when WFMHub regenerates this report.",
         action_headers,
         action_rows,
-        editable_headers={"Coaching Status", "Coaching Date", "Coach", "Coaching Comment"},
+        editable_headers={"Coaching Status", "Coaching Date", "Coach", "Due Date", "Coaching Comment"},
     )
     if action_rows:
         status_col = action_headers.index("coaching_status")
@@ -512,20 +697,29 @@ def build_pcs_performance_workbook(
             4, status_col, 3 + len(action_rows), status_col,
             {
                 "validate": "list",
-                "source": ["Pending", "Completed", "Not required"],
+                "source": ["Pending", "Planned", "Completed", "Not required"],
                 "input_title": "Coaching status",
-                "input_message": "Choose one of the three governed statuses.",
+                "input_message": "Choose one of the four action statuses.",
                 "error_title": "Invalid status",
-                "error_message": "Use Pending, Completed or Not required.",
+                "error_message": "Use Pending, Planned, Completed or Not required.",
             },
         )
         action_sheet.conditional_format(
             4, status_col, 3 + len(action_rows), status_col,
             {"type": "text", "criteria": "containing", "value": "Pending", "format": book.report.error},
         )
+        for hidden_header in (
+            "coaching_key", "call_id", "queue", "q1_answer", "q2_answer",
+            "pcs_status", "post_call_survey_mode", "source_file", "ops_manager",
+        ):
+            if hidden_header in action_headers:
+                column = action_headers.index(hidden_header)
+                action_sheet.set_column(column, column, None, None, {"hidden": True})
     data_headers, data_rows = _query(
         conn,
-        """SELECT business_date, agent_id, agent_name, team_leader, ops_manager,
+        """SELECT business_date, agent_id, agent_name,
+                  agent_name || ' [' || agent_id || ']' AS agent_key,
+                  team_leader, ops_manager,
                   lob, language, inbound_calls AS inbound_call_legs,
                   pcs_status_calls AS pcs_status_1,
                   pcs_participation_responses AS q1_nonblank,
@@ -535,21 +729,22 @@ def build_pcs_performance_workbook(
                   low_score_responses AS score_le_3,
                   top_box_responses AS score_gt_3,
                   pcs_invalid_responses AS invalid_q1,
-                  CASE WHEN survey_responses<20 THEN 'LOW_SAMPLE' ELSE 'OK' END AS sample_state
+                  CASE WHEN survey_responses<? THEN 'LOW_SAMPLE' ELSE 'OK' END AS sample_state
            FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
            ORDER BY business_date, lob, team_leader, agent_name""",
-        [data_start, end],
+        [minimum_sample, data_start, latest],
     )
     book.table("PCS_DATA", "PCS clean calculation table", "One agent/day. Use the table filters or Table Design > Insert Slicer; formulas on DASHBOARD read this table directly.", data_headers, data_rows or [tuple(None for _ in data_headers)])
     book.definitions([
         ("PCS Average", "Sum of valid inbound Q1 scores / valid inbound Q1 responses", "Customer experience result", "Only configured discrete Q1 scores are valid"),
         ("PCS Participation", "Inbound raw Q1 nonblank / inbound PCSStatus=1", "Survey participation opportunity", "Invalid nonblank Q1 remains in the numerator"),
         ("Score <= 3", "Count of valid Q1 responses at or below 3", "Follow-up volume", "A count, not a percentage"),
-        ("Actions Rate", "Completed rows in COACHING / valid Q1 responses at or below 3", "Coaching completion", "Team entry stays in the workbook; WFMHub does not import it"),
-        ("Low sample", "Fewer than 20 valid responses in the selected period", "Interpretation warning", "Does not change the calculated score"),
+        ("Actions Rate", "Completed rows in COACHING / valid Q1 responses at or below 3", "Coaching completion", "Edits stay in Excel and carry forward by immutable Coaching Key; SQLite is untouched"),
+        ("Low sample", f"Fewer than {minimum_sample} valid responses in the selected period", "Interpretation warning", "Threshold comes from the effective metric catalog"),
         ("Selector mechanics", "Excel SUMIFS and COUNTIFS over the visible PCS_DATA and COACHING tables", "Interactive management view", "No Power Query, connection, macro, or Data Model"),
-        ("Native slicers", "Click an Excel Table, then Table Design > Insert Slicer", "Optional manual filtering", "Slicers filter the selected table; dashboard selector boxes drive KPI cards"),
+        ("Agent realizations", "Latest day, current MTD and previous-month same-days at agent grain", "TL action list", "Filter Team Leader directly on the AGENT_RESULTS table"),
     ])
+    _add_pcs_lookups(book, trend_dates)
     book.audit(_audit_rows(conn, config, "pcs", start, end))
     return _finish(book, partial, target)
 

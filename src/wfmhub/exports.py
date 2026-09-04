@@ -85,6 +85,12 @@ DATASETS: dict[str, ExportDataset] = {
         """SELECT * FROM mart.attendance_agent_day
            WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id""",
     ),
+    "planned_time_off": ExportDataset(
+        "planned_time_off", "Approved PTO and Away intervals clipped to scheduled shifts.",
+        """SELECT * FROM mart.planned_time_off_segment
+           WHERE business_date BETWEEN ? AND ?
+           ORDER BY business_date, agent_id, segment_start""",
+    ),
     "daily_attendance_calls": ExportDataset(
         "daily_attendance_calls", "Absent, not-seen and late agents requiring an attendance call.",
         """SELECT business_date, agent_id, agent_name, team_leader, ops_manager,

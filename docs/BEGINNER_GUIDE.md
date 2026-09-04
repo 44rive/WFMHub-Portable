@@ -41,10 +41,11 @@ This check uses the date of each schedule, LILO, Agent Status, or Call by Call
 row. Historical work before a person's leave date therefore remains valid.
 
 The standard `FTE Count.xlsx` template also has `PTO` and `Away` registers.
-Populate them now using the dropdowns and inclusive dates, but note that
-v0.13.1 does not yet apply those registers to attendance or staffing. Until
-that overlay is released, they are controlled planning inputs rather than Hub
-calculation evidence.
+Populate them using the dropdowns and inclusive dates. Approved PTO and
+Active/Closed Away are removed from expected-work minutes, attendance calls,
+correction gaps, and net staffing. Planned Away changes future staffing only;
+it never hides a current or historical no-show. Partial-day PTO uses its exact
+start/end time. Verint Activities remain the final payroll record.
 
 ## The normal daily routine
 
@@ -115,7 +116,8 @@ yesterday.
 
 This report compares scheduled, observed, and productive FTE by 15-minute
 interval, LOB, and language. Future or missing intervals remain unknown instead
-of becoming fake shortages.
+of becoming fake shortages. It keeps gross scheduled FTE, planned-time-off FTE,
+and net scheduled FTE separately so planned absence never erases demand.
 
 ## OEM Flash
 
@@ -167,6 +169,10 @@ Resolve every final-ledger exception:
   has no final code;
 - `PARTIAL_CORRECTION_REVIEW`: Verint has a code but it does not cover the whole
   observed gap;
+- `PLANNED_TIME_OFF_NOT_IN_VERINT`: FTE says completed PTO/Away but the final
+  Activities export has no matching absence code;
+- `TIME_OFF_PARTIALLY_IN_VERINT`: a final code exists but covers fewer minutes
+  than the planned-time-off interval;
 - `VERINT_WITHOUT_OBSERVED_GAP`: Verint contains a final code but the operational
   evidence does not support that interval;
 - `PROVISIONAL_DAY`: the shift is not complete and cannot be finalized yet.
@@ -189,10 +195,14 @@ an absence KPI plus a second hidden penalty.
 Choose **PCS Performance**, select the dates, and open the generated workbook.
 There is no Power Query, Data Model, or Refresh All step.
 
-On `DASHBOARD`, use the boxes for Period View, custom dates, LOB, Team Leader,
-and Agent. The KPI cards recalculate in Excel from the included `PCS_DATA`
-table. The report also includes ready-made team, agent, trend, and coaching
-views.
+On `DASHBOARD`, choose Latest day, Current/Previous week, Current MTD,
+Previous-month same days, Previous full month, or Custom period. Then choose
+LOB, Team Leader, or Agent. The KPI cards, benchmark, and chart all recalculate
+from the included `PCS_DATA` table.
+
+Open `AGENT_RESULTS` and filter the Team Leader column for the ready-made TL
+realization list: latest day, current MTD, previous-month same-days, movement,
+participation, sample, low scores, and next action.
 
 PCS formulas:
 
@@ -203,9 +213,10 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-For coaching, filter `COACHING` to your team and dates, then fill the four blue
-columns: status, date, coach, and comment. Save/send the workbook normally.
-Nothing must be synced back into WFMHub.
+For coaching, filter `COACHING` to your team and dates, then fill the five blue
+columns: status, coach, coaching date, due date, and comment. Save/send the
+workbook normally. When the Hub regenerates the same current report, those
+cells carry forward by Coaching Key. Nothing is imported into SQLite.
 
 If you prefer native slicers, click inside `PCS_DATA` or `COACHING` and choose
 **Table Design > Insert Slicer**.

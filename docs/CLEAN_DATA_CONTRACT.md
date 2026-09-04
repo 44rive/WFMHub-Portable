@@ -34,6 +34,7 @@ cannot silently substitute for the operational schedule.
 |---|---|---|
 | `daily_attendance_calls` | Agent/day requiring a call | Daily absent/late call list |
 | `daily_staffing_gaps` | Date/15 minutes/roster LOB/language | Daily staffing gap sheet |
+| `planned_time_off` | Exact schedule-clipped agent interval | Approved PTO and effective Away planning overlay |
 | `daily_service_lob` | Date/interval/service LOB/language | Intraday SL state |
 | `pcs_agent_day` | Agent/day | PCS detail |
 | `pcs_team_day` | Team/LOB/language/day | PCS team summary |
@@ -77,3 +78,5 @@ row count, rule version, and rule hash.
 PCS does not use a separate feed contract. Its generated workbook contains a
 visible `PCS_DATA` Excel Table and a visible `COACHING` Excel Table. Dashboard
 formulas read those tables directly, so there is no connection or refresh step.
+Editable coaching cells carry forward from the previous current workbook by
+Coaching Key and never enter SQLite.

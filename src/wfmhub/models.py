@@ -358,6 +358,139 @@ def _build_agents(conn: DatabaseConnection) -> dict[str, dict[str, Any]]:
     return {row["agent_id"]: row for row in _dicts(conn.execute("SELECT * FROM core.dim_agent"))}
 
 
+PLANNED_TIME_OFF_COLUMNS = [
+    "segment_key", "agent_day_key", "business_date", "agent_id", "agent_name",
+    "team_leader", "ops_manager", "lob", "language", "source_kind",
+    "absence_type", "record_status", "segment_start", "segment_end",
+    "planned_minutes", "source_file", "source_sheet", "source_row",
+]
+
+
+def _build_planned_time_off(
+    conn: DatabaseConnection,
+    schedules: list[dict[str, Any]],
+    agents: dict[str, dict[str, Any]],
+    start: date,
+    end: date,
+    as_of: datetime,
+) -> dict[str, list[dict[str, Any]]]:
+    """Clip approved PTO/Away rows to shifts and make overlaps exclusive."""
+
+    source = _dicts(conn.execute(
+        """SELECT r.*, f.file_name AS source_file
+           FROM raw.fte_time_off r
+           JOIN meta.source_file f
+             ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+           WHERE r.start_date<=? AND coalesce(r.end_date, ?) >= ?
+             AND (
+               (r.source_kind='PTO' AND r.record_status='APPROVED')
+               OR (r.source_kind='AWAY' AND r.record_status IN ('ACTIVE','PLANNED','CLOSED'))
+             )
+           ORDER BY r.agent_id, r.start_date, r.source_kind, r.source_row""",
+        [end, end, start],
+    ))
+    by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in source:
+        by_agent[row["agent_id"]].append(row)
+
+    output: list[dict[str, Any]] = []
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for shift in schedules:
+        shift_start, shift_end = shift["scheduled_start"], shift["scheduled_end"]
+        agent_id = shift["agent_id"]
+        business_date = shift["schedule_date"]
+        if (
+            not agent_id or not shift_start or not shift_end or shift_end <= shift_start
+            or shift["assignment_type"] == "Off"
+        ):
+            continue
+        candidates: list[dict[str, Any]] = []
+        for row in by_agent.get(agent_id, []):
+            if business_date < row["start_date"]:
+                continue
+            if row["end_date"] is not None and business_date > row["end_date"]:
+                continue
+            if row["source_kind"] == "PTO" and row["day_coverage"] == "PARTIAL_DAY":
+                segment_start = datetime.combine(business_date, row["start_time"])
+                segment_end = datetime.combine(business_date, row["end_time"])
+            else:
+                segment_start, segment_end = shift_start, shift_end
+            # Planned Away is a capacity planning input only.  It cannot erase
+            # attendance evidence which has already happened.
+            if row["source_kind"] == "AWAY" and row["record_status"] == "PLANNED":
+                if segment_end <= as_of:
+                    continue
+                segment_start = max(segment_start, as_of)
+            segment_start = max(shift_start, segment_start)
+            segment_end = min(shift_end, segment_end)
+            if segment_end > segment_start:
+                candidates.append({**row, "segment_start": segment_start, "segment_end": segment_end})
+        if not candidates:
+            continue
+
+        # Away outranks PTO when two registers overlap. Within the same kind,
+        # the later physical row is the deterministic winner. The boundary
+        # sweep ensures downstream minutes are never double counted.
+        boundaries = sorted({
+            value
+            for item in candidates
+            for value in (item["segment_start"], item["segment_end"])
+        })
+        exclusive: list[dict[str, Any]] = []
+        for left, right in zip(boundaries, boundaries[1:]):
+            active = [
+                item for item in candidates
+                if item["segment_start"] < right and item["segment_end"] > left
+            ]
+            if not active:
+                continue
+            chosen = max(
+                active,
+                key=lambda item: (
+                    item["source_kind"] == "AWAY",
+                    item["source_row"],
+                ),
+            )
+            current = {**chosen, "segment_start": left, "segment_end": right}
+            identity = (
+                chosen["source_kind"], chosen["absence_type"], chosen["record_status"],
+                chosen["source_file"], chosen["source_sheet"], chosen["source_row"],
+            )
+            if exclusive and exclusive[-1]["segment_end"] == left and exclusive[-1]["identity"] == identity:
+                exclusive[-1]["segment_end"] = right
+            else:
+                exclusive.append({**current, "identity": identity})
+        agent = agents.get(agent_id, {})
+        agent_day_key = f"{business_date:%Y%m%d}-{agent_id}"
+        for item in exclusive:
+            minutes = int((item["segment_end"] - item["segment_start"]).total_seconds() // 60)
+            if minutes <= 0:
+                continue
+            segment_key = hashlib.sha256(
+                f"{agent_day_key}|{item['source_kind']}|{item['absence_type']}|"
+                f"{item['segment_start']}|{item['segment_end']}".encode("utf-8")
+            ).hexdigest()
+            result = {
+                "segment_key": segment_key, "agent_day_key": agent_day_key,
+                "business_date": business_date, "agent_id": agent_id,
+                "agent_name": agent.get("canonical_name") or shift["agent_name"],
+                "team_leader": agent.get("team_leader"),
+                "ops_manager": agent.get("ops_manager"), "lob": agent.get("lob"),
+                "language": agent.get("language"),
+                "source_kind": item["source_kind"], "absence_type": item["absence_type"],
+                "record_status": item["record_status"],
+                "segment_start": item["segment_start"], "segment_end": item["segment_end"],
+                "planned_minutes": minutes, "source_file": item["source_file"],
+                "source_sheet": item["source_sheet"], "source_row": item["source_row"],
+            }
+            output.append(result)
+            grouped[agent_day_key].append(result)
+    output.sort(key=lambda row: (row["business_date"], row["agent_id"], row["segment_start"]))
+    conn.execute("DELETE FROM mart.planned_time_off_segment")
+    _insert_dicts(conn, "mart.planned_time_off_segment", PLANNED_TIME_OFF_COLUMNS, output)
+    return grouped
+
+
 def _events_by_agent(events: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for event in events:
@@ -422,6 +555,8 @@ ATTENDANCE_COLUMNS = [
     "no_show_minutes", "worked_span_minutes", "attendance_result", "attendance_percent", "schedule_source", "lilo_source",
     "actual_first_seen", "actual_last_seen", "actual_evidence", "status_covered_minutes", "status_source",
     "shift_state", "call_action", "requires_call", "is_provisional", "evaluation_as_of",
+    "planned_work_minutes", "planning_overlay", "planning_overlay_minutes",
+    "planning_overlay_source",
 ]
 
 UNRELIABLE_ATTENDANCE_RESULTS = {
@@ -453,6 +588,7 @@ def _build_attendance(
     agents: dict[str, dict[str, Any]],
     statuses_by_day: dict[tuple[date, str], list[dict[str, Any]]],
     status_loaded_dates: set[date],
+    planned_time_off: dict[str, list[dict[str, Any]]],
     as_of: datetime,
     minimum_status_coverage: float,
 ) -> list[dict[str, Any]]:
@@ -468,7 +604,39 @@ def _build_attendance(
         # Activities are the corrected Verint ledger, never operational attendance
         # evidence. Only the StartEndTimes assignment can make the shift planned
         # absence at this stage.
-        planned_absence = scheduled_minutes if shift["assignment_type"] == "Planned absence" else 0
+        agent_day_key = f"{shift['schedule_date']:%Y%m%d}-{agent_id}"
+        time_off_rows = planned_time_off.get(agent_day_key, [])
+        time_off_intervals = [
+            (item["segment_start"], item["segment_end"])
+            for item in time_off_rows
+        ]
+        time_off_minutes = (
+            interval_minutes(start, end, time_off_intervals)
+            if start and end else 0
+        )
+        time_off_labels = list(dict.fromkeys(
+            f"{item['source_kind']}: {item['absence_type']}" for item in time_off_rows
+        ))
+        planning_overlay = "; ".join(time_off_labels) or None
+        planning_source = "; ".join(sorted({item["source_file"] for item in time_off_rows})) or None
+        full_time_off = bool(scheduled_minutes and time_off_minutes >= scheduled_minutes)
+        effective_assignment_type = (
+            "Planned absence"
+            if shift["assignment_type"] == "Planned absence" or full_time_off
+            else shift["assignment_type"]
+        )
+        effective_assignment = planning_overlay if full_time_off and planning_overlay else shift["assignment"]
+        planned_absence = (
+            scheduled_minutes
+            if shift["assignment_type"] == "Planned absence"
+            else min(scheduled_minutes, time_off_minutes)
+        )
+        planned_work_minutes = max(0, scheduled_minutes - planned_absence)
+        working_intervals = (
+            subtract_intervals(start, end, time_off_intervals)
+            if start and end and effective_assignment_type != "Planned absence"
+            else []
+        )
         first, last, source_loaded, row_present, lilo_source = _lilo_boundaries(shift, lilo, loaded_dates)
         evidence_end = min(end, as_of) if end and start and as_of > start else start
         statuses = (
@@ -476,13 +644,33 @@ def _build_attendance(
             if start and evidence_end and evidence_end > start else []
         )
         if start and end and end > start:
-            status_category, status_covered, status_exclusive = _exclusive_category_minutes(start, end, statuses)
+            status_window_end = evidence_end if evidence_end and evidence_end > start else start
+            status_category, status_covered, status_exclusive = (
+                _exclusive_category_minutes(start, status_window_end, statuses)
+                if status_window_end > start else ({}, 0, [])
+            )
+            gross_status_exclusive = status_exclusive
+            expected_exclusive: list[dict[str, Any]] = []
+            for item in status_exclusive:
+                for left, right in subtract_intervals(
+                    item["interval_start"], item["interval_end"], time_off_intervals,
+                ):
+                    expected_exclusive.append({**item, "interval_start": left, "interval_end": right})
+            status_exclusive = expected_exclusive
+            status_category = defaultdict(int)
+            for item in status_exclusive:
+                status_category[item["actual_category"]] += int(
+                    (item["interval_end"] - item["interval_start"]).total_seconds() // 60
+                )
+            status_category = dict(status_category)
+            status_covered = sum(status_category.values())
             required_status_dates = {
                 start.date() + timedelta(days=offset)
                 for offset in range(((end - timedelta(microseconds=1)).date() - start.date()).days + 1)
             }
         else:
             status_category, status_covered, status_exclusive = {}, 0, []
+            gross_status_exclusive = []
             required_status_dates = {shift["schedule_date"]}
         status_source_loaded = required_status_dates <= status_loaded_dates
         status_sources = "; ".join(sorted({row["source_file"] for row in statuses})) or None
@@ -502,7 +690,11 @@ def _build_attendance(
             max(0, int((min(end, as_of) - start).total_seconds() // 60))
             if start and end and as_of > start else 0
         )
-        status_coverage_ratio = status_covered / elapsed_minutes if elapsed_minutes else 0.0
+        elapsed_work_minutes = sum(
+            int((min(right, as_of) - left).total_seconds() // 60)
+            for left, right in working_intervals if left < as_of and min(right, as_of) > left
+        )
+        status_coverage_ratio = status_covered / elapsed_work_minutes if elapsed_work_minutes else 0.0
         status_is_primary = bool(statuses) and status_coverage_ratio >= minimum_status_coverage
         if status_is_primary and status_first is not None:
             actual_first = status_first
@@ -524,8 +716,14 @@ def _build_attendance(
         raw_late = max(0, int((actual_first - start).total_seconds() // 60)) if actual_first and start else 0
         raw_early = max(0, int((end - actual_last).total_seconds() // 60)) if actual_last and end and shift_complete else 0
         usable_pair = bool(actual_first and actual_last and start and end and actual_last >= actual_first and actual_last > start and actual_first < end)
-        late_segments = [(start, min(actual_first, end))] if usable_pair and actual_first > start else []
-        early_segments = [(max(actual_last, start), end)] if usable_pair and shift_complete and end > actual_last else []
+        late_segments = (
+            subtract_intervals(start, min(actual_first, end), time_off_intervals)
+            if usable_pair and actual_first > start else []
+        )
+        early_segments = (
+            subtract_intervals(max(actual_last, start), end, time_off_intervals)
+            if usable_pair and shift_complete and end > actual_last else []
+        )
         late = sum(int((b - a).total_seconds() // 60) for a, b in late_segments)
         early = sum(int((b - a).total_seconds() // 60) for a, b in early_segments)
         late = 0 if late <= tolerance else late
@@ -541,26 +739,31 @@ def _build_attendance(
             status_exclusive and not status_presence
             and status_coverage_ratio >= minimum_status_coverage
         )
-        no_show = scheduled_minutes if (
+        no_show_segments = working_intervals if (
             (blank_lilo_row or status_proves_disconnected)
-            and shift["assignment_type"] not in {"Off", "Planned absence"}
+            and effective_assignment_type not in {"Off", "Planned absence"}
             and shift_complete
-        ) else 0
+        ) else []
+        no_show = sum(int((b - a).total_seconds() // 60) for a, b in no_show_segments)
         worked_span = int((actual_last - actual_first).total_seconds() // 60) if actual_first and actual_last and actual_last >= actual_first else 0
         parse_ok = bool(shift["parse_ok"])
-        if not parse_ok and shift["assignment_type"] != "Off":
+        if not parse_ok and effective_assignment_type != "Off":
             result = "Schedule parse error"
-        elif shift["assignment_type"] == "Off":
+        elif effective_assignment_type == "Off":
             result = "Off"
-        elif shift["assignment_type"] == "Planned absence":
-            result = "Planned absence"
+        elif effective_assignment_type == "Planned absence":
+            if full_time_off and time_off_rows:
+                kinds = {item["source_kind"] for item in time_off_rows}
+                result = "PTO" if kinds == {"PTO"} else "Away" if kinds == {"AWAY"} else "Planned time off"
+            else:
+                result = "Planned absence"
         elif shift_not_started:
             result = "Not started"
         elif shift_in_progress and late:
             result = "Late - shift in progress"
         elif (
             shift_in_progress and actual_first is None and start
-            and as_of >= start + timedelta(minutes=tolerance)
+            and elapsed_work_minutes > tolerance
             and (source_loaded or status_source_loaded)
         ):
             result = "Not seen - shift in progress"
@@ -569,7 +772,7 @@ def _build_attendance(
         elif not source_loaded and not status_source_loaded:
             result = "Data not loaded"
         elif no_show:
-            result = "No show"
+            result = "No show - partial time off" if time_off_minutes else "No show"
         elif actual_first is None and actual_last is None:
             result = "Missing actual evidence"
         elif actual_first is None or actual_last is None:
@@ -583,16 +786,16 @@ def _build_attendance(
         elif early:
             result = "Early leave"
         else:
-            result = "Present"
+            result = "Present - partial time off" if time_off_minutes else "Present"
         shift_state = (
             "NOT_STARTED" if shift_not_started else
             "IN_PROGRESS" if shift_in_progress else
             "COMPLETE" if shift_complete else
             "INVALID"
         )
-        if shift["assignment_type"] in {"Off", "Planned absence"}:
+        if effective_assignment_type in {"Off", "Planned absence"}:
             call_action = "NONE"
-        elif result == "No show":
+        elif no_show:
             call_action = "CALL_NO_SHOW"
         elif result == "Not seen - shift in progress":
             call_action = "CALL_NOT_SEEN_NOW"
@@ -602,13 +805,14 @@ def _build_attendance(
             call_action = "NONE"
         agent = agents.get(agent_id, {})
         rows.append({
-            "agent_day_key": f"{shift['schedule_date']:%Y%m%d}-{agent_id}",
+            "agent_day_key": agent_day_key,
             "business_date": shift["schedule_date"], "agent_id": agent_id,
             "agent_name": agent.get("canonical_name") or shift["agent_name"],
             "team_leader": agent.get("team_leader"), "ops_manager": agent.get("ops_manager"),
             "lob": agent.get("lob"), "market": agent.get("market"), "language": agent.get("language"), "location": agent.get("location"),
             "scheduled_start": start, "scheduled_end": end, "scheduled_minutes": scheduled_minutes,
-            "assignment": shift["assignment"], "assignment_type": shift["assignment_type"], "planned_absence_minutes": planned_absence,
+            "assignment": effective_assignment, "assignment_type": effective_assignment_type,
+            "planned_absence_minutes": planned_absence,
             "first_login": first, "last_logout": last, "source_loaded": source_loaded or status_source_loaded, "lilo_row_present": row_present,
             "seen_in_lilo": agent_id in seen_ids, "raw_late_minutes": raw_late, "raw_early_leave_minutes": raw_early,
             "uncoded_late_minutes": late, "uncoded_early_leave_minutes": early, "no_show_minutes": no_show,
@@ -621,8 +825,15 @@ def _build_attendance(
             "requires_call": call_action != "NONE",
             "is_provisional": shift_state in {"NOT_STARTED", "IN_PROGRESS"},
             "evaluation_as_of": as_of,
-            "_events": events, "_late_segments": late_segments, "_early_segments": early_segments,
+            "planned_work_minutes": planned_work_minutes,
+            "planning_overlay": planning_overlay,
+            "planning_overlay_minutes": time_off_minutes,
+            "planning_overlay_source": planning_source,
+            "_events": events, "_late_segments": late_segments,
+            "_early_segments": early_segments, "_no_show_segments": no_show_segments,
+            "_planned_time_off_segments": time_off_rows,
             "_status_exclusive": status_exclusive, "_status_category": status_category,
+            "_status_exclusive_gross": gross_status_exclusive,
             "_status_is_primary": status_is_primary,
             "_evidence_complete": result not in UNRELIABLE_ATTENDANCE_RESULTS,
             "_schedule_source_file_id": shift["source_file_id"],
@@ -771,8 +982,8 @@ CORRECTION_RESIDUAL_COLUMNS = [
 
 def _correction_id(row: dict[str, Any], issue: str, start: datetime | None, end: datetime | None) -> str:
     clean = "".join(char for char in issue.upper() if char.isalnum())
-    start_key = start.strftime("%H%M") if start else "DAY"
-    end_key = end.strftime("%H%M") if end else "DAY"
+    start_key = start.strftime("%H%M%S") if start else "DAY"
+    end_key = end.strftime("%H%M%S") if end else "DAY"
     return f"{row['business_date']:%Y%m%d}-{row['agent_id']}-{start_key}-{end_key}-{clean}"
 
 
@@ -821,11 +1032,13 @@ def _build_corrections(
     match_tolerance = rulebook.verint_match_tolerance_minutes
     for row in attendance:
         start, end = row["scheduled_start"], row["scheduled_end"]
-        if row["attendance_result"] == "No show" and start and end:
-            minutes = int((end - start).total_seconds() // 60)
-            if minutes > 0:
+        if row["no_show_minutes"] > 0 and start and end:
+            for gap_start, gap_end in row.get("_no_show_segments", []):
+                minutes = int((gap_end - gap_start).total_seconds() // 60)
+                if minutes <= 0:
+                    continue
                 source = "; ".join(value for value in (row["lilo_source"], row["status_source"]) if value) or row["schedule_source"]
-                add(row, "No show", start, end, minutes, 1, "High", "Review absence reason", row["actual_evidence"], source)
+                add(row, "No show", gap_start, gap_end, minutes, 1, "High", "Review absence reason", row["actual_evidence"], source)
         if row["uncoded_late_minutes"] > 0:
             for gap_start, gap_end in row["_late_segments"]:
                 minutes = int((gap_end - gap_start).total_seconds() // 60)
@@ -845,16 +1058,22 @@ def _build_corrections(
         actual_first, actual_last = row["actual_first_seen"], row["actual_last_seen"]
         if not actual_first or not actual_last or actual_last <= actual_first:
             continue
-        exclusive = row.get("_status_exclusive", [])
+        exclusive = row.get("_status_exclusive_gross", row.get("_status_exclusive", []))
         for category, issue, priority in (("Logged Off", "Mid-shift logged off", 4), ("Unavailable", "Unavailable in shift", 7)):
             raw = [(item["interval_start"], item["interval_end"]) for item in exclusive if item["actual_category"] == category]
             exact_gaps = _exact_status_gaps(raw, status_tolerance)
-            for hit_start, hit_end in clip_intervals(actual_first, actual_last, exact_gaps):
-                minutes = int((hit_end - hit_start).total_seconds() // 60)
-                if minutes <= status_tolerance:
-                    continue
-                confidence = "High" if category == "Logged Off" else "Review"
-                add(row, issue, hit_start, hit_end, minutes, priority, confidence, "General Unavailability", "AGENT_STATUS", row["status_source"])
+            clipped = clip_intervals(actual_first, actual_last, exact_gaps)
+            time_off = [
+                (item["segment_start"], item["segment_end"])
+                for item in row.get("_planned_time_off_segments", [])
+            ]
+            for raw_start, raw_end in clipped:
+                for hit_start, hit_end in subtract_intervals(raw_start, raw_end, time_off):
+                    minutes = int((hit_end - hit_start).total_seconds() // 60)
+                    if minutes <= status_tolerance:
+                        continue
+                    confidence = "High" if category == "Logged Off" else "Review"
+                    add(row, issue, hit_start, hit_end, minutes, priority, confidence, "General Unavailability", "AGENT_STATUS", row["status_source"])
 
     by_key = {row["agent_day_key"]: row for row in attendance}
     residual_rows: list[dict[str, Any]] = []
@@ -927,6 +1146,15 @@ def _build_corrections(
         gaps_by_key[f"{item['business_date']:%Y%m%d}-{item['agent_id']}"].append(item)
     for base in attendance:
         for event in _final_verint_events(base, rulebook):
+            planned_overlap = interval_minutes(
+                event["start"], event["end"],
+                [
+                    (item["segment_start"], item["segment_end"])
+                    for item in base.get("_planned_time_off_segments", [])
+                ],
+            )
+            if planned_overlap > 0:
+                continue
             has_observed_overlap = any(
                 gap["gap_start"] and gap["gap_end"]
                 and interval_minutes(gap["gap_start"], gap["gap_end"], [(event["start"], event["end"])]) > 0
@@ -961,6 +1189,7 @@ STAFFING_COLUMNS = [
     "scheduled_fte", "elapsed_scheduled_fte", "observed_fte", "productive_fte",
     "staffing_variance_fte", "staffing_gap_fte", "staffing_state",
     "evidence_basis", "evaluation_as_of",
+    "gross_scheduled_fte", "planned_time_off_fte",
 ]
 
 TIMELINE_COLUMNS = [
@@ -1000,6 +1229,7 @@ def _build_staffing(
             "interval_end": right, "lob": lob, "language": language,
             "scheduled_ids": set(), "observed_ids": set(), "productive_ids": set(),
             "auxiliary_ids": set(), "scheduled_seconds": 0.0,
+            "gross_scheduled_seconds": 0.0, "time_off_seconds": 0.0,
             "source_available_seconds": 0.0,
             "elapsed_scheduled_seconds": 0.0, "observed_seconds": 0.0,
             "productive_seconds": 0.0, "evidence": set(),
@@ -1009,14 +1239,28 @@ def _build_staffing(
         start, end = row["scheduled_start"], row["scheduled_end"]
         if (
             not start or not end or end <= start
-            or row["assignment_type"] in {"Off", "Planned absence"}
+            or row["assignment_type"] == "Off"
         ):
             continue
+        time_off_intervals = [
+            (item["segment_start"], item["segment_end"])
+            for item in row.get("_planned_time_off_segments", [])
+        ]
+        if row["assignment_type"] == "Planned absence" and not time_off_intervals:
+            time_off_intervals = [(start, end)]
+        working_intervals = subtract_intervals(start, end, time_off_intervals)
         elapsed_end = min(end, as_of)
         for left, right in _quarter_intervals(start, end):
             bucket = bucket_for(row, left, right)
-            scheduled = _overlap_seconds(left, right, start, end)
-            elapsed = _overlap_seconds(left, right, start, elapsed_end) if elapsed_end > start else 0.0
+            gross = _overlap_seconds(left, right, start, end)
+            scheduled = sum(_overlap_seconds(left, right, a, b) for a, b in working_intervals)
+            planned = max(0.0, gross - scheduled)
+            elapsed = sum(
+                _overlap_seconds(left, right, a, min(b, elapsed_end))
+                for a, b in working_intervals if a < elapsed_end
+            )
+            bucket["gross_scheduled_seconds"] += gross
+            bucket["time_off_seconds"] += planned
             if scheduled:
                 bucket["scheduled_ids"].add(row["agent_id"])
                 bucket["scheduled_seconds"] += scheduled
@@ -1024,7 +1268,8 @@ def _build_staffing(
                     bucket["source_available_seconds"] += scheduled
                 bucket["elapsed_scheduled_seconds"] += elapsed
 
-        exclusive = row.get("_status_exclusive", [])
+        expected_exclusive = row.get("_status_exclusive", [])
+        exclusive = row.get("_status_exclusive_gross", expected_exclusive)
         active_statuses = [
             item for item in exclusive
             if item["actual_category"] in {"Productive", "Auxiliary", "Lunch", "Break"}
@@ -1067,6 +1312,8 @@ def _build_staffing(
     output: list[dict[str, Any]] = []
     for item in buckets.values():
         scheduled_fte = item["scheduled_seconds"] / 900
+        gross_scheduled_fte = item["gross_scheduled_seconds"] / 900
+        planned_time_off_fte = item["time_off_seconds"] / 900
         elapsed_scheduled_fte = item["elapsed_scheduled_seconds"] / 900
         observed_fte = item["observed_seconds"] / 900
         productive_fte = item["productive_seconds"] / 900
@@ -1106,6 +1353,8 @@ def _build_staffing(
             "staffing_state": state,
             "evidence_basis": evidence,
             "evaluation_as_of": as_of,
+            "gross_scheduled_fte": gross_scheduled_fte,
+            "planned_time_off_fte": planned_time_off_fte,
         })
     output.sort(key=lambda row: (row["business_date"], row["interval_start"], row["lob"], row["language"]))
     conn.execute("DELETE FROM mart.staffing_interval")
@@ -1121,14 +1370,23 @@ def _build_shift_timeline(
     output: list[dict[str, Any]] = []
     for row in attendance:
         start, end = row["scheduled_start"], row["scheduled_end"]
-        if not start or not end or end <= start or row["assignment_type"] in {"Off", "Planned absence"}:
+        if (
+            not start or not end or end <= start or row["assignment_type"] == "Off"
+            or (
+                row["assignment_type"] == "Planned absence"
+                and not row.get("_planned_time_off_segments")
+            )
+        ):
             continue
-        exclusive = row.get("_status_exclusive", [])
+        exclusive = row.get("_status_exclusive_gross", row.get("_status_exclusive", []))
         boundaries = {start, end}
         if start < as_of < end:
             boundaries.add(as_of)
         for item in exclusive:
             boundaries.update((item["interval_start"], item["interval_end"]))
+        planned_segments = row.get("_planned_time_off_segments", [])
+        for item in planned_segments:
+            boundaries.update((item["segment_start"], item["segment_end"]))
         for value in (row["actual_first_seen"], row["actual_last_seen"]):
             if value is not None and start < value < end:
                 boundaries.add(value)
@@ -1143,9 +1401,20 @@ def _build_shift_timeline(
             ), None)
             actual_status = chosen.get("status") if chosen else None
             source_file = chosen.get("source_file") if chosen else None
-            if left >= as_of:
+            planned = next((
+                item for item in planned_segments
+                if item["segment_start"] <= left and item["segment_end"] >= right
+            ), None)
+            if planned is not None:
+                active_during_time_off = chosen is not None and chosen["actual_category"] != "Logged Off"
+                category = chosen["actual_category"] if active_during_time_off else planned["source_kind"]
+                mismatch = "WORK_DURING_TIME_OFF" if active_during_time_off else "PLANNED_TIME_OFF"
+                is_gap = False
+                source = "AGENT_STATUS" if active_during_time_off else planned["source_kind"]
+                source_file = chosen.get("source_file") if active_during_time_off else planned["source_file"]
+            elif left >= as_of:
                 category, mismatch, is_gap, source = "FUTURE", "FUTURE", False, "NONE"
-            elif row["attendance_result"] == "No show":
+            elif any(a <= left and b >= right for a, b in row.get("_no_show_segments", [])):
                 category, mismatch, is_gap, source = "NO_ACTIVITY", "NO_SHOW", True, row["actual_evidence"]
                 source_file = row["lilo_source"] or row["status_source"]
             elif chosen is not None:
@@ -1184,7 +1453,11 @@ def _build_shift_timeline(
                 "ops_manager": row["ops_manager"], "lob": row["lob"],
                 "language": row["language"], "scheduled_start": start,
                 "scheduled_end": end, "segment_start": left, "segment_end": right,
-                "segment_minutes": minutes, "planned_state": row["assignment_type"],
+                "segment_minutes": minutes,
+                "planned_state": (
+                    f"{planned['source_kind']}: {planned['absence_type']}"
+                    if planned is not None else row["assignment_type"]
+                ),
                 "actual_status": actual_status, "actual_category": category,
                 "mismatch_type": mismatch, "is_gap": is_gap,
                 "observed_source": source, "source_file": source_file,
@@ -1224,6 +1497,9 @@ def _build_verint_final_absence(
     end: date,
     as_of: datetime,
 ) -> tuple[int, int]:
+    # StartEndTimes is the authoritative roster of expected agent-days.  The
+    # post-day Activities export is left-attached below; this keeps completely
+    # empty or missing Verint rows visible instead of silently dropping them.
     shifts = _dicts(conn.execute(
         """
         WITH ranked AS (
@@ -1238,6 +1514,24 @@ def _build_verint_final_absence(
             JOIN meta.source_file f ON f.file_id=r.source_file_id
             LEFT JOIN core.dim_agent d ON d.agent_id=r.agent_id
             WHERE f.active=true AND f.status='SUCCESS'
+              AND f.source_variant='START_END'
+              AND r.schedule_date BETWEEN ? AND ? AND r.agent_id IS NOT NULL
+        )
+        SELECT * FROM ranked WHERE row_rank=1
+        """,
+        [start, end],
+    ))
+    activity_shifts = _dicts(conn.execute(
+        """
+        WITH ranked AS (
+            SELECT r.*, f.file_name AS source_file, f.modified_at,
+                   row_number() OVER (
+                       PARTITION BY r.schedule_date, r.agent_id
+                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.schedule_shift r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id
+            WHERE f.active=true AND f.status='SUCCESS'
               AND f.source_variant='ACTIVITIES'
               AND r.schedule_date BETWEEN ? AND ? AND r.agent_id IS NOT NULL
         )
@@ -1245,6 +1539,10 @@ def _build_verint_final_absence(
         """,
         [start, end],
     ))
+    activity_by_key = {
+        f"{row['schedule_date']:%Y%m%d}-{row['agent_id']}": row
+        for row in activity_shifts
+    }
     events = _dicts(conn.execute(
         """SELECT r.*, f.file_name AS source_file
            FROM raw.schedule_event r
@@ -1261,7 +1559,8 @@ def _build_verint_final_absence(
         row["agent_day_key"]: row
         for row in _dicts(conn.execute(
             """SELECT agent_day_key, attendance_result, actual_evidence,
-                      source_loaded, shift_state
+                      source_loaded, shift_state, planning_overlay_minutes,
+                      planning_overlay
                FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ?""",
             [start, end],
         ))
@@ -1293,12 +1592,20 @@ def _build_verint_final_absence(
             continue
         agent_day_key = f"{shift['schedule_date']:%Y%m%d}-{shift['agent_id']}"
         candidates: list[tuple[str | None, datetime, datetime, str, str]] = []
-        candidates.append((shift["assignment"], shift_start, shift_end, "SHIFT_ASSIGNMENT", shift["source_file"]))
-        for event in events_by_row.get((shift["source_file_id"], shift["source_row"]), []):
+        activity_shift = activity_by_key.get(agent_day_key)
+        if activity_shift is not None:
             candidates.append((
-                event["activity"], event["event_start"], event["event_end"],
-                "SHIFT_EVENT", event["source_file"],
+                activity_shift["assignment"], activity_shift["scheduled_start"],
+                activity_shift["scheduled_end"], "SHIFT_ASSIGNMENT",
+                activity_shift["source_file"],
             ))
+            for event in events_by_row.get(
+                (activity_shift["source_file_id"], activity_shift["source_row"]), [],
+            ):
+                candidates.append((
+                    event["activity"], event["event_start"], event["event_end"],
+                    "SHIFT_EVENT", event["source_file"],
+                ))
         flag_intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
         seen: set[tuple[Any, ...]] = set()
         unmapped = 0
@@ -1397,6 +1704,12 @@ def _build_verint_final_absence(
             absence_minutes or vacation_minutes or unpaid_minutes
             or shrinkage_minutes or unmapped_minutes
         )
+        expected_time_off_minutes = int(
+            attendance.get("planning_overlay_minutes") or 0
+        ) if attendance is not None else 0
+        coded_time_off_minutes = max(
+            absence_minutes, vacation_minutes, unpaid_minutes, shrinkage_minutes,
+        )
         working_shift = shift.get("assignment_type") not in {"Off", "Planned absence"}
         shift_is_complete = bool(
             attendance.get("shift_state") == "COMPLETE"
@@ -1441,6 +1754,10 @@ def _build_verint_final_absence(
             "final_ledger_status": (
                 "UNMAPPED_REVIEW" if unmapped_minutes
                 else "PROVISIONAL_DAY" if provisional_day
+                else "PLANNED_TIME_OFF_NOT_IN_VERINT"
+                if expected_time_off_minutes and not final_code_present
+                else "TIME_OFF_PARTIALLY_IN_VERINT"
+                if expected_time_off_minutes and coded_time_off_minutes < expected_time_off_minutes
                 else "VERINT_WITHOUT_OBSERVED_GAP" if unsupported_verint_code
                 else "UNCODED_EMPTY_SHIFT" if uncoded_empty_shift
                 else "UNCORRECTED_OBSERVED_GAP" if uncorrected_observed_gap
@@ -1675,6 +1992,7 @@ def _build_pcs(
             FROM core.clean_call_leg c
             LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
             WHERE c.business_date BETWEEN ? AND ? AND c.agent_id IS NOT NULL
+              AND d.match_method='Agent ID'
         ), aggregated AS (
             SELECT business_date, agent_id,
                    coalesce(max(canonical_name), max(agent_name)) AS agent_name,
@@ -2263,8 +2581,8 @@ def _build_quality(
         for business_date, low_rows in conn.execute(
             """SELECT business_date, count(*)
                FROM mart.attendance_agent_day
-               WHERE scheduled_minutes>0 AND status_source IS NOT NULL
-                 AND 1.0*status_covered_minutes/scheduled_minutes < ?
+               WHERE planned_work_minutes>0 AND status_source IS NOT NULL
+                 AND 1.0*status_covered_minutes/planned_work_minutes < ?
                GROUP BY business_date ORDER BY business_date""",
             [config.rules.minimum_status_coverage],
         ).fetchall():
@@ -2331,6 +2649,35 @@ def _build_quality(
             "schedule", row["source_file"], row["business_date"], row["agent_id"],
             "Verint final activity without observed gap", "REVIEW",
             f"{row['activity']} / {row['category']} covers {row['minutes']} minutes for {row['agent_name'] or row['agent_id']}; compare LILO and Agent Status.",
+        )
+    for row in _dicts(conn.execute(
+        """SELECT business_date, agent_id, agent_name, final_ledger_status
+           FROM mart.verint_final_absence_agent_day
+           WHERE business_date BETWEEN ? AND ?
+             AND final_ledger_status IN (
+               'PLANNED_TIME_OFF_NOT_IN_VERINT','TIME_OFF_PARTIALLY_IN_VERINT'
+             )""", [start, end]
+    )):
+        add(
+            "fte", None, row["business_date"], row["agent_id"],
+            "Planned time off not final in Verint", "ERROR",
+            f"{row['agent_name'] or row['agent_id']}: {row['final_ledger_status']}. "
+            "Correct Verint Activities, export again, and refresh before payroll use.",
+        )
+    for row in _dicts(conn.execute(
+        """SELECT r.agent_id, r.source_sheet, r.source_row, r.start_date,
+                  r.absence_type, f.file_name
+           FROM raw.fte_time_off r
+           JOIN meta.source_file f ON f.file_id=r.source_file_id
+           LEFT JOIN core.dim_agent d ON d.agent_id=r.agent_id
+           WHERE f.active=true AND f.status='SUCCESS'
+             AND coalesce(d.match_method,'Unmatched to FTE')<>'Agent ID'"""
+    )):
+        add(
+            "fte", row["file_name"], row["start_date"], row["agent_id"],
+            "Time-off Agent ID not in active roster", "ERROR",
+            f"{row['source_sheet']} row {row['source_row']} ({row['absence_type']}) "
+            "does not match an admitted Agent-sheet ID.",
         )
     for row in _dicts(conn.execute(
         """SELECT business_date, agent_id, activity, source_file, sum(minutes) AS minutes
@@ -2510,10 +2857,13 @@ def refresh_models(
             statuses, status_loaded_dates = {}, set()
         stage(6, "Building employee dimension")
         agents = _build_agents(conn)
+        planned_time_off = _build_planned_time_off(
+            conn, schedules, agents, start, end, evaluation_as_of,
+        )
         stage(7, "Building attendance")
         attendance = _build_attendance(
             conn, rulebook, schedules, events_by_agent, lilo, loaded_dates, seen_ids,
-            agents, statuses, status_loaded_dates, evaluation_as_of,
+            agents, statuses, status_loaded_dates, planned_time_off, evaluation_as_of,
             config.rules.minimum_status_coverage,
         )
         stage(8, "Keeping adherence disabled")

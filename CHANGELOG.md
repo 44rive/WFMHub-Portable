@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.14.0 — 2026-09-04
+
+- Activated the governed `PTO` and `Away` sheets in the standard FTE workbook.
+  Approved PTO and effective Away are clipped to exact schedule intervals and
+  applied consistently to attendance, correction gaps, timelines and staffing;
+  Planned Away affects future capacity only.
+- Split interval staffing into gross scheduled, planned-time-off and net
+  scheduled FTE. Verint Activities remain the final payroll authority, while
+  missing or partial post-day coding for expected time off is now explicit.
+- Rebuilt PCS as a simpler TL cockpit: reliable loaded-date period selectors,
+  one agent realization list, selector-driven dashboard/trend, governed sample
+  threshold, Agent-ID-safe filtering, and a focused coaching action table.
+- Kept PCS coaching outside SQLite while carrying the five editable Excel
+  fields forward between report generations using the stable Coaching Key.
+
 ## 0.13.1 — 2026-09-04
 
 - Replaced the editable correction-decision sheet with `VERINT_INJECTION`: one
@@ -14,8 +29,8 @@
   covered residual intervals.
 - Expanded the blank FTE template with governed `PTO` and `Away` Excel Tables,
   leading-zero-safe Agent IDs, date/time formats, dropdowns, required-field
-  highlighting and plain-language instructions. The registers are ready to be
-  populated before their calculation overlay is enabled.
+  highlighting and plain-language instructions. The registers were staged for
+  the calculation overlay delivered in v0.14.0.
 
 ## 0.13.0 — 2026-09-04
 

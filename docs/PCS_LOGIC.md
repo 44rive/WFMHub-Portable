@@ -38,8 +38,10 @@ external link:
 - every valid inbound Q1 `<=3` creates one coaching opportunity;
 - each opportunity is identified by the stable deduplicated call-leg key;
 - `Actions Rate = completed coaching opportunities / all coaching opportunities`;
-- `OK`, `Yes`, `Y`, `Done` and `Completed` imports normalize to `COMPLETED`;
-- coaching decisions persist in SQLite and survive report regeneration.
+- the TL fills Status, Coach, Coaching Date, Due Date and Comment in Excel;
+- when the current PCS report is regenerated, those editable values are read
+  from the previous workbook and carried forward by Coaching Key;
+- coaching decisions are never imported into SQLite.
 
 `Not required` remains in the denominator and is not counted as completed.
 Low sample is an interpretation warning, not a coaching opportunity by itself.
@@ -57,3 +59,7 @@ kept in participation but excluded from the average.
 
 The editable settings live in `config\wfm_rules.toml` under `[pcs]`. Changing
 them requires a new `rulebook.version`, validation, and a refresh.
+
+The low-sample threshold and any future PCS/participation targets live in
+`config\metric_catalog.toml`. The workbook never invents a target when none is
+configured.

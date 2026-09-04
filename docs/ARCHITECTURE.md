@@ -87,12 +87,14 @@ details remain in one module.
 | `core.dim_agent` | One operational Agent ID |
 | `core.correction_action` | Legacy compatibility table; correction workbooks are no longer imported |
 | `core.pcs_coaching_action` | Legacy compatibility table; generated PCS coaching stays in Excel |
+| `raw.fte_time_off` | One governed PTO/Away register row from the standard FTE workbook |
 | `mart.attendance_agent_day` | One scheduled Agent ID/day |
 | `mart.conformance_agent_day` | Legacy compatibility table; empty in v0.5 |
 | `mart.correction_candidate` | One observed LILO/status gap plus Verint-final check |
 | `mart.correction_residual_segment` | One still-uncovered interval requiring Verint review/injection |
 | `mart.staffing_interval` | One 15-minute roster LOB/language staffing interval |
 | `mart.shift_timeline_segment` | One exact planned-versus-observed timeline segment |
+| `mart.planned_time_off_segment` | One schedule-clipped, non-overlapping PTO/Away interval |
 | `mart.rta_snapshot` | Legacy compatibility table; empty in v0.5 |
 | `mart.verint_final_exception` | One final Verint interval with no observed supporting gap |
 | `mart.forecast_hour` | One raw forecast queue/hour plus mapped scopes |
@@ -197,9 +199,10 @@ Counts `<=3` and `>3` remain counts. Participation is `inbound raw-Q1 nonblank /
 inbound PCSStatus=1`; invalid raw answers stay in that numerator and are
 separately counted. Q2 and Mode 2 are diagnostics only. Higher grains always
 sum counters before dividing. A valid inbound Q1 `<=3` is one coaching
-opportunity. The generated `COACHING` sheet carries those calls plus four blue
+opportunity. The generated `COACHING` sheet carries those calls plus five blue
 manual columns. Actions Rate is completed workbook rows divided by all
-low-score opportunities. The PCS mart rebuild window expands to the first
+low-score opportunities. Those five fields carry forward from the prior
+current workbook by Coaching Key and never enter SQLite. The PCS mart rebuild window expands to the first
 day of the previous month through the selected end date so Today/Current Week
 reports retain MTD and comparison context. See [PCS logic](PCS_LOGIC.md).
 

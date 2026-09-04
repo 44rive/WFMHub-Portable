@@ -47,7 +47,7 @@ never agent availability.
 
 | Source | Used for |
 |---|---|
-| FTE roster | Date-aware in-scope agents and organisation fields |
+| FTE roster | Date-aware in-scope agents, organisation fields, approved PTO, and Away planning |
 | Verint StartEndTimes | Scheduled start/end and assignment boundaries |
 | Storm LILO | First/last presence evidence, including loaded blank rows |
 | Storm Agent Status | Observed attendance and interval staffing evidence |
@@ -65,6 +65,11 @@ FTE scope is effective-dated: `Active` rows are admitted; `Leaver` rows are
 admitted only through `End date if leaver`; other statuses and undated leavers
 are excluded. The same rule is applied to schedules, LILO, Agent Status, and
 Call by Call for each row's business date.
+
+The standard FTE workbook also owns PTO and Away registers. Approved PTO and
+effective Away intervals change expected work and net staffing without editing
+any extract. Planned Away affects future capacity only. Verint Activities stay
+the final payroll/absence authority.
 
 ## Windows quick start
 
@@ -110,16 +115,18 @@ coaching sync.
 
 `Reports\PCS Performance.xlsx` contains:
 
-- selector boxes for period view, custom dates, LOB, team leader, and agent;
+- selector boxes for latest day, current/previous week, current/previous month,
+  custom dates, LOB, team leader, and Agent ID;
 - KPI cards that recalculate in desktop Excel from the included clean table;
-- daily trend plus team and agent views;
+- a selector-driven trend and a ready-made `AGENT_RESULTS` realization list;
 - a `COACHING` table containing every valid low-score opportunity;
 - a visible `PCS_DATA` Excel Table at agent/day grain.
 
 Choose values in the boxes on `DASHBOARD`. To add native slicers manually,
 click inside `PCS_DATA` or `COACHING`, then choose **Table Design > Insert
-Slicer**. The team fills the four blue coaching columns and saves/sends that
-workbook; WFMHub does not need to read it back.
+Slicer**. The team fills the five blue coaching columns and saves/sends that
+workbook. When the current report is regenerated, Excel actions carry forward
+by Coaching Key; they are never imported into SQLite.
 
 ## Configurable logic
 
