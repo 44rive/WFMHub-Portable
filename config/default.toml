@@ -4,12 +4,16 @@ timezone = "Europe/Berlin"
 [paths]
 # Relative paths are resolved from the WFMHub folder.
 source_root = "extracts"
-database = "database/wfm.sqlite3"
-output = "output"
-logs = "logs"
-backups = "backups"
-input = "input"
-custom = "custom"
+database = "_system/database/wfm.sqlite3"
+# Reports is the only normal user-facing destination. Internal feeds and
+# compatibility artifacts stay under _system.
+reports = "Reports"
+system = "_system"
+output = "_system/output"
+logs = "_system/logs"
+backups = "_system/backups"
+input = "_system/input"
+custom = "_system/custom"
 business_rules = "config/wfm_rules.toml"
 metric_catalog = "config/metric_catalog.toml"
 analytics_rules = "config/analytics_rules.toml"
@@ -70,12 +74,12 @@ max_final_absence_rows = 100000
 max_final_absence_event_rows = 100000
 
 [report_packs]
-# One workbook per operational decision. Each product uses the same visual
-# shell and writes compact companion data for Excel Data Model templates.
-pcs = "pcs"
-bonus = "bonus"
-service = "service"
-staffing = "staffing"
-attendance = "attendance"
-corrections = "corrections"
-absence = "absence"
+# Kept only for command/config compatibility. Official products are published
+# with fixed names directly in Reports; these values no longer create folders.
+pcs = "."
+bonus = "."
+service = "."
+staffing = "."
+attendance = "."
+corrections = "."
+absence = "."

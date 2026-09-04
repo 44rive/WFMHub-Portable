@@ -15,11 +15,11 @@ from .database import connect
 
 
 ASCII_LOGO = (
-    "#   #  #####  #   #      #   #  #   #  #### ",
-    "#   #  #      ## ##      #   #  #   #  #   #",
-    "# # #  ####   # # #      #####  #   #  #### ",
-    "## ##  #      #   #      #   #  #   #  #   #",
-    "#   #  #      #   #      #   #   ###   #### ",
+    " __        _______ __  __   _   _ _   _ ____ ",
+    " \\ \\      / /  ___|  \\/  | | | | | | | | __ )",
+    "  \\ \\ /\\ / /| |_  | |\\/| | | |_| | | | |  _ \\",
+    "   \\ V  V / |  _| | |  | | |  _  | |_| | |_) |",
+    "    \\_/\\_/  |_|   |_|  |_| |_| |_|\\___/|____/ ",
 )
 PANEL_INNER_WIDTH = 76
 
@@ -96,7 +96,19 @@ def load_dashboard_status(home: Path) -> DashboardStatus:
                       requested_start, requested_end
                FROM meta.refresh_run ORDER BY started_at DESC LIMIT 1"""
         ).fetchone()
-        agents = conn.execute("SELECT count(*) FROM core.dim_agent").fetchone()[0]
+        agents = conn.execute(
+            """SELECT count(DISTINCT r.agent_id)
+               FROM raw.fte_agent r
+               JOIN meta.source_file f ON f.file_id=r.source_file_id
+               WHERE f.active=true AND f.status='SUCCESS' AND r.agent_id IS NOT NULL
+                 AND (
+                     upper(trim(coalesce(r.employment_status,'')))='ACTIVE'
+                     OR (
+                         upper(trim(coalesce(r.employment_status,'')))='LEAVER'
+                         AND r.end_date IS NOT NULL AND r.end_date >= date('now')
+                     )
+                 )"""
+        ).fetchone()[0]
         sources_total, sources_healthy = conn.execute(
             """SELECT count(*),
                       coalesce(sum(CASE WHEN status='SUCCESS' THEN 1 ELSE 0 END), 0)

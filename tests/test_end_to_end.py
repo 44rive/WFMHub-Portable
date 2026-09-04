@@ -386,11 +386,15 @@ class EndToEndTests(unittest.TestCase):
                     before_failure,
                 )
                 report = build_report(conn, config, model.start, model.end)
-                self.assertEqual(report.parent, home / "output" / "operations")
-                self.assertTrue(report.name.startswith("WFMHub_Daily_Operations_"))
+                self.assertEqual(report.parent, home / "_system" / "legacy_reports")
+                self.assertEqual(report.name, "Legacy Daily Operations.xlsx")
                 corrections_report = build_report_pack("corrections", conn, config, model.start, model.start)
                 pcs_report = build_report_pack("quality_pcs", conn, config, model.start, model.end)
                 focused_pcs_report = build_report_pack("pcs", conn, config, model.start, model.end)
+                service_report = build_report_pack(
+                    "service", conn, config, model.start, model.end,
+                    service_profile="ford_oem_fr",
+                )
                 attendance_report = build_report_pack("attendance", conn, config, model.start, model.end)
                 absence_report = build_report_pack("absence", conn, config, model.start, model.end)
                 export_progress = []
@@ -519,6 +523,16 @@ class EndToEndTests(unittest.TestCase):
                 ])
             finally:
                 focused_pcs_book.close()
+            service_book = load_workbook(service_report, read_only=True, data_only=True)
+            try:
+                self.assertEqual(service_report, home / "Reports" / "OEM Flash.xlsx")
+                self.assertEqual(service_book.sheetnames, [
+                    "FLASH", "HOURLY", "QUEUES", "EXCEPTIONS", "DATA_STATUS",
+                    "DEFINITIONS", "_AUDIT",
+                ])
+                self.assertEqual(service_book["FLASH"]["A1"].value, "OEM FLASH  /  FORD OEM FRANCE")
+            finally:
+                service_book.close()
             absence_book = load_workbook(absence_report, read_only=False, data_only=True)
             try:
                 self.assertEqual(absence_book.sheetnames, [
@@ -528,26 +542,23 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(absence_book["_AUDIT"].sheet_state, "hidden")
             finally:
                 absence_book.close()
-            model_folder = home / "output" / "model_data" / "corrections"
-            self.assertTrue((model_folder / "gaps.csv").exists())
-            self.assertTrue((model_folder / "timeline.csv").exists())
-            self.assertTrue((model_folder / "manifest.json").exists())
-            pcs_model_folder = home / "output" / "model_data" / "pcs"
-            self.assertTrue((pcs_model_folder / "agent_day.csv").exists())
-            with (pcs_model_folder / "agent_day.csv").open(encoding="utf-8-sig", newline="") as handle:
+            self.assertFalse((home / "_system" / "feeds" / "corrections").exists())
+            pcs_feed = home / "_system" / "feeds" / "pcs"
+            pcs_model_folder = pcs_feed / "current"
+            self.assertTrue((pcs_model_folder / "PCS_AgentDay.csv").exists())
+            with (pcs_model_folder / "PCS_AgentDay.csv").open(encoding="utf-8-sig", newline="") as handle:
                 pcs_model_headers = next(csv.reader(handle))
             self.assertIn("business_date", pcs_model_headers)
             self.assertIn("q1_score_sum", pcs_model_headers)
-            pcs_feed = home / "output" / "template_feeds" / "pcs"
             self.assertTrue((pcs_feed / "current" / "PCS_AgentDay.csv").exists())
-            self.assertTrue((pcs_feed / "current" / "PCS_Summary.csv").exists())
-            self.assertTrue((pcs_feed / "current" / "PCS_Actions.csv").exists())
-            self.assertTrue((pcs_feed / "current" / "PCS_Trend.csv").exists())
+            self.assertTrue((pcs_feed / "current" / "PCS_Calls.csv").exists())
+            self.assertTrue((pcs_feed / "current" / "PCS_Agents.csv").exists())
+            self.assertTrue((pcs_feed / "current" / "PCS_Dates.csv").exists())
             self.assertTrue((pcs_feed / "current" / "manifest.json").exists())
             self.assertGreaterEqual(len(list((pcs_feed / "archive").glob("*/manifest.json"))), 1)
             for generated_report in (
                 report, corrections_report, pcs_report, focused_pcs_report,
-                attendance_report, absence_report,
+                service_report, attendance_report, absence_report,
             ):
                 with zipfile.ZipFile(generated_report) as archive:
                     self.assertFalse(any("externalLinks" in name for name in archive.namelist()))

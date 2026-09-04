@@ -6,6 +6,7 @@ import hashlib
 import shutil
 import tomllib
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 
@@ -50,6 +51,23 @@ def ensure_report_catalog(home: Path, target: Path | None = None) -> Path:
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(default, target)
+    else:
+        # Presentation contracts are executable workbook schemas. Migrate the
+        # known v0.11 contract safely when the OEM Flash sheet layout changes;
+        # keep a recoverable copy instead of silently accepting a guaranteed
+        # runtime mismatch.
+        try:
+            current_meta = tomllib.loads(target.read_text(encoding="utf-8")).get("catalog", {})
+            default_meta = tomllib.loads(default.read_text(encoding="utf-8")).get("catalog", {})
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            current_meta, default_meta = {}, {}
+        if (
+            str(current_meta.get("version", "")) == "2026.09.3"
+            and str(default_meta.get("version", "")) == "2026.09.4"
+        ):
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            shutil.copy2(target, target.with_name(f"{target.stem}_pre_2026_09_4_{stamp}{target.suffix}"))
+            shutil.copy2(default, target)
     return target
 
 

@@ -47,6 +47,8 @@ class Config:
     source_root: Path
     database: Path
     output: Path
+    reports: Path
+    system: Path
     logs: Path
     backups: Path
     input: Path
@@ -136,6 +138,8 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         source_root=_portable_path(home, str(paths.get("source_root", "extracts"))),
         database=_portable_path(home, str(paths.get("database", "database/wfm.sqlite3"))),
         output=_portable_path(home, str(paths.get("output", "output"))),
+        reports=_portable_path(home, str(paths.get("reports", "Reports"))),
+        system=_portable_path(home, str(paths.get("system", "_system"))),
         logs=_portable_path(home, str(paths.get("logs", "logs"))),
         backups=_portable_path(home, str(paths.get("backups", "backups"))),
         input=_portable_path(home, str(paths.get("input", "input"))),
@@ -256,7 +260,10 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         top_box_minimum=business.pcs_top_box_minimum,
         low_score_maximum=business.pcs_low_score_maximum,
     ))
-    for path in (cfg.database.parent, cfg.output, cfg.logs, cfg.backups, cfg.input, cfg.custom):
+    for path in (
+        cfg.database.parent, cfg.output, cfg.reports, cfg.system,
+        cfg.logs, cfg.backups, cfg.input, cfg.custom,
+    ):
         path.mkdir(parents=True, exist_ok=True)
     return cfg
 

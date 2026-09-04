@@ -1,9 +1,9 @@
-// Query name: PCS Actions
+// Query name: PCS Calls
 // Load To: Only Create Connection + Add this data to the Data Model
 let
-    FeedRoot = Excel.CurrentWorkbook(){[Name="pFeedFolder"]}[Content]{0}[Column1],
+    FeedRoot = "__PCS_FEED_FOLDER__",
     Source = Csv.Document(
-        File.Contents(FeedRoot & "\\PCS_Actions.csv"),
+        File.Contents(FeedRoot & "\\PCS_Calls.csv"),
         [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]
     ),
     PromotedHeaders = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),

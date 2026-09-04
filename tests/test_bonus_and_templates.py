@@ -12,7 +12,11 @@ from openpyxl import Workbook, load_workbook
 from wfmhub.bonus import import_bonus_matrix
 from wfmhub.config import load_config
 from wfmhub.database import connect, migrate
-from wfmhub.excel_templates import excel_template, require_new_template
+from wfmhub.excel_templates import (
+    excel_template,
+    materialize_pcs_power_queries,
+    require_new_template,
+)
 from wfmhub.on_demand_analysis import build_analysis_workbook
 from wfmhub.service_profiles import load_service_profiles
 from wfmhub.sota_reports import build_kpi_catalog
@@ -102,32 +106,39 @@ class ExcelTemplateTests(unittest.TestCase):
             try:
                 self.assertEqual(
                     workbook.sheetnames,
-                    ["START_HERE", "SETUP", "PCS_REPORT", "PIVOT_AREA", "FORMULAS"],
+                    ["START_HERE", "SETUP", "PCS_REPORT", "COACHING_LOG", "PIVOT_AREA", "FORMULAS"],
                 )
-                self.assertIn("pFeedFolder", workbook.defined_names)
+                self.assertNotIn("pFeedFolder", workbook.defined_names)
                 self.assertEqual(len(workbook._external_links), 0)
-                self.assertIn("template_feeds", workbook["SETUP"]["B5"].value)
+                self.assertIn("_system", workbook["SETUP"]["B5"].value)
             finally:
                 workbook.close()
 
     def test_power_query_assigns_pcs_numeric_types_before_data_model_load(self):
-        query = (REPO / "templates" / "power_query" / "WFMHubCsv.pq").read_text(encoding="utf-8")
-        self.assertIn('{"q1_score_sum", type number}', query)
-        self.assertIn('{"valid_q1", Int64.Type}', query)
-        self.assertIn("Table.TransformColumnTypes", query)
-        self.assertTrue(query.rstrip().endswith("Typed"))
-
         for filename, query_name in (
             ("PCS_AgentDay.pq", "PCS Agent Day"),
-            ("PCS_Summary.pq", "PCS Summary"),
-            ("PCS_Actions.pq", "PCS Actions"),
-            ("PCS_Trend.pq", "PCS Trend"),
+            ("PCS_Calls.pq", "PCS Calls"),
+            ("PCS_Agents.pq", "PCS Agents"),
+            ("PCS_Dates.pq", "PCS Dates"),
         ):
             typed_query = (REPO / "templates" / "power_query" / filename).read_text(encoding="utf-8")
             self.assertIn(f"Query name: {query_name}", typed_query)
-            self.assertIn('[Name="pFeedFolder"]', typed_query)
+            self.assertIn("__PCS_FEED_FOLDER__", typed_query)
+            self.assertNotIn("Excel.CurrentWorkbook", typed_query)
             self.assertIn("Table.TransformColumnTypes", typed_query)
             self.assertTrue(typed_query.rstrip().endswith("Typed"))
+
+    def test_setup_materializes_firewall_safe_pcs_queries(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = SimpleNamespace(home=REPO, system=root / "_system")
+            paths = materialize_pcs_power_queries(config)
+            self.assertEqual(len(paths), 4)
+            for path in paths:
+                text = path.read_text(encoding="utf-8")
+                self.assertIn(str(root / "_system" / "feeds" / "pcs" / "current"), text)
+                self.assertNotIn("__PCS_FEED_FOLDER__", text)
+                self.assertNotIn("Excel.CurrentWorkbook", text)
 
     def test_governance_workbook_exposes_service_and_mapping_controls(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -151,11 +162,16 @@ class ExcelTemplateTests(unittest.TestCase):
     def test_master_location_is_stable_and_existing_file_is_protected(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            config = SimpleNamespace(home=root, output=root / "output")
+            config = SimpleNamespace(
+                home=root,
+                output=root / "output",
+                reports=root / "Reports",
+                system=root / "_system",
+            )
             template = require_new_template(config, "PCS")
-            self.assertEqual(template.path, root / "templates" / "reports" / "pcs.xlsx")
-            self.assertEqual(template.model_folder, root / "output" / "model_data" / "pcs")
-            self.assertEqual(template.feed_folder, root / "output" / "template_feeds" / "pcs" / "current")
+            self.assertEqual(template.path, root / "Reports" / "PCS Team.xlsx")
+            self.assertEqual(template.model_folder, root / "_system" / "feeds" / "pcs" / "current")
+            self.assertEqual(template.feed_folder, root / "_system" / "feeds" / "pcs" / "current")
             template.path.write_bytes(b"excel-master")
             with self.assertRaises(FileExistsError):
                 require_new_template(config, "PCS")

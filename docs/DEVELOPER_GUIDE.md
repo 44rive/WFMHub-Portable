@@ -51,7 +51,7 @@ attendance, absence, correction, or payroll models.
 ## Windows portable build
 
 ```bash
-python3 packaging/windows/build_portable.py --version 0.11.0 --python-version 3.13.7
+python3 packaging/windows/build_portable.py --version 0.12.0 --python-version 3.13.7
 ```
 
 The builder always deletes and recreates stage and wheelhouse. It:
@@ -105,23 +105,26 @@ Create a local populated standard copy without changing the source workbook:
 
 ```bash
 python3 tools/build_fte_template.py --source /path/to/current/FTE.xlsx \
-  --output output/setup/FTE\ Count.xlsx
+  --output _system/output/setup/FTE\ Count.xlsx
 ```
 
-Report-pack keys and destinations live in `report_packs.py` and
-`[report_packs]`, separate from integer row limits in `[report]`.
+Report-pack keys and fixed current filenames live in `report_packs.py`,
+separate from integer row limits in `[report]`. The old `[report_packs]`
+settings are accepted only for compatibility and do not create report folders.
 `reports.build_report()` remains the Daily Operations compatibility API. Register
 builders through `build_report_pack`; do not import them directly in the CLI.
 The menu exposes only `pcs`, `bonus`, `service`, `staffing`, `attendance`,
 `corrections`, and `absence`. `operations` and `quality_pcs` remain compatibility
 API keys, not current product contracts.
 
-All current products use `DecisionWorkbook`. A builder must create the exact
-ordered sheets declared in `default_reports.toml`, keep `_AUDIT` hidden, and
-write only report-ready grains to `output/model_data/<pack>`. Do not add raw
-extract tables to workbooks or model packages.
+Current products publish fixed names directly into `Reports`; the previous
+current copy is archived only after a complete replacement workbook exists. A
+builder must create the exact ordered sheets declared in
+`default_reports.toml` and keep `_AUDIT` hidden. Do not add raw extract tables
+to workbooks.
 
-`template-init` may create a styled `.xlsx` starter. After a user adds Excel
+Only PCS publishes compact model tables under `_system/feeds/pcs`. The
+`template-init` command may create its styled `.xlsx` starter. After a user adds Excel
 Data Model, PivotTable, or slicer parts, Python must never open or rewrite that
 master. Daily jobs update only the stable compact CSV package; Excel performs
 Refresh All. Local masters are Git-ignored.

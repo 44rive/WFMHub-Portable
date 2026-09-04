@@ -5,7 +5,7 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -104,6 +104,62 @@ class AgentScopeTests(unittest.TestCase):
         self.assertEqual(scope.resolve(None, "Agent One"), "100")
         self.assertEqual(scope.resolve("999", "Agent One"), "999")
         self.assertIsNone(scope.resolve("999", "Someone Else"))
+
+    def test_scope_keeps_active_and_leaver_only_through_leave_date(self):
+        scope = AgentScope(
+            frozenset({"100", "200", "300"}),
+            {"active agent": "100", "leaver agent": "200", "transfer agent": "300"},
+            "fingerprint",
+            {
+                "100": ("Active", None),
+                "200": ("Leaver", date(2026, 8, 15)),
+                "300": ("Transfer", date(2026, 8, 15)),
+            },
+        )
+        self.assertEqual(scope.resolve("100", "Active Agent", date(2026, 9, 1)), "100")
+        self.assertEqual(scope.resolve("200", "Leaver Agent", date(2026, 8, 15)), "200")
+        self.assertIsNone(scope.resolve("200", "Leaver Agent", date(2026, 8, 16)))
+        self.assertIsNone(scope.resolve("300", "Transfer Agent", date(2026, 8, 1)))
+
+    def test_ingestion_applies_fte_status_on_each_business_date(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home, source = make_home(folder)
+            fte = source / "FTE" / "FTE Count.xlsx"
+            fte.parent.mkdir(parents=True)
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "Agent"
+            sheet.append([
+                "Client ID", "Status", "Name", "Team leader", "Ops Manager",
+                "LOB", "Market", "Language", "Location", "City", "FTE",
+                "End date if leaver",
+            ])
+            sheet.append(["100", "Active", "Active Agent", "TL", "Ops", "LOB", "M", "EN", "O", "C", 1, None])
+            sheet.append(["200", "Leaver", "Leaver Agent", "TL", "Ops", "LOB", "M", "EN", "O", "C", 1, date(2026, 8, 1)])
+            sheet.append(["300", "Transfer", "Transfer Agent", "TL", "Ops", "LOB", "M", "EN", "O", "C", 1, date(2026, 8, 1)])
+            workbook.save(fte)
+            lilo = source / "Storm" / "LILO" / "LILO 2026-08-01 - 2026-08-02.csv"
+            lilo.parent.mkdir(parents=True)
+            with lilo.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["Date", "[Agent]", "[Agent ID]", "[First Log-on Time]", "[Last Log-off Time]"])
+                for day in ("2026-08-01", "2026-08-02"):
+                    for agent_id, name in (("100", "Active Agent"), ("200", "Leaver Agent"), ("300", "Transfer Agent")):
+                        writer.writerow([day, name, agent_id, f"{day} 08:00:00", f"{day} 16:00:00"])
+            config = load_config(home)
+            with write_session(config) as conn:
+                result = ingest_all(conn, config)
+                kept = conn.execute(
+                    """SELECT r.agent_id, r.extract_date FROM raw.lilo r
+                       JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+                       ORDER BY r.agent_id, r.extract_date"""
+                ).fetchall()
+            self.assertEqual(result.failed, 0)
+            self.assertEqual(kept, [
+                ("100", date(2026, 8, 1)),
+                ("100", date(2026, 8, 2)),
+                ("200", date(2026, 8, 1)),
+            ])
 
 
 class SQLiteLifecycleTests(unittest.TestCase):
@@ -321,7 +377,7 @@ class SQLiteLifecycleTests(unittest.TestCase):
             ):
                 shutil.copy2(REPO / "config" / name, home / "config" / name)
             (home / "config" / "wfmhub.toml").write_text(
-                default.replace('database = "database/wfm.sqlite3"', 'database = "database/wfm.duckdb"'),
+                default.replace('database = "_system/database/wfm.sqlite3"', 'database = "database/wfm.duckdb"'),
                 encoding="utf-8",
             )
             legacy = home / "database" / "wfm.duckdb"

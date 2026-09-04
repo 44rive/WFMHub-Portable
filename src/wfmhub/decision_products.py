@@ -11,7 +11,7 @@ from typing import Any, Iterable, Sequence
 from .config import Config
 from .database import DatabaseConnection
 from .metrics import MetricCatalog, evaluate_metric, load_metric_catalog
-from .report_packs import report_pack, report_pack_folder
+from .report_packs import publish_report, report_current_path
 from .reports import COLORS, _query
 from .rules import load_rulebook
 from .service_profiles import ServiceProfile, load_service_profiles
@@ -64,12 +64,8 @@ def _delta(value: float | None, reference: float | None, percent: bool = False) 
 
 
 def _output_path(config: Config, key: str, start: date, end: date, generated: datetime, output: Path | None) -> Path:
-    pack = report_pack(key)
-    return (
-        output
-        or report_pack_folder(config, key)
-        / f"{pack.filename_prefix}_{start:%Y-%m-%d}_to_{end:%Y-%m-%d}_{generated:%H%M%S_%f}.xlsx"
-    ).resolve()
+    del start, end, generated
+    return (output or report_current_path(config, key)).resolve()
 
 
 def _source_state(conn: DatabaseConnection, families: Sequence[str], through: date, final: bool = False) -> tuple[str, str]:
@@ -135,13 +131,12 @@ def _audit_rows(
         ("Generated", datetime.now(), "Local work-machine time"),
         ("Refresh run", latest[0] if latest else None, latest[2] if latest else "No successful refresh metadata"),
         ("Calculation authority", "Python + SQLite", "Excel contains presentation only"),
-        ("Template model folder", str(config.output / "model_data" / report_key), "Power Query: connection only + Add to Data Model"),
     ]
     if report_key == "pcs":
         rows.append((
-            "Template current feed",
-            str(config.output / "template_feeds" / report_key / "current"),
-            "Stable filenames; refreshed atomically by WFMHub",
+            "PCS current feed",
+            str(config.system / "feeds" / report_key / "current"),
+            "Power Query: connection only + Add to Data Model",
         ))
     rows.extend(extra)
     return rows
@@ -165,7 +160,7 @@ def _atomic_book(
 def _finish(book: DecisionWorkbook, partial: Path, target: Path) -> Path:
     try:
         book.close()
-        partial.replace(target)
+        publish_report(book.config, book.report_key, partial, target, book.generated)
     except Exception:
         partial.unlink(missing_ok=True)
         raise
@@ -400,14 +395,41 @@ def build_pcs_performance_workbook(
     # PivotTables. The visible AGENT_DETAIL sheet remains the simpler
     # selected-period agent summary.
     book.tables.append(ModelTable("AGENT_DAY", day_headers, day_rows))
+    dim_agent_headers, dim_agent_rows = _query(
+        conn,
+        """SELECT p.agent_id,
+                  max(coalesce(d.canonical_name,p.agent_name)) AS agent_name,
+                  max(coalesce(d.team_leader,p.team_leader)) AS team_leader,
+                  max(coalesce(d.ops_manager,p.ops_manager)) AS ops_manager,
+                  max(coalesce(d.lob,p.lob)) AS lob,
+                  max(coalesce(d.language,p.language)) AS language
+           FROM mart.agent_pcs_day p
+           LEFT JOIN core.dim_agent d ON d.agent_id=p.agent_id
+           WHERE p.business_date BETWEEN ? AND ?
+           GROUP BY p.agent_id ORDER BY p.agent_id""",
+        [min(period.start for period in periods), max(period.end for period in periods)],
+    )
+    book.tables.append(ModelTable("DIM_AGENT", dim_agent_headers, dim_agent_rows))
+    date_start = min(period.start for period in periods)
+    date_end = max(period.end for period in periods)
+    dim_date_rows = []
+    current_date = date_start
+    while current_date <= date_end:
+        dim_date_rows.append((
+            current_date,
+            current_date.year,
+            current_date.month,
+            current_date.strftime("%Y-%m"),
+            current_date.strftime("%b %Y"),
+            current_date.isocalendar().week,
+            current_date.strftime("%A"),
+            current_date.day,
+        ))
+        current_date += timedelta(days=1)
     book.tables.append(ModelTable(
-        "SUMMARY",
-        [
-            "period", "period_start", "period_end", "pcs_average",
-            "participation_rate", "valid_q1", "pcs_status_1", "score_le_3",
-            "score_gt_3", "inbound_call_legs", "coaching_completed", "actions_rate",
-        ],
-        comparison,
+        "DIM_DATE",
+        ["date", "year", "month_number", "month_key", "month_label", "iso_week", "weekday", "day_of_month"],
+        dim_date_rows,
     ))
     book.definitions([
         ("PCS Average", "Sum of valid inbound Q1 scores / valid inbound Q1 responses", "Customer experience result", "Only configured discrete Q1 scores are valid"),
@@ -417,7 +439,7 @@ def build_pcs_performance_workbook(
         ("Low sample", "Fewer than 20 valid responses in the selected period", "Interpretation warning", "Does not change the calculated score"),
         ("Power Pivot PCS Average", "DIVIDE(SUM('PCS Agent Day'[q1_score_sum]), SUM('PCS Agent Day'[valid_q1]))", "Excel master measure", "Copy exactly; do not average agent percentages"),
         ("Power Pivot Participation", "DIVIDE(SUM('PCS Agent Day'[q1_nonblank]), SUM('PCS Agent Day'[pcs_status_1]))", "Excel master measure", "Copy exactly; source columns are explicitly numeric"),
-        ("Stable Excel feed", str(config.output / "template_feeds" / "pcs" / "current"), "Power Query folder", "Load connection-only + Add to Data Model"),
+        ("Stable Excel feed", str(config.system / "feeds" / "pcs" / "current"), "Power Query folder", "Load connection-only + Add to Data Model"),
     ])
     book.audit(_audit_rows(conn, config, "pcs", start, end))
     return _finish(book, partial, target)
@@ -528,7 +550,7 @@ def build_service_performance_workbook(
     profile = catalog.select(profile_id, end)
     metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
     rulebook = load_rulebook(config.home, config.business_rules)
-    book, partial, target = _atomic_book(config, "service", f"SERVICE PERFORMANCE  /  {profile.label.upper()}", start, end, output)
+    book, partial, target = _atomic_book(config, "service", f"OEM FLASH  /  {profile.label.upper()}", start, end, output)
     periods = _comparison_periods(start, end)
     all_start, all_end = min(p.start for p in periods), max(p.end for p in periods)
     raw_rows = _service_rows(conn, profile, all_start, all_end)
@@ -541,29 +563,51 @@ def build_service_performance_workbook(
     latest, mtd, prior = by_label["Latest day"], by_label["Current MTD"], by_label["Prior-month same days"]
     latest_method = _profile_metric(metric_catalog, profile, profile.service_level_metric, end)
     forecast_marks = ",".join("?" for _ in profile.service_scopes)
-    forecast_total = conn.execute(
-        f"""SELECT coalesce(sum(volume_forecast),0) FROM mart.forecast_hour
+    forecast_total, forecast_rows_count = conn.execute(
+        f"""SELECT sum(volume_forecast), count(*) FROM mart.forecast_hour
             WHERE business_date=? AND service_scope IN ({forecast_marks})""",
         [end, *profile.service_scopes],
-    ).fetchone()[0]
+    ).fetchone()
+    if not forecast_rows_count:
+        forecast_total = None
     forecast_method = metric_catalog.method_for(
         "forecast_attainment", end, {"lob": profile.service_scopes[0]},
     )
     forecast_evaluation = evaluate_metric(
         forecast_method, {"actual_volume": latest[3], "forecast_volume": forecast_total},
-    ) if forecast_method else None
+    ) if forecast_method and forecast_total is not None else None
     families = tuple(system.lower() for system in profile.source_systems) + ("forecast",)
     status, status_text = _source_state(conn, families, end)
+    latest_raw = [
+        row for row in raw_rows
+        if str(row["business_date"])[:10] == end.isoformat()
+    ]
+    group_metrics: dict[str, dict[str, float | str | None]] = {}
+    for group in profile.groups:
+        group_metrics[group.label] = _service_aggregate(
+            [row for row in latest_raw if profile.group_for(row.get("queue")) == group.label],
+            profile,
+            metric_catalog,
+            end,
+        )
+
+    def group_value(label: str, metric: str) -> float | str | None:
+        return group_metrics.get(label, {}).get(metric)
+
+    variance_calls = (
+        float(latest[3] or 0) - float(forecast_total)
+        if forecast_total is not None else None
+    )
     book.dashboard(
         [
-            KpiCard("Latest-day service level", latest[5], "percent", f"Target {latest_method.target:.0%}" if latest_method.target is not None else "No target"),
-            KpiCard("Latest-day availability", latest[6], "percent", "Answered / offered"),
-            KpiCard("Latest-day offered", latest[3], "integer", f"Forecast {forecast_total:,.0f}"),
+            KpiCard("OEM availability", latest[6], "percent", "Answered / offered"),
+            KpiCard("OEM service level", latest[5], "percent", f"Target {latest_method.target:.0%}" if latest_method.target is not None else "No target"),
+            KpiCard("Ford availability", group_value("Ford", "availability"), "percent", "Mapped Ford queues"),
+            KpiCard("Ford service level", group_value("Ford", "service_level"), "percent", "Mapped Ford queues"),
+            KpiCard("Toyota availability", group_value("Toyota", "availability"), "percent", "Mapped Toyota/Lexus queues"),
+            KpiCard("Toyota service level", group_value("Toyota", "service_level"), "percent", "Mapped Toyota/Lexus queues"),
             KpiCard("Forecast attainment", forecast_evaluation.value if forecast_evaluation else None, "percent", "Actual offered / forecast"),
-            KpiCard("Latest-day answered", latest[4], "integer", "All mapped queues"),
-            KpiCard("Latest-day AHT seconds", latest[7], "decimal", "Weighted by answered contacts"),
-            KpiCard("MTD service level", mtd[5], "percent", _delta(mtd[5], prior[5], True)),
-            KpiCard("MTD availability", mtd[6], "percent", _delta(mtd[6], prior[6], True)),
+            KpiCard("Variance calls", variance_calls, "integer", "Actual offered - forecast"),
         ],
         status,
         status_text,
@@ -574,8 +618,10 @@ def build_service_performance_workbook(
             f"{profile.label}: the extract's within-{rulebook.target_seconds}s counter is evaluated by {profile.service_level_metric}.{latest_method.method_id} from metric_catalog.toml.",
             "Service availability is answered / offered. It is never agent availability or adherence.",
             "Forecast contributes forecast only. APBE/APFR/APDE contribute actual performance only.",
+            "Back-office workload is shown as not configured until a governed source is supplied; WFMHub does not invent those counters.",
         ],
         (("Service Level", 5), ("Availability", 6)),
+        sheet_name="FLASH",
     )
 
     hourly: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -583,21 +629,102 @@ def build_service_performance_workbook(
         if start.isoformat() <= str(row["business_date"])[:10] <= end.isoformat():
             group = profile.group_for(row.get("queue"))
             hourly[(str(row["business_date"])[:10], str(row["hour_start"]), group)].append(row)
+    forecast_rows = conn.execute(
+        f"""SELECT hour_start, sum(volume_forecast)
+            FROM mart.forecast_hour
+            WHERE business_date BETWEEN ? AND ?
+              AND service_scope IN ({forecast_marks})
+            GROUP BY hour_start""",
+        [start, end, *profile.service_scopes],
+    ).fetchall()
+    forecast_by_hour = {str(row[0])[:13]: float(row[1] or 0) for row in forecast_rows}
+    staffing_marks = ",".join("?" for _ in profile.service_scopes)
+    staffing_rows = conn.execute(
+        f"""SELECT business_date, hour_key,
+                   avg(scheduled_fte), avg(observed_fte), avg(productive_fte)
+            FROM (
+                SELECT business_date, substr(cast(interval_start AS TEXT),1,13) AS hour_key,
+                       interval_start, sum(scheduled_fte) AS scheduled_fte,
+                       sum(observed_fte) AS observed_fte,
+                       sum(productive_fte) AS productive_fte
+                FROM mart.staffing_interval
+                WHERE business_date BETWEEN ? AND ?
+                  AND lob IN ({staffing_marks})
+                GROUP BY business_date, interval_start
+            ) staffing
+            GROUP BY business_date, hour_key""",
+        [start, end, *profile.service_scopes],
+    ).fetchall()
+    staffing_by_hour = {
+        f"{str(row[0])[:10]}T{str(row[1])[-2:]}": (
+            float(row[2] or 0), float(row[3] or 0), float(row[4] or 0),
+        )
+        for row in staffing_rows
+    }
+    grouped_by_hour: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in raw_rows:
+        if start.isoformat() <= str(row["business_date"])[:10] <= end.isoformat():
+            grouped_by_hour[(str(row["business_date"])[:10], str(row["hour_start"]))].append(row)
+
     hourly_rows = []
+    for (business_date, hour_start), rows in sorted(grouped_by_hour.items()):
+        row_date = date.fromisoformat(business_date)
+        total = _service_aggregate(rows, profile, metric_catalog, row_date)
+        hour_key = str(hour_start)[:13]
+        forecast = forecast_by_hour.get(hour_key)
+        attainment = _ratio(total["offered"], forecast)
+        scheduled, observed, productive = staffing_by_hour.get(
+            f"{business_date}T{hour_key[-2:]}", (None, None, None),
+        )
+        hourly_rows.append((
+            business_date, hour_start, "OEM TOTAL", "OEM Total",
+            total["offered"], forecast,
+            float(total["offered"] or 0) - forecast if forecast is not None else None,
+            attainment, total["answered"], total["within_target"],
+            total["short_abandoned"], total["service_level"], total["availability"],
+            total["aht_seconds"], scheduled, observed, productive,
+            total["service_method"], total["service_state"],
+        ))
     for (business_date, hour_start, group), rows in sorted(hourly.items()):
         row_date = date.fromisoformat(business_date)
         metrics = _service_aggregate(rows, profile, metric_catalog, row_date)
-        hourly_rows.append((business_date, hour_start, group, metrics["offered"], metrics["answered"], metrics["within_target"], metrics["short_abandoned"], metrics["service_level"], metrics["availability"], metrics["aht_seconds"], metrics["service_method"], metrics["service_state"]))
-    headers = ["business_date", "hour_start", "service_group", "offered", "answered", "answered_within_target", "short_abandoned", "service_level", "service_availability", "aht_seconds", "service_method", "service_state"]
-    ws = book.table("INTRADAY", f"{profile.label} hourly service", "Ford / Toyota / Chery are separated by configured queue-name groups; totals remain additive.", headers, hourly_rows)
+        hourly_rows.append((
+            business_date, hour_start, "QUEUE GROUP", group,
+            metrics["offered"], None, None, None, metrics["answered"],
+            metrics["within_target"], metrics["short_abandoned"],
+            metrics["service_level"], metrics["availability"], metrics["aht_seconds"],
+            None, None, None, metrics["service_method"], metrics["service_state"],
+        ))
+    hourly_rows.sort(key=lambda row: (str(row[0]), str(row[1]), 0 if row[2] == "OEM TOTAL" else 1, str(row[3])))
+    headers = [
+        "business_date", "hour_start", "row_type", "service_group", "offered",
+        "forecast", "variance_calls", "forecast_attainment", "answered",
+        "answered_within_target", "short_abandoned", "service_level",
+        "service_availability", "aht_seconds", "scheduled_fte", "observed_fte",
+        "productive_fte", "service_method", "service_state",
+    ]
+    ws = book.table("HOURLY", f"{profile.label} hourly control", "OEM total rows reconcile forecast and staffing; Ford / Toyota / Chery rows show mapped queue-group performance.", headers, hourly_rows)
     if hourly_rows:
         state_col = headers.index("service_state")
         ws.conditional_format(4, state_col, 3 + len(hourly_rows), state_col, {"type": "text", "criteria": "containing", "value": "BELOW_TARGET", "format": book.report.error})
     detail_headers = ["business_date", "interval_start", "source_system", "queue", "service_scope", "designation", "mapping_status", "offered", "answered", "abandoned", "short_abandoned", "answered_within_target", "handled_seconds", "source_file"]
     detail_rows = [tuple(row.get(header) for header in detail_headers) for row in raw_rows if start.isoformat() <= str(row["business_date"])[:10] <= end.isoformat()]
-    book.table("QUEUE_DETAIL", "Mapped queue evidence", "Compact governed queue intervals for reconciliation; no original extract rows are modified.", detail_headers, detail_rows)
+    book.table("QUEUES", "Mapped queue evidence", "Compact governed queue intervals for reconciliation; no original extract rows are modified.", detail_headers, detail_rows)
     action_rows = [row for row in hourly_rows if row[-1] == "BELOW_TARGET"]
-    book.table("ACTIONS", "Service intervals below target", "Prioritize intervals with high offered volume and validate staffing/forecast before escalation.", headers, action_rows)
+    book.table("EXCEPTIONS", "Service intervals below target", "Prioritize intervals with high offered volume and validate staffing/forecast before escalation.", headers, action_rows)
+    source_headers, source_rows = _query(
+        conn,
+        """SELECT source_family, newest_business_date, row_count, scoped_out_count,
+                  status, newest_file, details
+           FROM mart.source_health
+           WHERE lower(source_family) IN ('apbe','apfr','apde','forecast','fte','schedule','lilo','agent_status')
+           ORDER BY source_family""",
+    )
+    source_rows.append((
+        "back_office", None, None, None, "NOT_CONFIGURED", None,
+        "The reference workbook contains manually sourced backlog counters; no governed source is configured yet.",
+    ))
+    book.table("DATA_STATUS", "Flash source status", "The Flash stays explicit about missing or stale inputs.", source_headers, source_rows)
     book.definitions([
         ("Service Level", f"({latest_method.numerator}) / ({latest_method.denominator})", "Contract performance", f"Governed method {latest_method.method_id}; ratio of summed counters"),
         ("Service Availability", "Answered / offered", "Ability of the service to answer demand", "Not an agent metric"),

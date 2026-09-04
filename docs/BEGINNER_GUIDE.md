@@ -1,249 +1,213 @@
-# Beginner guide — WFMHub without technical words
+# WFMHub beginner guide
 
 Think of WFMHub as a washing machine for data:
 
-1. You drop new extract files into the same source folders.
-2. WFMHub reads them but never edits them.
-3. It keeps the useful rows in its SQLite database.
-4. It calculates the agreed rules.
-5. It gives you one Excel workbook for one job.
+1. You place new extracts in the usual source folders.
+2. WFMHub reads them but never changes them.
+3. It remembers the useful data in SQLite.
+4. It calculates the agreed formulas.
+5. It creates the Excel file you asked for.
 
 You do not need to install Python, SQLite, DuckDB, ODBC, or Power BI.
 
 ## The two files you click
 
-- `SETUP.cmd`: use once when you install WFMHub or move the extract folder.
-- `WFMHub.cmd`: use for normal daily work.
+- `SETUP.cmd`: use it once after extracting WFMHub.
+- `WFMHub.cmd`: use it for normal work.
 
-Keep the entire WFMHub folder together. Do not move only the `.cmd` files.
+Never move only the `.cmd` file. Keep the full WFMHub folder together.
 
-## First setup — one time
+## Setup once
 
-1. Extract the complete portable ZIP.
-2. Double-click `SETUP.cmd`.
-3. Paste the path of the folder that contains your `FTE`, `Storm`, and `Verint`
-   folders.
-4. Wait for **Setup ready**.
-5. Double-click `WFMHub.cmd`.
-6. Choose **Validate rules and build governance catalog**.
+1. Right-click the downloaded ZIP and choose **Extract All**.
+2. Open the extracted WFMHub folder.
+3. Double-click `SETUP.cmd`.
+4. Paste the folder containing `FTE`, `Storm`, and `Verint`.
+5. Wait for **Setup ready**.
+6. Double-click `WFMHub.cmd`.
 
-Setup creates local config files and `database\wfm.sqlite3`. Your source files
-are not moved or edited.
+Your source files stay where they are. WFMHub does not edit them.
 
-## Your FTE roster defines “our agents”
+## Who counts as an agent
 
-WFMHub uses the **Agent** sheet in the FTE workbook. Use
-`templates\FTE Count.xlsx` if you need a clean standard file. The important
-fields are Agent ID, Agent Name, Team Leader, Ops Manager, LOB, and Language.
+The FTE roster is the authority:
 
-An operational row is kept when its Agent ID is on the active roster, or when a
-unique roster name can safely identify it. Verint **Data Source IDs** is treated
-as the Verint Agent ID. Rows outside the roster are counted and excluded from
-agent reports.
+- Status `Active`: included.
+- Status `Leaver`: included up to and including `End date if leaver`.
+- After the leave date: excluded.
+- Any other status, or a Leaver without a leave date: excluded.
 
-## Normal daily routine
+This check uses the date of each schedule, LILO, Agent Status, or Call by Call
+row. Historical work before a person's leave date therefore remains valid.
 
-1. Put today’s extracts in their normal folders. Existing files can stay.
+## The normal daily routine
+
+1. Add the new extracts to their normal folders.
 2. Double-click `WFMHub.cmd`.
-3. Read the fixed status panel. It shows the latest loaded source date.
-4. Choose **Refresh hub data**.
-5. Choose the source group:
-   - Attendance/absence for FTE, schedule, LILO, and Agent Status.
-   - Service for APBE/APFR/APDE and Verint Forecast.
-   - PCS for FTE and Call by Call.
-   - All sources when you want everything.
-6. Choose a date option.
-7. Choose the exact report products you want.
-8. Wait until the progress bar says **Refresh complete**.
-9. Open the new workbook under `output`.
+3. Read the status panel and latest data date.
+4. Choose **Refresh source data once**.
+5. Select All, Attendance, Service, or PCS sources.
+6. Choose the dates.
+7. Wait for **Refresh complete**.
+8. Choose the individual report you need.
+9. Open it from `Reports`.
 
-The progress bar can pause on a large file while rows are still being streamed.
-Do not close the window unless an error is shown. The latest details are in
-`logs\wfmhub_YYYYMMDD.log`.
+You do not need to refresh the sources again for every workbook. After one
+refresh, the reports use the same prepared database.
 
-## Choose dates
+## The Reports folder
 
-The menu offers today, yesterday, current week, current month, previous month,
-a custom range, config dates, or all available dates.
+Current workbooks always have the same names:
 
-For a monthly exercise choose **Current month** or enter the first and last date
-yourself. Date selection never changes an extract. It only controls what the
-model and report include.
+```text
+Reports\Attendance Callout.xlsx
+Reports\Staffing Gaps.xlsx
+Reports\OEM Flash.xlsx
+Reports\Yesterday Corrections.xlsx
+Reports\Final Absenteeism.xlsx
+Reports\Bonus Management.xlsx
+Reports\PCS Performance.xlsx
+Reports\PCS Team.xlsx
+```
 
-Multi-day files are okay. WFMHub uses dates inside each row or Verint date
-column—not just the filename.
+When a generated report is replaced, WFMHub first saves its previous version in
+`Reports\Archive`. You do not need to rename or move daily reports yourself.
 
-## The seven report products
+`PCS Team.xlsx` is protected: WFMHub refreshes its small data files but does not
+replace the workbook.
 
-### PCS Performance
+## Choosing dates
 
-Use this for management PCS updates. It shows the latest day, selected period,
-current MTD, comparable previous-month days, and previous full month.
-Choosing Today or Current Week does not cut off the month comparison; WFMHub
-automatically prepares the prior full month through the selected end date for
-PCS only.
+The menu offers Today, Yesterday, Current Week, Current Month, Previous Month,
+custom dates, all available dates, or saved default dates.
 
-- PCS average = sum of valid inbound Q1 scores / count of valid inbound Q1.
-- Participation = inbound nonblank Q1 / inbound `PCSStatus=1`.
-- Every valid Q1 `<=3` creates one coaching row. Actions Rate is completed
-  coaching rows divided by those low-score rows.
-- A three-hour rhythm means you generate/send it every three hours. The formula
-  and reporting period are still daily and monthly.
+The selected dates affect only the calculation and report. They do not affect
+the extracts. A multi-day extract is valid because WFMHub reads dates from its
+rows instead of assuming the filename contains one day.
 
-Never average agent percentages. WFMHub divides the summed counters.
+## Attendance Callout
 
-To update coaching, open the newest PCS workbook, edit only the blue columns on
-`ACTIONS`, save it, then choose **Import PCS coaching decisions**. Build PCS
-again so Actions Rate and the template feeds include the saved decisions.
+This is the list used to call or follow up agents.
 
-### Bonus Performance
+- **Call no-show** requires a completed working shift, a loaded blank LILO row,
+  and no active Agent Status evidence.
+- **Call late** means the first observed evidence is after scheduled start plus
+  the configured tolerance.
+- **Not seen now** is a provisional same-day warning.
+- An unfinished shift is never marked as early leave.
+- A missing source is **missing evidence**, never a no-show.
 
-First choose **Import Bonus Matrix v1.2** and paste the path to the final source
-workbook. WFMHub reads and hashes it without changing it.
+Choose Current Week to receive every actionable case in the week, not only
+yesterday.
 
-The report separates:
+## Staffing Gaps
 
-- Scenario Payout: useful for management discussion.
-- Released Payout: usable only after policy, eligibility, and data gates pass.
-- Source Workbook Payout: the cached source result used for reconciliation.
-- Control Adjustment: the explained difference between governed and source
-  scenarios.
+This report compares scheduled, observed, and productive FTE by 15-minute
+interval, LOB, and language. Future or missing intervals remain unknown instead
+of becoming fake shortages.
 
-Absence must be used once—as a KPI, eligibility gate, or proration—not twice.
+## OEM Flash
 
-### Service Performance
+The Ford OEM pilot combines:
 
-Choose a service profile. Ford OEM France is the first configured example. Its
-queues come from `config\queue_mapping.csv`; its scope, governed metric choices,
-and display groups come from `config\service_profiles.toml`. KPI formulas and
-targets remain in `config\metric_catalog.toml`.
+- OEM/Ford/Toyota service level and service availability;
+- actual calls, Verint forecast, forecast attainment, and call variance;
+- hourly Ford/Toyota/Chery queue-group results;
+- scheduled, observed, and productive FTE when matching evidence exists;
+- queue mapping and source freshness.
 
-- Ford OEM Service Level matches the original Flash: summed
-  answered-within-target / summed offered. Another profile may select another
-  governed method without changing Python.
-- Service Availability = answered / offered.
-- AHT = handled seconds / answered.
-- Forecast is used only as forecast. APBE/APFR/APDE are actuals.
+Service availability is `answered / offered`. It is not agent availability.
 
-Operational forecast files must be placed in the configured
-`Verint\Forecast` source folder. Files under `TOLEARN` are references and are
-never loaded automatically. Names such as `FORD_FR_08-2026.txt` and
-`Forecast_RSA_NL_August.txt` are matched to the configured filename token in
-`queue_mapping.csv`.
+Forecast attainment is `actual offered / forecast`. Call variance is
+`actual offered - forecast`; these two ideas are deliberately shown separately.
 
-Service availability is never agent availability and never adherence.
+The old Flash also contained manually sourced back-office counters. Until a
+reliable source is configured, WFMHub shows `NOT_CONFIGURED` instead of making
+up a number.
 
-### Staffing & Coverage
+## Yesterday Corrections
 
-Use this to see scheduled, observed, and productive FTE by 15-minute interval,
-LOB, and language. Future or missing evidence is left unknown; it is not turned
-into a fake staffing gap.
-
-### Attendance Callouts
-
-Choose **Today** for the live calling list. Choose **Current Week** or custom
-dates to include every callout case and daily trend in that whole period.
-
-An unfinished shift cannot be marked as early leave. A confirmed no-show needs
-a completed scheduled shift, a loaded blank LILO row, and no active Agent
-Status evidence. A missing file or missing row is **missing evidence**, not a
-no-show.
-
-### Attendance Corrections
-
-Use this after the day is complete. It compares planned schedule boundaries
-with LILO and Agent Status evidence, then checks whether Verint Activities
-already cover the gap.
+Use this after the operating day is complete. WFMHub compares schedule with
+LILO and Agent Status, then checks whether Verint Activities already cover each
+gap.
 
 1. Open `GAPS`.
-2. Edit only the pale-blue columns: Confirmed Activity, Validation Status,
-   Owner, Comment, and Injected Date.
-3. Use `SHIFT_VIEW` to see planned versus observed time across the shift.
+2. Review the complete shift on `SHIFT_VIEW`.
+3. Edit only the pale-blue decision columns.
 4. Save the workbook.
-5. In WFMHub choose **Import attendance correction decisions**.
+5. Use **System and advanced tools > Import edited attendance correction
+   decisions**.
 
-One invalid row cancels the complete import, so partial bad changes are not
-saved.
+## Final Absenteeism
 
-### Final Absence & Shrinkage
+This is the final payroll/reporting ledger. It uses corrected Verint Activities
+inside StartEndTimes boundaries. LILO and Agent Status detect operational gaps;
+they do not invent the final payroll category.
 
-This is the post-correction result for payroll/final reporting. It uses Verint
-Activities clipped to StartEndTimes boundaries. LILO and Agent Status detect
-the original operational problem, but do not invent the final payroll reason.
-Review every unmapped activity before using the result.
+Resolve every unmapped activity before using the report as final.
 
-## Run an analysis for any period
+## Bonus Management
 
-Choose **Analyze a period**, then select PCS, service, forecast, staffing,
-attendance, final absence, or bonus. Choose a comparison:
+Choose Bonus Management and then:
 
-- previous equal-length period;
-- previous-month same calendar days;
-- configured target; or
-- no comparison.
+- import a new Bonus Matrix v1.2 and build; or
+- build from the matrix already imported.
 
-The workbook contains `FINDINGS`, `METRICS`, and the exact `EVIDENCE` rows. It
-uses deterministic Python/SQLite rules, not AI. A comparison describes what
-changed; it does not pretend to prove why.
+WFMHub hashes and reads the source without changing it. Scenario Payout remains
+separate from Released Payout. Absence must have one financial consequence—not
+an absence KPI plus a second hidden penalty.
 
-## Export clean data
+## PCS Team
 
-Choose **Export clean data**, a dataset, dates, and CSV or XLSX. Use CSV for
-large call data. WFMHub writes the result to `output\data_exports` and creates a
-manifest beside it. The extract is untouched.
+PCS is the only Power Query/Data Model workbook.
 
-## Optional Excel PivotTables and slicers
+On a normal reporting cycle:
 
-You do not need this for normal reports. Use it only when you want an
-interactive Excel master.
+1. Choose **Sync and refresh PCS Team**.
+2. Choose the desired period.
+3. Open `Reports\PCS Team.xlsx`.
+4. Click **Data > Refresh All**.
+5. Use your PivotTables and slicers.
 
-1. Choose **Create an Excel Pivot/slicer master**.
-2. Select one report and a useful populated period.
-3. Open the created file in `templates\reports`.
-4. Follow [EXCEL_TEMPLATE_GUIDE.md](EXCEL_TEMPLATE_GUIDE.md) once.
-5. Save the master.
+The first setup is described in [EXCEL_TEMPLATE_GUIDE.md](EXCEL_TEMPLATE_GUIDE.md).
+Use the ready-to-paste scripts under `_system\power_query`; the copies under
+`templates` are source patterns, not the installation-specific scripts.
 
-After that, normal PCS builds refresh only the small stable CSV tables under
-`output\template_feeds\pcs\current`. Open the master, click **Data > Refresh All**, then use
-**Save As** for the file you will email. WFMHub never overwrites the master, so
-your PivotTables and slicers stay intact. Raw data is not loaded into sheets.
+PCS formulas:
 
-## Change a KPI safely
+- PCS Average = valid Q1 score sum / valid Q1 response count.
+- Participation = inbound nonblank Q1 / inbound `PCSStatus=1`.
+- Coaching opportunity = one valid inbound Q1 response `<= 3`.
+- Actions Rate = completed coaching / coaching opportunities.
 
-Do not edit formulas inside a report workbook. They are presentation files.
+Never average agent PCS percentages or use the raw score sum as the score.
 
-- Change KPI formulas/targets in `config\metric_catalog.toml`.
-- Change attendance/absence classifications in `config\wfm_rules.toml`.
-- Change service queue membership in `config\queue_mapping.csv`.
-- Change service report profiles in `config\service_profiles.toml`.
-- Change analysis thresholds in `config\analytics_rules.toml`.
+For coaching:
 
-Increase the file version, validate rules, refresh, and compare the new report
-with the previous one. Read [METRIC_CATALOG_GUIDE.md](METRIC_CATALOG_GUIDE.md)
-before changing a formula.
+1. Find the low-score call in the PCS Calls PivotTable.
+2. Copy its Coaching Key to `COACHING_LOG`.
+3. Enter status, date, coach, and comment.
+4. Save normally.
+5. The next **Sync and refresh PCS Team** imports the entry into SQLite and
+   republishes the model feeds.
 
-## Optional Copilot writing help
+## Analysis and clean data
 
-WFMHub does not call any AI or upload data. If your company permits it, attach
-only a finished report to your approved Microsoft Copilot and paste
-`prompts\COPILOT_WFM_ANALYST.md`. Copilot may help explain the result; it is not
-allowed to recalculate the KPI or replace the evidence.
+**Analyze a period** creates a separate evidence workbook for a selected domain
+and comparison. It is deterministic Python/SQLite analysis, not AI.
 
-## Custom Python or SQL
+**Export clean data** creates CSV or XLSX for the selected dataset and dates.
+Use CSV for large Call by Call data.
 
-Copy an underscore example in `custom\jobs` or `custom\sql`, rename it, and use
-the **Advanced** menu. Custom jobs receive selected dates and read-only hub
-access. Python code is still executable code: use only code you understand.
+## If something breaks
 
-## Backups and common errors
+- **File not found:** keep the complete extracted WFMHub folder together.
+- **Another refresh is running:** let it finish; do not delete its lock.
+- **No Time zone found:** the portable package was incompletely extracted.
+- **Required columns missing:** read the named source file in the error/log.
+- **Empty report:** check source health and date coverage in System tools.
+- **Red INCOMPLETE badge:** fix the missing or stale source; do not replace the
+  blank with zero.
 
-- Use **Create database backup** before a major configuration or upgrade.
-- “Another refresh is running” means wait for the current job. Do not delete a
-  lock while that job is active.
-- “No Time zone found” means the portable release is incomplete; keep the whole
-  extracted folder and run the system check.
-- “Required columns are missing” means the selected file does not match that
-  source contract. Read the named file/columns in the log.
-- An empty report usually means the selected period has no matching scoped data.
-  Choose **Show source health and date coverage**.
-- A red **INCOMPLETE** badge means do not silently replace blanks with zero.
+Technical data, feeds, logs, and backups are under `_system`. Normal daily work
+belongs in `Reports`.

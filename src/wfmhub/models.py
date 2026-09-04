@@ -319,7 +319,13 @@ def _build_agents(conn: DatabaseConnection) -> dict[str, dict[str, Any]]:
             SELECT agent_id FROM roster UNION SELECT agent_id FROM actual_names
             UNION SELECT agent_id FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
             UNION SELECT agent_id FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
-            UNION SELECT agent_id FROM raw.fte_agent r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
+            UNION SELECT agent_id FROM raw.fte_agent r
+                  JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+                  WHERE agent_id IS NOT NULL
+                    AND (
+                        upper(trim(coalesce(employment_status,'')))='ACTIVE'
+                        OR (upper(trim(coalesce(employment_status,'')))='LEAVER' AND end_date IS NOT NULL)
+                    )
         ), fte_ranked AS (
                 SELECT r.agent_id, r.agent_name, r.employment_status, r.team_leader,
                        r.ops_manager, r.lob, r.market, r.language, r.location,
@@ -329,8 +335,12 @@ def _build_agents(conn: DatabaseConnection) -> dict[str, dict[str, Any]]:
                     ORDER BY CASE WHEN upper(coalesce(employment_status,''))='ACTIVE' THEN 0 ELSE 1 END,
                              end_date DESC NULLS LAST, f.modified_at DESC NULLS LAST, source_row DESC
                 ) row_rank
-                FROM raw.fte_agent r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+                FROM raw.fte_agent r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
                 WHERE r.agent_id IS NOT NULL
+                  AND (
+                      upper(trim(coalesce(r.employment_status,'')))='ACTIVE'
+                      OR (upper(trim(coalesce(r.employment_status,'')))='LEAVER' AND r.end_date IS NOT NULL)
+                  )
         ), fte AS (
             SELECT agent_id, agent_name, employment_status, team_leader, ops_manager,
                    lob, market, language, location, city, fte

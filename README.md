@@ -1,134 +1,171 @@
 # WFMHub Portable
 
-WFMHub turns untouched WFM extracts into a durable SQLite database, focused
-Excel decision products, compact Excel Data Model inputs, clean exports, and
-repeatable on-demand analysis. The Windows package runs without admin rights,
-installed Python, ODBC, DuckDB, Power Query, or Python in Excel.
+WFMHub reads untouched WFM extracts, keeps a durable SQLite history, and
+produces focused Excel workbooks. It runs on a locked-down Windows work machine
+without admin rights, installed Python, ODBC, DuckDB, or Python in Excel.
 
-The extracts are read-only inputs. Normal reports contain curated business
-grains—not copied raw files—and SQLite remains the calculation authority.
+The operating rule is simple: **refresh the sources once, then build only the
+product you need**. Extract files are never moved or edited.
 
-## Current operating model
+## What you see
 
-The hub now produces one workbook for one decision:
+Normal users work from one folder:
 
-| Product | Management question |
+```text
+Reports/
+  Attendance Callout.xlsx
+  Staffing Gaps.xlsx
+  OEM Flash.xlsx
+  Yesterday Corrections.xlsx
+  Final Absenteeism.xlsx
+  Bonus Management.xlsx
+  PCS Performance.xlsx
+  PCS Team.xlsx
+  Archive/
+```
+
+Every generated product has a fixed name. When WFMHub replaces one, it first
+copies the previous version into `Reports\Archive\YYYY-MM-DD`.
+
+`PCS Team.xlsx` is different only in behaviour: it is the persistent team
+workspace. WFMHub never overwrites it during a normal refresh, so its
+PivotTables, slicers, layout, and `COACHING_LOG` survive.
+
+Technical files live under `_system`. You normally do not open that folder.
+
+## Products
+
+| Product | Operational decision |
 |---|---|
-| PCS Performance | How are daily and current-month PCS and participation moving versus the comparable prior month? |
-| Bonus Performance | What does Bonus Matrix v1.2 calculate, what changed, and is it safe to release? |
-| Service Performance | Is the selected mapped LOB meeting SL, service availability, forecast, and AHT expectations? |
-| Staffing & Coverage | Where is scheduled capacity not present by LOB/language and interval? |
-| Attendance Callouts | Which agents require contact or follow-up on every selected date? |
-| Attendance Corrections | Which completed-day observed gaps remain to be corrected in Verint? |
-| Final Absence & Shrinkage | What does the corrected Verint ledger contain for payroll and final reporting? |
+| Attendance Callout | Who must be contacted for absence, lateness, or not-seen status? |
+| Staffing Gaps | Where is scheduled capacity missing by LOB, language, and interval? |
+| OEM Flash | What is Ford OEM service, demand, forecast, and staffing state? |
+| Yesterday Corrections | Which completed-day gaps still need a Verint correction? |
+| Final Absenteeism | What does corrected Verint contain for final absence and shrinkage? |
+| Bonus Management | What did Bonus Matrix v1.2 calculate, and is it safe to release? |
+| PCS Team | How are PCS, participation, low scores, and coaching moving daily and monthly? |
 
-Every workbook has the same navy/teal/gold shell, a status badge, KPI cards,
-action-oriented detail, definitions, and hidden audit lineage. Adherence is not
-calculated. Service availability always means **answered / offered**.
-The Ford OEM profile follows the original Flash's gross SL and actual/forecast
-attainment definitions while labelling them unambiguously.
+The products use one visual identity but not one generic layout. The Flash is an
+intraday control page, Attendance is a call list, Corrections is a shift
+timeline, and Final Absenteeism is a ledger.
 
-## Source boundaries
+Adherence is not calculated. Service availability means **answered / offered**,
+never agent availability.
+
+## Source authority
 
 | Source | Used for |
 |---|---|
-| FTE Agent sheet | Authoritative in-scope roster and organisation fields |
-| Verint StartEndTimes | Planned start/end and assignment boundaries |
-| Storm LILO | First/last daily presence evidence, including loaded blank rows |
-| Storm Agent Status | Within-shift observed presence and staffing evidence |
-| Verint Activities | Post-correction final absence/shrinkage ledger and correction reconciliation |
-| Verint Forecast | Forecast and schedule requirements only |
-| Storm APBE/APFR/APDE | Service actuals only |
+| FTE roster | Date-aware in-scope agents and organisation fields |
+| Verint StartEndTimes | Scheduled start/end and assignment boundaries |
+| Storm LILO | First/last presence evidence, including loaded blank rows |
+| Storm Agent Status | Observed attendance and interval staffing evidence |
+| Verint Activities | Post-correction final absence and shrinkage |
+| Verint Forecast | Forecast only |
+| Storm APBE/APFR/APDE | Actual service performance only |
 | Storm Call by Call | Agent call performance and PCS |
-| Bonus Matrix v1.2 | Monthly bonus inputs, configuration, policy, and source reconciliation |
+| Bonus Matrix v1.2 | Bonus inputs, KPI configuration, and source reconciliation |
 
-Filename dates are hints. Row dates and Verint date columns define the business
-date, so multi-day extracts are supported. Missing evidence is shown as missing;
-it is never invented as a no-show or zero.
+Multi-day files are supported. Row dates are authoritative; filename dates are
+only fallback hints. Missing evidence remains missing and is never converted to
+a false no-show or zero.
+
+FTE scope is effective-dated: `Active` rows are admitted; `Leaver` rows are
+admitted only through `End date if leaver`; other statuses and undated leavers
+are excluded. The same rule is applied to schedules, LILO, Agent Status, and
+Call by Call for each row's business date.
 
 ## Windows quick start
 
-1. Download the portable Windows release and choose **Extract All**.
-2. Double-click `SETUP.cmd` once and select the folder containing `FTE`,
-   `Storm`, and `Verint`.
-3. Double-click `WFMHub.cmd`.
-4. Choose **Validate rules and build governance catalog** after setup and after
-   every configuration change.
-5. Choose **Refresh hub data**, a source group, a period, and the report products
-   you need.
+1. Download the portable release and choose **Extract All**.
+2. Double-click `SETUP.cmd` once.
+3. Paste the folder containing `FTE`, `Storm`, and `Verint`.
+4. Double-click `WFMHub.cmd`.
+5. Choose **Refresh source data once**.
+6. Choose the report you need from Today, Month, PCS Team, or Analyse.
+7. Open it directly from `Reports`.
 
-Use `templates\FTE Count.xlsx` if you need the standard roster. Start with the
-[beginner guide](docs/BEGINNER_GUIDE.md).
+See the [beginner guide](docs/BEGINNER_GUIDE.md) for the exact clicks.
 
-## Output folders
+## OEM Flash pilot
 
-| Folder | Contents |
-|---|---|
-| `output\pcs` | Daily/MTD/prior-month PCS and participation |
-| `output\bonus` | Governed Bonus Matrix result and release controls |
-| `output\service` | Mapped LOB service performance; Ford OEM France is the starter profile |
-| `output\staffing` | LOB/language interval coverage and exceptions |
-| `output\attendance` | Live same-day contact queue |
-| `output\corrections` | Completed-day residual gaps and shift visualization |
-| `output\absence` | Final Activities-only absence and shrinkage ledger |
-| `output\analysis` | On-demand domain analysis for any selected period |
-| `output\template_feeds\pcs\current` | Stable typed PCS CSVs consumed by the protected Excel master |
-| `output\template_feeds\pcs\archive` | Immutable copies of every PCS feed refresh |
-| `output\model_data\<product>` | Small CSV tables used by optional Excel Data Model masters |
-| `output\data_exports` | Explicit clean CSV/XLSX exports |
-| `output\custom` | Trusted custom Python/read-only SQL results |
+The first Flash profile is Ford OEM France. It follows the useful operating
+logic in `TOLEARN\Flash FORD OEM.xlsx` without copying its inflated hidden raw
+sheets or fragile formulas.
 
-The former “management shared report” route is retired. Each official report
-product is presentation-ready and follows the same contract.
+The Flash contains:
 
-## Excel PivotTable and slicer route
+- OEM, Ford, and Toyota service level and service availability;
+- actual offered calls, Verint forecast, forecast attainment, and call variance;
+- hourly mapped queue-group performance;
+- scheduled, observed, and productive FTE when matching staffing data exists;
+- queue evidence and explicit source freshness.
 
-Normal generated workbooks work immediately and do not need Power Query. If you
-want native PivotTables and slicers:
+`Forecast attainment = actual offered / forecast`.
+`Variance calls = actual offered - forecast`.
 
-1. Open the included data-free `templates\reports\pcs.xlsx` starter. For other
-   products, choose **Create an Excel Pivot/slicer master** once.
-2. Follow [Excel template setup](docs/EXCEL_TEMPLATE_GUIDE.md) to create direct
-   CSV queries as **Connection Only + Add to Data Model**.
-3. On normal PCS report days, WFMHub refreshes the stable filenames under
-   `output\template_feeds\pcs\current` and archives that refresh.
-4. Open the protected master in `templates\reports`, choose **Refresh All**, and
-   then **Save As** the copy you will send.
+The reference workbook's back-office counters do not yet have a governed raw
+source. WFMHub labels that section `NOT_CONFIGURED` rather than fabricating it.
 
-WFMHub never edits a configured master again, preserving its Data Model,
-PivotTables, slicers, and your layout. Raw data is never loaded to a worksheet.
+Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
+`config\service_profiles.toml`; formulas and targets live in
+`config\metric_catalog.toml`.
+
+## PCS Team and Excel Data Model
+
+PCS is the only product that uses Power Query and the Excel Data Model. The
+master is `Reports\PCS Team.xlsx`; its four small input files are hidden under
+`_system\feeds\pcs\current`:
+
+- `PCS_AgentDay.csv` — fact table, one agent/day;
+- `PCS_Calls.csv` — fact table, one low-score coaching opportunity;
+- `PCS_Agents.csv` — agent/team/LOB/language dimension;
+- `PCS_Dates.csv` — small generated calendar dimension.
+
+The queries load as **Only Create Connection + Add to Data Model**. They do not
+load rows to a worksheet. Follow the one-time
+[PCS Excel setup guide](docs/EXCEL_TEMPLATE_GUIDE.md).
+
+Setup writes the four ready-to-paste query scripts under
+`_system\power_query`. Their local path is literal, so the queries do not
+reference one another or combine the workbook with a file source.
+
+Normal PCS routine:
+
+1. Choose **Sync and refresh PCS Team** in WFMHub.
+2. Open `Reports\PCS Team.xlsx`.
+3. Choose **Data > Refresh All**.
+4. Use the PivotTables and slicers.
+5. Enter completed coaching in `COACHING_LOG`.
+6. On the next sync, WFMHub imports those decisions before refreshing the feed.
+
+The generated `PCS Performance.xlsx` is a static calculation check. The team
+master remains the collaborative workbook.
 
 ## Configurable logic
 
-Calculations are centralized and separated by responsibility:
-
 | File | Owns |
 |---|---|
-| `config\wfm_rules.toml` | Attendance/absence evidence classification and source parsing rules |
-| `config\metric_catalog.toml` | Effective-dated KPI formulas, targets, units, scope, priority, and aggregation |
-| `config\analytics_rules.toml` | Deterministic finding thresholds and limits |
-| `config\report_catalog.toml` | Workbook names and ordered sheet contracts |
-| `config\queue_mapping.csv` | Source queues, report LOBs, and forecast comparison scopes |
-| `config\service_profiles.toml` | Effective-dated service products, included scopes, selected governed metrics, and queue groups |
+| `config\wfm_rules.toml` | Attendance and absence evidence classification |
+| `config\metric_catalog.toml` | Effective-dated KPI formulas, targets, units, and aggregation |
+| `config\analytics_rules.toml` | Deterministic analysis thresholds |
+| `config\queue_mapping.csv` | Queue-to-LOB and forecast comparison mapping |
+| `config\service_profiles.toml` | Flash/service scope and queue groups |
 
-Percentages are decimals (`0.80` means 80%). Higher-level KPIs always use a
-ratio of summed counters; percentages are never averaged. Run the validation
-menu after an edit so invalid formulas, dates, priorities, mappings, and report
-contracts fail before a refresh.
+Percentages are stored as decimals: `0.80` means 80%. Aggregated percentages
+use ratios of summed components; WFMHub never averages agent percentages.
 
-## Bonus Matrix and analysis
+## Analysis and clean exports
 
-Import the final `Bonus_Matrix_v1.2.xlsx` from the menu. WFMHub hashes the source,
-imports it without modifying it, recalculates the governed scenario, and keeps
-Released Payout blocked until the configured input, policy, and eligibility
-controls pass. Absence must have one financial consequence—KPI, eligibility, or
-proration—not a duplicate penalty.
+**Analyze a period** creates an evidence-backed workbook for PCS, service,
+forecast, staffing, attendance, final absence, or bonus. It uses deterministic
+Python/SQLite logic, not AI.
 
-Choose **Analyze a period** to create an evidence-backed workbook for PCS,
-service, forecast, staffing, attendance, final absence, or bonus. This is
-deterministic Python/SQLite analysis. The optional prompt under `prompts` can be
-used manually with your approved Copilot account after attaching only the
-finished workbook.
+**Export clean data** produces explicit CSV or XLSX data for a selected period.
+Large call datasets should use CSV. The original extract is unchanged.
+
+The optional prompt under `prompts` can be used manually with an approved
+Microsoft Copilot account after attaching only an approved finished report.
 
 ## Developer commands
 
@@ -137,15 +174,13 @@ python3 -m venv .venv
 . .venv/bin/activate
 python3 -m pip install -e .
 python3 -m wfmhub --home . setup --source-root /path/to/extracts --non-interactive
-python3 -m wfmhub --home . rules catalog
-python3 -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31 --all-packs
-python3 -m wfmhub --home . import-bonus "TOLEARN/Bonus_Matrix_v1.2 (1).xlsx"
-python3 -m wfmhub --home . import-pcs-actions "output/pcs/EDITED_PCS_REPORT.xlsx"
+python3 -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31 --no-report
+python3 -m wfmhub --home . report --pack service --start 2026-08-31 --end 2026-08-31
+python3 -m wfmhub --home . pcs-team --start 2026-08-01 --end 2026-08-31
 python3 -m wfmhub --home . analyze pcs --start 2026-08-01 --end 2026-08-31 --comparison previous_month
-python3 -m wfmhub --home . template-init --pack pcs --start 2026-08-01 --end 2026-08-31
 python3 -m unittest discover -s tests -v
 ```
 
-See [Architecture](docs/ARCHITECTURE.md), [PCS logic](docs/PCS_LOGIC.md),
-[metric catalog guide](docs/METRIC_CATALOG_GUIDE.md), and
-[clean-data contract](docs/CLEAN_DATA_CONTRACT.md) for the technical contracts.
+For implementation details, see [Architecture](docs/ARCHITECTURE.md),
+[PCS logic](docs/PCS_LOGIC.md), and the
+[metric catalog guide](docs/METRIC_CATALOG_GUIDE.md).

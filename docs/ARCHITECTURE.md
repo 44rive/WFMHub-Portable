@@ -39,16 +39,16 @@ WFMHub/
 ├── config/queue_mapping.csv    editable queue/file/scope mapping
 ├── config/default_service_profiles.toml shipped service-product defaults
 ├── config/service_profiles.toml editable effective-dated service profiles
-├── templates/reports/          protected Excel-authored Pivot/slicer masters
-├── templates/power_query/      direct-CSV Power Query pattern
+├── Reports/                    current fixed-name workbooks + dated archive
+│   └── PCS Team.xlsx           protected persistent Excel-authored master
+├── templates/power_query/      direct-CSV Power Query source patterns
 ├── prompts/                    optional manual Copilot handoff prompt
-├── database/wfm.sqlite3        durable SQLite hub
-├── input/                      persistent human inputs
-├── custom/                     Python and read-only SQL job templates
-├── output/                     finished reports
-├── logs/                       daily logs
-└── backups/                    SQLite online backups
+└── _system/                    database, feeds, logs, backups and advanced tools
 ```
+
+Setup renders the PCS query patterns into `_system/power_query` with the exact
+local feed path. Each query then has a single file data source and does not use
+`Excel.CurrentWorkbook`, preventing the privacy-firewall dependency chain.
 
 The work computer runs no installer or `pip`. SQLite is Python's standard
 `sqlite3` module. Only pure-Python `openpyxl`, `XlsxWriter`, and `et_xmlfile`
@@ -117,47 +117,47 @@ details remain in one module.
 
 The shared SQLite hub can serve multiple workbooks without mixing their grains:
 
-| Pack | Folder | Scope |
+| Pack | Current file | Scope |
 |---|---|---|
-| `pcs` | `output/pcs` | Daily, selected-period, MTD and prior-month PCS/participation |
-| `bonus` | `output/bonus` | Imported Bonus Matrix result, KPI diagnostics and release controls |
-| `service` | `output/service` | Selected effective service profile, mapped queues, forecast and AHT |
-| `staffing` | `output/staffing` | Selected-day roster LOB/language coverage |
-| `attendance` | `output/attendance` | Same-day no-show/late/not-seen contact queue |
-| `corrections` | `output/corrections` | Latest completed-day residual gaps and shift visualization |
-| `absence` | `output/absence` | Activities-only final absence/shrinkage ledger |
+| `pcs` | `Reports/PCS Performance.xlsx` | Static PCS calculation check |
+| `bonus` | `Reports/Bonus Management.xlsx` | Imported Bonus Matrix result and release controls |
+| `service` | `Reports/OEM Flash.xlsx` | Ford OEM queue, forecast, service and staffing control |
+| `staffing` | `Reports/Staffing Gaps.xlsx` | Selected-day roster LOB/language coverage |
+| `attendance` | `Reports/Attendance Callout.xlsx` | No-show/late/not-seen contact queue |
+| `corrections` | `Reports/Yesterday Corrections.xlsx` | Completed-day residual gaps and shift visualization |
+| `absence` | `Reports/Final Absenteeism.xlsx` | Activities-only final absence/shrinkage ledger |
 
-Every product uses the same `DASHBOARD`/detail/`DEFINITIONS`/hidden `_AUDIT`
-presentation shell. The Corrections `GAPS` sheet and PCS `ACTIONS` blue columns
-are the only generated-report inputs accepted for persistent decision import. Legacy `operations` and `quality_pcs`
-builders remain callable for compatibility but are absent from the menu;
-Intraday and Executive Scorecard keys remain disabled.
+Products share the same visual identity but use purpose-specific layouts. The
+OEM Flash begins with `FLASH` and `HOURLY`; Corrections uses `GAPS` and
+`SHIFT_VIEW`; Attendance remains an action list. Legacy `operations` and
+`quality_pcs` builders remain callable under `_system/legacy_reports` but are
+absent from the menu.
 
-Each report also refreshes compact tables in `output/model_data/<product>`.
-Excel-authored masters query those CSVs directly as connection-only Data Model
-tables. WFMHub creates a starter once and never rewrites a master, protecting
-native PivotTables and slicers.
-
-PCS additionally publishes a strict stable-name contract under
-`output/template_feeds/pcs/current`: agent/day, named-period summary,
-call-level coaching actions, and daily trend. Each publication is also copied
-to `archive`, and the manifest is published after the atomic CSV replacements.
+Only PCS publishes Data Model inputs. Its strict stable-name contract is under
+`_system/feeds/pcs/current`: agent-day fact, coaching-call fact, Agent
+dimension, and Date dimension. Each publication is copied to the feed archive,
+and the manifest is published after the atomic CSV replacements. The protected
+master is `Reports/PCS Team.xlsx`; WFMHub reads its `COACHING_LOG` but never
+rewrites the file during normal operation.
 This avoids direct SQLite/ODBC/native-driver dependencies on controlled work
 machines while preserving SQLite as the calculation authority.
 
 ## Agent scope and identity
 
-FTE is the authority for “our agents.” Before an agent-level row enters the
+FTE is the authority for “our agents.” Scope is evaluated on each source row's
+business date. Before an agent-level row enters the
 active raw layer:
 
-1. Normalize the source Agent ID.
-2. Keep it when the ID exists in active FTE `Client ID` values.
-3. Otherwise normalize accents, case, punctuation, and whitespace in the name.
-4. Keep it only when that name maps to exactly one FTE Agent ID.
-5. Preserve a populated operational source ID. In particular, Verint `Data
+1. Admit FTE Status `Active` for every date.
+2. Admit Status `Leaver` only through its populated `End date if leaver`.
+3. Exclude other statuses and undated Leavers.
+4. Normalize the source Agent ID and apply that effective-dated eligibility.
+5. Otherwise normalize accents, case, punctuation, and whitespace in the name.
+6. Keep it only when that name maps to exactly one eligible FTE Agent ID.
+7. Preserve a populated operational source ID. In particular, Verint `Data
    Source IDs` remains the schedule Agent ID.
-6. Apply the same gate to Call-by-Call agent legs.
-7. Exclude everything else and count it as outside roster.
+8. Apply the same gate to schedules, LILO, Agent Status, and Call-by-Call.
+9. Exclude everything else and count it as outside roster.
 
 A populated unmatched ID can therefore be admitted by a unique roster name,
 but an ambiguous or missing name cannot. This is a scope decision, not fuzzy

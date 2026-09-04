@@ -77,19 +77,41 @@ def _normalize_agent_name(value: Any) -> str | None:
 
 @dataclass(frozen=True)
 class AgentScope:
-    """Authoritative agent scope derived from the active FTE roster."""
+    """Date-aware agent scope derived from Active and dated Leaver FTE rows."""
 
     agent_ids: frozenset[str]
     unique_names: dict[str, str]
     fingerprint: str
+    eligibility: dict[str, tuple[str, date | None]] = field(default_factory=dict)
 
-    def resolve(self, agent_id: Any, agent_name: Any) -> str | None:
+    def active_on(self, roster_id: str, business_date: date | None) -> bool:
+        rule = self.eligibility.get(roster_id)
+        if rule is None:
+            # Backwards-compatible programmatic scopes used by parser clients.
+            return roster_id in self.agent_ids
+        status, leave_date = rule
+        normalized_status = " ".join(status.upper().replace("_", " ").split())
+        if normalized_status == "ACTIVE":
+            return True
+        return (
+            normalized_status == "LEAVER"
+            and leave_date is not None
+            and business_date is not None
+            and business_date <= leave_date
+        )
+
+    def resolve(
+        self,
+        agent_id: Any,
+        agent_name: Any,
+        business_date: date | None = None,
+    ) -> str | None:
         normalized_id = normalize_id(agent_id)
-        if normalized_id in self.agent_ids:
+        if normalized_id in self.agent_ids and self.active_on(normalized_id, business_date):
             return normalized_id
         name_key = _normalize_agent_name(agent_name)
         roster_id = self.unique_names.get(name_key) if name_key else None
-        if roster_id is None:
+        if roster_id is None or not self.active_on(roster_id, business_date):
             return None
         # Preserve a populated operational source ID (especially Verint Data
         # Source IDs) while using the unique roster name only as the scope gate.
@@ -97,7 +119,7 @@ class AgentScope:
 
 
 AGENT_SCOPED_FAMILIES = {"schedule", "lilo", "agent_status", "calls"}
-AGENT_SCOPE_POLICY_VERSION = "v1-id-or-unique-name-preserve-source-id"
+AGENT_SCOPE_POLICY_VERSION = "v2-active-or-leaver-through-leave-date"
 SCHEDULE_PARSER_POLICY_VERSION = "v2-explicit-start-end-vs-activities"
 
 
@@ -353,22 +375,20 @@ def _parse_start_end_schedule(path: Path, file_id: str, scope: AgentScope | None
         for physical_row, values in enumerate(reader, 2):
             name = _clean(values[0] if values else None)
             raw_id = normalize_id(values[1] if len(values) > 1 else None, reject_placeholders=False)
-            agent_id = normalize_id(values[1] if len(values) > 1 else None)
+            source_agent_id = normalize_id(values[1] if len(values) > 1 else None)
             if not name and raw_id is None:
                 continue
-            if scope is not None:
-                resolved_id = scope.resolve(agent_id, name)
-                if resolved_id is None:
-                    scoped_out += sum(
-                        1 for column, _ in date_columns
-                        if column < len(values) and str(values[column] or "").strip()
-                    )
-                    continue
-                agent_id = resolved_id
             for ordinal, (column, business_date) in enumerate(date_columns, 1):
                 raw_assignment = _clean(values[column] if column < len(values) else None)
                 if not raw_assignment:
                     continue
+                agent_id = source_agent_id
+                if scope is not None:
+                    resolved_id = scope.resolve(agent_id, name, business_date)
+                    if resolved_id is None:
+                        scoped_out += 1
+                        continue
+                    agent_id = resolved_id
                 assignment, start, end = parse_verint_interval(raw_assignment)
                 is_off = raw_assignment.strip().upper() == "OFF"
                 parse_ok = is_off or bool(start and end and end > start)
@@ -443,16 +463,16 @@ def parse_schedule(path: Path, file_id: str, scope: AgentScope | None = None) ->
                 continue
             if marker is None:
                 raise SourceSchemaError(f"Agent row before date marker at line {source_row}")
-            if scope is not None:
-                resolved_id = scope.resolve(agent_id, name)
-                if resolved_id is None:
-                    scoped_out += 1
-                    continue
-                agent_id = resolved_id
             raw_assignment = _clean(row.get("Shift Assignment"))
             assignment, start, end = parse_verint_interval(raw_assignment)
             is_off = (raw_assignment or "").strip().upper() == "OFF"
             schedule_date = start.date() if start else marker
+            if scope is not None:
+                resolved_id = scope.resolve(agent_id, name, schedule_date)
+                if resolved_id is None:
+                    scoped_out += 1
+                    continue
+                agent_id = resolved_id
             parse_ok = is_off or bool(start and end and end > start)
             shifts.append({
                 "source_file_id": file_id, "source_row": source_row,
@@ -498,14 +518,6 @@ def parse_lilo(path: Path, file_id: str, scope: AgentScope | None = None) -> Par
             raise SourceSchemaError(f"LILO missing columns: {', '.join(missing)}")
         for source_row, row in enumerate(reader, 2):
             agent_id = normalize_id(row.get("[Agent ID]"))
-            if scope is None and not agent_id:
-                continue
-            if scope is not None:
-                resolved_id = scope.resolve(agent_id, row.get("[Agent]"))
-                if resolved_id is None:
-                    scoped_out += 1
-                    continue
-                agent_id = resolved_id
             first = parse_datetime(row.get("[First Log-on Time]"))
             raw_last = parse_datetime(row.get("[Last Log-off Time]"))
             extract_date = (
@@ -516,6 +528,14 @@ def parse_lilo(path: Path, file_id: str, scope: AgentScope | None = None) -> Par
                     f"line {source_row}: no row date; a multi-day LILO row with blank login/logout needs a Date column"
                 )
                 continue
+            if scope is None and not agent_id:
+                continue
+            if scope is not None:
+                resolved_id = scope.resolve(agent_id, row.get("[Agent]"), extract_date)
+                if resolved_id is None:
+                    scoped_out += 1
+                    continue
+                agent_id = resolved_id
             last = raw_last
             adjusted = False
             if first and last and last < first:
@@ -572,11 +592,6 @@ def _insert_lilo_direct(
             if progress is not None and processed % 5000 == 0:
                 progress(processed, 0, f"LILO: {processed:,} rows scanned")
             agent_id = normalize_id(row.get("[Agent ID]"))
-            resolved_id = scope.resolve(agent_id, row.get("[Agent]"))
-            if resolved_id is None:
-                scoped_out += 1
-                continue
-            agent_id = resolved_id
             first = parse_datetime(row.get("[First Log-on Time]"))
             raw_last = parse_datetime(row.get("[Last Log-off Time]"))
             extract_date = (
@@ -585,6 +600,11 @@ def _insert_lilo_direct(
             if extract_date is None:
                 rejected += 1
                 continue
+            resolved_id = scope.resolve(agent_id, row.get("[Agent]"), extract_date)
+            if resolved_id is None:
+                scoped_out += 1
+                continue
+            agent_id = resolved_id
             last = raw_last
             adjusted = False
             if first and last and last < first:
@@ -633,16 +653,16 @@ def _status_record(
     row: dict[str, Any], file_id: str, source_row: int, scope: AgentScope | None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     agent_id = normalize_id(row.get("[Agent ID]"))
-    if scope is not None:
-        resolved_id = scope.resolve(agent_id, row.get("[Agent]"))
-        if resolved_id is None:
-            return None, "outside roster"
-        agent_id = resolved_id
     start = parse_datetime(row.get("[Status Start Date and Time]"))
     seconds = duration_seconds(row.get("[Status Duration]"))
     end = start + timedelta(seconds=seconds) if start is not None and seconds is not None else None
     if not start or not end or end <= start:
         return None, "invalid status interval"
+    if scope is not None:
+        resolved_id = scope.resolve(agent_id, row.get("[Agent]"), start.date())
+        if resolved_id is None:
+            return None, "outside roster"
+        agent_id = resolved_id
     serial = _clean(row.get("[Serial Number]"))
     if not serial:
         serial = hashlib.sha256(repr(sorted(row.items())).encode("utf-8")).hexdigest()
@@ -754,7 +774,7 @@ def _call_record(
     agent_name = _clean(get("Agent"))
     agent_id = source_agent_id
     if scope is not None:
-        agent_id = scope.resolve(source_agent_id, agent_name)
+        agent_id = scope.resolve(source_agent_id, agent_name, start.date())
         if agent_id is None:
             return None, "outside roster"
     elif agent_id is None:
@@ -1064,32 +1084,52 @@ PARSERS: dict[str, Callable[[Path, str, AgentScope | None], ParseResult]] = {
 
 def _load_agent_scope(conn: DatabaseConnection) -> AgentScope:
     rows = conn.execute(
-        """SELECT r.agent_id, r.agent_name
+        """SELECT r.agent_id, r.agent_name, r.employment_status, r.end_date
            FROM raw.fte_agent r
            JOIN meta.source_file f ON f.file_id=r.source_file_id
            WHERE f.active=true AND f.status='SUCCESS'"""
     ).fetchall()
-    ids = {normalize_id(agent_id) for agent_id, _ in rows}
-    ids.discard(None)
+    ranked: dict[str, tuple[str, date | None, str | None]] = {}
+    for agent_id, agent_name, status, end_date in rows:
+        normalized_id = normalize_id(agent_id)
+        normalized_status = " ".join(str(status or "").strip().upper().replace("_", " ").split())
+        parsed_end = parse_date(end_date)
+        if not normalized_id or normalized_status not in {"ACTIVE", "LEAVER"}:
+            continue
+        if normalized_status == "LEAVER" and parsed_end is None:
+            continue
+        candidate = (normalized_status, parsed_end, _normalize_agent_name(agent_name))
+        current = ranked.get(normalized_id)
+        if current is None or (
+            (candidate[0] == "ACTIVE", candidate[1] or date.min)
+            > (current[0] == "ACTIVE", current[1] or date.min)
+        ):
+            ranked[normalized_id] = candidate
+    ids = set(ranked)
     if not ids:
         raise SourceSchemaError(
             "Agent scope is empty. Load a valid FTE roster before agent-level extracts; "
             "no worldwide rows were admitted."
         )
     names: dict[str, set[str]] = {}
-    for agent_id, agent_name in rows:
-        normalized_id = normalize_id(agent_id)
-        name_key = _normalize_agent_name(agent_name)
+    for normalized_id, (_, _, name_key) in ranked.items():
         if normalized_id and name_key:
             names.setdefault(name_key, set()).add(normalized_id)
     unique_names = {name: next(iter(matches)) for name, matches in names.items() if len(matches) == 1}
     payload = "\n".join([
         f"policy:{AGENT_SCOPE_POLICY_VERSION}",
-        *(f"id:{value}" for value in sorted(ids)),
+        *(
+            f"id:{value}|status:{ranked[value][0]}|end:{ranked[value][1] or ''}"
+            for value in sorted(ids)
+        ),
         *(f"name:{key}={value}" for key, value in sorted(unique_names.items())),
     ])
     fingerprint = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    return AgentScope(frozenset(ids), unique_names, fingerprint)
+    eligibility = {
+        agent_id: (values[0], values[1])
+        for agent_id, values in ranked.items()
+    }
+    return AgentScope(frozenset(ids), unique_names, fingerprint, eligibility)
 
 
 def _insert_rows(conn: DatabaseConnection, table: str, rows: list[dict[str, Any]]) -> None:

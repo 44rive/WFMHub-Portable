@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.0 — 2026-09-04
+
+- Simplified daily work to one flat `Reports` folder with fixed workbook names;
+  each replaceable report archives its previous copy automatically.
+- Made `Reports/PCS Team.xlsx` the only persistent team workbook. Its
+  PivotTables, slicers, and coaching log survive while WFMHub refreshes a small
+  four-table star-schema feed under `_system`.
+- Rebuilt the Ford OEM pilot as `OEM Flash.xlsx` with OEM/Ford/Toyota service,
+  actual-versus-forecast, hourly queue groups, staffing evidence, freshness,
+  and an explicit `NOT_CONFIGURED` state for unsourced back-office measures.
+- Reorganized the menu around Update, Today, Month, PCS Team, Analyse, and
+  Settings; report generation is independent from source ingestion.
+- Enforced effective-dated FTE scope everywhere: Active agents are included;
+  Leavers are included through their leave date; undated Leavers and all other
+  statuses are excluded from schedules, LILO, Agent Status, and Call by Call.
+- Updated the portable layout, beginner documentation, PCS Power Query scripts,
+  model relationships, governed measures, and packaging checks for the new
+  structure.
+
 ## 0.11.0 — 2026-09-03
 
 - Rebuilt PCS follow-up at call-response grain: every valid inbound Q1 `<=3`

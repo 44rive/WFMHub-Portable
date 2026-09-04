@@ -75,12 +75,12 @@ def build_pcs_starter(path: Path) -> Path:
     start.merge_range("A2:H2", "Data-free public starter  |  designed by Anass ASSRI", subtitle)
     steps = [
         "1. Run WFMHub and build PCS Performance for the dates you need.",
-        "2. Confirm output\\template_feeds\\pcs\\current contains the four PCS CSV files.",
-        "3. Follow docs\\EXCEL_TEMPLATE_GUIDE.md to paste the supplied Power Query scripts.",
+        "2. WFMHub updates four small PCS model files inside _system automatically.",
+        "3. Follow docs\\EXCEL_TEMPLATE_GUIDE.md to paste the generated Power Query scripts.",
         "4. Load each query as Only Create Connection + Add to Data Model. Never load it to a sheet.",
-        "5. Create your PivotTables in PIVOT_AREA and slicers from PCS Agent Day.",
+        "5. Create the four relationships shown on SETUP, then build PivotTables and slicers.",
         "6. Move or link the finished management visuals to PCS_REPORT.",
-        "7. Each reporting cycle: WFMHub build, Excel Refresh All, check latest date, then Save As.",
+        "7. Team coaching stays in COACHING_LOG. Use WFMHub Sync PCS Team, then Refresh All.",
     ]
     start.write("A4", "FIRST-TIME SETUP", section)
     for row, text_value in enumerate(steps, 5):
@@ -90,8 +90,8 @@ def build_pcs_starter(path: Path) -> Path:
     start.merge_range(
         "A15:H17",
         "No source extracts, employee rows, external workbook links, Pivot cache, SQLite connection, "
-        "or hidden raw-data sheet is included. The Data Model is created by you from the stable, "
-        "typed CSV feeds generated on your own work machine.",
+        "or hidden raw-data sheet is included. The Data Model is created once from stable, typed "
+        "CSV feeds generated on your own work machine. This workbook is never regenerated.",
         note,
     )
     start.set_column("A:A", 24)
@@ -104,16 +104,24 @@ def build_pcs_starter(path: Path) -> Path:
     setup.write("A5", "Current feed folder", header)
     relative_formula = (
         '=IFERROR(LEFT(CELL("filename",A1),FIND("[",CELL("filename",A1))-1)'
-        '&"..\\..\\output\\template_feeds\\pcs\\current","")'
+        '&"..\\_system\\feeds\\pcs\\current","")'
     )
     setup.write_formula("B5", relative_formula, input_format, "")
-    setup.merge_range("B6:F7", "Keep this master in templates\\reports so the relative path remains correct.", note)
+    setup.merge_range("B6:F7", "Keep this master directly in Reports so the relative path remains correct.", note)
     setup.write("A9", "Daily sequence", section)
-    setup.merge_range("A10:F12", "Build PCS in WFMHub -> Refresh All in Excel -> verify latest date -> Save As the copy to send.", note)
+    setup.merge_range("A10:F11", "Build PCS in WFMHub -> Refresh All in Excel -> verify latest date -> save or send.", note)
+    setup.write("A13", "Model relationships", section)
+    setup.merge_range(
+        "A14:F18",
+        "PCS Agents[agent_id] 1 -> * PCS Agent Day[agent_id]\n"
+        "PCS Agents[agent_id] 1 -> * PCS Calls[agent_id]\n"
+        "PCS Dates[date] 1 -> * PCS Agent Day[business_date]\n"
+        "PCS Dates[date] 1 -> * PCS Calls[business_date]\n"
+        "Do not accept any other relationship suggested by Excel.",
+        note,
+    )
     setup.set_column("A:A", 24)
     setup.set_column("B:F", 22)
-    workbook.define_name("pFeedFolder", "=SETUP!$B$5")
-
     cockpit = workbook.add_worksheet("PCS_REPORT")
     cockpit.hide_gridlines(2)
     cockpit.set_tab_color(COLORS["gold"])
@@ -138,6 +146,40 @@ def build_pcs_starter(path: Path) -> Path:
     cockpit.set_landscape()
     cockpit.fit_to_pages(1, 1)
 
+    coaching = workbook.add_worksheet("COACHING_LOG")
+    coaching.hide_gridlines(2)
+    coaching.set_tab_color(COLORS["blue"])
+    coaching.merge_range("A1:E1", "PCS COACHING LOG", title)
+    coaching.merge_range(
+        "A2:E2",
+        "Persistent team input  |  copy Coaching Key from the PCS Calls view and complete the blue fields",
+        subtitle,
+    )
+    coaching.add_table(
+        "A4:E5",
+        {
+            "name": "tblCoachingLog",
+            "style": "Table Style Medium 2",
+            "columns": [
+                {"header": "Coaching Key"},
+                {"header": "Coaching Status"},
+                {"header": "Coaching Date"},
+                {"header": "Coach"},
+                {"header": "Coaching Comment"},
+            ],
+        },
+    )
+    coaching.set_column("A:A", 42, input_format)
+    coaching.set_column("B:B", 20, input_format)
+    coaching.set_column("C:C", 16, input_format)
+    coaching.set_column("D:D", 22, input_format)
+    coaching.set_column("E:E", 55, input_format)
+    coaching.data_validation("B5:B10004", {
+        "validate": "list",
+        "source": ["Pending", "Completed", "Not required"],
+    })
+    coaching.freeze_panes(4, 0)
+
     pivot = workbook.add_worksheet("PIVOT_AREA")
     pivot.hide_gridlines(2)
     pivot.merge_range("A1:N1", "PIVOTTABLE BUILD AREA", title)
@@ -145,9 +187,9 @@ def build_pcs_starter(path: Path) -> Path:
     pivot.merge_range("A4:G4", "MAIN AGENT / LOB PIVOT", section)
     pivot.merge_range("A5:G20", "Insert PivotTable from Data Model here. Use PCS Agent Day. Rows: LOB > Team Leader > Agent. Values: governed measures from FORMULAS.", note)
     pivot.merge_range("I4:N4", "COACHING PIVOT", section)
-    pivot.merge_range("I5:N20", "Insert a separate PivotTable from PCS Actions here. Use Coaching Status, LOB, Team Leader and Business Date.", note)
+    pivot.merge_range("I5:N20", "Insert a separate PivotTable from PCS Calls here. Use Coaching Status, LOB, Team Leader and Business Date.", note)
     pivot.merge_range("A23:N23", "SAFE RELATIONSHIP RULE", section)
-    pivot.merge_range("A24:N27", "Start with no relationships. A slicer controls PivotTables from the same table. Do not accept Excel's automatic relationship suggestion unless you intentionally add a governed Date or Agent dimension later.", note)
+    pivot.merge_range("A24:N27", "Create only the four relationships listed on SETUP. Build slicers from PCS Agents and PCS Dates so the same slicer controls agent-day and coaching pivots.", note)
     pivot.set_column("A:N", 13)
 
     formulas = workbook.add_worksheet("FORMULAS")
@@ -160,8 +202,8 @@ def build_pcs_starter(path: Path) -> Path:
         ("PCS Participation", "DIVIDE(SUM('PCS Agent Day'[q1_nonblank]), SUM('PCS Agent Day'[pcs_status_1]))", "0.0%", "Original R: raw nonblank Q1 / PCSStatus=1"),
         ("Low Score %", "DIVIDE(SUM('PCS Agent Day'[score_le_3]), SUM('PCS Agent Day'[valid_q1]))", "0.0%", "Valid Q1 <=3 / all valid Q1"),
         ("Positive %", "DIVIDE(SUM('PCS Agent Day'[score_gt_3]), SUM('PCS Agent Day'[valid_q1]))", "0.0%", "Valid Q1 >3 / all valid Q1"),
-        ("Coaching Opportunities", "COUNTROWS('PCS Actions')", "#,##0", "One row per valid low-score response"),
-        ("Coaching Completed", "CALCULATE(COUNTROWS('PCS Actions'), 'PCS Actions'[coaching_status] = \"Completed\")", "#,##0", "Completed coaching rows"),
+        ("Coaching Opportunities", "COUNTROWS('PCS Calls')", "#,##0", "One row per valid low-score response"),
+        ("Coaching Completed", "CALCULATE(COUNTROWS('PCS Calls'), 'PCS Calls'[coaching_status] = \"Completed\")", "#,##0", "Completed coaching rows after Sync PCS Team"),
         ("Actions Rate", "DIVIDE([Coaching Completed], [Coaching Opportunities])", "0.0%", "Original S business meaning without external link"),
     ]
     for row_index, values in enumerate(rows, 4):

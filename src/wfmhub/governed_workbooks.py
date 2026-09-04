@@ -16,7 +16,7 @@ from .datasets import (
     service_scope_interval,
 )
 from .metrics import load_metric_catalog
-from .report_packs import report_pack, report_pack_folder
+from .report_packs import publish_report, report_current_path
 from .reporting import (
     add_domain_rules_sheet,
     add_findings_sheet,
@@ -38,12 +38,8 @@ def _output_path(
     generated: datetime,
     output: Path | None,
 ) -> Path:
-    pack = report_pack(key)
-    return (
-        output
-        or report_pack_folder(config, key)
-        / f"{pack.filename_prefix}_{start:%Y-%m-%d}_to_{end:%Y-%m-%d}_{generated:%H%M%S_%f}.xlsx"
-    ).resolve()
+    del start, end, generated
+    return (output or report_current_path(config, key)).resolve()
 
 
 def _add_landing(
@@ -365,7 +361,7 @@ def build_daily_operations_workbook(
         raise
     else:
         report.close()
-        partial.replace(output)
+        publish_report(config, "operations", partial, output, generated)
     return output
 
 
@@ -527,7 +523,7 @@ def build_exact_pcs_workbook(
         raise
     else:
         report.close()
-        partial.replace(output)
+        publish_report(config, "quality_pcs", partial, output, generated)
     return output
 
 
@@ -836,7 +832,7 @@ def build_corrections_workbook(
         raise
     else:
         report.close()
-        partial.replace(output)
+        publish_report(config, "corrections", partial, output, generated)
     return output
 
 
@@ -983,5 +979,5 @@ def build_final_absence_workbook(
         raise
     else:
         report.close()
-        partial.replace(output)
+        publish_report(config, "absence", partial, output, generated)
     return output

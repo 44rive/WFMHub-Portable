@@ -4,6 +4,7 @@ config/wfm_rules.toml
 config/metric_catalog.toml
 config/analytics_rules.toml
 config/report_catalog.toml
+config/report_catalog_pre_*.toml
 config/queue_mapping.csv
 config/service_profiles.toml
 config/wfmhub_pre_*.toml
@@ -12,6 +13,11 @@ backups/
 logs/
 output/
 extracts/
+_system/
+Reports/*.xlsx
+Reports/*.xlsm
+Reports/Archive/
+!Reports/README.txt
 templates/reports/*.xlsx
 templates/reports/*.xlsm
 !templates/reports/README.md

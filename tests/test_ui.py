@@ -44,8 +44,8 @@ class DashboardTests(unittest.TestCase):
             quality_reviews=2,
         ))
 
-        self.assertIn("# # #", text)
-        self.assertIn("#####", text)
+        self.assertIn("_______", text)
+        self.assertIn("|____/", text)
         self.assertIn("made by Anass ASSRI", text)
         self.assertIn("Latest data: 2026-08-27", text)
         self.assertIn("(schedule)", text)
@@ -66,6 +66,27 @@ class DashboardTests(unittest.TestCase):
                     ["ui", datetime(2026, 8, 27, 9, 40), datetime(2026, 8, 27, 9, 41), date(2026, 8, 1), date(2026, 8, 27)],
                 )
                 conn.execute("INSERT INTO core.dim_agent(agent_id) VALUES ('100'), ('200')")
+                conn.execute(
+                    """INSERT INTO meta.source_file(
+                           file_id, source_family, source_path, file_name, sha256,
+                           size_bytes, discovered_at, loaded_at, active, status
+                       ) VALUES (
+                           'fte-ui', 'fte', 'FTE Count.xlsx', 'FTE Count.xlsx',
+                           'fixture', 1, ?, ?, true, 'SUCCESS'
+                       )""",
+                    [datetime(2026, 8, 27, 9, 39), datetime(2026, 8, 27, 9, 39)],
+                )
+                conn.executemany(
+                    """INSERT INTO raw.fte_agent(
+                           source_file_id, source_row, agent_id,
+                           employment_status, agent_name, end_date
+                       ) VALUES ('fte-ui', ?, ?, ?, ?, ?)""",
+                    [
+                        (2, "100", "Active", "Agent 100", None),
+                        (3, "200", "Leaver", "Agent 200", date(2099, 12, 31)),
+                        (4, "300", "Leaver", "Expired Agent", date(2020, 1, 1)),
+                    ],
+                )
                 conn.execute(
                     """INSERT INTO mart.source_health(
                            source_family, expected_path, newest_business_date,

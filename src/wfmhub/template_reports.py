@@ -1,9 +1,9 @@
-"""Shared decision-workbook shell and compact Excel Data Model exports.
+"""Shared report shell plus the compact PCS-only Excel Data Model feed.
 
-The generated XLSX is immediately usable as a static management snapshot.  In
-parallel, every visible dataset is written to a small CSV package.  A reusable
-Excel-authored template can connect those CSV files directly to the Data Model
-and retain native PivotTables and slicers without Python rewriting the XLSX.
+Operational reports are complete replaceable snapshots. PCS is intentionally
+different: its stable team-authored workbook connects to the small star-schema
+CSV files written here and therefore retains native PivotTables, slicers, and
+coaching notes across refreshes.
 """
 
 from __future__ import annotations
@@ -23,9 +23,9 @@ from .reports import COLORS, ExcelReport
 
 _PCS_FEED_FILES = {
     "AGENT_DAY": "PCS_AgentDay.csv",
-    "SUMMARY": "PCS_Summary.csv",
-    "ACTIONS": "PCS_Actions.csv",
-    "TREND": "PCS_Trend.csv",
+    "ACTIONS": "PCS_Calls.csv",
+    "DIM_AGENT": "PCS_Agents.csv",
+    "DIM_DATE": "PCS_Dates.csv",
 }
 
 
@@ -54,78 +54,9 @@ def _csv_value(value: Any) -> Any:
     return "" if value is None else value
 
 
-def _safe_key(value: str) -> str:
-    cleaned = "".join(char.lower() if char.isalnum() else "_" for char in value)
-    return "_".join(part for part in cleaned.split("_") if part)
-
-
-def write_model_package(
-    config: Config,
-    report_key: str,
-    start: date,
-    end: date,
-    generated: datetime,
-    tables: Iterable[ModelTable],
-) -> Path:
-    """Atomically replace the compact files consumed by Excel templates."""
-
-    root = config.output / "model_data" / _safe_key(report_key)
-    root.mkdir(parents=True, exist_ok=True)
-    table_list = list(tables)
-    expected = {f"{_safe_key(table.key)}.csv" for table in table_list}
-    for existing in root.glob("*.csv"):
-        if existing.name not in expected and existing.name != "context.csv":
-            existing.unlink()
-
-    files: list[dict[str, Any]] = []
-    for table in table_list:
-        target = root / f"{_safe_key(table.key)}.csv"
-        partial = target.with_suffix(".csv.partial")
-        with partial.open("w", encoding="utf-8-sig", newline="") as handle:
-            writer = csv.writer(handle, lineterminator="\n")
-            writer.writerow(table.headers)
-            writer.writerows([_csv_value(value) for value in row] for row in table.rows)
-        partial.replace(target)
-        files.append({
-            "table": table.key,
-            "file": target.name,
-            "rows": len(table.rows),
-            "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
-        })
-
-    context = root / "context.csv"
-    context_partial = context.with_suffix(".csv.partial")
-    with context_partial.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.writer(handle, lineterminator="\n")
-        writer.writerow(["report_key", "period_start", "period_end", "generated_at", "model_folder"])
-        writer.writerow([report_key, start.isoformat(), end.isoformat(), generated.isoformat(timespec="seconds"), str(root)])
-    context_partial.replace(context)
-    files.append({
-        "table": "context",
-        "file": context.name,
-        "rows": 1,
-        "sha256": hashlib.sha256(context.read_bytes()).hexdigest(),
-    })
-
-    manifest = root / "manifest.json"
-    manifest_partial = manifest.with_suffix(".json.partial")
-    manifest_partial.write_text(json.dumps({
-        "schema_version": 1,
-        "report_key": report_key,
-        "period_start": start.isoformat(),
-        "period_end": end.isoformat(),
-        "generated_at": generated.isoformat(timespec="seconds"),
-        "calculation_authority": "WFMHub Python + SQLite",
-        "excel_load": "Power Query connection-only + Add to Data Model",
-        "files": files,
-    }, indent=2), encoding="utf-8")
-    manifest_partial.replace(manifest)
-    return root
-
-
 def _column_type(header: str, values: Sequence[Any]) -> str:
     name = header.casefold()
-    if name in {"business_date", "period_start", "period_end", "coaching_date"}:
+    if name in {"date", "business_date", "period_start", "period_end", "coaching_date"}:
         return "date"
     if name in {"call_start", "call_end", "generated_at"} or name.endswith("_at"):
         return "datetime"
@@ -133,6 +64,7 @@ def _column_type(header: str, values: Sequence[Any]) -> str:
         "inbound_call_legs", "pcs_status_1", "q1_nonblank", "valid_q1",
         "score_le_3", "score_gt_3", "invalid_q1", "valid_responses",
         "participating_responses", "eligible_calls", "coaching_completed",
+        "year", "month_number", "iso_week", "day_of_month",
     }:
         return "integer"
     if name in {
@@ -202,7 +134,7 @@ def write_pcs_template_feed(
 ) -> Path:
     """Publish stable current PCS files and an immutable refresh archive."""
 
-    root = config.output / "template_feeds" / "pcs"
+    root = config.system / "feeds" / "pcs"
     stamp = generated.strftime("%Y%m%d_%H%M%S_%f")
     staging = root / f".staging_{stamp}"
     archive = root / "archive" / f"{start:%Y-%m-%d}_to_{end:%Y-%m-%d}_{stamp}"
@@ -295,8 +227,9 @@ class DecisionWorkbook:
         notes: Sequence[str],
         chart_series: Sequence[tuple[str, int]] = (),
         chart_type: str = "line",
+        sheet_name: str = "DASHBOARD",
     ) -> None:
-        ws = self.report.workbook.add_worksheet("DASHBOARD")
+        ws = self.report.workbook.add_worksheet(sheet_name)
         ws.hide_gridlines(2)
         ws.set_tab_color(COLORS["gold"])
         ws.set_zoom(90)
@@ -353,8 +286,8 @@ class DecisionWorkbook:
             for series_name, column in chart_series:
                 series = {
                     "name": series_name,
-                    "categories": ["DASHBOARD", table_row + 3, 0, table_row + 2 + len(comparison_rows), 0],
-                    "values": ["DASHBOARD", table_row + 3, column, table_row + 2 + len(comparison_rows), column],
+                    "categories": [sheet_name, table_row + 3, 0, table_row + 2 + len(comparison_rows), 0],
+                    "values": [sheet_name, table_row + 3, column, table_row + 2 + len(comparison_rows), column],
                 }
                 if chart_type == "line":
                     series.update({"line": {"width": 2.25}, "marker": {"type": "circle", "size": 4}})
@@ -413,11 +346,6 @@ class DecisionWorkbook:
             ["Item", "Value", "Evidence"],
             rows,
         )
-        for index, row in enumerate(rows, 5):
-            if row and str(row[0]) == "Template model folder":
-                self.report.workbook.define_name("pModelDataPath", f"='_AUDIT'!$B${index}")
-            if row and str(row[0]) == "Template current feed":
-                self.report.workbook.define_name("pFeedFolder", f"='_AUDIT'!$B${index}")
         ws.hide()
 
     def close(self) -> Path:
@@ -435,10 +363,6 @@ class DecisionWorkbook:
         for ws in self.report.workbook.worksheets():
             ws.set_footer("&LWFM Hub | Anass ASSRI&CPage &P of &N&RConfidential")
         self.report.close()
-        write_model_package(
-            self.config, self.report_key, self.start, self.end, self.generated,
-            (table for table in self.tables if table.key != "_AUDIT"),
-        )
         if self.report_key == "pcs":
             write_pcs_template_feed(
                 self.config, self.start, self.end, self.generated,

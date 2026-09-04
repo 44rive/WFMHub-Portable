@@ -1,128 +1,47 @@
-# PivotTable field guide
+# PCS PivotTable field guide
 
-Use [EXCEL_TEMPLATE_GUIDE.md](EXCEL_TEMPLATE_GUIDE.md) for the one-time button
-clicks. This page tells you which fields belong in each PivotTable.
+PCS is the only WFMHub product that uses Power Query and the Excel Data Model.
+All other workbooks are complete generated snapshots with layouts suited to
+their operational purpose.
 
-The queries must read the compact CSVs in `output\model_data\<report>` and load
-as **Connection Only + Add to Data Model**. Do not load raw extracts or model
-tables into worksheets.
+Use [EXCEL_TEMPLATE_GUIDE.md](EXCEL_TEMPLATE_GUIDE.md) for the one-time query,
+relationship, and measure setup.
 
-## PCS Performance
+## Main performance PivotTable
 
-Use `agent_day.csv` for interactive date, agent, LOB and Team Leader slicing.
-Use `agent_detail.csv` only when you want one already-aggregated row per agent
-for the selected period.
-
-- Rows: `agent_name`.
-- Slicers: `business_date`, `lob`, `team_leader`, `agent_name`, `language`,
-  `sample_state`.
-- Values to sum: `q1_score_sum`, `valid_q1`, `q1_nonblank`, `pcs_status_1`,
+- Rows from `PCS Agents`: `lob`, `team_leader`, `agent_name`.
+- Slicers from `PCS Agents`: `lob`, `team_leader`, `agent_name`, `language`.
+- Timeline from `PCS Dates`: `date`.
+- Values from `PCS Agent Day`: governed measures plus `valid_q1`,
   `score_le_3`, and `score_gt_3`.
 
-Create Data Model measures that divide summed counters:
+Required measures:
 
 ```text
 PCS Average = SUM(q1_score_sum) / SUM(valid_q1)
 PCS Participation = SUM(q1_nonblank) / SUM(pcs_status_1)
 ```
 
-Never average `pcs_average` or `participation_rate`.
+Never average `pcs_average` or `participation_rate` columns.
 
-## Service Performance
+## Coaching PivotTable
 
-Use `intraday.csv` for management and `queue_detail.csv` for audit.
+- Rows: Agent, then call date or Coaching Key.
+- Filters: coaching status, date, LOB, and Team Leader.
+- Values: Coaching Opportunities, Coaching Completed, and Actions Rate.
 
-- Rows: `hour_start`.
-- Columns: `service_group`.
-- Slicers: `business_date`, `service_group`.
-- Values to sum: `offered`, `answered`, `answered_within_target`,
-  `short_abandoned`, and `handled_seconds` when present.
-
-Measures:
-
-```text
-Ford OEM Gross SL = SUM(answered_within_target) / SUM(offered)
-Service Availability = SUM(answered) / SUM(offered)
-AHT = SUM(handled_seconds) / SUM(answered)
-```
-
-The chosen service profile controls which mapped scopes and governed SL method
-enter the files. If a different profile selects adjusted SL, its measure is
-`SUM(answered_within_target) / (SUM(offered) - SUM(short_abandoned))`. Check
-`service_method` and the report `DEFINITIONS` sheet instead of guessing.
-
-## Staffing & Coverage
-
-Use `intraday.csv`.
-
-- Rows: `interval_start`.
-- Columns: `lob`, then `language`.
-- Slicers: `business_date`, `lob`, `language`, `staffing_state`.
-- Values: sum `scheduled_fte`, `observed_fte`, `productive_fte`, and
-  `staffing_gap_fte`.
-
-Treat `DATA_MISSING` and future intervals as unknown. Do not replace blank gaps
-with zero.
-
-## Attendance Callouts
-
-Use `actions.csv`.
-
-- Rows: `agent_name`.
-- Slicers: `lob`, `team_leader`, `call_action`, `attendance_result`.
-- Useful columns: scheduled start/end, first/last evidence, late minutes,
-  no-show minutes, source-loaded flag, and provisional flag.
-
-This is a contact queue, not an adherence table.
-
-The selected menu period is respected. **Today** gives the live callout queue;
-**Current Week** includes action rows for every available date in that week.
-
-## Attendance Corrections
-
-Use `gaps.csv` for actions and `timeline.csv` for a planned-versus-observed
-visual.
-
-- Rows: `agent_name`, then gap start.
-- Slicers: `lob`, `team_leader`, `detected_issue`, `validation_status`.
-- Values: sum gap minutes.
-
-Edit and import decisions only in the generated workbook `GAPS` sheet. The
-Data Model copy is for analysis and should stay read-only.
-
-## Final Absence & Shrinkage
-
-Use `agent_detail.csv`.
-
-- Rows: `agent_name`.
-- Columns: `business_date`; group dates by month if needed.
-- Slicers: `lob`, `team_leader`, `language`, `final_ledger_status`.
-- Values: sum planned net, final absence, vacation, unpaid, shrinkage, and
-  unmapped hours.
-
-Measure:
-
-```text
-Final Absence Rate = SUM(final_absence_hours) / SUM(planned_net_hours)
-```
-
-Never average `final_absence_rate`.
-
-## Bonus Performance
-
-Use `agent_detail.csv` and `kpi_analysis.csv`.
-
-- Rows: `population`, then `agent_name`.
-- Slicers: `period`, `population`, `release_status`, `eligibility`.
-- Values: scenario payout, released payout, and achievement components.
-
-Do not present Scenario Payout as payroll output while release rows are blocked.
+The editable decisions belong in `PCS Team.xlsx > COACHING_LOG`. The PCS Calls
+model table is refreshed data and remains read-only.
 
 ## Common mistakes
 
-- **Count of** instead of **Sum of**: open Value Field Settings and select Sum.
-- Percentage above 100%: divide summed numerators by summed denominators.
-- Missing agents: check the FTE roster and Source Health.
-- Missing dates: check date coverage and the period used to build the report.
-- Refresh error: unhide `_AUDIT` and verify the Template model folder path.
-- Empty Pivot: inspect `manifest.json`; it states the exact row count per CSV.
+- **Count of instead of Sum of:** use a supplied measure rather than dropping
+  the score-sum field directly into Values.
+- **Slicer controls one Pivot only:** build the slicer from `PCS Agents` or
+  `PCS Dates`, then use Report Connections.
+- **Relationship error:** Agent ID must be text in both facts; dates must be real
+  dates, not Month labels.
+- **Slow refresh:** all four queries must be Connection Only + Add to Data
+  Model. None should load to a worksheet.
+- **No new date:** run WFMHub **Sync and refresh PCS Team** before Excel
+  **Refresh All**.

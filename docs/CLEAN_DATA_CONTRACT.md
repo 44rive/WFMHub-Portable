@@ -8,6 +8,10 @@ custom Python, or a future report.
 Source extracts are opened read-only. FTE defines the admitted agents. Dates
 come from row content, not filenames.
 
+FTE scope is evaluated per business date: Active rows remain eligible, Leavers
+remain eligible through their populated leave date, and every other status is
+excluded. Historical rows before a leave date remain valid.
+
 ## Source boundaries
 
 | Source | Allowed purpose |
@@ -59,23 +63,18 @@ unions overlaps, caps planned net minutes at the configured standard day
 net value. A final rate therefore cannot exceed 100%.
 
 Run an export from `WFMHub.cmd > Export clean data`. Each CSV/XLSX is written
-under `output\data_exports\<dataset>` with a manifest containing its period,
+under the configured internal export area with a manifest containing its period,
 row count, rule version, and rule hash.
 
-Each current report also writes smaller presentation-grain CSV tables under
-`output\model_data\<report>`. Those files are for the optional Excel Data Model
-route and are not a second calculation layer. `manifest.json` records their
-period, row counts, hashes, and generation time.
-
-PCS has the stronger end-user template contract under
-`output\template_feeds\pcs\current`:
+Only PCS writes Excel Data Model feeds. Its end-user template contract is under
+`_system\feeds\pcs\current`:
 
 - `PCS_AgentDay.csv`
-- `PCS_Summary.csv`
-- `PCS_Actions.csv`
-- `PCS_Trend.csv`
+- `PCS_Calls.csv`
+- `PCS_Agents.csv`
+- `PCS_Dates.csv`
 - `manifest.json`
 
 Every file has a stable name and UTF-8 header. Numeric/date types are declared
 again in the supplied Power Query scripts. A complete copy of every published
-set is kept under `output\template_feeds\pcs\archive`.
+set is kept under `_system\feeds\pcs\archive`.

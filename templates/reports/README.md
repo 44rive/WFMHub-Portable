@@ -1,29 +1,14 @@
-# WFMHub Excel templates
+# Excel master policy
 
-This folder holds Excel-authored master files with native PivotTables and
-slicers. WFMHub creates the starter once and never rewrites it afterward,
-because Python libraries can damage Excel-only slicer and Data Model parts.
+The only persistent Excel master is `Reports/PCS Team.xlsx`.
 
-Expected optional master names:
+WFMHub creates that data-free starter during portable packaging or from the
+`pcs-team` command when it is missing. Daily refreshes update only the compact
+CSV feeds under `_system/feeds/pcs/current`; they do not overwrite the team's
+PivotTables, slicers, or coaching log.
 
-- `pcs.xlsx`
-- `bonus.xlsx`
-- `service.xlsx`
-- `staffing.xlsx`
-- `attendance.xlsx`
-- `corrections.xlsx`
-- `absence.xlsx`
+`SETUP.cmd` renders firewall-safe, installation-specific query scripts into
+`_system/power_query` for the one-time Excel setup.
 
-The portable release includes a reviewed, data-free `pcs.xlsx` starter so this
-folder is no longer empty on first use. For other products, create one from
-menu option **Create an Excel Pivot/slicer master**, then follow
-`docs/EXCEL_TEMPLATE_GUIDE.md`. The PCS master contains the named cell
-`pFeedFolder` for PCS; its stable typed CSV files are refreshed under
-`output/template_feeds/pcs/current/`. No raw extract is loaded to a worksheet.
-
-The shipped PCS starter contains no source rows, Pivot caches, connections, or
-external links. Use the supplied one-query-per-file scripts under
-`templates/power_query` and follow `docs/EXCEL_TEMPLATE_GUIDE.md`.
-
-These master files are intentionally ignored by Git so a locally populated
-workbook cannot be published by accident.
+All other workbooks are replaceable snapshots published directly in `Reports`
+with their previous copies stored under `Reports/Archive`.

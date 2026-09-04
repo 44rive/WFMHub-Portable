@@ -94,13 +94,14 @@ def import_pcs_coaching(conn: DatabaseConnection, config: Config, path: Path) ->
         raise FileNotFoundError(path)
     workbook = load_workbook(path, read_only=True, data_only=True, keep_links=False)
     try:
-        if "ACTIONS" not in workbook.sheetnames:
-            raise ValueError("The workbook has no ACTIONS sheet")
-        sheet = workbook["ACTIONS"]
+        sheet_name = "COACHING_LOG" if "COACHING_LOG" in workbook.sheetnames else "ACTIONS"
+        if sheet_name not in workbook.sheetnames:
+            raise ValueError("The workbook has no COACHING_LOG or ACTIONS sheet")
+        sheet = workbook[sheet_name]
         headers = [str(cell.value or "").strip() for cell in sheet[4]]
         missing = sorted(REQUIRED_HEADERS - set(headers))
         if missing:
-            raise ValueError(f"ACTIONS is missing coaching columns: {', '.join(missing)}")
+            raise ValueError(f"{sheet_name} is missing coaching columns: {', '.join(missing)}")
         index = {header: headers.index(header) for header in headers if header}
         decisions = []
         for row_number, values in enumerate(
@@ -126,7 +127,7 @@ def import_pcs_coaching(conn: DatabaseConnection, config: Config, path: Path) ->
         for row_number, coaching_key, *_ in decisions:
             if coaching_key not in valid_keys:
                 raise ValueError(
-                    f"ACTIONS row {row_number} has an unknown or no-longer-eligible Coaching Key"
+                    f"{sheet_name} row {row_number} has an unknown or no-longer-eligible Coaching Key"
                 )
 
         imported = 0

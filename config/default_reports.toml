@@ -1,8 +1,8 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.3"
-description = "One decision per workbook, one shared visual shell, compact Excel Data Model exports."
+version = "2026.09.4"
+description = "One decision per workbook; OEM Flash is purpose-built and only PCS publishes Excel Data Model feeds."
 
 [[packs]]
 key = "pcs"
@@ -20,10 +20,10 @@ sheets = ["DASHBOARD", "AGENT_DETAIL", "KPI_ANALYSIS", "ACTIONS", "DEFINITIONS",
 
 [[packs]]
 key = "service"
-title = "SERVICE PERFORMANCE"
-purpose = "Mapped-LOB service level, service availability, forecast deviation and AHT."
+title = "OEM FLASH"
+purpose = "Email-ready OEM service control with queue, forecast and staffing evidence."
 finding_domains = ["service", "forecast", "data_quality"]
-sheets = ["DASHBOARD", "INTRADAY", "QUEUE_DETAIL", "ACTIONS", "DEFINITIONS", "_AUDIT"]
+sheets = ["FLASH", "HOURLY", "QUEUES", "EXCEPTIONS", "DATA_STATUS", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "staffing"

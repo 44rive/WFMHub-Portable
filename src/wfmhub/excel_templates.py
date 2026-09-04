@@ -13,6 +13,15 @@ from pathlib import Path
 from .config import Config
 
 
+PCS_QUERY_FILES = (
+    "PCS_AgentDay.pq",
+    "PCS_Calls.pq",
+    "PCS_Agents.pq",
+    "PCS_Dates.pq",
+)
+PCS_FEED_PLACEHOLDER = "__PCS_FEED_FOLDER__"
+
+
 @dataclass(frozen=True)
 class ExcelTemplate:
     report_key: str
@@ -25,8 +34,6 @@ class ExcelTemplate:
 
     @property
     def feed_folder(self) -> Path:
-        if self.report_key.casefold() == "pcs":
-            return self.model_folder.parents[1] / "template_feeds" / "pcs" / "current"
         return self.model_folder
 
 
@@ -38,10 +45,15 @@ def excel_template(config: Config, report_key: str) -> ExcelTemplate:
             char.lower() if char.isalnum() else "_" for char in report_key
         ).split("_") if part
     )
+    path = (
+        config.reports / "PCS Team.xlsx"
+        if safe_key == "pcs"
+        else config.system / "templates" / f"{safe_key}.xlsx"
+    )
     return ExcelTemplate(
         report_key=report_key,
-        path=(config.home / "templates" / "reports" / f"{safe_key}.xlsx").resolve(),
-        model_folder=(config.output / "model_data" / safe_key).resolve(),
+        path=path.resolve(),
+        model_folder=(config.system / "feeds" / safe_key / "current").resolve(),
     )
 
 
@@ -56,3 +68,32 @@ def require_new_template(config: Config, report_key: str, force: bool = False) -
             "Use --force only if you intentionally want to replace its PivotTables and slicers."
         )
     return template
+
+
+def materialize_pcs_power_queries(config: Config) -> tuple[Path, ...]:
+    """Write firewall-safe PCS query scripts for this exact installation.
+
+    A literal file path keeps each query at one data-source boundary. This
+    avoids combining Excel.CurrentWorkbook with File.Contents, which can trip
+    Power Query's privacy firewall on managed workstations.
+    """
+
+    source_dir = config.home / "templates" / "power_query"
+    target_dir = config.system / "power_query"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    feed_folder = str(config.system / "feeds" / "pcs" / "current").replace('"', '""')
+    generated: list[Path] = []
+    for filename in PCS_QUERY_FILES:
+        source = source_dir / filename
+        if not source.is_file():
+            raise FileNotFoundError(f"PCS Power Query template is missing: {source}")
+        text = source.read_text(encoding="utf-8")
+        if PCS_FEED_PLACEHOLDER not in text:
+            raise ValueError(f"PCS Power Query template has no feed placeholder: {source}")
+        rendered = text.replace(PCS_FEED_PLACEHOLDER, feed_folder)
+        target = target_dir / filename
+        partial = target.with_suffix(target.suffix + ".partial")
+        partial.write_text(rendered, encoding="utf-8")
+        partial.replace(target)
+        generated.append(target)
+    return tuple(generated)

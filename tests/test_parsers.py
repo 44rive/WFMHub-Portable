@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
@@ -12,6 +12,63 @@ from wfmhub.ingestion import AgentScope, SourceSchemaError, parse_agent_status, 
 
 
 class ParserTests(unittest.TestCase):
+    def test_leaver_cutoff_is_applied_inside_schedule_status_and_calls(self):
+        scope = AgentScope(
+            frozenset({"200"}),
+            {"leaver agent": "200"},
+            "scope",
+            {"200": ("Leaver", date(2026, 8, 1))},
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            schedule = root / "StartEndTimes.txt"
+            with schedule.open("w", encoding="cp1252", newline="") as handle:
+                writer = csv.writer(handle, delimiter="\t")
+                writer.writerow(["Name", "Data Source IDs", "08/01/2026", "08/02/2026"])
+                writer.writerow([
+                    "Leaver Agent", "200",
+                    ".ORG | Work 08/01/2026 8:00 AM-08/01/2026 4:00 PM",
+                    ".ORG | Work 08/02/2026 8:00 AM-08/02/2026 4:00 PM",
+                ])
+            schedule_result = parse_schedule(schedule, "schedule", scope)
+            self.assertEqual(
+                [row["schedule_date"] for row in schedule_result.tables["raw.schedule_shift"]],
+                [date(2026, 8, 1)],
+            )
+            self.assertEqual(schedule_result.scoped_out, 1)
+
+            status = root / "Agent Status.csv"
+            status.write_text(
+                "[Serial Number],[Status],[Status Start Date and Time],[Agent],[Agent ID],[Status Duration],[Queue]\n"
+                "one,Available,8/1/2026 9:00,Leaver Agent,200,0:15:00,Main\n"
+                "two,Available,8/2/2026 9:00,Leaver Agent,200,0:15:00,Main\n",
+                encoding="utf-8-sig",
+            )
+            status_result = parse_agent_status(status, "status", scope)
+            self.assertEqual(
+                [row["extract_date"] for row in status_result.tables["raw.agent_status"]],
+                [date(2026, 8, 1)],
+            )
+            self.assertEqual(status_result.scoped_out, 1)
+
+            calls = root / "Call by Call.csv"
+            with calls.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow([
+                    "[Call Date/Time]", "[Call End Date/Time]", "[Call ID]",
+                    "[Call Reference Number]", "[Agent ID]", "[Agent]",
+                    "[Call Direction]", "[Talk Time]", "[Hold Time]",
+                    "[Total Wrap Time]",
+                ])
+                writer.writerow(["8/1/2026 9:00", "8/1/2026 9:05", "one", "one", "200", "Leaver Agent", "I", "0:04:00", "0:00:30", "0:00:30"])
+                writer.writerow(["8/2/2026 9:00", "8/2/2026 9:05", "two", "two", "200", "Leaver Agent", "I", "0:04:00", "0:00:30", "0:00:30"])
+            calls_result = parse_calls(calls, "calls", scope)
+            self.assertEqual(
+                [row["business_date"] for row in calls_result.tables["raw.call_leg"]],
+                [date(2026, 8, 1)],
+            )
+            self.assertEqual(calls_result.scoped_out, 1)
+
     def test_shipped_fte_template_has_stable_contract(self):
         template = Path(__file__).resolve().parents[1] / "templates" / "FTE Count.xlsx"
         workbook = load_workbook(template, read_only=False, data_only=False)
