@@ -798,14 +798,27 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("Current week", defined["PCS_From"])
             finally:
                 focused_pcs_book.close()
-            service_book = load_workbook(service_report, read_only=True, data_only=True)
+            service_book = load_workbook(service_report, read_only=False, data_only=False)
             try:
-                self.assertEqual(service_report, home / "Reports" / "OEM Flash.xlsx")
+                self.assertEqual(service_report, home / "Reports" / "Service Flashes.xlsx")
                 self.assertEqual(service_book.sheetnames, [
-                    "FLASH", "HOURLY", "QUEUES", "EXCEPTIONS", "DATA_STATUS",
+                    "CONTROL", "Flash RSA NL", "Flash RSA BE", "Flash Ford NL",
+                    "Flash OEM", "FLASH_DATA", "QUEUE_MAP", "EXCEPTIONS",
                     "DEFINITIONS", "_AUDIT",
                 ])
-                self.assertEqual(service_book["FLASH"]["A1"].value, "OEM FLASH  /  FORD OEM FRANCE")
+                self.assertEqual(service_book["CONTROL"]["A1"].value, "SERVICE FLASH CONTROL")
+                self.assertEqual(service_book.properties.creator, "Anass ASSRI")
+                self.assertEqual(len(service_book._external_links), 0)
+                self.assertGreaterEqual(len(service_book["CONTROL"]._charts), 1)
+                for sheet_name in ("Flash RSA NL", "Flash RSA BE", "Flash Ford NL", "Flash OEM"):
+                    self.assertGreaterEqual(len(service_book[sheet_name]._charts), 1)
+                    self.assertTrue(service_book[sheet_name].tables)
+                self.assertFalse(any(
+                    isinstance(cell.value, str) and cell.value.startswith("=")
+                    for sheet in service_book.worksheets
+                    for row in sheet.iter_rows()
+                    for cell in row
+                ))
             finally:
                 service_book.close()
             absence_book = load_workbook(absence_report, read_only=False, data_only=False)

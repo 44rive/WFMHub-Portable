@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.17.0 — 2026-09-05
+
+- Reconstructed all four `TOLEARN/Book1.xlsx` service flashes as one native,
+  email-ready `Service Flashes.xlsx`: RSA Netherlands, RSA Belgium, Ford
+  Netherlands, and Ford OEM France. Each Flash has KPI cards, an hourly table,
+  a demand/service chart, a day-through-cutoff total, and explicit missing-data
+  states; the workbook contains no external links or cell formulas.
+- Added a governed Call-by-Call service mart at hour/queue grain. Offered demand
+  is counted once per inbound interaction and Flash comparison scope, so
+  transfers do not inflate volume; handled workload still uses the underlying
+  handled legs. Short abandons, within-target calls, gross/adjusted TSL,
+  availability, abandon rate, and weighted AHT use the central rule and metric
+  catalogs.
+- Changed Call-by-Call admission to keep either an effective Active/Leaver FTE
+  agent row or an exactly mapped service queue. This preserves abandoned calls
+  and mapped contacts handled outside the roster while worldwide unmapped data
+  stays excluded; PCS remains roster-gated through the agent dimension.
+- Added configurable Flash sheet/layout, Call-by-Call source, operating hours,
+  and display order to service profiles, plus central `short_abandon_seconds`.
+  Queue membership stays in `queue_mapping.csv`, and Verint Forecast remains
+  forecast-only.
+- Added workbook control, clean hourly data, queue-map evidence, exceptions,
+  definitions, and hidden audit sheets, together with transfer-deduplication,
+  mapped-abandon, workbook-contract, Excel-link, formula, and author tests.
+
 ## 0.16.2 — 2026-09-05
 
 - Removed all Microsoft 365 spill arrays and `_xlfn` functions from PCS after

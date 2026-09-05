@@ -47,6 +47,7 @@ class Rulebook:
     cap_event_to_schedule: bool
     unmapped_activity_is_error: bool
     target_seconds: int
+    short_abandon_seconds: int
     activity_rules: tuple[ActivityRule, ...]
     pcs_scored_questions: tuple[int, ...]
     pcs_comment_questions: tuple[int, ...]
@@ -253,6 +254,7 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
         version = str(meta["version"]).strip()
         standard_day_hours = float(absence["standard_day_hours"])
         target_seconds = int(service["target_seconds"])
+        short_abandon_seconds = int(service.get("short_abandon_seconds", 5))
     except (KeyError, TypeError, ValueError) as exc:
         raise RulebookError(f"Rulebook metadata contains an invalid or missing value: {exc}") from exc
     if not version:
@@ -264,6 +266,10 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
             raise RulebookError(f"absence.{key} must be between 0 and 120")
     if not 1 <= target_seconds <= 600:
         raise RulebookError("service.target_seconds must be between 1 and 600")
+    if not 0 <= short_abandon_seconds <= target_seconds:
+        raise RulebookError(
+            "service.short_abandon_seconds must be between 0 and target_seconds"
+        )
     activity_rules: list[ActivityRule] = []
     seen_categories: set[str] = set()
     valid_matches = {"exact", "contains", "exact_or_suffix"}
@@ -334,7 +340,9 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
         spell_gap_days=int(absence.get("spell_gap_days", 1)),
         cap_event_to_schedule=bool(absence.get("cap_event_to_schedule", True)),
         unmapped_activity_is_error=bool(absence.get("unmapped_activity_is_error", True)),
-        target_seconds=target_seconds, activity_rules=tuple(activity_rules),
+        target_seconds=target_seconds,
+        short_abandon_seconds=short_abandon_seconds,
+        activity_rules=tuple(activity_rules),
         pcs_scored_questions=scored_questions, pcs_comment_questions=comment_questions,
         pcs_survey_mode=str(pcs.get("survey_mode", "2")),
         pcs_primary_score_question=pcs_primary_question,

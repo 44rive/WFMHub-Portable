@@ -79,9 +79,9 @@ REPORT_PACKS = {
     "service": ReportPack(
         key="service",
         default_folder="service",
-        filename_prefix="WFMHub_Service_Performance",
-        current_filename="OEM Flash.xlsx",
-        purpose="Mapped-LOB service level, availability, forecast deviation and AHT.",
+        filename_prefix="WFMHub_Service_Flashes",
+        current_filename="Service Flashes.xlsx",
+        purpose="RSA and OEM daily flashes from mapped Call-by-Call interactions and Verint forecast.",
     ),
     "realisations": ReportPack(
         key="realisations",

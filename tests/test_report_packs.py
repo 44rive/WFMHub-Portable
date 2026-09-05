@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from wfmhub.cli import SOURCE_GROUPS
 from wfmhub.report_packs import (
     IMPLEMENTED_REPORT_PACK_KEYS,
     REPORT_PACKS,
@@ -16,6 +17,12 @@ from wfmhub.report_packs import (
 
 
 class ReportPackTests(unittest.TestCase):
+    def test_service_refresh_group_includes_flash_actual_and_forecast_sources(self):
+        self.assertTrue(
+            {"fte", "calls", "forecast", "apbe", "apfr", "apde"}
+            <= SOURCE_GROUPS["intraday"]
+        )
+
     def test_independent_report_packs_are_registered(self):
         self.assertEqual(IMPLEMENTED_REPORT_PACK_KEYS, (
             "pcs", "bonus", "service", "realisations", "staffing", "attendance", "corrections", "absence",
@@ -55,7 +62,7 @@ class ReportPackTests(unittest.TestCase):
             self.assertEqual(len(archives), 1)
             self.assertEqual(archives[0].read_bytes(), b"old")
             self.assertEqual(current.name, "Attendance Callout.xlsx")
-            self.assertEqual(report_current_path(config, "service").name, "OEM Flash.xlsx")
+            self.assertEqual(report_current_path(config, "service").name, "Service Flashes.xlsx")
             self.assertEqual(report_current_path(config, "corrections").name, "Attendance Review.xlsx")
 
 

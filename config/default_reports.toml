@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.10"
+version = "2026.09.11"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
@@ -20,10 +20,10 @@ sheets = ["Policy_Decisions", "Control_Checks", "KPI_Config", "Raw_Data", "Resul
 
 [[packs]]
 key = "service"
-title = "OEM FLASH"
-purpose = "Email-ready OEM service control with queue, forecast and staffing evidence."
+title = "SERVICE FLASHES"
+purpose = "Email-ready RSA and OEM daily service control from mapped Call-by-Call interactions and Verint forecast."
 finding_domains = ["service", "forecast", "data_quality"]
-sheets = ["FLASH", "HOURLY", "QUEUES", "EXCEPTIONS", "DATA_STATUS", "DEFINITIONS", "_AUDIT"]
+sheets = ["CONTROL", "Flash RSA NL", "Flash RSA BE", "Flash Ford NL", "Flash OEM", "FLASH_DATA", "QUEUE_MAP", "EXCEPTIONS", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "realisations"

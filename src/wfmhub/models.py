@@ -38,6 +38,7 @@ class ModelSummary:
     absence_rows: int = 0
     absence_event_rows: int = 0
     service_rows: int = 0
+    call_service_rows: int = 0
     staffing_rows: int = 0
     timeline_rows: int = 0
     final_absence_rows: int = 0
@@ -2482,6 +2483,178 @@ SERVICE_COLUMNS = [
     "sl_target", "sl_state",
 ]
 
+CALL_SERVICE_COLUMNS = [
+    "business_date", "hour_start", "source_system", "service_scope",
+    "comparison_scope", "queue", "designation", "language", "offered",
+    "answered", "abandoned", "short_abandoned", "answered_within_target",
+    "talk_seconds", "hold_seconds", "wrap_seconds", "handled_seconds",
+    "service_level", "service_availability", "abandon_rate", "aht_seconds",
+    "call_legs", "transferred_legs", "source_files", "mapping_sha256",
+    "rule_version", "rule_sha256",
+]
+
+
+def _build_call_service(
+    conn: DatabaseConnection,
+    rulebook: Rulebook,
+    metric_catalog: MetricCatalog,
+    mapping: QueueMapping,
+    start: date,
+    end: date,
+) -> int:
+    """Materialize one offered contact per mapped interaction and Flash scope.
+
+    Call-by-Call is a leg feed: transfers and companion legs can repeat the
+    same customer contact. The interaction key is therefore the counting key.
+    A contact is counted once in each mapped comparison scope and assigned to
+    its first mapped queue. Agent workload remains the sum of its distinct
+    inbound handled legs.
+    """
+
+    conn.execute("DELETE FROM mart.call_service_hour")
+    rows = _dicts(conn.execute(
+        """
+        SELECT business_date, interaction_key, call_key, call_start,
+               call_direction, queue, queue_wait_seconds, agent_id,
+               talk_seconds, hold_seconds, wrap_seconds, transferred,
+               language, lob, source_file
+        FROM core.clean_call_leg
+        WHERE business_date BETWEEN ? AND ?
+        ORDER BY business_date, interaction_key, call_start, call_key
+        """,
+        [start, end],
+    ))
+    interactions: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        interaction = str(row.get("interaction_key") or row.get("call_key") or "")
+        interactions[(row["business_date"], interaction)].append(row)
+
+    aggregates: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for (business_date, _interaction), legs in interactions.items():
+        inbound = [
+            leg for leg in legs
+            if str(leg.get("call_direction") or "").strip().upper() == "I"
+        ]
+        mapped_groups: dict[str, list[tuple[dict[str, Any], Any]]] = defaultdict(list)
+        for leg in inbound:
+            mapped = mapping.map_actual("STORM", leg.get("queue"), None, None)
+            if mapped.status == "MAPPED":
+                mapped_groups[mapped.comparison_scope].append((leg, mapped))
+        if not mapped_groups:
+            continue
+
+        for comparison_scope, candidates in mapped_groups.items():
+            candidates.sort(key=lambda item: (item[0].get("call_start") or datetime.max, str(item[0].get("call_key") or "")))
+            selected, mapped = candidates[0]
+            # Queue-less handled legs can only be safely attached when the
+            # interaction belongs to one configured Flash scope.
+            relevant = [item[0] for item in candidates]
+            if len(mapped_groups) == 1:
+                relevant = inbound
+            handled_legs = [
+                leg for leg in relevant
+                if leg.get("agent_id") is not None
+                or sum(float(leg.get(name) or 0) for name in ("talk_seconds", "hold_seconds", "wrap_seconds")) > 0
+            ]
+            answered = 1 if handled_legs else 0
+            wait_seconds = selected.get("queue_wait_seconds")
+            short_abandoned = int(
+                not answered
+                and wait_seconds is not None
+                and float(wait_seconds) < rulebook.short_abandon_seconds
+            )
+            within_target = int(
+                bool(answered)
+                and wait_seconds is not None
+                and float(wait_seconds) <= rulebook.target_seconds
+            )
+            call_start = selected.get("call_start")
+            if call_start is None:
+                continue
+            hour_start = call_start.replace(minute=0, second=0, microsecond=0)
+            queue = str(selected.get("queue") or "UNNAMED MAPPED QUEUE")
+            suffix = mapped.service_scope.rsplit(" ", 1)[-1].upper()
+            language = (
+                suffix
+                if suffix in {"FR", "VL", "NL", "DE", "EN"}
+                else selected.get("language")
+            )
+            key = (
+                business_date, hour_start, mapped.service_scope,
+                comparison_scope, queue, mapped.designation, language,
+            )
+            bucket = aggregates.setdefault(key, {
+                "offered": 0, "answered": 0, "abandoned": 0,
+                "short_abandoned": 0, "answered_within_target": 0,
+                "talk_seconds": 0.0, "hold_seconds": 0.0,
+                "wrap_seconds": 0.0, "handled_seconds": 0.0,
+                "call_legs": 0, "transferred_legs": 0,
+                "source_files": set(),
+            })
+            bucket["offered"] += 1
+            bucket["answered"] += answered
+            bucket["abandoned"] += 1 - answered
+            bucket["short_abandoned"] += short_abandoned
+            bucket["answered_within_target"] += within_target
+            for name in ("talk_seconds", "hold_seconds", "wrap_seconds"):
+                bucket[name] += sum(float(leg.get(name) or 0) for leg in handled_legs)
+            bucket["handled_seconds"] = (
+                bucket["talk_seconds"] + bucket["hold_seconds"] + bucket["wrap_seconds"]
+            )
+            bucket["call_legs"] += len(relevant)
+            bucket["transferred_legs"] += sum(bool(leg.get("transferred")) for leg in relevant)
+            bucket["source_files"].update(
+                str(leg["source_file"]) for leg in relevant if leg.get("source_file")
+            )
+
+    output: list[dict[str, Any]] = []
+    for key, values in sorted(
+        aggregates.items(), key=lambda item: tuple(str(value or "") for value in item[0]),
+    ):
+        business_date, hour_start, service_scope, comparison_scope, queue, designation, language = key
+        components = {
+            name: values[name]
+            for name in (
+                "offered", "answered", "abandoned", "short_abandoned",
+                "answered_within_target", "handled_seconds",
+            )
+        }
+        dimensions = {
+            "source_system": "CALL_BY_CALL", "queue": queue,
+            "lob": service_scope, "language": language,
+        }
+        service_level = _metric_evaluation(
+            metric_catalog, "service_level", business_date, dimensions, components,
+        )
+        availability = _metric_evaluation(
+            metric_catalog, "service_availability", business_date, dimensions, components,
+        )
+        abandon = _metric_evaluation(
+            metric_catalog, "abandon_rate", business_date, dimensions, components,
+        )
+        aht = _metric_evaluation(
+            metric_catalog, "aht_seconds", business_date, dimensions, components,
+        )
+        output.append({
+            "business_date": business_date, "hour_start": hour_start,
+            "source_system": "CALL_BY_CALL", "service_scope": service_scope,
+            "comparison_scope": comparison_scope, "queue": queue,
+            "designation": designation, "language": language,
+            **{name: values[name] for name in (
+                "offered", "answered", "abandoned", "short_abandoned",
+                "answered_within_target", "talk_seconds", "hold_seconds",
+                "wrap_seconds", "handled_seconds", "call_legs", "transferred_legs",
+            )},
+            "service_level": service_level.value,
+            "service_availability": availability.value,
+            "abandon_rate": abandon.value, "aht_seconds": aht.value,
+            "source_files": " | ".join(sorted(values["source_files"])),
+            "mapping_sha256": mapping.sha256,
+            "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
+        })
+    _insert_dicts(conn, "mart.call_service_hour", CALL_SERVICE_COLUMNS, output)
+    return len(output)
+
 
 def _build_service(
     conn: DatabaseConnection,
@@ -3043,8 +3216,11 @@ def refresh_models(
         final_absence_events, final_absence = _build_verint_final_absence(
             conn, rulebook, metric_catalog, start, end, evaluation_as_of,
         )
-        stage(17, "Building service performance")
+        stage(17, "Building service performance and Call-by-Call flashes")
         service = _build_service(conn, rulebook, metric_catalog, mapping, start, end)
+        call_service = _build_call_service(
+            conn, rulebook, metric_catalog, mapping, start, end,
+        )
         _record_rule_application(conn, run_id, rulebook)
         _record_mapping_application(conn, run_id, mapping)
         stage(18, "Checking source health")
@@ -3063,7 +3239,8 @@ def refresh_models(
             start=start, end=end, attendance_rows=len(attendance), conformance_rows=len(conformance),
             correction_rows=len(corrections), rta_rows=len(rta), forecast_rows=forecast,
             intraday_rows=actual, pcs_rows=pcs, quality_rows=quality,
-            absence_rows=absence, absence_event_rows=absence_events, service_rows=service,
+            absence_rows=absence, absence_event_rows=absence_events,
+            service_rows=service, call_service_rows=call_service,
             staffing_rows=staffing, timeline_rows=timeline,
             final_absence_rows=final_absence,
             final_absence_event_rows=final_absence_events,

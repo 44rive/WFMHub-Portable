@@ -9,10 +9,61 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 
 from wfmhub.ingestion import AgentScope, SourceSchemaError, parse_agent_status, parse_calls, parse_forecast, parse_fte, parse_lilo, parse_queue_actual, parse_schedule
+from wfmhub.mapping import load_queue_mapping
 from tools.build_fte_template import standardize_source
 
 
 class ParserTests(unittest.TestCase):
+    def test_calls_keep_mapped_service_demand_outside_agent_roster(self):
+        scope = AgentScope(
+            frozenset({"100"}), {"roster agent": "100"}, "scope",
+            {"100": ("Active", None)},
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            mapping_file = root / "queue_mapping.csv"
+            mapping_file.write_text(
+                "mapping_type,source_system,source_value,service_scope,designation\n"
+                "queue,STORM,MAPPED_QUEUE,RSA NL,RSA NL\n",
+                encoding="utf-8",
+            )
+            calls = root / "Call by Call.csv"
+            with calls.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow([
+                    "[Call Date/Time]", "[Call End Date/Time]", "[Call ID]",
+                    "[Call Reference Number]", "[Agent ID]", "[Agent]",
+                    "[Call Direction]", "[Talk Time]", "[Hold Time]",
+                    "[Total Wrap Time]", "[Total Queue Wait Time]", "[Queue]",
+                ])
+                # A handled mapped-queue contact is valid service demand even
+                # when the handler is outside this operation's FTE roster.
+                writer.writerow([
+                    "8/1/2026 9:00", "8/1/2026 9:05", "handled", "handled",
+                    "999", "Other Operation", "I", "0:04:00", "0:00:30",
+                    "0:00:30", "0:00:10", "MAPPED_QUEUE",
+                ])
+                # An abandoned contact has no agent by definition, but must
+                # remain in offered demand when its queue is mapped.
+                writer.writerow([
+                    "8/1/2026 9:10", "8/1/2026 9:10", "abandon", "abandon",
+                    "", "", "I", "", "", "", "0:00:03", "MAPPED_QUEUE",
+                ])
+                writer.writerow([
+                    "8/1/2026 9:20", "8/1/2026 9:22", "world", "world",
+                    "999", "Other Operation", "I", "0:02:00", "", "",
+                    "0:00:15", "UNMAPPED_WORLD_QUEUE",
+                ])
+
+            result = parse_calls(
+                calls, "calls", scope, load_queue_mapping(mapping_file),
+            )
+            rows = result.tables["raw.call_leg"]
+            self.assertEqual([row["call_id"] for row in rows], ["handled", "abandon"])
+            self.assertEqual(rows[0]["agent_id"], "999")
+            self.assertIsNone(rows[1]["agent_id"])
+            self.assertEqual(result.scoped_out, 1)
+
     def test_leaver_cutoff_is_applied_inside_schedule_status_and_calls(self):
         scope = AgentScope(
             frozenset({"200"}),

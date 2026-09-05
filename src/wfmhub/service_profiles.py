@@ -6,7 +6,7 @@ import hashlib
 import shutil
 import tomllib
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -41,6 +41,12 @@ class ServiceProfile:
     effective_from: date
     effective_to: date | None
     groups: tuple[ServiceGroup, ...]
+    flash_sheet: str
+    flash_layout: str
+    flash_source_systems: tuple[str, ...]
+    operating_start_hour: int
+    operating_end_hour: int
+    display_order: int
 
     def active_on(self, value: date) -> bool:
         return self.effective_from <= value and (self.effective_to is None or value <= self.effective_to)
@@ -94,6 +100,22 @@ def ensure_service_profiles(home: Path, target: Path | None = None) -> Path:
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    else:
+        try:
+            current = tomllib.loads(target.read_text(encoding="utf-8")).get("catalog", {})
+            default = tomllib.loads(source.read_text(encoding="utf-8")).get("catalog", {})
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            current, default = {}, {}
+        if (
+            str(current.get("version", "")) == "2026.09.3"
+            and str(default.get("version", "")) == "2026.09.4"
+        ):
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            shutil.copy2(
+                target,
+                target.with_name(f"{target.stem}_pre_flash_layout_{stamp}{target.suffix}"),
+            )
+            shutil.copy2(source, target)
     return target
 
 
@@ -122,11 +144,33 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
                 if str(value).strip()
             )
             systems = tuple(str(value).strip().upper() for value in item["source_systems"] if str(value).strip())
+            flash_systems = tuple(
+                str(value).strip().upper()
+                for value in item.get("flash_source_systems", ["CALL_BY_CALL"])
+                if str(value).strip()
+            )
+            operating_start = int(item.get("operating_start_hour", 0))
+            operating_end = int(item.get("operating_end_hour", 23))
+            display_order = int(item.get("display_order", 100))
         except (KeyError, TypeError, ValueError) as exc:
             raise ServiceProfileError(f"Invalid service profile item {index}: {exc}") from exc
-        if not profile_id or not scopes or not staffing_lobs or not systems:
+        if not profile_id or not scopes or not staffing_lobs or not systems or not flash_systems:
             raise ServiceProfileError(
-                f"Invalid service profile item {index}: id/scopes/staffing_lobs/systems"
+                f"Invalid service profile item {index}: id/scopes/staffing_lobs/systems/flash systems"
+            )
+        flash_sheet = str(item.get("flash_sheet", item.get("label", profile_id))).strip()
+        flash_layout = str(item.get("flash_layout", "standard")).strip().lower()
+        if not flash_sheet or len(flash_sheet) > 31:
+            raise ServiceProfileError(
+                f"Invalid service profile {profile_id!r}: flash_sheet must contain 1-31 characters"
+            )
+        if flash_layout not in {"standard", "workforce", "oem_split"}:
+            raise ServiceProfileError(
+                f"Invalid service profile {profile_id!r}: unsupported flash_layout {flash_layout!r}"
+            )
+        if not 0 <= operating_start <= operating_end <= 23:
+            raise ServiceProfileError(
+                f"Invalid service profile {profile_id!r}: operating hours must be between 0 and 23"
             )
         groups = tuple(
             ServiceGroup(str(group.get("label", "")).strip(), tuple(str(value) for value in group.get("queue_contains", [])))
@@ -146,6 +190,12 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
             effective_from=effective_from,
             effective_to=effective_to,
             groups=groups,
+            flash_sheet=flash_sheet,
+            flash_layout=flash_layout,
+            flash_source_systems=flash_systems,
+            operating_start_hour=operating_start,
+            operating_end_hour=operating_end,
+            display_order=display_order,
         ))
     if not profiles or default_profile not in {profile.profile_id for profile in profiles}:
         raise ServiceProfileError("default_profile must identify at least one profile")
@@ -156,6 +206,7 @@ def validate_service_profiles(
     catalog: ServiceProfileCatalog,
     metric_catalog: MetricCatalog | None = None,
 ) -> list[str]:
+    flash_sheets: set[str] = set()
     for left_index, left in enumerate(catalog.profiles):
         for right in catalog.profiles[left_index + 1:]:
             if left.profile_id != right.profile_id:
@@ -177,6 +228,12 @@ def validate_service_profiles(
                 )
     for profile in catalog.profiles:
         profile.staffing_pairs()
+        key = profile.flash_sheet.casefold()
+        if key in flash_sheets:
+            raise ServiceProfileError(
+                f"Duplicate flash sheet name {profile.flash_sheet!r}"
+            )
+        flash_sheets.add(key)
     return [
         f"Service profiles {catalog.version} are valid.",
         f"SHA-256: {catalog.sha256}",

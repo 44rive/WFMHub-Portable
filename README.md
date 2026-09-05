@@ -30,7 +30,7 @@ Technical files live under `_system`. You normally do not open that folder.
 |---|---|
 | Attendance Callout | Who must be contacted for absence, lateness, or not-seen status? |
 | Staffing & Capacity Plan | Where is capacity missing now, and where will forecast demand exceed net schedules in future weeks? |
-| OEM Flash | What is Ford OEM service, demand, forecast, and staffing state? |
+| Service Flashes | What is the hourly RSA NL, RSA BE, Ford NL, and Ford OEM service state? |
 | Realisations | How did actual volume, service, forecast, staffing, absence, and shrinkage perform across every mapped LOB and period? |
 | Attendance Review | Which gaps across the selected completed dates still need a Verint correction? |
 | Final Absenteeism | What does corrected Verint contain for final absence and shrinkage? |
@@ -54,8 +54,8 @@ never agent availability.
 | Storm Agent Status | Observed attendance and interval staffing evidence |
 | Verint Activities | Post-correction final absence and shrinkage |
 | Verint Forecast | Forecast only |
-| Storm APBE/APFR/APDE | Actual service performance only |
-| Storm Call by Call | Agent call performance and PCS |
+| Storm APBE/APFR/APDE | Formal actual service performance for Realisations and governed service exports |
+| Storm Call by Call | Mapped Flash demand/service, agent call performance, and PCS |
 | Bonus Matrix v1.2 | Bonus inputs, KPI configuration, and source reconciliation |
 
 Multi-day files are supported. Row dates are authoritative; filename dates are
@@ -91,25 +91,29 @@ See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
 [Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the optional one-time
 Power Query setup used by shared PCS and Absenteeism files.
 
-## OEM Flash pilot
+## Service Flashes
 
-The first Flash profile is Ford OEM France. It follows the useful operating
-logic in `TOLEARN\Flash FORD OEM.xlsx` without copying its inflated hidden raw
-sheets or fragile formulas.
+`Reports\Service Flashes.xlsx` reconstructs the four visual references in
+`TOLEARN\Book1.xlsx` as safe native Excel sheets: RSA NL, RSA BE, Ford NL, and
+Ford OEM France. One control page links to every Flash; `FLASH_DATA`,
+`QUEUE_MAP`, `EXCEPTIONS`, `DEFINITIONS`, and the hidden audit sheet provide the
+evidence behind the presentation.
 
-The Flash contains:
+Actual demand comes from exact queues in `queue_mapping.csv`. WFMHub counts one
+inbound customer interaction per Flash scope, not every transferred call leg.
+That keeps abandoned calls with no Agent ID and mapped service contacts handled
+outside the FTE roster without admitting unrelated worldwide queues. PCS stays
+limited to the effective-dated FTE roster.
 
-- OEM, Ford, and Toyota service level and service availability;
-- actual offered calls, Verint forecast, forecast attainment, and call variance;
-- hourly mapped queue-group performance;
-- scheduled, observed, and productive FTE when matching staffing data exists;
-- queue evidence and explicit source freshness.
+Verint Forecast supplies forecast only. `Deviation`, following the Book1 label,
+means `actual offered / forecast through the latest actual hour`. Availability
+is `handled / offered`; TSL uses the effective gross or short-abandon-adjusted
+method selected for that profile; AHT is weighted handled seconds per answered
+interaction.
 
-`Forecast attainment = actual offered / forecast`.
-`Variance calls = actual offered - forecast`.
-
-The reference workbook's back-office counters do not yet have an agreed source.
-WFMHub labels that section `NOT_CONFIGURED` until the source is added.
+Ford NL's Dispatch, Follow-up, and Mailbox BNL cards remain `N/C` because Book1
+contains the labels but no governed source or formula. WFMHub does not invent
+those figures.
 
 Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in

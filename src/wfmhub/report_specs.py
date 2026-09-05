@@ -53,7 +53,7 @@ def ensure_report_catalog(home: Path, target: Path | None = None) -> Path:
         shutil.copy2(default, target)
     else:
         # Presentation contracts are executable workbook schemas. Migrate the
-        # known v0.11 contract safely when the OEM Flash sheet layout changes;
+        # known contracts safely when the Service Flashes layout changes;
         # keep a recoverable copy instead of silently accepting a guaranteed
         # runtime mismatch.
         try:
@@ -71,6 +71,14 @@ def ensure_report_catalog(home: Path, target: Path | None = None) -> Path:
             ("2026.09.4", "2026.09.7"),
             ("2026.09.5", "2026.09.7"),
             ("2026.09.6", "2026.09.7"),
+            ("2026.09.3", "2026.09.11"),
+            ("2026.09.4", "2026.09.11"),
+            ("2026.09.5", "2026.09.11"),
+            ("2026.09.6", "2026.09.11"),
+            ("2026.09.7", "2026.09.11"),
+            ("2026.09.8", "2026.09.11"),
+            ("2026.09.9", "2026.09.11"),
+            ("2026.09.10", "2026.09.11"),
         }:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             safe_version = default_version.replace(".", "_")

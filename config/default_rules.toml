@@ -36,6 +36,8 @@ low_score_maximum = 3
 # This describes the extract's answered-within-target counter. KPI formulas,
 # targets, scopes and effective dates live only in metric_catalog.toml.
 target_seconds = 20
+# Call-by-Call interactions abandoned before this threshold are short abandons.
+short_abandon_seconds = 5
 
 # First matching rule wins. Keep specific activities above broad rules.
 # Flags drive absence, payroll and shrinkage marts without changing extracts.

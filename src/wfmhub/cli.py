@@ -37,7 +37,7 @@ from .ui import clear_screen, render_dashboard
 SOURCE_GROUPS = {
     "all": None,
     "operations": {"fte", "schedule", "lilo", "agent_status"},
-    "intraday": {"forecast", "apbe", "apfr", "apde"},
+    "intraday": {"fte", "calls", "forecast", "apbe", "apfr", "apde"},
     "pcs": {"fte", "calls"},
 }
 
@@ -193,7 +193,11 @@ def refresh(
     print(f"Attendance  : {model.attendance_rows:,} rows")
     print(f"Gaps        : {model.correction_rows:,} rows")
     print(f"Absence     : {model.absence_rows:,} agent-day + {model.absence_event_rows:,} evidence rows")
-    print(f"Service     : {model.service_rows:,} actual + {model.forecast_rows:,} forecast rows")
+    print(
+        f"Service     : {model.service_rows:,} AP actual + "
+        f"{model.call_service_rows:,} Call-by-Call flash + "
+        f"{model.forecast_rows:,} forecast rows"
+    )
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
     print(f"Shared data : {sum(item.rows for item in shared_feeds):,} feed rows updated")
     print(f"Metrics     : {model.metric_rows:,} calculated values")
@@ -617,7 +621,7 @@ def _choose_source_group() -> str:
     print("\nDATA TO REFRESH")
     print("1. All sources")
     print("2. Attendance/absence: FTE, Verint schedule, LILO and Agent Status")
-    print("3. Service: APBE, APFR, APDE and Verint Forecast")
+    print("3. Service flashes: Call by Call, queue mapping and Verint Forecast")
     print("4. Agent PCS: FTE and Call by Call")
     choice = input("Choose 1-4: ").strip()
     try:
@@ -739,7 +743,7 @@ def menu(home: Path) -> int:
         print("\n  TODAY")
         print("    [2] Attendance Callout")
         print("    [3] Staffing & Capacity Plan")
-        print("    [4] OEM Flash")
+        print("    [4] Service Flashes")
         print("    [5] Realisations (all mapped LOBs)")
         print("    [6] Attendance Review")
         print("\n  MONTH")

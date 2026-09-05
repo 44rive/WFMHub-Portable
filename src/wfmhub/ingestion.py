@@ -16,6 +16,7 @@ from openpyxl import load_workbook
 
 from .config import Config
 from .database import DatabaseConnection
+from .mapping import QueueMapping, load_queue_mapping
 from .progress import ProgressCallback
 from .utils import (
     classify_assignment,
@@ -122,6 +123,7 @@ AGENT_SCOPED_FAMILIES = {"schedule", "lilo", "agent_status", "calls"}
 AGENT_SCOPE_POLICY_VERSION = "v3-active-or-leaver-id-or-unique-name"
 SCHEDULE_PARSER_POLICY_VERSION = "v2-explicit-start-end-vs-activities"
 FTE_PARSER_POLICY_VERSION = "v2-time-off-registers"
+CALL_PARSER_POLICY_VERSION = "v4-active-roster-or-mapped-queue"
 
 
 FILENAME_DATE_RE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
@@ -902,6 +904,7 @@ def _call_record(
     file_id: str,
     source_row: int,
     scope: AgentScope | None,
+    queue_mapping: QueueMapping | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     get = lambda name: row.get(headers.get(name, ""))
     start = parse_datetime(get("Call Date/Time"))
@@ -910,11 +913,22 @@ def _call_record(
     source_agent_id = normalize_id(get("Agent ID"))
     agent_name = _clean(get("Agent"))
     agent_id = source_agent_id
+    queue = _clean(get("Queue"))
+    queue_is_mapped = (
+        queue_mapping is not None
+        and queue_mapping.map_actual("STORM", queue, None, None).status == "MAPPED"
+    )
     if scope is not None:
-        agent_id = scope.resolve(source_agent_id, agent_name, start.date())
-        if agent_id is None:
+        roster_agent_id = scope.resolve(source_agent_id, agent_name, start.date())
+        if roster_agent_id is not None:
+            agent_id = roster_agent_id
+        elif not queue_is_mapped:
             return None, "outside roster"
-    elif agent_id is None:
+        # Mapped queue interactions are required for service demand even when
+        # they were abandoned (no Agent ID) or handled by another operation.
+        # Agent-level marts still admit only rows joined to the governed FTE
+        # dimension, so this does not expand PCS or attendance scope.
+    elif agent_id is None and not queue_is_mapped:
         return None, "outside roster"
     end = parse_datetime(get("Call End Date/Time"))
     if end and end < start:
@@ -952,7 +966,7 @@ def _call_record(
         "call_progress": _clean(get("CallProgress")),
         "queue_wait_seconds": duration_seconds(get("Total Queue Wait Time")),
         "queue_id": normalize_id(get("Queue ID"), reject_placeholders=False),
-        "queue": _clean(get("Queue")),
+        "queue": queue,
         "call_treatment_id": normalize_id(get("Call Treatment ID"), reject_placeholders=False),
         "call_treatment": _clean(get("Call Treatment")),
         "agent_group_id": normalize_id(get("Agent Group ID"), reject_placeholders=False),
@@ -999,14 +1013,21 @@ def _call_record(
     return record, None
 
 
-def parse_calls(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
+def parse_calls(
+    path: Path,
+    file_id: str,
+    scope: AgentScope | None = None,
+    queue_mapping: QueueMapping | None = None,
+) -> ParseResult:
     headers = _call_header_map(path)
     output: list[dict[str, Any]] = []
     rejected: list[str] = []
     scoped_out = 0
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         for source_row, row in enumerate(csv.DictReader(handle), 2):
-            record, reason = _call_record(row, headers, file_id, source_row, scope)
+            record, reason = _call_record(
+                row, headers, file_id, source_row, scope, queue_mapping,
+            )
             if reason == "outside roster":
                 scoped_out += 1
             elif reason:
@@ -1021,6 +1042,7 @@ def _insert_calls_direct(
     path: Path,
     file_id: str,
     scope: AgentScope,
+    queue_mapping: QueueMapping,
     progress: ProgressCallback | None = None,
 ) -> tuple[int, int, int]:
     headers = _call_header_map(path)
@@ -1031,7 +1053,9 @@ def _insert_calls_direct(
             processed += 1
             if progress is not None and processed % 2000 == 0:
                 progress(processed, 0, f"Call by Call: {processed:,} rows scanned")
-            record, reason = _call_record(row, headers, file_id, source_row, scope)
+            record, reason = _call_record(
+                row, headers, file_id, source_row, scope, queue_mapping,
+            )
             if reason == "outside roster":
                 scoped_out += 1
                 continue
@@ -1302,6 +1326,7 @@ def ingest_all(
         if not selected or candidate.family in selected
     ]
     total = len(candidates)
+    queue_mapping = load_queue_mapping(config.queue_mapping)
     if progress is not None:
         progress(0, total, "Scanning source files")
     for index, candidate in enumerate(candidates, 1):
@@ -1325,6 +1350,13 @@ def ingest_all(
             scope_fingerprint = FTE_PARSER_POLICY_VERSION
         if candidate.family == "schedule":
             scope_fingerprint = f"{scope_fingerprint}|{SCHEDULE_PARSER_POLICY_VERSION}"
+        if candidate.family == "calls":
+            # Re-read unchanged Call-by-Call files whenever the queue catalog
+            # changes: mapped queue demand is part of the admitted scope.
+            scope_fingerprint = (
+                f"{scope_fingerprint}|{CALL_PARSER_POLICY_VERSION}|"
+                f"queue-map:{queue_mapping.sha256}"
+            )
         existing = conn.execute(
             """SELECT file_id, active, row_count, scoped_out_count FROM meta.source_file
                WHERE source_family=? AND source_path=? AND sha256=?
@@ -1388,7 +1420,7 @@ def ingest_all(
                     )
                 elif candidate.family == "calls":
                     row_count, scoped_out_count, rejected_count = _insert_calls_direct(
-                        conn, path, file_id, scope, progress
+                        conn, path, file_id, scope, queue_mapping, progress
                     )
                 else:
                     row_count = result.row_count

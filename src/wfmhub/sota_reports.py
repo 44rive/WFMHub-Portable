@@ -99,13 +99,19 @@ def _add_catalog_sheets(
         "Profiles select metric IDs and reporting scopes. KPI formulas and targets remain in METRIC_METHODS.",
         [
             "profile_id", "label", "service_scopes", "source_systems",
+            "flash_source_systems", "flash_sheet", "flash_layout",
+            "operating_start_hour", "operating_end_hour", "display_order",
             "service_level_metric", "availability_metric", "aht_metric",
             "effective_from", "effective_to", "catalog_version", "catalog_sha256",
         ],
         [
             (
                 profile.profile_id, profile.label, " | ".join(profile.service_scopes),
-                " | ".join(profile.source_systems), profile.service_level_metric,
+                " | ".join(profile.source_systems),
+                " | ".join(profile.flash_source_systems), profile.flash_sheet,
+                profile.flash_layout, profile.operating_start_hour,
+                profile.operating_end_hour, profile.display_order,
+                profile.service_level_metric,
                 profile.availability_metric, profile.aht_metric, profile.effective_from,
                 profile.effective_to, service_profiles.version, service_profiles.sha256,
             )

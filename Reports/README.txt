@@ -3,7 +3,7 @@ it replaces one, the previous copy is saved under Reports\Archive\YYYY-MM-DD.
 
 Attendance Callout.xlsx   Who must be contacted now
 Staffing Gaps.xlsx        Actual control and future weekly capacity plan
-OEM Flash.xlsx            Ford OEM service and forecast control
+Service Flashes.xlsx      RSA NL/BE and Ford NL/OEM hourly service control
 Realisations.xlsx         Actual versus plan across all mapped LOBs
 Attendance Review.xlsx    Completed-day gaps awaiting Verint correction
 Final Absenteeism.xlsx    Corrected Verint absence/shrinkage ledger

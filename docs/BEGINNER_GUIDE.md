@@ -69,7 +69,7 @@ Current workbooks always have the same names:
 ```text
 Reports\Attendance Callout.xlsx
 Reports\Staffing Gaps.xlsx
-Reports\OEM Flash.xlsx
+Reports\Service Flashes.xlsx
 Reports\Realisations.xlsx
 Reports\Attendance Review.xlsx
 Reports\Final Absenteeism.xlsx
@@ -123,20 +123,26 @@ net scheduled FTE after approved PTO and Away. `WEEKLY_PLAN` summarizes the
 same capacity as FTE-hours by week, LOB, and language. Missing forecast remains
 `NO FORECAST`; forecast demand with nobody scheduled remains a visible gap.
 
-## OEM Flash
+## Service Flashes
 
-The Ford OEM pilot combines:
+This one workbook contains four daily sheets: RSA Netherlands, RSA Belgium,
+Ford Netherlands, and Ford OEM France. Choose the end date you want to send;
+that date is the visible Flash day. The selected start date remains in the
+audit boundary but does not turn a daily Flash into a multi-day total.
 
-- OEM/Ford/Toyota service level and service availability;
-- actual calls, Verint forecast, forecast attainment, and call variance;
-- hourly Ford/Toyota/Chery queue-group results;
-- scheduled, observed, and productive FTE when matching evidence exists;
-- queue mapping and source freshness.
+Call-by-Call supplies the actual service figures. The queue map decides which
+calls belong to each Flash. WFMHub counts one customer interaction once even
+when it has transfer legs. An abandoned call is still demand even though it has
+no Agent ID. Verint supplies forecast only.
 
-Service availability is `answered / offered`. It is not agent availability.
+Open `CONTROL`, then click a Flash name. Each Flash shows hourly forecast,
+actual, handled, handled in target, service level, availability, and weighted
+AHT through the latest actual hour. Blank evidence stays blank. Use
+`EXCEPTIONS` to review missing forecast, missing mapped demand, or below-target
+hours; use `QUEUE_MAP` to see the exact included queues.
 
-Forecast attainment is `actual offered / forecast`. Call variance is
-`actual offered - forecast`; these two ideas are deliberately shown separately.
+Service availability is `handled / offered`. It is not agent availability.
+The `Deviation` label follows Book1 and means `actual offered / forecast`.
 
 The old Flash also contained manually sourced back-office counters. Until a
 reliable source is configured, WFMHub shows `NOT_CONFIGURED` instead of making

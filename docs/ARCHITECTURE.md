@@ -105,6 +105,7 @@ details remain in one module.
 | `mart.absence_event` | One observed, schedule-clipped LILO/status gap with final label |
 | `mart.absence_agent_day` | One payroll absence/vacation/shrinkage result per Agent ID/day |
 | `mart.service_interval` | One rule-versioned APBE/APFR/APDE service interval |
+| `mart.call_service_hour` | One mapped Call-by-Call queue/hour with interaction-deduplicated service counters |
 | `mart.metric_value` | One configured KPI observation per source entity/method |
 | `mart.analysis_finding` | One ranked deterministic finding with evidence filter |
 | `mart.bonus_agent_month` | One governed monthly bonus result per agent |
@@ -119,7 +120,7 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 |---|---|---|
 | `pcs` | `Reports/PCS Performance.xlsx` | Selector-driven PCS performance and coaching workbook |
 | `bonus` | `Reports/Bonus Management.xlsx` | Imported Bonus Matrix result and release controls |
-| `service` | `Reports/OEM Flash.xlsx` | Ford OEM queue, forecast, service and staffing control |
+| `service` | `Reports/Service Flashes.xlsx` | RSA NL/BE and Ford NL/OEM daily mapped-call service control |
 | `realisations` | `Reports/Realisations.xlsx` | All mapped LOB actual/forecast, service, staffing, absence and shrinkage results |
 | `staffing` | `Reports/Staffing Gaps.xlsx` | Full-period actual staffing control and future capacity planning |
 | `attendance` | `Reports/Attendance Callout.xlsx` | No-show/late/not-seen contact queue |
@@ -127,8 +128,8 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `absence` | `Reports/Final Absenteeism.xlsx` | Activities-only final absence/shrinkage ledger |
 
 Products share the same visual identity but use purpose-specific layouts. The
-OEM Flash begins with `FLASH` and `HOURLY`; Corrections uses `VERINT_INJECTION` and
-`SHIFT_VIEW`; Attendance remains an action list. Legacy `operations` and
+Service Flashes begins with `CONTROL` and four purpose-built Flash sheets;
+Corrections uses `VERINT_INJECTION` and `SHIFT_VIEW`; Attendance remains an action list. Legacy `operations` and
 `quality_pcs` builders remain callable under `_system/legacy_reports` but are
 absent from the menu.
 
@@ -163,8 +164,11 @@ active raw layer:
    unique matching FTE organisation fields; ambiguous names stay excluded.
 7. Preserve a populated operational source ID. In particular, Verint `Data
    Source IDs` remains the schedule Agent ID.
-8. Apply the same gate to schedules, LILO, Agent Status, and Call-by-Call.
-9. Exclude everything else and count it as outside roster.
+8. Apply the same gate to schedules, LILO, and Agent Status. For Call-by-Call,
+   also admit a row when its queue exactly matches the reviewed queue map; this
+   preserves mapped abandoned demand and cross-operation handling.
+9. Exclude everything else and count it as outside roster. Agent-level Call-by-
+   Call marts still require a join to the governed FTE dimension.
 
 A populated unmatched ID can therefore be admitted by a unique roster name,
 but an ambiguous or missing name cannot. This is a scope decision, not fuzzy
@@ -174,6 +178,8 @@ The scope has a deterministic fingerprint. If FTE changes, the same untouched
 schedule/LILO/status/call file is reprocessed against the new roster. This prevents
 both stale worldwide rows and the “new agent missing from an unchanged file”
 problem. Forecast and APBE/APFR/APDE are queue data, so they bypass the agent gate.
+Changing the queue map also changes the Call-by-Call scope fingerprint, causing
+unchanged call extracts to be safely reprocessed.
 
 ## Incremental and atomic refresh
 
@@ -202,12 +208,15 @@ be proven.
 
 ## Call and PCS model
 
-Call CSVs are FTE-scoped before storage. A stable Call Key combines call
+Call CSVs are FTE-or-exact-mapped-queue scoped before storage. A stable Call Key combines call
 references, direction, agent and timestamps; `core.clean_call_leg` selects the
 newest active version across overlapping history extracts. The official PCS
 contract reproduces `TOLEARN/PCS Report.xlsx`: keep inbound legs with an Agent
 ID, accept Q1 only when its numeric value is one of the configured discrete
 scores (default `1,2,3,4,5`), and calculate `sum(valid Q1) / count(valid Q1)`.
+The Flash mart separately groups inbound legs by Interaction Key and mapped
+comparison scope, so a transfer remains one offered interaction while handled
+leg seconds remain available for weighted AHT.
 Counts `<=3` and `>3` remain counts. Participation is `inbound raw-Q1 nonblank /
 inbound PCSStatus=1`; invalid raw answers stay in that numerator and are
 separately counted. Q2 and Mode 2 are diagnostics only. Higher grains always
