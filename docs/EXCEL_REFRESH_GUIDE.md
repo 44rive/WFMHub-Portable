@@ -36,9 +36,8 @@ Do this once per shared workbook. Make a backup copy before starting.
 14. Save the workbook.
 
 The Dashboard now follows the newest `Date` in `tblPcsData`. `Current week`
-means Monday through that newest date. LOB narrows the Team Leader list; LOB and
-Team Leader narrow the Agent list. If an old selection is no longer valid, set
-the downstream box back to `All`.
+means Monday through that newest date. LOB, Team Leader and Agent are combined
+as filters. If a combination has no data, set one or more boxes back to `All`.
 
 ## PCS: connect new coaching opportunities
 
@@ -129,6 +128,5 @@ correct agent and day.
   choose them again from left to right.
 - **Someone is editing:** do not replace the workbook. Refresh only the query,
   and use a personal Sheet View before applying table filters.
-- **A new agent is missing:** confirm the correct fixed CSV was refreshed, then
-  set LOB, Team Leader, and Agent back to `All`. `TEAM_VIEW` reads new agents
-  directly from the refreshed table; no report rebuild is required.
+- **A new agent is missing from PCS TEAM_VIEW:** build PCS once while the shared
+  workbook is closed. Existing coaching fields carry forward by Coaching Key.

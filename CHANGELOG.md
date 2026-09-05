@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.16.2 — 2026-09-05
+
+- Removed all Microsoft 365 spill arrays and `_xlfn` functions from PCS after
+  corporate Excel repaired the generated workbook on open. Selector lists are
+  now static, compatible named ranges and Coaching Queue uses classic
+  `INDEX/MATCH`.
+- Replaced the spill-based PCS team page with a normal filterable Excel Table.
+  Each agent row is pre-calculated for latest day, current week, current MTD,
+  previous-MTD same days, movement, participation, sample and coaching action.
+- Reduced the hidden trend calculation range to loaded PCS dates only and added
+  a regression assertion that PCS contains no array formulas.
+
 ## 0.16.1 — 2026-09-05
 
 - Fixed a `mart_verint_final_exception.exception_key` unique-constraint failure

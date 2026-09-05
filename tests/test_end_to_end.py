@@ -782,8 +782,13 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("tblCoaching", focused_pcs_book["COACHING"].tables)
                 self.assertIn("tblCoachingQueue", focused_pcs_book["COACHING_QUEUE"].tables)
                 self.assertIn("tblPcsData", focused_pcs_book["AGENT_RESULTS"]["I5"].value)
-                team_formula = focused_pcs_book["TEAM_VIEW"]["A11"].value
-                self.assertIn("tblPcsData", getattr(team_formula, "text", ""))
+                self.assertIn("tblTeamView", focused_pcs_book["TEAM_VIEW"].tables)
+                self.assertFalse(any(
+                    hasattr(cell.value, "text")
+                    for sheet in focused_pcs_book.worksheets
+                    for row in sheet.iter_rows()
+                    for cell in row
+                ))
                 self.assertEqual(focused_pcs_book["_LOOKUPS"].sheet_state, "hidden")
                 pcs_table_headers = [cell.value for cell in focused_pcs_book["PCS_DATA"][4]]
                 defined = {

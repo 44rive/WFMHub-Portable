@@ -221,10 +221,11 @@ Previous-month same days, Previous full month, or Custom period. Then choose
 LOB, Team Leader, or Agent. The KPI cards, benchmark, and chart all recalculate
 from the included `PCS_DATA` table.
 
-Open `TEAM_VIEW` for the easiest TL workflow. It follows the Dashboard's LOB,
-Team Leader, Agent and period choices and shows the realization list beside the
-matching coaching opportunities. `AGENT_RESULTS` remains the full filterable
-detail.
+Open `TEAM_VIEW` for the easiest TL workflow. Filter its normal Excel Table by
+LOB, Team Leader, or Agent. Latest day, current week, current MTD, previous MTD,
+movement, participation, sample, and coaching priority are already calculated.
+It does not use fragile spill formulas. `AGENT_RESULTS` remains the custom-period
+formula view.
 
 PCS formulas:
 

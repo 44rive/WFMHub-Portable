@@ -236,6 +236,119 @@ def _pcs_coaching_rows(
     )
 
 
+def _pcs_team_snapshot(
+    conn: DatabaseConnection,
+    latest: date,
+    minimum_sample: int,
+) -> tuple[list[str], list[tuple[Any, ...]]]:
+    """Return an Excel-version-safe TL view calculated entirely in Python."""
+
+    current_week_start = latest - timedelta(days=latest.weekday())
+    current_month_start = latest.replace(day=1)
+    previous_start, previous_end = _previous_month(latest)
+    previous_same_day = min(
+        previous_end,
+        previous_start + timedelta(days=latest.day - 1),
+    )
+    headers, source_rows = _query(
+        conn,
+        """SELECT lob, team_leader,
+                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']' AS agent_selector,
+                  agent_id, agent_name, language, business_date,
+                  pcs_score_sum, survey_responses, pcs_participation_responses,
+                  pcs_status_calls, low_score_responses
+           FROM mart.agent_pcs_day
+           WHERE business_date BETWEEN ? AND ?
+           ORDER BY lob, team_leader, agent_name, business_date""",
+        [previous_start, latest],
+    )
+    indexes = {header: index for index, header in enumerate(headers)}
+    grouped: dict[tuple[Any, ...], list[tuple[Any, ...]]] = defaultdict(list)
+    for row in source_rows:
+        grouped[tuple(row[indexes[name]] for name in (
+            "lob", "team_leader", "agent_selector", "agent_id",
+            "agent_name", "language",
+        ))].append(row)
+
+    def totals(rows: Sequence[Sequence[Any]], left: date, right: date) -> tuple[float, float, float, float, float]:
+        selected = []
+        for row in rows:
+            business_date = row[indexes["business_date"]]
+            if isinstance(business_date, str):
+                business_date = date.fromisoformat(business_date[:10])
+            if left <= business_date <= right:
+                selected.append(row)
+        return tuple(
+            sum(float(row[indexes[column]] or 0) for row in selected)
+            for column in (
+                "pcs_score_sum", "survey_responses",
+                "pcs_participation_responses", "pcs_status_calls",
+                "low_score_responses",
+            )
+        )
+
+    output: list[tuple[Any, ...]] = []
+    for identity, rows in sorted(grouped.items(), key=lambda item: tuple(str(value or "") for value in item[0])):
+        latest_values = totals(rows, latest, latest)
+        week_values = totals(rows, current_week_start, latest)
+        month_values = totals(rows, current_month_start, latest)
+        prior_values = totals(rows, previous_start, previous_same_day)
+        latest_score = _ratio(latest_values[0], latest_values[1])
+        week_score = _ratio(week_values[0], week_values[1])
+        month_score = _ratio(month_values[0], month_values[1])
+        prior_score = _ratio(prior_values[0], prior_values[1])
+        valid = int(month_values[1])
+        low = int(month_values[4])
+        priority = (
+            "NO RESPONSE" if valid == 0
+            else "LOW SAMPLE" if valid < minimum_sample
+            else "COACH" if low > 0
+            else "ON TRACK"
+        )
+        next_action = (
+            "Open COACHING" if low > 0
+            else "Build sample" if valid < minimum_sample
+            else "Monitor"
+        )
+        output.append((
+            *identity, latest_score, week_score, month_score, prior_score,
+            month_score - prior_score
+            if month_score is not None and prior_score is not None else None,
+            _ratio(month_values[2], month_values[3]), valid, low, priority,
+            next_action,
+        ))
+    return (
+        [
+            "lob", "team_leader", "agent_selector", "agent_id",
+            "agent_name", "language", "latest_day_pcs", "current_week_pcs",
+            "current_mtd_pcs", "previous_mtd_pcs", "mtd_movement",
+            "current_mtd_participation", "current_mtd_valid_q1",
+            "current_mtd_score_le_3", "priority", "next_action",
+        ],
+        output,
+    )
+
+
+def _add_pcs_team_snapshot(
+    book: DecisionWorkbook,
+    headers: Sequence[str],
+    rows: Sequence[Sequence[Any]],
+) -> None:
+    """Add the safe, filterable realization page used by team leaders."""
+
+    sheet = book.table(
+        "TEAM_VIEW", "PCS team realizations",
+        "Filter LOB, Team Leader or Agent Selector in the header. Daily, current-week, current-MTD and previous-MTD results are already calculated—no spill formulas or PivotTable setup required.",
+        headers, rows or [tuple(None for _ in headers)],
+    )
+    if rows:
+        priority = headers.index("priority")
+        sheet.conditional_format(
+            4, priority, 3 + len(rows), priority,
+            {"type": "text", "criteria": "containing", "value": "COACH", "format": book.report.error},
+        )
+
+
 def _pcs_sum_formula(column: str, from_name: str = "PCS_From", to_name: str = "PCS_To") -> str:
     scope = (
         f'(tblPcsData[Date]>={from_name})*(tblPcsData[Date]<={to_name})*'
@@ -714,8 +827,7 @@ def _add_pcs_lookups(
     dates: Sequence[date],
     scope_rows: Sequence[Sequence[Any]],
 ) -> None:
-    """Hidden chart calculations and cascading selector lists."""
-    del scope_rows
+    """Hidden chart calculations and static Excel-safe selector lists."""
     ws = book.report.workbook.add_worksheet("_LOOKUPS")
     headers = [
         "Date", "Q1 Score Sum", "Valid Q1", "Q1 Nonblank", "PCS Status 1",
@@ -747,29 +859,22 @@ def _add_pcs_lookups(
             row_index, 6,
             f'=IFERROR($D${excel_row}/$E${excel_row},NA())',
         )
-    ws.write("J2", "All")
-    ws.write_dynamic_array_formula(
-        "J3", '=SORT(UNIQUE(FILTER(tblPcsData[LOB],tblPcsData[LOB]<>"","")))',
+    selector_lists = (
+        (9, sorted({str(row[0]) for row in scope_rows if row[0]})),
+        (10, sorted({str(row[1]) for row in scope_rows if row[1]})),
+        (11, sorted({str(row[2]) for row in scope_rows if row[2]})),
     )
-    ws.write("K2", "All")
-    ws.write_dynamic_array_formula(
-        "K3",
-        '=SORT(UNIQUE(FILTER(tblPcsData[Team Leader],'
-        '(tblPcsData[Team Leader]<>"")*IF(DASHBOARD!$K$6="All",1,'
-        'tblPcsData[LOB]=DASHBOARD!$K$6),"")))',
-    )
-    ws.write("L2", "All")
-    ws.write_dynamic_array_formula(
-        "L3",
-        '=SORT(UNIQUE(FILTER(tblPcsData[Agent Selector],'
-        '(tblPcsData[Agent Selector]<>"")*IF(DASHBOARD!$K$6="All",1,'
-        'tblPcsData[LOB]=DASHBOARD!$K$6)*IF(DASHBOARD!$N$6="All",1,'
-        'tblPcsData[Team Leader]=DASHBOARD!$N$6),"")))',
-    )
+    for column, values in selector_lists:
+        ws.write(1, column, "All")
+        for row_index, value in enumerate(values, 2):
+            ws.write(row_index, column, value)
     wb = book.report.workbook
-    wb.define_name("PCS_LOB_LIST", "=_LOOKUPS!$J$2:INDEX(_LOOKUPS!$J:$J,COUNTA(_LOOKUPS!$J:$J))")
-    wb.define_name("PCS_TL_LIST", "=_LOOKUPS!$K$2:INDEX(_LOOKUPS!$K:$K,COUNTA(_LOOKUPS!$K:$K))")
-    wb.define_name("PCS_AGENT_LIST", "=_LOOKUPS!$L$2:INDEX(_LOOKUPS!$L:$L,COUNTA(_LOOKUPS!$L:$L))")
+    for name, column, values in (
+        ("PCS_LOB_LIST", "J", selector_lists[0][1]),
+        ("PCS_TL_LIST", "K", selector_lists[1][1]),
+        ("PCS_AGENT_LIST", "L", selector_lists[2][1]),
+    ):
+        wb.define_name(name, f"=_LOOKUPS!${column}$2:${column}${2 + len(values)}")
     ws.hide()
 
 
@@ -815,7 +920,7 @@ def build_pcs_performance_workbook(
         "valid": default_aggregate[5], "low": default_aggregate[7],
         "positive": default_aggregate[8], "inbound": default_aggregate[9],
     }
-    trend_end = max(latest, date(latest.year, 12, 31))
+    trend_end = latest
     trend_dates = [
         data_start + timedelta(days=offset)
         for offset in range((trend_end - data_start).days + 1)
@@ -824,7 +929,8 @@ def build_pcs_performance_workbook(
         book, status, status_text, start, end, lobs, team_leaders, agents,
         data_start, latest, len(trend_dates), minimum_sample, default_values,
     )
-    _add_pcs_team_view(book, minimum_sample)
+    team_headers, team_rows = _pcs_team_snapshot(conn, latest, minimum_sample)
+    _add_pcs_team_snapshot(book, team_headers, team_rows)
 
     agent_headers, agent_raw = _query(
         conn,
@@ -924,7 +1030,7 @@ def build_pcs_performance_workbook(
     for excel_row, values in enumerate(queue_source, 5):
         queue_rows.append(tuple(
             values[queue_indexes[header]] if header != "action_status" else
-            '=IFERROR(XLOOKUP([@[Coaching Key]],tblCoaching[Coaching Key],tblCoaching[Coaching Status]),"Not started")'
+            '=IFERROR(INDEX(tblCoaching[Coaching Status],MATCH([@[Coaching Key]],tblCoaching[Coaching Key],0)),"Not started")'
             for header in queue_headers
         ))
     queue_sheet = book.table(
@@ -977,8 +1083,8 @@ def build_pcs_performance_workbook(
         ("Score <= 3", "Count of valid Q1 responses at or below 3", "Follow-up volume", "A count, not a percentage"),
         ("Actions Rate", "Completed rows in COACHING / valid Q1 responses at or below 3", "Coaching completion", "Saved notes are matched by Coaching Key"),
         ("Low sample", f"Fewer than {minimum_sample} valid responses in the selected period", "Interpretation warning", "Use a larger sample before drawing conclusions"),
-        ("Selectors", "LOB narrows Team Leader; LOB and Team Leader narrow Agent", "Management view", "Change an upstream selector if a previous choice is no longer valid"),
-        ("Agent realizations", "Latest day, selected period and previous-month same-days at agent grain", "TL action list", "Filter Team Leader directly on the AGENT_RESULTS table"),
+        ("Selectors", "Period, LOB, Team Leader and Agent filters are combined", "Dashboard management view", "Choose only a valid combination or set a box back to All"),
+        ("Team realizations", "Latest day, current week, current MTD and previous-MTD at agent grain", "Excel-safe TL action list", "Filter the TEAM_VIEW header; no spill formulas are used"),
     ])
     _add_pcs_lookups(book, trend_dates, selector_rows)
     book.audit(_audit_rows(conn, config, "pcs", start, end))

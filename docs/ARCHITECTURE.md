@@ -134,9 +134,10 @@ absent from the menu.
 
 PCS is generated directly from SQLite. `PCS_DATA`, `COACHING_QUEUE` and
 `COACHING` are ordinary visible Excel Tables. Dashboard selectors use Excel
-`SUMPRODUCT`; `TEAM_VIEW` uses Microsoft 365 dynamic formulas so a TL can see
-the filtered realization list and coaching queue without editing a PivotTable.
-Users may still add Table slicers manually. A first build needs no Excel
+`SUMPRODUCT`; `TEAM_VIEW` is a conventional, filterable Excel Table with
+Python-calculated latest-day, current-week, current-MTD and previous-MTD
+results. It deliberately uses no spill arrays or `_xlfn` functions. Users may
+still add Table slicers manually. A first build needs no Excel
 connection. For one long-lived shared file, the user may link the two
 replaceable PCS tables to fixed CSV feeds with Power Query. `COACHING` remains
 the permanent editable log. No Data Model or ODBC driver is required.

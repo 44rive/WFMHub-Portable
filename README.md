@@ -126,8 +126,8 @@ stable CSV feeds under `Feed\PCS`; the file names never change.
 - selector boxes for latest day, current/previous week, current/previous month,
   custom dates, LOB, team leader, and Agent ID;
 - KPI cards that recalculate in desktop Excel from the included clean table;
-- a novice-facing `TEAM_VIEW` where one selection shows both agent realization
-  and coaching opportunities;
+- an Excel-safe `TEAM_VIEW` with ready-calculated latest-day, current-week,
+  current-MTD and previous-MTD agent realizations;
 - a selector-driven trend and a ready-made `AGENT_RESULTS` realization list;
 - a collaborative `COACHING` action plan and separate `COACHING_QUEUE`;
 - a visible `PCS_DATA` Excel Table at agent/day grain.
@@ -141,9 +141,10 @@ report is rebuilt while closed, action fields carry forward by Coaching Key.
 For a long-lived team file, make a one-time Power Query from
 `Feed\PCS\PCS_AGENT_DAY_CURRENT.csv` into the existing `tblPcsData` table. After
 that, **Data > Refresh All** updates the dashboard without replacing coaching
-work. `TEAM_VIEW` reads new agents directly from the refreshed table, so a
-rebuild is needed only for a new workbook design. The `HELP` sheet gives the
-exact operating steps.
+work. The Dashboard and existing `AGENT_RESULTS` rows recalculate from the
+refreshed table. Regenerate the workbook when the roster gains new agents;
+saved coaching fields carry forward by Coaching Key. The `HELP` sheet gives
+the exact operating steps.
 
 ## Shared Final Absenteeism
 
