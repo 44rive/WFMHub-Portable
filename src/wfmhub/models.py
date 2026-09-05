@@ -1060,7 +1060,22 @@ def _final_verint_events(base: dict[str, Any], rulebook: Rulebook) -> list[dict[
     deduped: dict[tuple[Any, ...], dict[str, Any]] = {}
     for item in candidates:
         if item["start"] and item["end"] and item["end"] > item["start"]:
-            deduped[(item["activity"], item["start"], item["end"], item["source_file"])] = item
+            # Overlapping daily/full-history Activities exports can contain the
+            # same business event under different filenames.  Source filename
+            # is provenance, not event identity, so merge it instead of
+            # returning two rows that share one downstream exception key.
+            key = (item["activity"], item["start"], item["end"])
+            existing = deduped.get(key)
+            if existing is None:
+                deduped[key] = item
+                continue
+            sources = {
+                str(value).strip()
+                for source in (existing.get("source_file"), item.get("source_file"))
+                for value in str(source or "").split(";")
+                if str(value).strip()
+            }
+            existing["source_file"] = "; ".join(sorted(sources)) or None
     return list(deduped.values())
 
 
@@ -1225,7 +1240,7 @@ def _build_corrections(
             key = hashlib.sha256(
                 f"{base['agent_day_key']}|{event['activity']}|{event['start']}|{event['end']}".encode("utf-8")
             ).hexdigest()
-            exceptions.append({
+            exception = {
                 "exception_key": key, "agent_day_key": base["agent_day_key"],
                 "business_date": base["business_date"], "agent_id": base["agent_id"],
                 "agent_name": base["agent_name"], "activity": event["activity"],
@@ -1234,7 +1249,32 @@ def _build_corrections(
                 "exception_type": "VERINT_FINAL_WITHOUT_OBSERVED_GAP",
                 "source_file": event["source_file"], "rule_version": rulebook.version,
                 "rule_sha256": rulebook.sha256,
-            })
+            }
+            exceptions.append(exception)
+    # Keep the primary-key boundary defensive as well.  Event normalization
+    # above should already make these unique, but a future input path must not
+    # make a safe refresh fail merely because it repeats the same exception.
+    exceptions_by_key: dict[str, dict[str, Any]] = {}
+    for exception in exceptions:
+        key = exception["exception_key"]
+        existing = exceptions_by_key.get(key)
+        if existing is None:
+            exceptions_by_key[key] = exception
+            continue
+        sources = {
+            str(value).strip()
+            for source in (existing.get("source_file"), exception.get("source_file"))
+            for value in str(source or "").split(";")
+            if str(value).strip()
+        }
+        existing["source_file"] = "; ".join(sorted(sources)) or None
+    exceptions = sorted(
+        exceptions_by_key.values(),
+        key=lambda item: (
+            item["business_date"], item["agent_id"], item["event_start"],
+            item["event_end"], item["activity"],
+        ),
+    )
     conn.execute("DELETE FROM mart.verint_final_exception")
     _insert_dicts(conn, "mart.verint_final_exception", VERINT_EXCEPTION_COLUMNS, exceptions)
     return output

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.1 — 2026-09-05
+
+- Fixed a `mart_verint_final_exception.exception_key` unique-constraint failure
+  when overlapping daily or full-history Verint Activities extracts repeat the
+  same agent activity and exact interval under different filenames. WFMHub now
+  keeps one business event, merges its source-file provenance, and applies a
+  defensive primary-key deduplication before materializing final exceptions.
+
 ## 0.16.0 — 2026-09-05
 
 - Added a novice-facing PCS `TEAM_VIEW` driven by the existing period, LOB,
