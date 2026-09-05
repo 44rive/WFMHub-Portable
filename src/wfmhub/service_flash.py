@@ -110,9 +110,13 @@ def _aggregate(
     return {
         **components,
         "raw_offered": components["offered"],
-        # Storm's business display removes abandons below the configured short
-        # threshold from volume, availability and forecast comparison.
-        "offered": max(0.0, components["offered"] - components["short_abandoned"]),
+        # Storm displays every inbound queue entry as Total Entered. Only the
+        # SLA denominator removes short abandons; Routed Rate and volume retain
+        # the raw entered count.
+        "offered": components["offered"],
+        "business_offered": max(
+            0.0, components["offered"] - components["short_abandoned"],
+        ),
         "service_level": service.value,
         "service_target": service.method.target,
         "service_method": service.method.method_id,
@@ -402,7 +406,7 @@ def _table_value_format(book: DecisionWorkbook, header: str):
     if (
         lowered.startswith("sl ")
         or any(token in lowered for token in (
-            "availability", "deviation", "service level", "tsl", "absence rate",
+            "availability", "routed rate", "deviation", "service level", "tsl", "absence rate",
         ))
     ):
         return book.report.percent
@@ -422,24 +426,28 @@ def _flash_columns(
 ) -> tuple[list[str], list[list[Any]], int, int, int]:
     if profile.flash_layout == "oem_split":
         headers = [
-            "Hour", "Volume Forecasted", "Volume Ford", "Volume Toyota",
-            "SL Ford", "Availability Ford", "Availability Toyota", "AHT",
+            "Hour", "Volume Forecasted", "Volume Ford", "Volume Chery",
+            "Volume Toyota", "SL Ford", "SL Chery", "SL Toyota",
+            "Routed Rate Ford", "Routed Rate Chery", "Routed Rate Toyota", "AHT",
         ]
         rows = []
         for row in hourly:
             ford = row["groups"].get("Ford") or {}
+            chery = row["groups"].get("Chery") or {}
             toyota = row["groups"].get("Toyota") or {}
             rows.append([
                 row["hour_label"], row["forecast"], ford.get("offered"),
-                toyota.get("offered"), ford.get("service_level"),
-                ford.get("availability"), toyota.get("availability"),
+                chery.get("offered"), toyota.get("offered"),
+                ford.get("service_level"), chery.get("service_level"),
+                toyota.get("service_level"), ford.get("availability"),
+                chery.get("availability"), toyota.get("availability"),
                 row["aht_seconds"],
             ])
-        return headers, rows, 1, 2, 4
+        return headers, rows, 1, 2, 5
     if profile.flash_layout == "workforce":
         headers = [
             "Hour", "Volume Forecasted", "Volume Actual", "Volume Handled",
-            "Volume Handled in SL", "Deviation", "Availability", "TSL",
+            "Volume Handled in SL", "Deviation", "Routed Rate", "TSL",
             "AHT", "Planned HC", "Short Sickness", "Long Sickness",
             "Late/Early Leave", "Absence HC", "Absence Rate", "Data State",
         ]
@@ -454,7 +462,7 @@ def _flash_columns(
         return headers, rows, 1, 2, 7
     headers = [
         "Hour", "Volume Forecasted", "Volume Actual", "Volume Handled",
-        "Volume Handled in SL", "Deviation", "Availability", "TSL", "AHT",
+        "Volume Handled in SL", "Deviation", "Routed Rate", "TSL", "AHT",
         "Data State",
     ]
     rows = [[
@@ -474,15 +482,17 @@ def _flash_cards(
 ) -> list[tuple[str, Any, str, str]]:
     value = total or {}
     if profile.flash_layout == "oem_split":
-        ford, toyota = groups.get("Ford") or {}, groups.get("Toyota") or {}
+        ford = groups.get("Ford") or {}
+        chery = groups.get("Chery") or {}
+        toyota = groups.get("Toyota") or {}
         return [
-            ("Availability OEM", value.get("availability"), "percent", "Handled / actual"),
-            ("Availability Ford", ford.get("availability"), "percent", "Mapped Ford queues"),
-            ("Availability Toyota", toyota.get("availability"), "percent", "Toyota and Lexus"),
+            ("Routed Rate OEM", value.get("availability"), "percent", "Total routed / total entered"),
+            ("SLA OEM", value.get("service_level"), "percent", value.get("service_method") or "Configured method"),
+            ("SLA Ford", ford.get("service_level"), "percent", "APFR Ford"),
+            ("SLA Chery", chery.get("service_level"), "percent", "APFR Chery"),
+            ("SLA Toyota", toyota.get("service_level"), "percent", "APFR Toyota and Lexus"),
             ("Deviation", value.get("forecast_attainment"), "percent", "Actual / forecast through cutoff"),
-            ("TSL OEM", value.get("service_level"), "percent", value.get("service_method") or "Configured method"),
-            ("TSL Ford", ford.get("service_level"), "percent", "Mapped Ford queues"),
-            ("TSL Toyota", toyota.get("service_level"), "percent", "Toyota and Lexus"),
+            ("AHT", value.get("aht_seconds"), "seconds", "Weighted handled seconds"),
         ]
     if profile.flash_layout == "workforce":
         planned = max((row.get("planned_hc") or 0 for row in hourly), default=0)
@@ -493,17 +503,17 @@ def _flash_cards(
             ("Mailbox BNL", "N/C", "value", "Source not configured"),
             ("Absence Rate HC", _ratio(absent, planned), "percent", "Peak absent HC / peak planned HC"),
             ("Deviation", value.get("forecast_attainment"), "percent", "Actual / forecast through cutoff"),
-            ("Availability", value.get("availability"), "percent", "Handled / actual"),
+            ("Routed Rate", value.get("availability"), "percent", "Routed / entered"),
             ("TSL", value.get("service_level"), "percent", value.get("service_method") or "Configured method"),
             ("AHT", value.get("aht_seconds"), "seconds", "Weighted handled seconds"),
         ]
     return [
         ("Forecast", value.get("forecast"), "integer", "Through latest actual hour"),
-        ("Actual", value.get("offered"), "integer", "Unique mapped interactions"),
-        ("Handled", value.get("answered"), "integer", "Answered interactions"),
+        ("Actual", value.get("offered"), "integer", "Inbound queue entries"),
+        ("Handled", value.get("answered"), "integer", "Routed queue entries"),
         ("Handled in SL", value.get("answered_within_target"), "integer", "Answered inside threshold"),
         ("Deviation", value.get("forecast_attainment"), "percent", "Actual / forecast through cutoff"),
-        ("Availability", value.get("availability"), "percent", "Handled / actual"),
+        ("Routed Rate", value.get("availability"), "percent", "Routed / entered"),
         ("TSL", value.get("service_level"), "percent", value.get("service_method") or "Configured method"),
         ("AHT", value.get("aht_seconds"), "seconds", "Weighted handled seconds"),
     ]
@@ -523,7 +533,7 @@ def _add_flash_sheet(
     ws.set_tab_color(COLORS["gold"])
     ws.set_zoom(85)
     ws.merge_range("A1:Q1", f"FLASH  /  {profile.label.upper()}", book.report.title)
-    cutoff_text = f"through {cutoff:02d}:59" if cutoff is not None else "no mapped call interactions"
+    cutoff_text = f"through {cutoff:02d}:59" if cutoff is not None else "no mapped queue entries"
     ws.merge_range(
         "A2:Q2",
         f"{report_day:%Y-%m-%d}  |  Call-by-Call actuals {cutoff_text}  |  generated {book.generated:%Y-%m-%d %H:%M}",
@@ -557,12 +567,14 @@ def _add_flash_sheet(
     ws.write(total_row, 0, label, formats["total"])
     total_values = total or {}
     if profile.flash_layout == "oem_split":
-        ford, toyota = (
-            group_totals.get("Ford") or {}, group_totals.get("Toyota") or {},
-        )
+        ford = group_totals.get("Ford") or {}
+        chery = group_totals.get("Chery") or {}
+        toyota = group_totals.get("Toyota") or {}
         values = [
-            total_values.get("forecast"), ford.get("offered"), toyota.get("offered"),
-            ford.get("service_level"), ford.get("availability"),
+            total_values.get("forecast"), ford.get("offered"), chery.get("offered"),
+            toyota.get("offered"), ford.get("service_level"),
+            chery.get("service_level"), toyota.get("service_level"),
+            ford.get("availability"), chery.get("availability"),
             toyota.get("availability"), total_values.get("aht_seconds"),
         ]
     elif profile.flash_layout == "workforce":
@@ -593,7 +605,7 @@ def _add_flash_sheet(
         fmt = (
             formats["total_percent"] if lowered.startswith("sl ") or any(
                 token in lowered
-                for token in ("availability", "deviation", "tsl", "absence rate")
+                for token in ("availability", "routed rate", "deviation", "tsl", "absence rate")
             )
             else formats["total_seconds"] if "aht" in lowered
             else formats["total_integer"] if isinstance(value, (int, float)) and value is not None
@@ -611,7 +623,8 @@ def _add_flash_sheet(
             (
                 ("Forecast", forecast_col, COLORS["muted"]),
                 ("Ford", 2, COLORS["teal"]),
-                ("Toyota", 3, COLORS["gold"]),
+                ("Chery", 3, COLORS["red"]),
+                ("Toyota", 4, COLORS["gold"]),
             )
             if profile.flash_layout == "oem_split"
             else (
@@ -674,12 +687,12 @@ def _add_control_sheet(
     ws.merge_range("A1:J1", "SERVICE FLASH CONTROL", book.report.title)
     ws.merge_range(
         "A2:J2",
-        f"Daily control for {report_day:%Y-%m-%d}  |  actuals: mapped Call-by-Call interactions  |  forecast: Verint",
+        f"Daily control for {report_day:%Y-%m-%d}  |  actuals: mapped inbound Call-by-Call queue entries  |  forecast: Verint",
         book.report.subtitle,
     )
     headers = [
         "Flash", "Cutoff", "Forecast", "Actual", "Handled", "Deviation",
-        "Availability", "TSL", "AHT", "Status",
+        "Routed Rate", "TSL", "AHT", "Status",
     ]
     for col, header in enumerate(headers):
         ws.write(4, col, header, book.report.header)
@@ -734,7 +747,8 @@ def _add_control_sheet(
     notes = [
         "Open a Flash name to jump to its hourly sheet.",
         "Deviation follows the reference workbook: actual offered / forecast through the latest actual hour.",
-        "Availability uses business offered; TSL also removes non-short abandons inside target, matching Storm.",
+        "Storm SLA = answered within 20s / (total entered - abandons under 5s).",
+        "Routed Rate = total routed / total entered; it does not remove short abandons.",
         "No mapped calls and missing forecasts remain blank; the workbook never turns missing evidence into zero.",
     ]
     ws.write("A10", "OPERATING NOTES", book.report.section)
@@ -753,25 +767,27 @@ def _flat_hour_rows(
 ) -> tuple[list[str], list[tuple[Any, ...]]]:
     headers = [
         "profile_id", "flash", "business_date", "hour", "forecast", "offered",
-        "answered", "abandoned", "short_abandoned",
+        "business_offered", "answered", "abandoned", "short_abandoned",
         "abandoned_within_target", "answered_within_target",
         "forecast_attainment", "availability", "service_level", "service_target",
         "service_method", "abandon_rate", "aht_seconds", "planned_hc",
         "short_sickness_hc", "long_sickness_hc", "late_early_hc",
         "absence_hc", "absence_rate", "ford_offered", "ford_answered",
-        "ford_service_level", "toyota_offered", "toyota_answered",
+        "ford_service_level", "chery_offered", "chery_answered",
+        "chery_service_level", "toyota_offered", "toyota_answered",
         "toyota_service_level", "data_state",
     ]
     rows: list[tuple[Any, ...]] = []
     for profile in profiles:
         for row in hourly_by_profile[profile.profile_id]:
-            ford, toyota = (
-                row["groups"].get("Ford") or {}, row["groups"].get("Toyota") or {},
-            )
+            ford = row["groups"].get("Ford") or {}
+            chery = row["groups"].get("Chery") or {}
+            toyota = row["groups"].get("Toyota") or {}
             rows.append(tuple([
                 row.get("profile_id"), row.get("flash"), row.get("business_date"),
                 row.get("hour"), row.get("forecast"), row.get("offered"),
-                row.get("answered"), row.get("abandoned"), row.get("short_abandoned"),
+                row.get("business_offered"), row.get("answered"),
+                row.get("abandoned"), row.get("short_abandoned"),
                 row.get("abandoned_within_target"),
                 row.get("answered_within_target"), row.get("forecast_attainment"),
                 row.get("availability"), row.get("service_level"),
@@ -781,6 +797,7 @@ def _flat_hour_rows(
                 row.get("long_sickness_hc"), row.get("late_early_hc"),
                 row.get("absence_hc"), row.get("absence_rate"),
                 ford.get("offered"), ford.get("answered"), ford.get("service_level"),
+                chery.get("offered"), chery.get("answered"), chery.get("service_level"),
                 toyota.get("offered"), toyota.get("answered"), toyota.get("service_level"),
                 row.get("data_state"),
             ]))
@@ -795,7 +812,7 @@ def build_service_flashes_workbook(
     output: Path | None = None,
     profile_id: str | None = None,
 ) -> Path:
-    """Build all Book1 Flash layouts from mapped Call-by-Call interactions."""
+    """Build all Storm Flash layouts from mapped Call-by-Call queue entries."""
 
     catalog = load_service_profiles(config.home, config.service_profiles)
     profiles = [profile for profile in catalog.profiles if profile.active_on(end)]
@@ -834,7 +851,7 @@ def build_service_flashes_workbook(
         headers, rows = _flat_hour_rows(profiles, hourly_by_profile)
         book.table(
             "FLASH_DATA", "Flash clean hourly data",
-            "One profile/hour for the report day. Actual demand is deduplicated by Call-by-Call interaction key.",
+            "One profile/hour for the report day. Actual demand counts mapped inbound queue entries like Storm Total Entered.",
             headers, rows,
         )
         with mapping.file.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -913,17 +930,17 @@ def build_service_flashes_workbook(
             (),
         )
         book.definitions([
-            ("Volume Actual", "One unique inbound interaction in a mapped Flash scope", "Demand", "Transferred call legs are not double-counted inside the same Flash scope"),
-            ("OEM visible scope", " and ".join(oem_groups) or "Every configured group", "Matches the Book1 OEM image", "Other mapped groups remain in the hub but are excluded from OEM Flash totals"),
-            ("Volume Handled", "Mapped interaction with an inbound handled agent leg", "Service availability numerator", "Agent may be outside the FTE roster; the queue is the service boundary"),
+            ("Volume Actual", "Every inbound entry into a mapped Flash queue", "Storm Total Entered", "A transfer entering another mapped queue is another queue entry"),
+            ("OEM visible scope", " and ".join(oem_groups) or "Every configured group", "Matches the Storm OEM platform", "Regional Ford queues remain auditable but are excluded from the OEM total"),
+            ("Volume Handled", "Inbound queue entry routed to an agent", "Storm Total Routed", "Agent may be outside the FTE roster; the queue is the service boundary"),
             ("Response time", "Total Queue Wait Time + Ringing Duration", "Storm threshold clock", "Reproduced from the Call-by-Call business reference"),
-            ("Volume Handled in SL", f"Handled interaction with response time < {rulebook.target_seconds} seconds", "TSL numerator", "Threshold is editable in wfm_rules.toml"),
-            ("Short Abandon", f"Unanswered interaction with response time < {rulebook.short_abandon_seconds} seconds", "Removed from business offered", "Configured centrally"),
-            ("Abandoned in SL", f"Non-short unanswered interaction with response time < {rulebook.target_seconds} seconds", "Removed from the Storm SL denominator", "Kept separate from short abandons"),
-            ("Deviation", "Business offered / forecast through the latest actual hour", "Demand tracking", "Business offered excludes short abandons"),
-            ("Availability", "Handled / business offered", "Service availability", "Matches Storm dashboard; not agent availability or adherence"),
-            ("TSL", "Handled within target / (business offered - abandoned in SL)", "Service-level control", "Storm business reference; a gross technical method remains available in the KPI catalog"),
-            ("AHT", "Sum of inbound talk + hold + wrap / handled interactions", "Workload", "Weighted; never an average of hourly averages"),
+            ("Volume Handled in SL", f"Routed queue entry with response time < {rulebook.target_seconds} seconds", "SLA numerator", "Threshold is editable in wfm_rules.toml"),
+            ("Short Abandon", f"Unanswered queue entry with response time < {rulebook.short_abandon_seconds} seconds", "Removed only from the SLA denominator", "Configured centrally"),
+            ("Abandoned in SL", f"Non-short unanswered queue entry with response time < {rulebook.target_seconds} seconds", "Diagnostic only", "It remains in the Storm SLA denominator"),
+            ("Deviation", "Total entered / forecast through the latest actual hour", "Demand tracking", "Uses the visible Storm volume"),
+            ("Routed Rate", "Total routed / total entered", "Service availability", "Matches the Storm screenshot; not agent availability or adherence"),
+            ("TSL", "Handled within target / (total entered - short abandons)", "Service-level control", "Proven against the supplied Storm queue screenshots"),
+            ("AHT", "Sum of inbound talk + hold + wrap / routed queue entries", "Workload", "Weighted; never an average of hourly averages"),
             ("Ford NL workload cards", "Dispatch, Follow-up and Mailbox BNL remain N/C", "Data integrity", "Book1 provides labels but no governed source or formula; values are not invented"),
         ])
         clean_calls, unique_interactions = conn.execute(
@@ -942,7 +959,7 @@ def build_service_flashes_workbook(
             ("Selected data period", f"{start} to {end}", "Model boundary"),
             ("Clean Call-by-Call legs", clean_calls, "After stable call-leg deduplication"),
             ("Unique clean interactions", unique_interactions, "Before queue mapping"),
-            ("Mapped Flash offered", mapped_offered, "One per interaction/comparison scope"),
+            ("Mapped Flash offered", mapped_offered, "Inbound queue-entry count"),
             ("Queue mapping", mapping.file.name, mapping.sha256),
             ("Service profiles", catalog.version, catalog.sha256),
             ("OEM visible groups", " | ".join(oem_groups) or "ALL", "Configured in service_profiles.toml"),

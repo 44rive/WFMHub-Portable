@@ -8,7 +8,7 @@ from pathlib import Path
 
 from wfmhub.database import DatabaseConnection, _migration_statements
 from wfmhub.mapping import load_queue_mapping
-from wfmhub.metrics import load_metric_catalog
+from wfmhub.metrics import evaluate_metric, load_metric_catalog
 from wfmhub.models import (
     _aggregate_forecast_hour_rows,
     _build_call_service,
@@ -23,6 +23,44 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class CallServiceModelTests(unittest.TestCase):
+    def test_storm_screenshot_arithmetic_is_reproduced(self):
+        catalog = load_metric_catalog(
+            REPO, REPO / "config" / "default_metrics.toml",
+        )
+        dimensions = {"lob": "Ford FR", "source_system": "CALL_BY_CALL"}
+        components = {
+            "offered": 278,
+            "answered": 266,
+            "abandoned": 12,
+            "short_abandoned": 2,
+            "abandoned_within_target": 0,
+            "answered_within_target": 249,
+            "handled_seconds": 0,
+        }
+        service = evaluate_metric(
+            catalog.method_for("service_level", date(2026, 9, 5), dimensions),
+            components,
+        )
+        routed = evaluate_metric(
+            catalog.method_for(
+                "service_availability_business", date(2026, 9, 5), dimensions,
+            ),
+            components,
+        )
+        self.assertAlmostEqual(service.value, 0.9021739130434783)
+        self.assertAlmostEqual(routed.value, 0.9568345323741007)
+
+        ford_components = dict(components)
+        ford_components.update({
+            "offered": 74, "answered": 73, "abandoned": 1,
+            "short_abandoned": 0, "answered_within_target": 72,
+        })
+        ford_service = evaluate_metric(
+            catalog.method_for("service_level", date(2026, 9, 5), dimensions),
+            ford_components,
+        )
+        self.assertAlmostEqual(ford_service.value, 0.972972972972973)
+
     def test_four_fifteen_minute_forecasts_become_one_hour(self):
         mapping = load_queue_mapping(REPO / "config" / "default_queue_mapping.csv")
         rows = []
@@ -61,20 +99,37 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertEqual(native[1]["interval_end"], datetime(2026, 9, 1, 8, 30))
         self.assertEqual(native[1]["fte_required"], 4)
 
-    def test_oem_visible_layout_matches_book1_ford_toyota_contract(self):
+    def test_storm_visible_scopes_and_oem_layout(self):
         catalog = load_service_profiles(
             REPO, REPO / "config" / "default_service_profiles.toml",
         )
         profile = catalog.select("ford_oem_fr", date(2026, 9, 1))
-        self.assertEqual(profile.flash_total_groups, ("Ford", "Toyota"))
+        self.assertEqual(profile.flash_total_groups, ("Ford", "Chery", "Toyota"))
         self.assertTrue(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR"},
         ))
         self.assertTrue(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR"},
         ))
-        self.assertFalse(_included_in_flash_total(
+        self.assertTrue(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CHERY_ASSISTANCE_FR"},
+        ))
+        self.assertFalse(_included_in_flash_total(
+            profile, {"queue": "APBN_BRU_MOBILITY_Ford_Assistance_FR"},
+        ))
+        ford_nl = catalog.select("ford_nl", date(2026, 9, 1))
+        self.assertTrue(_included_in_flash_total(
+            ford_nl, {"queue": "APBN_AMS_MOBILITY_Ford_Assistance_NL"},
+        ))
+        self.assertFalse(_included_in_flash_total(
+            ford_nl, {"queue": "APBN_BRU_MOBILITY_Ford_Assistance_VL"},
+        ))
+        rsa_nl = catalog.select("rsa_nl", date(2026, 9, 1))
+        self.assertTrue(_included_in_flash_total(
+            rsa_nl, {"queue": "APBN_AMS_MOBILITY_INSURAN_Front_NL"},
+        ))
+        self.assertFalse(_included_in_flash_total(
+            rsa_nl, {"queue": "APBN_AMS_MOBILITY_PROVIDER_Local_NL"},
         ))
         blank = {
             "hour_label": "08:00", "forecast": 10, "offered": 5,
@@ -84,13 +139,15 @@ class CallServiceModelTests(unittest.TestCase):
             "data_state": "READY",
             "groups": {
                 "Ford": {"offered": 3, "service_level": 2 / 3, "availability": 1},
+                "Chery": {"offered": 1, "service_level": 1, "availability": 1},
                 "Toyota": {"offered": 2, "service_level": 0.5, "availability": 0.5},
             },
         }
         headers, _, _, _, _ = _flash_columns(profile, [blank])
         self.assertEqual(headers, [
-            "Hour", "Volume Forecasted", "Volume Ford", "Volume Toyota",
-            "SL Ford", "Availability Ford", "Availability Toyota", "AHT",
+            "Hour", "Volume Forecasted", "Volume Ford", "Volume Chery",
+            "Volume Toyota", "SL Ford", "SL Chery", "SL Toyota",
+            "Routed Rate Ford", "Routed Rate Chery", "Routed Rate Toyota", "AHT",
         ])
         cards = _flash_cards(
             profile,
@@ -100,8 +157,8 @@ class CallServiceModelTests(unittest.TestCase):
             [blank],
         )
         self.assertEqual([card[0] for card in cards], [
-            "Availability OEM", "Availability Ford", "Availability Toyota",
-            "Deviation", "TSL OEM", "TSL Ford", "TSL Toyota",
+            "Routed Rate OEM", "SLA OEM", "SLA Ford", "SLA Chery",
+            "SLA Toyota", "Deviation", "AHT",
         ])
 
     def test_forecast_only_hour_has_no_attainment_instead_of_crashing(self):
@@ -110,7 +167,7 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertIsNone(_ratio(10, 0))
         self.assertEqual(_ratio(8, 10), 0.8)
 
-    def test_interactions_not_transfer_legs_drive_flash_volume(self):
+    def test_inbound_queue_entries_drive_storm_flash_volume(self):
         raw = sqlite3.connect(
             ":memory:",
             detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
@@ -140,7 +197,7 @@ class CallServiceModelTests(unittest.TestCase):
             conn.execute(statement)
 
         rows = [
-            # Two legs, one customer interaction. Only one offered call.
+            # Two inbound entries in one interaction. Storm counts both queue entries.
             (date(2026, 8, 1), "transfer", "leg-1", datetime(2026, 8, 1, 9, 0), "I", "MAPPED_QUEUE", 10, 0, None, 0, 0, 0, False, "NL", None, "calls.csv"),
             (date(2026, 8, 1), "transfer", "leg-2", datetime(2026, 8, 1, 9, 1), "I", "MAPPED_QUEUE", 0, 0, "999", 100, 10, 10, True, "NL", None, "calls.csv"),
             # Three unanswered interactions: short, in-target non-short and long.
@@ -181,11 +238,11 @@ class CallServiceModelTests(unittest.TestCase):
                       abandon_rate, aht_seconds
                FROM mart.call_service_hour"""
         ).fetchone()
-        self.assertEqual(result[:9], (5, 2, 3, 1, 1, 1, 170.0, 6, 1))
-        self.assertAlmostEqual(result[9], 1 / 3)
-        # Storm business availability excludes short abandons from offered demand.
-        self.assertAlmostEqual(result[10], 1 / 2)
-        self.assertAlmostEqual(result[11], 3 / 5)
+        self.assertEqual(result[:9], (6, 2, 4, 1, 2, 1, 170.0, 6, 1))
+        self.assertAlmostEqual(result[9], 1 / 5)
+        # The Storm screenshot's routed rate uses every entered queue entry.
+        self.assertAlmostEqual(result[10], 2 / 6)
+        self.assertAlmostEqual(result[11], 4 / 6)
         self.assertAlmostEqual(result[12], 85.0)
         conn.close()
 

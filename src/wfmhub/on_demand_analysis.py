@@ -127,7 +127,7 @@ def _evidence(conn: DatabaseConnection, domain: str, start: date, end: date) -> 
                         ), actual AS (
                             SELECT business_date, hour_start,
                                    coalesce(comparison_scope, service_scope, lob, queue, '(unmapped)') AS comparison_scope,
-                                   sum(max(0, offered-short_abandoned)) AS actual_volume
+                                   sum(offered) AS actual_volume
                             FROM mart.service_interval
                             WHERE business_date BETWEEN ? AND ? AND mapping_status='MAPPED'
                             GROUP BY business_date, hour_start,

@@ -41,10 +41,10 @@ The products use one visual identity but not one generic layout. The Flash is an
 intraday control page, Attendance is a call list, Corrections is a shift
 timeline, and Final Absenteeism is a ledger.
 
-Adherence is not calculated. Reported service availability means **answered /
-(offered - short abandons)**. Reported TSL means **answered inside target /
-(offered - short abandons - non-short abandons inside target)**. Both follow
-the Storm business reference; availability never means agent availability.
+Adherence is not calculated. Reported Routed Rate means **total routed / total
+entered**. Reported TSL means **answered inside target / (total entered - short
+abandons under 5 seconds)**. Both follow the supplied Storm screenshots; Routed
+Rate never means agent availability.
 
 ## Source authority
 
@@ -100,21 +100,21 @@ Ford OEM France. One control page links to every Flash; `FLASH_DATA`,
 `QUEUE_MAP`, `EXCEPTIONS`, `DEFINITIONS`, and the hidden audit sheet provide the
 evidence behind the presentation.
 
-Actual demand comes from exact queues in `queue_mapping.csv`. WFMHub counts one
-inbound customer interaction per Flash scope, not every transferred call leg.
-That keeps abandoned calls with no Agent ID and mapped service contacts handled
-outside the FTE roster without admitting unrelated worldwide queues. PCS stays
-limited to the effective-dated FTE roster.
+Actual demand comes from exact queues in `queue_mapping.csv`. WFMHub counts each
+mapped inbound queue entry, matching Storm `Total Entered`; outbound companion
+legs are ignored. A transfer entering another displayed queue is therefore a
+new queue entry. The profile catalog excludes Provider queues from RSA, limits
+Ford NL to the two Amsterdam queues, and limits OEM to the APFR Ford, Chery and
+Toyota/Lexus platform queues. PCS stays limited to the effective-dated FTE roster.
 
 Verint Forecast supplies forecast only. New 15-minute exports stay at their
 native grain for Staffing and are rolled into hours for the Flashes. Hourly
 volume is the sum of the four quarters; FTE is an average level; forecast SL
 and AHT are weighted by volume. `Deviation`, following the Book1 label, means
-`business offered / forecast through the latest actual hour`. Business offered
-is unique offered interactions less short abandons. Availability is `handled /
-business offered`; TSL is `handled within 20 seconds / (business offered -
-non-short abandons within 20 seconds)`; AHT is weighted handled seconds per
-answered interaction. The threshold clock is total queue wait plus ringing.
+`total entered / forecast through the latest actual hour`. Routed Rate is
+`total routed / total entered`; TSL is `handled within 20 seconds / (total
+entered - short abandons under 5 seconds)`; AHT is weighted handled seconds per
+routed queue entry. The threshold clock is total queue wait plus ringing.
 
 Ford NL's Dispatch, Follow-up, and Mailbox BNL cards remain `N/C` because Book1
 contains the labels but no governed source or formula. WFMHub does not invent

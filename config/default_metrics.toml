@@ -5,22 +5,22 @@
 # Higher grains always follow the declared aggregation; never average ratios.
 
 [catalog]
-version = "2026.09.3"
+version = "2026.09.4"
 description = "Canonical WFM metric methods, scopes, targets and aggregation contracts."
 
 [[metrics]]
 id = "service_level"
 method = "storm_20"
 label = "Storm service level 20s"
-description = "Answered within target divided by offered less short abandons and non-short abandons inside target."
+description = "Answered within target divided by entered calls less short abandons under five seconds."
 domain = "service"
 source_model = "service_interval"
 grain = "queue interval"
 unit = "percent"
 aggregation = "ratio_of_sums"
 numerator = "answered_within_target"
-denominator = "offered - short_abandoned - abandoned_within_target"
-sample = "offered - short_abandoned - abandoned_within_target"
+denominator = "offered - short_abandoned"
+sample = "offered - short_abandoned"
 target = 0.80
 direction = "higher_is_better"
 minimum_sample = 1
@@ -69,17 +69,17 @@ finding_dimensions = ["source_system", "lob", "language"]
 
 [[metrics]]
 id = "service_availability_business"
-method = "answered_over_business_offered"
-label = "Business service availability"
-description = "Answered contacts divided by offered contacts after short abandons are excluded; this is the Storm dashboard business reference."
+method = "storm_routed_rate"
+label = "Storm routed rate"
+description = "Answered or routed queue entries divided by every entered queue entry."
 domain = "service"
 source_model = "service_interval"
 grain = "queue interval"
 unit = "percent"
 aggregation = "ratio_of_sums"
 numerator = "answered"
-denominator = "offered - short_abandoned"
-sample = "offered - short_abandoned"
+denominator = "offered"
+sample = "offered"
 direction = "higher_is_better"
 minimum_sample = 1
 effective_from = 2026-01-01

@@ -520,7 +520,7 @@ class EndToEndTests(unittest.TestCase):
                 ).fetchone()
                 service_components = conn.execute(
                     """SELECT sum(answered_within_target),
-                              sum(offered-short_abandoned-abandoned_within_target)
+                              sum(offered-short_abandoned)
                        FROM mart.service_interval"""
                 ).fetchone()
                 self.assertAlmostEqual(
@@ -927,11 +927,12 @@ class EndToEndTests(unittest.TestCase):
                 ])
                 self.assertEqual(service_book["CONTROL"]["A1"].value, "SERVICE FLASH CONTROL")
                 self.assertEqual(
-                    [cell.value for cell in service_book["Flash OEM"][11]][:8],
+                    [cell.value for cell in service_book["Flash OEM"][11]][:12],
                     [
                         "Hour", "Volume Forecasted", "Volume Ford",
-                        "Volume Toyota", "SL Ford", "Availability Ford",
-                        "Availability Toyota", "AHT",
+                        "Volume Chery", "Volume Toyota", "SL Ford", "SL Chery",
+                        "SL Toyota", "Routed Rate Ford", "Routed Rate Chery",
+                        "Routed Rate Toyota", "AHT",
                     ],
                 )
                 self.assertEqual(service_book.properties.creator, "Anass ASSRI")

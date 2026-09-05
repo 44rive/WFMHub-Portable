@@ -158,7 +158,10 @@ class ExcelTemplateTests(unittest.TestCase):
         self.assertEqual(ford.availability_metric, "service_availability_business")
         self.assertEqual(ford.source_systems, ("CALL_BY_CALL",))
         self.assertEqual(ford.staffing_lobs, ("Ford FR",))
-        self.assertEqual([group.label for group in ford.groups], ["Toyota", "Chery", "Ford"])
+        self.assertEqual(
+            [group.label for group in ford.groups],
+            ["Toyota", "Chery", "Ford", "Regional Ford"],
+        )
 
     def test_previous_service_profile_catalog_upgrades_with_backup(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -172,19 +175,19 @@ class ExcelTemplateTests(unittest.TestCase):
                 default_text, encoding="utf-8",
             )
             previous_text = default_text.replace(
-                'version = "2026.09.6"', 'version = "2026.09.5"', 1,
+                'version = "2026.09.7"', 'version = "2026.09.6"', 1,
             ).replace(
-                'flash_total_groups = ["Ford", "Toyota"]\n', "", 1,
+                'flash_total_groups = ["Ford", "Chery", "Toyota"]\n', "", 1,
             )
             target = config / "service_profiles.toml"
             target.write_text(previous_text, encoding="utf-8")
 
             catalog = load_service_profiles(home, target)
 
-            self.assertEqual(catalog.version, "2026.09.6")
+            self.assertEqual(catalog.version, "2026.09.7")
             self.assertEqual(
                 catalog.select("ford_oem_fr", date(2026, 9, 1)).flash_total_groups,
-                ("Ford", "Toyota"),
+                ("Ford", "Chery", "Toyota"),
             )
             self.assertEqual(
                 len(list(config.glob("service_profiles_pre_call_service_*.toml"))),

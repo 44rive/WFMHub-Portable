@@ -27,7 +27,7 @@ class MetricCatalogTests(unittest.TestCase):
             "short_abandoned": 5,
             "abandoned_within_target": 4,
         })
-        self.assertAlmostEqual(result.value, 70 / 91)
+        self.assertAlmostEqual(result.value, 70 / 95)
         self.assertEqual(result.state, "BELOW_TARGET")
         zero = evaluate_metric(method, {
             "answered_within_target": 0,

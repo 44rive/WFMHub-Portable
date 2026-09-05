@@ -3,7 +3,7 @@
 # applies. Formulas and targets remain centralized in metric_catalog.toml.
 
 [catalog]
-version = "2026.09.6"
+version = "2026.09.7"
 default_profile = "ford_oem_fr"
 description = "Effective-dated service and Book1 Flash profiles for RSA Netherlands, RSA Belgium, Ford Netherlands, and Ford OEM France."
 
@@ -19,7 +19,7 @@ flash_layout = "oem_split"
 operating_start_hour = 0
 operating_end_hour = 23
 display_order = 4
-flash_total_groups = ["Ford", "Toyota"]
+flash_total_groups = ["Ford", "Chery", "Toyota"]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"
 aht_metric = "aht_seconds"
@@ -27,14 +27,18 @@ effective_from = 2026-01-01
 
 [[profiles.groups]]
 label = "Toyota"
-queue_contains = ["TOYOTA", "LEXUS"]
+queue_contains = ["APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS"]
 
 [[profiles.groups]]
 label = "Chery"
-queue_contains = ["CHERY"]
+queue_contains = ["APFR_PAR_RSA_CHERY_ASSISTANCE"]
 
 [[profiles.groups]]
 label = "Ford"
+queue_contains = ["APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE"]
+
+[[profiles.groups]]
+label = "Regional Ford"
 queue_contains = ["FORD"]
 
 [[profiles]]
@@ -49,13 +53,18 @@ flash_layout = "workforce"
 operating_start_hour = 0
 operating_end_hour = 23
 display_order = 3
+flash_total_groups = ["Ford Amsterdam"]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"
 aht_metric = "aht_seconds"
 effective_from = 2026-01-01
 
 [[profiles.groups]]
-label = "Ford"
+label = "Ford Amsterdam"
+queue_contains = ["APBN_AMS_MOBILITY_FORD"]
+
+[[profiles.groups]]
+label = "Regional Ford"
 queue_contains = ["FORD"]
 
 [[profiles]]
@@ -70,10 +79,15 @@ flash_layout = "standard"
 operating_start_hour = 7
 operating_end_hour = 21
 display_order = 2
+flash_total_groups = ["RSA"]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"
 aht_metric = "aht_seconds"
 effective_from = 2026-01-01
+
+[[profiles.groups]]
+label = "Provider"
+queue_contains = ["PROVIDER"]
 
 [[profiles.groups]]
 label = "RSA"
@@ -91,10 +105,15 @@ flash_layout = "standard"
 operating_start_hour = 7
 operating_end_hour = 22
 display_order = 1
+flash_total_groups = ["RSA"]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"
 aht_metric = "aht_seconds"
 effective_from = 2026-01-01
+
+[[profiles.groups]]
+label = "Provider"
+queue_contains = ["PROVIDER"]
 
 [[profiles.groups]]
 label = "RSA"

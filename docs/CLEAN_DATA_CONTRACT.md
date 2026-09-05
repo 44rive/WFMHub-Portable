@@ -64,15 +64,16 @@ planned net minutes, so rates cannot exceed 100%. Summary rates include only
 
 ## Service semantics
 
-One interaction may have several call legs. The service mart counts it once per
-mapped comparison scope. Reports use the Storm business reference:
+One interaction may have several call legs. The service mart counts every
+mapped inbound queue entry, matching Storm `Total Entered`, and ignores outbound
+companion legs. Reports use the Storm business reference:
 
-- business offered = raw offered - short abandons below 5 seconds;
+- total entered = mapped inbound queue entries;
+- SLA offered = total entered - short abandons below 5 seconds;
 - response time = total queue wait + ringing duration;
-- TSL = answered within 20 seconds / (business offered - non-short abandons
-  within 20 seconds);
-- service availability = answered / business offered;
-- deviation = business offered / forecast;
+- TSL = answered within 20 seconds / SLA offered;
+- routed rate = answered / total entered;
+- deviation = total entered / forecast;
 - AHT = total talk + hold + wrap seconds / answered.
 
 Technical gross methods remain in the metric catalog. Higher-grain percentages

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.18.2 — 2026-09-05
+
+- Corrected the Storm SLA after validating the four supplied dashboard
+  screenshots: `answered_within_target / (total_entered - short_abandoned)`.
+  Non-short abandons inside target remain diagnostic and are not subtracted.
+- Corrected Storm Routed Rate to `total_routed / total_entered` and made Flash
+  volume/deviation use the visible raw `Total Entered` count.
+- Changed Call-by-Call service counting to inbound queue-entry grain, matching
+  the Storm queue dashboard; outbound companion legs remain excluded.
+- Excluded Provider queues from RSA Flash totals, limited Ford NL to the two
+  Amsterdam queues, and limited OEM to the three APFR Ford/Chery/Toyota queues.
+- Added every missing queue identity visible in the supplied screenshots and
+  expanded the OEM sheet to expose Chery alongside Ford and Toyota/Lexus.
+- Added screenshot-derived regression cases, automatic configuration upgrades,
+  and updated business documentation.
+
 ## 0.18.1 — 2026-09-05
 
 - Fixed Attendance Review generation when a selected period has no exact gaps;

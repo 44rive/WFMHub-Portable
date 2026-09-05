@@ -2620,13 +2620,12 @@ def _build_call_service(
     start: date,
     end: date,
 ) -> int:
-    """Materialize one offered contact per mapped interaction and Flash scope.
+    """Materialize Storm service at inbound queue-entry grain.
 
-    Call-by-Call is a leg feed: transfers and companion legs can repeat the
-    same customer contact. The interaction key is therefore the counting key.
-    A contact is counted once in each mapped comparison scope and assigned to
-    its first mapped queue. Agent workload remains the sum of its distinct
-    inbound handled legs.
+    Storm's ``Total Entered`` is a count of inbound entries into the displayed
+    queues, not a count of unique customer interactions.  Outbound companion
+    legs never enter service demand; an inbound transfer into another mapped
+    queue is a new queue entry and is counted by Storm in that queue.
     """
 
     conn.execute("DELETE FROM mart.call_service_hour")
@@ -2642,100 +2641,81 @@ def _build_call_service(
         """,
         [start, end],
     ))
-    interactions: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
-    for row in rows:
-        interaction = str(row.get("interaction_key") or row.get("call_key") or "")
-        interactions[(row["business_date"], interaction)].append(row)
-
     aggregates: dict[tuple[Any, ...], dict[str, Any]] = {}
-    for (business_date, _interaction), legs in interactions.items():
-        inbound = [
-            leg for leg in legs
-            if str(leg.get("call_direction") or "").strip().upper() == "I"
-        ]
-        mapped_groups: dict[str, list[tuple[dict[str, Any], Any]]] = defaultdict(list)
-        for leg in inbound:
-            mapped = mapping.map_actual("STORM", leg.get("queue"), None, None)
-            if mapped.status == "MAPPED":
-                mapped_groups[mapped.comparison_scope].append((leg, mapped))
-        if not mapped_groups:
+    for selected in rows:
+        if str(selected.get("call_direction") or "").strip().upper() != "I":
             continue
-
-        for comparison_scope, candidates in mapped_groups.items():
-            candidates.sort(key=lambda item: (item[0].get("call_start") or datetime.max, str(item[0].get("call_key") or "")))
-            selected, mapped = candidates[0]
-            # Queue-less handled legs can only be safely attached when the
-            # interaction belongs to one configured Flash scope.
-            relevant = [item[0] for item in candidates]
-            if len(mapped_groups) == 1:
-                relevant = inbound
-            handled_legs = [
-                leg for leg in relevant
-                if leg.get("agent_id") is not None
-                or sum(float(leg.get(name) or 0) for name in ("talk_seconds", "hold_seconds", "wrap_seconds")) > 0
-            ]
-            answered = 1 if handled_legs else 0
-            wait_seconds = selected.get("queue_wait_seconds")
-            response_seconds = (
-                float(wait_seconds) + float(selected.get("ringing_seconds") or 0)
-                if wait_seconds is not None else None
-            )
-            short_abandoned = int(
-                not answered
-                and response_seconds is not None
-                and response_seconds < rulebook.short_abandon_seconds
-            )
-            abandoned_within_target = int(
-                not answered
-                and response_seconds is not None
-                and rulebook.short_abandon_seconds <= response_seconds
-                and response_seconds < rulebook.target_seconds
-            )
-            within_target = int(
-                bool(answered)
-                and response_seconds is not None
-                and response_seconds < rulebook.target_seconds
-            )
-            call_start = selected.get("call_start")
-            if call_start is None:
-                continue
-            hour_start = call_start.replace(minute=0, second=0, microsecond=0)
-            queue = str(selected.get("queue") or "UNNAMED MAPPED QUEUE")
-            suffix = mapped.service_scope.rsplit(" ", 1)[-1].upper()
-            language = (
-                suffix
-                if suffix in {"FR", "VL", "NL", "DE", "EN"}
-                else selected.get("language")
-            )
-            key = (
-                business_date, hour_start, mapped.service_scope,
-                comparison_scope, queue, mapped.designation, language,
-            )
-            bucket = aggregates.setdefault(key, {
-                "offered": 0, "answered": 0, "abandoned": 0,
-                "short_abandoned": 0, "abandoned_within_target": 0,
-                "answered_within_target": 0,
-                "talk_seconds": 0.0, "hold_seconds": 0.0,
-                "wrap_seconds": 0.0, "handled_seconds": 0.0,
-                "call_legs": 0, "transferred_legs": 0,
-                "source_files": set(),
-            })
-            bucket["offered"] += 1
-            bucket["answered"] += answered
-            bucket["abandoned"] += 1 - answered
-            bucket["short_abandoned"] += short_abandoned
-            bucket["abandoned_within_target"] += abandoned_within_target
-            bucket["answered_within_target"] += within_target
-            for name in ("talk_seconds", "hold_seconds", "wrap_seconds"):
-                bucket[name] += sum(float(leg.get(name) or 0) for leg in handled_legs)
-            bucket["handled_seconds"] = (
-                bucket["talk_seconds"] + bucket["hold_seconds"] + bucket["wrap_seconds"]
-            )
-            bucket["call_legs"] += len(relevant)
-            bucket["transferred_legs"] += sum(bool(leg.get("transferred")) for leg in relevant)
-            bucket["source_files"].update(
-                str(leg["source_file"]) for leg in relevant if leg.get("source_file")
-            )
+        mapped = mapping.map_actual("STORM", selected.get("queue"), None, None)
+        if mapped.status != "MAPPED":
+            continue
+        leg_workload = sum(
+            float(selected.get(name) or 0)
+            for name in ("talk_seconds", "hold_seconds", "wrap_seconds")
+        )
+        raw_agent = selected.get("agent_id")
+        has_agent = raw_agent is not None and bool(str(raw_agent).strip())
+        answered = int(has_agent or leg_workload > 0)
+        wait_seconds = selected.get("queue_wait_seconds")
+        response_seconds = (
+            float(wait_seconds) + float(selected.get("ringing_seconds") or 0)
+            if wait_seconds is not None else None
+        )
+        short_abandoned = int(
+            not answered
+            and response_seconds is not None
+            and response_seconds < rulebook.short_abandon_seconds
+        )
+        abandoned_within_target = int(
+            not answered
+            and response_seconds is not None
+            and rulebook.short_abandon_seconds <= response_seconds
+            and response_seconds < rulebook.target_seconds
+        )
+        within_target = int(
+            bool(answered)
+            and response_seconds is not None
+            and response_seconds < rulebook.target_seconds
+        )
+        call_start = selected.get("call_start")
+        if call_start is None:
+            continue
+        business_date = selected["business_date"]
+        hour_start = call_start.replace(minute=0, second=0, microsecond=0)
+        queue = str(selected.get("queue") or "UNNAMED MAPPED QUEUE")
+        suffix = mapped.service_scope.rsplit(" ", 1)[-1].upper()
+        language = (
+            suffix
+            if suffix in {"FR", "VL", "NL", "DE", "EN"}
+            else selected.get("language")
+        )
+        key = (
+            business_date, hour_start, mapped.service_scope,
+            mapped.comparison_scope, queue, mapped.designation, language,
+        )
+        bucket = aggregates.setdefault(key, {
+            "offered": 0, "answered": 0, "abandoned": 0,
+            "short_abandoned": 0, "abandoned_within_target": 0,
+            "answered_within_target": 0,
+            "talk_seconds": 0.0, "hold_seconds": 0.0,
+            "wrap_seconds": 0.0, "handled_seconds": 0.0,
+            "call_legs": 0, "transferred_legs": 0,
+            "source_files": set(),
+        })
+        bucket["offered"] += 1
+        bucket["answered"] += answered
+        bucket["abandoned"] += 1 - answered
+        bucket["short_abandoned"] += short_abandoned
+        bucket["abandoned_within_target"] += abandoned_within_target
+        bucket["answered_within_target"] += within_target
+        for name in ("talk_seconds", "hold_seconds", "wrap_seconds"):
+            bucket[name] += float(selected.get(name) or 0)
+        bucket["handled_seconds"] = (
+            bucket["talk_seconds"] + bucket["hold_seconds"] + bucket["wrap_seconds"]
+        )
+        bucket["call_legs"] += 1
+        bucket["transferred_legs"] += int(bool(selected.get("transferred")))
+        if selected.get("source_file"):
+            bucket["source_files"].add(str(selected["source_file"]))
 
     output: list[dict[str, Any]] = []
     for key, values in sorted(

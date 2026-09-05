@@ -358,13 +358,13 @@ no loss.
 
 ```text
 answered_within_target /
-(offered - short_abandoned - abandoned_within_target)
+(offered - short_abandoned)
 ```
 
 The threshold clock is Call-by-Call total queue wait plus ringing duration.
-Business availability remains answered divided by offered less short abandons.
-The metric catalog also retains technical gross availability/SL. Queue scopes
-choose the reported profile, while both variants remain available for audit.
+Storm Routed Rate is answered divided by every entered queue entry. Queue
+scopes and profile display groups choose the reported queues; Provider and
+regional Ford rows remain auditable without contaminating the four Flashes.
 AHT is weighted from handled seconds divided by answered contacts. Higher-grain
 reports use ratios of summed components, never averages of interval percentages.
 

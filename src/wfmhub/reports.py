@@ -56,7 +56,7 @@ def _display_header(name: str) -> str:
         "low_score_percent": "Low Score %", "pcs_average": "PCS Average",
         "q1_average": "Q1 Average", "q2_average": "Q2 Average",
         "sl_gross": "Gross SL %", "sl_adjusted": "Adjusted SL %",
-        "service_level": "Configured SL %", "service_availability": "Service Availability %",
+        "service_level": "Configured SL %", "service_availability": "Routed Rate %",
         "abandon_rate": "Abandon Rate %", "absence_rate": "Absence Rate %",
         "vacation_rate": "Vacation Rate %", "shrinkage_rate": "Shrinkage Rate %",
         "rule_sha256": "Rule SHA-256", "rule_version": "Rule Version",

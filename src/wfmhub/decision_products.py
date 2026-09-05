@@ -1114,7 +1114,14 @@ def _service_rows(
         [start, end, *profile.service_scopes, *profile.source_systems],
     )
     headers = [item[0] for item in cursor.description]
-    return [dict(zip(headers, row)) for row in cursor.fetchall()]
+    rows = [dict(zip(headers, row)) for row in cursor.fetchall()]
+    if profile.flash_total_groups:
+        allowed = set(profile.flash_total_groups)
+        rows = [
+            row for row in rows
+            if profile.group_for(row.get("queue")) in allowed
+        ]
+    return rows
 
 
 def _profile_metric(catalog: MetricCatalog, profile: ServiceProfile, metric_id: str, on_date: date):
@@ -1176,7 +1183,8 @@ def _service_aggregate(
     )
     return {
         "raw_offered": offered,
-        "offered": max(0.0, offered - short),
+        "offered": offered,
+        "business_offered": max(0.0, offered - short),
         "answered": answered,
         "short_abandoned": short,
         "abandoned_within_target": abandoned_in_target,
@@ -1402,9 +1410,7 @@ def build_realisations_workbook(
         absence_hours = sum(float(row[23] or 0) for row in rows)
         shrinkage_hours = sum(float(row[26] or 0) for row in rows)
         profile_components = {
-            # Daily rows expose business offered. Reconstruct raw offered for
-            # the central metric expression, which subtracts short abandons.
-            "offered": offered + short, "answered": answered,
+            "offered": offered, "answered": answered,
             "short_abandoned": short,
             "abandoned_within_target": abandoned_in_target,
             "answered_within_target": within,
@@ -1446,7 +1452,7 @@ def build_realisations_workbook(
             KpiCard("Forecast volume", total_forecast if forecast_present else None, "integer"),
             KpiCard("Forecast attainment", _ratio(total_actual, total_forecast) if forecast_present else None, "percent"),
             KpiCard("Mapped LOBs", len(selected_profiles), "integer"),
-            KpiCard("Service availability", availability_value, "percent"),
+            KpiCard("Routed rate", availability_value, "percent"),
             KpiCard("Weighted AHT", aht_value, "decimal"),
             KpiCard("Absence rate", _ratio(total_absence, total_planned), "percent"),
             KpiCard("Shrinkage rate", _ratio(total_shrinkage, total_planned), "percent"),
@@ -1455,18 +1461,18 @@ def build_realisations_workbook(
         status_text,
         [
             "LOB", "Actual", "Forecast", "Attainment %", "Service Level %",
-            "SL Target %", "Availability %", "AHT Seconds", "Absence Rate %",
+            "SL Target %", "Routed Rate %", "AHT Seconds", "Absence Rate %",
             "Shrinkage Rate %", "State",
         ],
         profile_summary,
         [
             "Queue membership is maintained in Queue Mapping; service and roster LOB links are maintained in Service Profiles.",
-            "Forecast comes from Verint. Actual volume, service level and AHT come from mapped Call-by-Call interactions.",
-            "Business availability means answered / (offered - short abandons), matching the Storm dashboard; it is not agent availability.",
+            "Forecast comes from Verint. Actual volume, service level and AHT come from mapped inbound Call-by-Call queue entries.",
+            "Routed Rate means answered / total entered, matching the Storm dashboard; it is not agent availability.",
             "Absence uses reviewed Attendance decisions; open gaps remain visible and cannot silently dilute results.",
             "Adherence is intentionally excluded.",
         ],
-        (("Service Level", 4), ("Availability", 6)),
+        (("Service Level", 4), ("Routed Rate", 6)),
     )
     book.table(
         "LOB_RESULTS", "Daily LOB results",
@@ -1491,7 +1497,7 @@ def build_realisations_workbook(
             absence_hours = sum(float(row[23] or 0) for row in group)
             shrinkage_hours = sum(float(row[26] or 0) for row in group)
             trend_components = {
-                "offered": offered + short, "answered": answered,
+                "offered": offered, "answered": answered,
                 "short_abandoned": short,
                 "abandoned_within_target": abandoned_in_target,
                 "answered_within_target": within,
@@ -1538,7 +1544,7 @@ def build_realisations_workbook(
     book.definitions([
         ("Actual / forecast", "Actual offered contacts / forecast contacts", "Demand realisation", "Use summed volumes"),
         ("Service level", "Configured numerator / denominator for each service profile", "Service performance", "Calculated from summed counters; never average LOB percentages"),
-        ("Service availability", "Answered / offered", "Ability of the service to answer demand", "Not agent availability"),
+        ("Routed Rate", "Answered / total entered", "Ability of the service to route demand", "Not agent availability"),
         ("Weighted AHT", "Handled seconds / answered contacts", "Workload", "Never average daily AHT values"),
         ("Absence rate", "Reviewed absence hours / planned hours", "Capacity impact", "Open attendance gaps remain review cases"),
     ])

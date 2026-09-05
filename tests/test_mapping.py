@@ -40,9 +40,17 @@ class QueueMappingTests(unittest.TestCase):
         self.assertEqual((ford_nl.service_scope, ford_nl.comparison_scope), ("Ford NL", "Ford NL"))
         reference_additions = {
             "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL": "RSA NL",
+            "APBN_AMS_MOBILITY_NIGHT_NightShift_NL": "RSA NL",
+            "APBN_AMS_RSA_OEM_All_NL": "RSA NL",
+            "APBN_AMS_RSA_PROVIDER_All_NL": "RSA NL",
             "APBN_BRU_MOBILITY_BIKE_Bike_FR": "RSA BE FR",
             "APBN_BRU_MOBILITY_BIKE_Bike_VL": "RSA BE VL",
+            "APBN_BRU_MOBILITY_NIGHT_NightShift_FR": "RSA BE FR",
+            "APBN_BRU_RSA_INSURAN_AzB_VL": "RSA BE VL",
+            "APBN_BRU_RSA_OEM-CONS_All_FR": "RSA BE FR",
+            "APBN_BRU_RSA_OEM_All_EN": "RSA BE VL",
             "APBN_BRU_MOBILITY_Ford_Assistance_DE": "Ford NL",
+            "APBN_LUX_MOBILITY_Ford_Assistance_DE": "Ford NL",
         }
         for queue, scope in reference_additions.items():
             self.assertEqual(

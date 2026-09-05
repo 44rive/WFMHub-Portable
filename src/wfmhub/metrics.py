@@ -202,8 +202,8 @@ def ensure_metric_catalog(home: Path, target: Path | None = None) -> Path:
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             current, shipped = {}, {}
         if (
-            str(current.get("version", "")) in {"2026.09.1", "2026.09.2"}
-            and str(shipped.get("version", "")) == "2026.09.3"
+            str(current.get("version", "")) in {"2026.09.1", "2026.09.2", "2026.09.3"}
+            and str(shipped.get("version", "")) == "2026.09.4"
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(
