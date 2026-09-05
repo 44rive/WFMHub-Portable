@@ -151,11 +151,12 @@ class ExcelTemplateTests(unittest.TestCase):
             finally:
                 workbook.close()
 
-    def test_default_ford_profile_matches_original_flash_gross_sl(self):
+    def test_default_ford_profile_uses_storm_business_reference(self):
         catalog = load_service_profiles(REPO, REPO / "config" / "default_service_profiles.toml")
         ford = catalog.select("ford_oem_fr", date(2026, 8, 25))
-        self.assertEqual(ford.service_level_metric, "service_level_gross")
-        self.assertEqual(ford.availability_metric, "service_availability")
+        self.assertEqual(ford.service_level_metric, "service_level")
+        self.assertEqual(ford.availability_metric, "service_availability_business")
+        self.assertEqual(ford.source_systems, ("CALL_BY_CALL",))
         self.assertEqual(ford.staffing_lobs, ("Ford FR",))
         self.assertEqual([group.label for group in ford.groups], ["Toyota", "Chery", "Ford"])
 
@@ -171,7 +172,7 @@ class ExcelTemplateTests(unittest.TestCase):
                 default_text, encoding="utf-8",
             )
             previous_text = default_text.replace(
-                'version = "2026.09.5"', 'version = "2026.09.4"', 1,
+                'version = "2026.09.6"', 'version = "2026.09.5"', 1,
             ).replace(
                 'flash_total_groups = ["Ford", "Toyota"]\n', "", 1,
             )
@@ -180,13 +181,13 @@ class ExcelTemplateTests(unittest.TestCase):
 
             catalog = load_service_profiles(home, target)
 
-            self.assertEqual(catalog.version, "2026.09.5")
+            self.assertEqual(catalog.version, "2026.09.6")
             self.assertEqual(
                 catalog.select("ford_oem_fr", date(2026, 9, 1)).flash_total_groups,
                 ("Ford", "Toyota"),
             )
             self.assertEqual(
-                len(list(config.glob("service_profiles_pre_flash_layout_*.toml"))),
+                len(list(config.glob("service_profiles_pre_call_service_*.toml"))),
                 1,
             )
 

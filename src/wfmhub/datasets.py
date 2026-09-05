@@ -70,14 +70,14 @@ def service_scope_interval(
     catalog: MetricCatalog,
     start: date,
     end: date | None = None,
-    source_system: str = "APDE",
+    source_system: str = "CALL_BY_CALL",
     limit: int = 100_000,
 ) -> Dataset:
     end = end or start
     dimensions = ("business_date", "interval_start", "source_system", "lob", "language")
     metrics = _metric_map(
         conn, catalog, start, end,
-        ["service_level", "service_availability", "abandon_rate", "aht_seconds"],
+        ["service_level", "service_availability_business", "abandon_rate", "aht_seconds"],
         dimensions,
     )
     base = conn.execute(
@@ -101,7 +101,7 @@ def service_scope_interval(
         key = tuple(base_row[index] for index in range(5))
         scoped = metrics.get(key, {})
         service = scoped.get("service_level")
-        availability = scoped.get("service_availability")
+        availability = scoped.get("service_availability_business")
         abandon = scoped.get("abandon_rate")
         aht = scoped.get("aht_seconds")
         rows.append((*base_row[:5], *base_row[5:10],
@@ -218,13 +218,16 @@ def final_absence_lob_month(
         """SELECT substr(business_date,1,7) AS month_key,
                   coalesce(lob,'(blank)') AS lob, coalesce(language,'(blank)') AS language,
                   count(*), sum(planned_net_minutes)/60.0,
-                  sum(final_absence_minutes)/60.0, sum(final_vacation_minutes)/60.0,
-                  sum(final_unpaid_minutes)/60.0, sum(final_shrinkage_minutes)/60.0,
-                  sum(final_unmapped_minutes)/60.0,
-                  sum(CASE WHEN final_absence_day THEN 1 ELSE 0 END)
-           FROM mart.verint_final_absence_agent_day
-           WHERE business_date BETWEEN ? AND ?
-             AND final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')
+                  sum(absence_minutes)/60.0, sum(vacation_minutes)/60.0,
+                  sum(unpaid_minutes)/60.0, sum(shrinkage_minutes)/60.0,
+                  sum(unverified_minutes)/60.0,
+                  sum(CASE WHEN absence_day THEN 1 ELSE 0 END)
+           FROM mart.absence_agent_day d
+           WHERE business_date BETWEEN ? AND ? AND unverified_minutes=0
+             AND NOT EXISTS (
+                 SELECT 1 FROM mart.attendance_agent_day a
+                 WHERE a.agent_day_key=d.agent_day_key AND a.is_provisional=true
+             )
            GROUP BY substr(business_date,1,7), coalesce(lob,'(blank)'),
                     coalesce(language,'(blank)') ORDER BY month_key, lob, language""",
         [start, end],

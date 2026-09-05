@@ -29,7 +29,7 @@ REPORT_PACKS = {
         default_folder="operations",
         filename_prefix="WFMHub_Daily_Operations",
         current_filename="Legacy Daily Operations.xlsx",
-        purpose="Attendance calls, staffing gaps, and APDE service state without adherence KPIs.",
+        purpose="Legacy combined attendance, staffing and service view without adherence KPIs.",
         implemented=True,
     ),
     "intraday": ReportPack(
@@ -53,14 +53,14 @@ REPORT_PACKS = {
         default_folder="absence",
         filename_prefix="WFMHub_Final_Absence_Shrinkage",
         current_filename="Final Absenteeism.xlsx",
-        purpose="Corrected Verint final absence and shrinkage ledger.",
+        purpose="Reviewed attendance-decision absence and shrinkage ledger.",
     ),
     "corrections": ReportPack(
         key="corrections",
         default_folder="corrections",
         filename_prefix="WFMHub_Attendance_Review",
         current_filename="Attendance Review.xlsx",
-        purpose="Selected-period exact residual intervals and a full-shift evidence timeline.",
+        purpose="Selected-period exact gaps, editable decisions and a full-shift evidence timeline.",
     ),
     "pcs": ReportPack(
         key="pcs",

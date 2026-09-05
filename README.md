@@ -32,8 +32,8 @@ Technical files live under `_system`. You normally do not open that folder.
 | Staffing & Capacity Plan | Where is capacity missing now, and where will forecast demand exceed net schedules in future weeks? |
 | Service Flashes | What is the hourly RSA NL, RSA BE, Ford NL, and Ford OEM service state? |
 | Realisations | How did actual volume, service, forecast, staffing, absence, and shrinkage perform across every mapped LOB and period? |
-| Attendance Review | Which gaps across the selected completed dates still need a Verint correction? |
-| Final Absenteeism | What does corrected Verint contain for final absence and shrinkage? |
+| Attendance Review | Which exact completed-day gaps need an Approved or Dismissed human decision? |
+| Final Absenteeism | What do the reviewed decisions and PTO/Away registers produce for absence and shrinkage? |
 | Bonus Management | What did Bonus Matrix v1.2 calculate, and is it safe to release? |
 | PCS Performance | How are PCS, participation, low scores, and coaching moving by date, month, LOB, team, and agent? |
 
@@ -41,8 +41,10 @@ The products use one visual identity but not one generic layout. The Flash is an
 intraday control page, Attendance is a call list, Corrections is a shift
 timeline, and Final Absenteeism is a ledger.
 
-Adherence is not calculated. Service availability means **answered / offered**,
-never agent availability.
+Adherence is not calculated. Reported service availability means **answered /
+(offered - short abandons)**, matching the Storm business dashboard; it never
+means agent availability. The technical answered/offered method remains in the
+KPI catalog for audit and comparison.
 
 ## Source authority
 
@@ -52,20 +54,18 @@ never agent availability.
 | Verint StartEndTimes | Preferred scheduled start/end and assignment boundaries |
 | Storm LILO | First/last presence evidence, including loaded blank rows |
 | Storm Agent Status | Observed attendance and interval staffing evidence |
-| Verint Activities | Post-correction final absence and shrinkage |
 | Verint Forecast | Forecast only |
-| Storm APBE/APFR/APDE | Formal actual service performance for Realisations and governed service exports |
-| Storm Call by Call | Mapped Flash demand/service, agent call performance, and PCS |
+| Storm Call by Call | All mapped service actuals, Flash demand/service, agent call performance, and PCS |
 | Bonus Matrix v1.2 | Bonus inputs, KPI configuration, and source reconciliation |
 
 Multi-day files are supported. Row dates are authoritative; filename dates are
 only fallback hints. Missing evidence remains missing and is never converted to
 a false no-show or zero.
 
-If a dedicated StartEndTimes file is unavailable, WFMHub can use successfully
-parsed Shift Assignment boundaries from the Activities export and raises a
-visible review finding. The activity intervals in that same export remain the
-post-correction final absence/shrinkage evidence.
+If a dedicated StartEndTimes file is unavailable, WFMHub can use a successfully
+parsed Shift Assignment boundary from an Activities export and raises a visible
+review finding. Activity intervals are not used for attendance, correction
+reconciliation, absence, or shrinkage.
 
 FTE scope is effective-dated: `Active` rows are admitted; `Leaver` rows are
 admitted only through `End date if leaver`; other statuses and undated leavers
@@ -74,8 +74,8 @@ Call by Call for each row's business date.
 
 The standard FTE workbook also owns PTO and Away registers. Approved PTO and
 effective Away intervals change expected work and net staffing without editing
-any extract. Planned Away affects future capacity only. Verint Activities stay
-the final payroll/absence authority.
+any extract. Planned Away affects future capacity only. Exact attendance gaps
+are classified through the imported Attendance Review ledger.
 
 ## Windows quick start
 
@@ -84,7 +84,8 @@ the final payroll/absence authority.
 3. Paste the folder containing `FTE`, `Storm`, and `Verint`.
 4. Double-click `WFMHub.cmd`.
 5. Choose **Refresh source data once**.
-6. Choose the report you need from Today, Month, PCS, or Analyse.
+6. Choose a reliable product under **Operational**, or an unfinished product
+   under **In Development**.
 7. Open it directly from `Reports`.
 
 See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
@@ -109,10 +110,10 @@ Verint Forecast supplies forecast only. New 15-minute exports stay at their
 native grain for Staffing and are rolled into hours for the Flashes. Hourly
 volume is the sum of the four quarters; FTE is an average level; forecast SL
 and AHT are weighted by volume. `Deviation`, following the Book1 label, means
-`actual offered / forecast through the latest actual hour`. Availability is
-`handled / offered`; TSL uses the effective gross or short-abandon-adjusted
-method selected for that profile; AHT is weighted handled seconds per answered
-interaction.
+`business offered / forecast through the latest actual hour`. Business offered
+is unique offered interactions less short abandons. Availability is `handled /
+business offered`; TSL is `handled within 20 seconds / business offered`; AHT
+is weighted handled seconds per answered interaction.
 
 Ford NL's Dispatch, Follow-up, and Mailbox BNL cards remain `N/C` because Book1
 contains the labels but no governed source or formula. WFMHub does not invent
@@ -153,11 +154,18 @@ refreshed table. Regenerate the workbook when the roster gains new agents;
 saved coaching fields carry forward by Coaching Key. The `HELP` sheet gives
 the exact operating steps.
 
-## Shared Final Absenteeism
+## Attendance decisions and shared absenteeism
+
+`Reports\Attendance Review.xlsx` is the auditable decision input. Build it for
+the required completed dates, edit only the five blue columns on `DECISIONS`,
+save it, then choose **Attendance Review > Import completed decisions**. Gap ID
+anchors the exact immutable start/end interval in SQLite; edited evidence is
+never trusted. Approved rows use the selected rulebook category, Dismissed rows
+count as no loss, and Open rows stay unverified.
 
 `Reports\Final Absenteeism.xlsx` follows the same long-lived-file principle.
 `TEAM_VIEW` filters agent results and review cases; `COMPONENT_VIEW` explains
-absence and shrinkage by final Verint category; `ACTIVITY_DETAIL` holds exact
+absence and shrinkage by reviewed category; `ACTIVITY_DETAIL` holds exact
 start/end evidence. The blue `ACTIONS` table is the permanent team-owned log
 and is never a Power Query target. Link the three fixed Absenteeism feeds once,
 then use **Data > Refresh All** without regenerating the shared workbook.
@@ -210,10 +218,13 @@ python3 -m wfmhub --home . setup --source-root /path/to/extracts --non-interacti
 python3 -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31 --no-report
 python3 -m wfmhub --home . report --pack service --start 2026-08-31 --end 2026-08-31
 python3 -m wfmhub --home . report --pack pcs --start 2026-08-01 --end 2026-08-31
+python3 -m wfmhub --home . import-attendance-decisions "Reports/Attendance Review.xlsx"
 python3 -m wfmhub --home . analyze pcs --start 2026-08-01 --end 2026-08-31 --comparison previous_month
 python3 -m unittest discover -s tests -v
 ```
 
 For implementation details in the portable package, see
-`_system\docs\ARCHITECTURE.md`, `_system\docs\PCS_LOGIC.md`, and
+`_system\docs\ARCHITECTURE.md`,
+`_system\docs\ATTENDANCE_DECISION_LEDGER.md`,
+`_system\docs\SERVICE_KPI_REFERENCE.md`, and
 `_system\docs\METRIC_CATALOG_GUIDE.md`.

@@ -1,4 +1,4 @@
-"""Human-readable full-shift evidence view used before Verint correction."""
+"""Human-readable full-shift evidence view for attendance decisions."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def add_shift_view(
     period_start: date,
     period_end: date,
 ) -> None:
-    """Show a compact 15-minute visual; exact times stay in VERINT_INJECTION."""
+    """Show a compact 15-minute visual; exact times stay in DECISIONS."""
 
     ws = report.workbook.add_worksheet("SHIFT_VIEW")
     ws.set_tab_color(COLORS["purple"])
@@ -53,7 +53,7 @@ def add_shift_view(
     ws.merge_range("A1:X1", "ATTENDANCE REVIEW  /  SHIFT VIEW", report.title)
     ws.merge_range(
         "A2:X2",
-        f"Completed dates {period_start:%Y-%m-%d} to {period_end:%Y-%m-%d}  |  visual check before Verint entry",
+        f"Completed dates {period_start:%Y-%m-%d} to {period_end:%Y-%m-%d}  |  visual evidence for human review",
         report.subtitle,
     )
     legend = [

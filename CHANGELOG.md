@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.18.0 — 2026-09-05
+
+- Retired APBE, APFR, and APDE from source discovery, refresh groups, health
+  controls, service calculation, and the daily menu. Existing raw AP tables are
+  preserved only as empty/readable compatibility storage; an existing user
+  configuration is cleaned automatically with a timestamped backup.
+- Made mapped Storm Call-by-Call interactions the only service-actual source
+  and retained Verint exclusively for Forecast and schedule boundaries.
+  `mart.service_interval` is now a stable projection of the interaction-
+  deduplicated Call-by-Call mart, including handled workload from transfer legs.
+- Aligned displayed TSL and service availability with the Storm business
+  reference: both exclude short abandons from offered demand. The gross
+  technical formulas remain effective-dated in the metric catalog for audit.
+- Replaced Activities-based correction reconciliation with a two-way Attendance
+  Review ledger. Completed-day Agent Status gaps, with LILO fallback, keep exact
+  start/end timestamps; users classify each Gap ID as Open, Approved, or
+  Dismissed, then import the workbook atomically without changing extracts.
+- Rebuilt absence and shrinkage from reviewed decisions plus governed PTO/Away
+  registers. Open gaps stay explicitly unverified, approved categories use the
+  central rulebook, dismissed gaps create no loss, and legacy final-absence
+  tables now expose compatibility projections of the reviewed ledger.
+- Reorganized the menu into Update, Operational, Analyze, In Development, and
+  Settings, with Attendance Callout, Service Flashes, and Attendance Review as
+  the operational products. Added business and beginner documentation for the
+  service KPI reference and attendance decision workflow.
+- Added round-trip, atomic-import, AP-config migration, business-availability,
+  exact-gap, workbook-contract, and no-external-link regression coverage.
+
 ## 0.17.1 — 2026-09-05
 
 - Added native 15-minute Verint forecast support without changing extracts.

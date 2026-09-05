@@ -18,9 +18,9 @@ from wfmhub.report_packs import (
 
 class ReportPackTests(unittest.TestCase):
     def test_service_refresh_group_includes_flash_actual_and_forecast_sources(self):
-        self.assertTrue(
-            {"fte", "calls", "forecast", "apbe", "apfr", "apde"}
-            <= SOURCE_GROUPS["intraday"]
+        self.assertEqual(SOURCE_GROUPS["service"], {"fte", "calls", "forecast"})
+        self.assertFalse(
+            {"apbe", "apfr", "apde"} & set(SOURCE_GROUPS["intraday"] or ())
         )
 
     def test_independent_report_packs_are_registered(self):

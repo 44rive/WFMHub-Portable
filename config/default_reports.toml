@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.11"
+version = "2026.09.12"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
@@ -49,14 +49,14 @@ sheets = ["DASHBOARD", "ACTIONS", "TREND", "DEFINITIONS", "_AUDIT"]
 [[packs]]
 key = "corrections"
 title = "ATTENDANCE REVIEW"
-purpose = "Completed-day exact residual intervals and full-shift evidence for Verint correction."
+purpose = "Completed-day exact gaps, editable human decisions and full-shift evidence."
 finding_domains = ["attendance", "data_quality"]
-sheets = ["DASHBOARD", "VERINT_INJECTION", "SHIFT_VIEW", "DEFINITIONS", "_AUDIT"]
+sheets = ["DASHBOARD", "DECISIONS", "SHIFT_VIEW", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
 
 [[packs]]
 key = "absence"
-title = "FINAL ABSENCE & SHRINKAGE"
-purpose = "Corrected Verint final absence and shrinkage ledger."
+title = "ABSENCE & SHRINKAGE"
+purpose = "Reviewed attendance-decision absence and shrinkage ledger."
 finding_domains = ["absence", "data_quality"]
 sheets = ["DASHBOARD", "TEAM_VIEW", "TEAM_SUMMARY", "AGENT_RESULTS", "ACTIONS", "ACTION_QUEUE", "ABSENCE_COMPONENTS", "SHRINKAGE_COMPONENTS", "COMPONENT_VIEW", "ACTIVITY_DETAIL", "ABSENCE_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
 

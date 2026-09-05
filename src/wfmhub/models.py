@@ -127,8 +127,6 @@ def resolve_period(
         SELECT min(d) AS "start_date [DATE]", max(d) AS "end_date [DATE]" FROM (
             SELECT min(schedule_date) AS d FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
             UNION ALL SELECT max(schedule_date) FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
-            UNION ALL SELECT min(business_date) FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
-            UNION ALL SELECT max(business_date) FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
             UNION ALL SELECT min(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
             UNION ALL SELECT max(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
             UNION ALL SELECT min(extract_date) FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
@@ -1102,7 +1100,6 @@ def _build_corrections(
         })
 
     status_tolerance = rulebook.status_gap_tolerance_minutes
-    match_tolerance = rulebook.verint_match_tolerance_minutes
     for row in attendance:
         start, end = row["scheduled_start"], row["scheduled_end"]
         if row["no_show_minutes"] > 0 and start and end:
@@ -1148,64 +1145,43 @@ def _build_corrections(
                     confidence = "High" if category == "Logged Off" else "Review"
                     add(row, issue, hit_start, hit_end, minutes, priority, confidence, "General Unavailability", "AGENT_STATUS", row["status_source"])
 
-    by_key = {row["agent_day_key"]: row for row in attendance}
-    residual_rows: list[dict[str, Any]] = []
-    for item in output:
-        base = by_key[item["business_date"].strftime("%Y%m%d") + "-" + item["agent_id"]]
-        gap_start, gap_end = item["gap_start"], item["gap_end"]
-        matches: list[tuple[int, dict[str, Any]]] = []
-        matched_intervals: list[tuple[datetime, datetime]] = []
-        if gap_start and gap_end:
-            for event in _final_verint_events(base, rulebook):
-                overlap = interval_minutes(gap_start, gap_end, [(event["start"], event["end"])])
-                if overlap > 0:
-                    matches.append((overlap, event))
-                    matched_intervals.append((max(gap_start, event["start"]), min(gap_end, event["end"])))
-        if matches:
-            overlap = interval_minutes(gap_start, gap_end, matched_intervals)
-            status = "CORRECTED" if overlap >= max(1, item["gap_minutes"] - match_tolerance) else "PARTIAL"
-            activities = "; ".join(sorted({str(event["activity"]) for _, event in matches}))
-            categories = "; ".join(sorted({str(event["category"]) for _, event in matches}))
-            sources = "; ".join(sorted({str(event["source_file"]) for _, event in matches if event["source_file"]})) or None
-            item.update({
-                "verint_reconciliation": status, "verint_activity": activities,
-                "verint_category": categories, "verint_overlap_minutes": overlap,
-                "verint_source_file": sources,
-            })
-        else:
-            item.update({
-                "verint_reconciliation": "NOT_APPLICABLE" if not gap_start or not gap_end else "NOT_CORRECTED",
-                "verint_activity": None, "verint_category": None, "verint_overlap_minutes": 0,
-                "verint_source_file": None,
-            })
-        if gap_start and gap_end:
-            for residual_start, residual_end in subtract_intervals(gap_start, gap_end, matched_intervals):
-                residual_minutes = int((residual_end - residual_start).total_seconds() // 60)
-                if residual_minutes <= match_tolerance:
-                    continue
-                residual_id = hashlib.sha256(
-                    f"{item['correction_id']}|{residual_start}|{residual_end}".encode("utf-8")
-                ).hexdigest()
-                residual_rows.append({
-                    "residual_id": residual_id, "correction_id": item["correction_id"],
-                    "business_date": item["business_date"], "agent_id": item["agent_id"],
-                    "residual_start": residual_start, "residual_end": residual_end,
-                    "residual_minutes": residual_minutes,
-                    "suggested_activity": item["suggested_activity"],
-                    "observed_source": item["observed_source"],
-                    "source_file": item["source_file"],
-                    "verint_reconciliation": item["verint_reconciliation"],
-                })
-
     actions = {row["correction_id"]: row for row in _dicts(conn.execute("SELECT * FROM core.correction_action"))}
     deduped: dict[str, dict[str, Any]] = {}
+    residual_rows: list[dict[str, Any]] = []
     for item in output:
         action = actions.get(item["correction_id"], {})
+        decision_status = str(action.get("validation_status") or "Open").strip().title()
+        if decision_status not in {"Open", "Approved", "Dismissed"}:
+            decision_status = "Open"
+        decision_state = {
+            "Approved": "DECISION_APPROVED",
+            "Dismissed": "DECISION_DISMISSED",
+            "Open": "PENDING_REVIEW",
+        }[decision_status]
         item.update({
             "confirmed_activity": action.get("confirmed_activity"),
-            "validation_status": action.get("validation_status") or "Open",
+            "validation_status": decision_status,
             "owner": action.get("owner"), "comment": action.get("comment"), "injected_date": action.get("injected_date"),
+            # Legacy column names remain for database compatibility; their
+            # values now describe the human decision ledger, never Activities.
+            "verint_reconciliation": decision_state,
+            "verint_activity": None, "verint_category": None,
+            "verint_overlap_minutes": item["gap_minutes"] if decision_status != "Open" else 0,
+            "verint_source_file": None,
         })
+        if item["gap_start"] and item["gap_end"]:
+            segment_id = hashlib.sha256(
+                f"{item['correction_id']}|{item['gap_start']}|{item['gap_end']}".encode("utf-8")
+            ).hexdigest()
+            residual_rows.append({
+                "residual_id": segment_id, "correction_id": item["correction_id"],
+                "business_date": item["business_date"], "agent_id": item["agent_id"],
+                "residual_start": item["gap_start"], "residual_end": item["gap_end"],
+                "residual_minutes": item["gap_minutes"],
+                "suggested_activity": item["suggested_activity"],
+                "observed_source": item["observed_source"], "source_file": item["source_file"],
+                "verint_reconciliation": decision_state,
+            })
         deduped[item["correction_id"]] = item
     output = sorted(deduped.values(), key=lambda item: (item["business_date"], item["priority"], -item["gap_minutes"], item["agent_id"]))
     conn.execute("DELETE FROM mart.correction_candidate")
@@ -1213,71 +1189,7 @@ def _build_corrections(
     conn.execute("DELETE FROM mart.correction_residual_segment")
     _insert_dicts(conn, "mart.correction_residual_segment", CORRECTION_RESIDUAL_COLUMNS, residual_rows)
 
-    exceptions: list[dict[str, Any]] = []
-    gaps_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for item in output:
-        gaps_by_key[f"{item['business_date']:%Y%m%d}-{item['agent_id']}"].append(item)
-    for base in attendance:
-        for event in _final_verint_events(base, rulebook):
-            planned_overlap = interval_minutes(
-                event["start"], event["end"],
-                [
-                    (item["segment_start"], item["segment_end"])
-                    for item in base.get("_planned_time_off_segments", [])
-                ],
-            )
-            if planned_overlap > 0:
-                continue
-            has_observed_overlap = any(
-                gap["gap_start"] and gap["gap_end"]
-                and interval_minutes(gap["gap_start"], gap["gap_end"], [(event["start"], event["end"])]) > 0
-                for gap in gaps_by_key.get(base["agent_day_key"], [])
-            )
-            if has_observed_overlap:
-                continue
-            minutes = interval_minutes(base["scheduled_start"], base["scheduled_end"], [(event["start"], event["end"])])
-            if minutes <= 0:
-                continue
-            key = hashlib.sha256(
-                f"{base['agent_day_key']}|{event['activity']}|{event['start']}|{event['end']}".encode("utf-8")
-            ).hexdigest()
-            exception = {
-                "exception_key": key, "agent_day_key": base["agent_day_key"],
-                "business_date": base["business_date"], "agent_id": base["agent_id"],
-                "agent_name": base["agent_name"], "activity": event["activity"],
-                "category": event["category"], "event_start": event["start"],
-                "event_end": event["end"], "minutes": minutes,
-                "exception_type": "VERINT_FINAL_WITHOUT_OBSERVED_GAP",
-                "source_file": event["source_file"], "rule_version": rulebook.version,
-                "rule_sha256": rulebook.sha256,
-            }
-            exceptions.append(exception)
-    # Keep the primary-key boundary defensive as well.  Event normalization
-    # above should already make these unique, but a future input path must not
-    # make a safe refresh fail merely because it repeats the same exception.
-    exceptions_by_key: dict[str, dict[str, Any]] = {}
-    for exception in exceptions:
-        key = exception["exception_key"]
-        existing = exceptions_by_key.get(key)
-        if existing is None:
-            exceptions_by_key[key] = exception
-            continue
-        sources = {
-            str(value).strip()
-            for source in (existing.get("source_file"), exception.get("source_file"))
-            for value in str(source or "").split(";")
-            if str(value).strip()
-        }
-        existing["source_file"] = "; ".join(sorted(sources)) or None
-    exceptions = sorted(
-        exceptions_by_key.values(),
-        key=lambda item: (
-            item["business_date"], item["agent_id"], item["event_start"],
-            item["event_end"], item["activity"],
-        ),
-    )
     conn.execute("DELETE FROM mart.verint_final_exception")
-    _insert_dicts(conn, "mart.verint_final_exception", VERINT_EXCEPTION_COLUMNS, exceptions)
     return output
 
 
@@ -2120,61 +2032,10 @@ def _build_intraday(
     )
     forecast_rows = _aggregate_forecast_hour_rows(forecast_source, mapping)
     _insert_dicts(conn, "mart.forecast_hour", FORECAST_HOUR_COLUMNS, forecast_rows)
+    # APBE/APFR/APDE are retired.  Keep the legacy table physically present so
+    # old databases and exports remain readable, but never leave stale actuals.
     conn.execute("DELETE FROM mart.intraday_queue_interval")
-    actual_source = _dicts(conn.execute(
-        """
-        SELECT business_date, interval_start, hour_start, source_system, queue, business_partner, lob, language,
-               offered, answered, abandoned, short_calls, answered_20s,
-               asa_seconds, aht_seconds, source_file
-        FROM (
-            SELECT r.*, f.file_name AS source_file,
-                   row_number() OVER (
-                       PARTITION BY source_system, business_date, interval_time, coalesce(queue,''),
-                                    coalesce(business_partner,''), coalesce(lob,''), coalesce(language,'')
-                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, source_row DESC
-                   ) row_rank
-            FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
-            WHERE business_date BETWEEN ? AND ?
-        ) x WHERE row_rank=1
-        """,
-        [start, end],
-    ))
-    actual_rows: list[dict[str, Any]] = []
-    for row in actual_source:
-        mapped = mapping.map_actual(row["source_system"], row["queue"], row["business_partner"], row["lob"])
-        offered, answered, abandoned = row["offered"], row["answered"], row["abandoned"]
-        dimensions = {
-            "source_system": row["source_system"],
-            "queue": row["queue"],
-            "business_partner": row["business_partner"],
-            "lob": row["lob"],
-            "language": row["language"],
-        }
-        components = {
-            "offered": offered,
-            "answered": answered,
-            "abandoned": abandoned,
-            "short_abandoned": row["short_calls"],
-            "answered_within_target": row["answered_20s"],
-            "handled_seconds": (
-                float(row["aht_seconds"]) * float(answered)
-                if row["aht_seconds"] is not None and answered is not None else None
-            ),
-        }
-        actual_rows.append({
-            **row,
-            "service_level_20s": _metric_evaluation(
-                metric_catalog, "service_level_gross", row["business_date"], dimensions, components,
-            ).value,
-            "abandon_rate": _metric_evaluation(
-                metric_catalog, "abandon_rate", row["business_date"], dimensions, components,
-            ).value,
-            "service_scope": mapped.service_scope, "comparison_scope": mapped.comparison_scope,
-            "designation": mapped.designation,
-            "mapping_status": mapped.status, "mapping_sha256": mapping.sha256,
-        })
-    _insert_dicts(conn, "mart.intraday_queue_interval", INTRADAY_COLUMNS, actual_rows)
-    return len(forecast_rows), len(actual_rows)
+    return len(forecast_rows), 0
 
 
 def _build_pcs(
@@ -2431,7 +2292,7 @@ def _build_absence(
     attendance: list[dict[str, Any]],
     corrections: list[dict[str, Any]],
 ) -> tuple[int, int]:
-    """Build absence only from observed LILO/status gaps, then attach Verint final labels."""
+    """Build corrected absence/shrinkage from observed gaps and human decisions."""
     conn.execute("DELETE FROM mart.absence_event")
     conn.execute("DELETE FROM mart.absence_agent_day")
     if not config.modules.get("absence", True):
@@ -2449,10 +2310,7 @@ def _build_absence(
         intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
 
         issue_intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
-        corrected_overlap_minutes = 0
-
         def add_event(correction: dict[str, Any]) -> None:
-            nonlocal corrected_overlap_minutes
             event_start, event_end = correction["gap_start"], correction["gap_end"]
             if not shift_start or not shift_end or not event_start or not event_end:
                 return
@@ -2460,17 +2318,30 @@ def _build_absence(
                 event_start, event_end = max(event_start, shift_start), min(event_end, shift_end)
             if event_end <= event_start:
                 return
-            activity = correction.get("verint_activity") or correction.get("suggested_activity") or correction["detected_issue"]
-            final_rule = rulebook.classify_activity(correction.get("verint_activity")) if correction.get("verint_activity") else None
-            fallback_category = {
-                "No show": "NO_SHOW", "Late": "LATE", "Early leave": "EARLY_LEAVE",
-                "Mid-shift logged off": "STATUS_LOGGED_OFF",
-                "Unavailable in shift": "STATUS_UNAVAILABLE",
-            }.get(correction["detected_issue"], "UNEXPLAINED_ABSENCE")
-            flags = _rule_flags(
-                final_rule, fallback_category,
-                absence=True, unpaid=False, shrinkage=True, working=False, planned=False,
+            decision_status = str(correction.get("validation_status") or "Open").title()
+            approved = decision_status == "Approved"
+            dismissed = decision_status == "Dismissed"
+            activity = (
+                correction.get("confirmed_activity")
+                if approved else "Dismissed gap" if dismissed else "Pending review"
             )
+            final_rule = rulebook.classify_activity(activity) if approved else None
+            if approved and final_rule is not None:
+                flags = _rule_flags(
+                    final_rule, final_rule.category, absence=False, unpaid=False,
+                    shrinkage=False, working=False, planned=False,
+                )
+            elif dismissed:
+                flags = _rule_flags(
+                    None, "DISMISSED", absence=False, unpaid=False,
+                    shrinkage=False, working=True, planned=False,
+                )
+                flags["mapped"] = True
+            else:
+                flags = _rule_flags(
+                    None, "PENDING_REVIEW", absence=False, unpaid=False,
+                    shrinkage=False, working=False, planned=False,
+                )
             minutes = int((event_end - event_start).total_seconds() // 60)
             if minutes <= 0:
                 return
@@ -2492,12 +2363,12 @@ def _build_absence(
                 "source_file": correction["source_file"], "rule_version": rulebook.version,
                 "rule_sha256": rulebook.sha256,
                 "reconciliation_status": correction["verint_reconciliation"],
-                "verint_activity": correction.get("verint_activity"),
-                "verint_category": correction.get("verint_category"),
-                "verint_overlap_minutes": correction.get("verint_overlap_minutes") or 0,
-                "verint_source_file": correction.get("verint_source_file"),
+                "verint_activity": None, "verint_category": None,
+                "verint_overlap_minutes": minutes if decision_status != "Open" else 0,
+                "verint_source_file": None,
             })
-            intervals["all"].append((event_start, event_end))
+            if not flags["working"]:
+                intervals["all"].append((event_start, event_end))
             intervals[flags["category"]].append((event_start, event_end))
             if not flags["working"]:
                 intervals["non_working"].append((event_start, event_end))
@@ -2506,8 +2377,67 @@ def _build_absence(
                     intervals[key].append((event_start, event_end))
             if not flags["mapped"]:
                 intervals["unmapped"].append((event_start, event_end))
-            issue_intervals[correction["detected_issue"]].append((event_start, event_end))
-            corrected_overlap_minutes += min(minutes, int(correction.get("verint_overlap_minutes") or 0))
+            if approved:
+                issue_intervals[correction["detected_issue"]].append((event_start, event_end))
+            if decision_status != "Open":
+                intervals["reviewed"].append((event_start, event_end))
+
+        def add_planned_event(segment: dict[str, Any]) -> None:
+            event_start, event_end = segment["segment_start"], segment["segment_end"]
+            activity = str(segment.get("absence_type") or segment.get("source_kind") or "Planned time off")
+            rule = rulebook.classify_activity(activity)
+            if rule is not None:
+                flags = _rule_flags(
+                    rule, rule.category, absence=False, unpaid=False,
+                    shrinkage=False, working=False, planned=True,
+                )
+            else:
+                is_away = str(segment.get("source_kind") or "").upper() == "AWAY"
+                flags = _rule_flags(
+                    None, "PLANNED_AWAY" if is_away else "PLANNED_PTO",
+                    absence=is_away, vacation=not is_away, unpaid=False,
+                    shrinkage=True, working=False, planned=True,
+                )
+                flags["mapped"] = True
+            minutes = int((event_end - event_start).total_seconds() // 60)
+            if minutes <= 0:
+                return
+            event_key = hashlib.sha256(
+                f"{base['agent_day_key']}|{segment['segment_key']}|planned".encode("utf-8")
+            ).hexdigest()
+            event_rows.append({
+                "event_key": event_key, "agent_day_key": base["agent_day_key"],
+                "business_date": base["business_date"], "agent_id": base["agent_id"],
+                "agent_name": base["agent_name"], "team_leader": base["team_leader"],
+                "ops_manager": base["ops_manager"], "lob": base["lob"],
+                "market": base["market"], "language": base["language"],
+                "location": base["location"], "activity": activity,
+                "category": flags["category"], "event_start": event_start,
+                "event_end": event_end, "minutes": minutes, "hours": minutes / 60.0,
+                "planned": True, "working": flags["working"],
+                "counts_as_absence": flags["absence"],
+                "counts_as_vacation": flags["vacation"],
+                "counts_as_unpaid": flags["unpaid"],
+                "counts_as_shrinkage": flags["shrinkage"],
+                "mapped": flags["mapped"],
+                "evidence_type": f"FTE_{str(segment.get('source_kind') or 'PTO').upper()}",
+                "source_file": segment.get("source_file"),
+                "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
+                "reconciliation_status": "PLANNED_REGISTER",
+                "verint_activity": None, "verint_category": None,
+                "verint_overlap_minutes": 0, "verint_source_file": None,
+            })
+            intervals["all"].append((event_start, event_end))
+            intervals[flags["category"]].append((event_start, event_end))
+            intervals["non_working"].append((event_start, event_end))
+            for key in ("absence", "vacation", "unpaid", "shrinkage"):
+                if flags[key]:
+                    intervals[key].append((event_start, event_end))
+            if not flags["mapped"]:
+                intervals["unmapped"].append((event_start, event_end))
+
+        for segment in base.get("_planned_time_off_segments", []):
+            add_planned_event(segment)
 
         for correction in corrections_by_key.get(base["agent_day_key"], []):
             add_event(correction)
@@ -2534,8 +2464,8 @@ def _build_absence(
         unpaid = min(planned_net, minutes_for("unpaid"))
         shrinkage = min(planned_net, minutes_for("shrinkage"))
         production = max(0, planned_net - min(planned_net, minutes_for("all")))
-        corrected = min(minutes_for("all"), corrected_overlap_minutes)
-        unverified = max(0, minutes_for("all") - corrected)
+        corrected = min(planned_net, minutes_for("reviewed"))
+        unverified = minutes_for("unmapped")
         dimensions = {
             "lob": base["lob"],
             "language": base["language"],
@@ -2598,6 +2528,65 @@ def _build_absence(
     _insert_dicts(conn, "mart.absence_event", ABSENCE_EVENT_COLUMNS, event_rows)
     _insert_dicts(conn, "mart.absence_agent_day", ABSENCE_DAY_COLUMNS, day_rows)
     return len(day_rows), len(event_rows)
+
+
+def _sync_reviewed_absence_compatibility(conn: DatabaseConnection) -> tuple[int, int]:
+    """Keep old table contracts readable while reviewed marts are authoritative.
+
+    These physical tables used to be built from Verint Activities.  They now
+    contain a transparent projection of the decision-led attendance ledger so
+    existing reports and Excel feeds can transition without a flag day.
+    """
+
+    conn.execute("DELETE FROM mart.verint_final_absence_event")
+    conn.execute("DELETE FROM mart.verint_final_absence_agent_day")
+    conn.execute(
+        """INSERT INTO mart.verint_final_absence_event (
+               event_key, agent_day_key, business_date, agent_id, agent_name,
+               team_leader, ops_manager, lob, market, language, location,
+               activity, category, event_start, event_end, minutes, hours,
+               counts_as_absence, counts_as_vacation, counts_as_unpaid,
+               counts_as_shrinkage, mapped, evidence_type, source_file,
+               rule_version, rule_sha256
+           )
+           SELECT event_key, agent_day_key, business_date, agent_id, agent_name,
+                  team_leader, ops_manager, lob, market, language, location,
+                  activity, category, event_start, event_end, minutes, hours,
+                  counts_as_absence, counts_as_vacation, counts_as_unpaid,
+                  counts_as_shrinkage, mapped, evidence_type, source_file,
+                  rule_version, rule_sha256
+           FROM mart.absence_event"""
+    )
+    conn.execute(
+        """INSERT INTO mart.verint_final_absence_agent_day (
+               agent_day_key, business_date, agent_id, agent_name, team_leader,
+               ops_manager, lob, market, language, location, scheduled_minutes,
+               planned_net_minutes, final_absence_minutes,
+               final_vacation_minutes, final_unpaid_minutes,
+               final_shrinkage_minutes, final_unmapped_minutes,
+               final_absence_hours, final_absence_rate, final_absence_day,
+               final_ledger_status, rule_version, rule_sha256
+           )
+           SELECT d.agent_day_key, d.business_date, d.agent_id, d.agent_name,
+                  d.team_leader, d.ops_manager, d.lob, d.market, d.language,
+                  d.location, d.scheduled_minutes, d.planned_net_minutes,
+                  d.absence_minutes, d.vacation_minutes, d.unpaid_minutes,
+                  d.shrinkage_minutes, d.unverified_minutes,
+                  d.absence_minutes/60.0, d.absence_rate, d.absence_day,
+                  CASE
+                    WHEN coalesce(a.is_provisional,false) THEN 'PROVISIONAL_DAY'
+                    WHEN d.unverified_minutes>0 THEN 'PENDING_REVIEW'
+                    WHEN d.absence_minutes>0 THEN 'ABSENCE_RECORDED'
+                    ELSE 'CLEAR'
+                  END,
+                  d.rule_version, d.rule_sha256
+           FROM mart.absence_agent_day d
+           LEFT JOIN mart.attendance_agent_day a
+             ON a.agent_day_key=d.agent_day_key"""
+    )
+    events = conn.execute("SELECT count(*) FROM mart.verint_final_absence_event").fetchone()[0]
+    days = conn.execute("SELECT count(*) FROM mart.verint_final_absence_agent_day").fetchone()[0]
+    return events, days
 
 
 SERVICE_COLUMNS = [
@@ -2754,7 +2743,7 @@ def _build_call_service(
             metric_catalog, "service_level", business_date, dimensions, components,
         )
         availability = _metric_evaluation(
-            metric_catalog, "service_availability", business_date, dimensions, components,
+            metric_catalog, "service_availability_business", business_date, dimensions, components,
         )
         abandon = _metric_evaluation(
             metric_catalog, "abandon_rate", business_date, dimensions, components,
@@ -2791,38 +2780,29 @@ def _build_service(
     start: date,
     end: date,
 ) -> int:
+    """Project governed Call-by-Call counters into the stable service mart."""
     conn.execute("DELETE FROM mart.service_interval")
     rows = _dicts(conn.execute(
         """
-        SELECT business_date, interval_start, hour_start, source_system, queue,
-               business_partner, lob, language, offered, answered, abandoned,
-               short_calls, abandoned_20s, answered_20s, aht_seconds, source_file
-        FROM (
-            SELECT r.*, f.file_name AS source_file,
-                   row_number() OVER (
-                       PARTITION BY source_system, business_date, interval_time, coalesce(queue,''),
-                                    coalesce(business_partner,''), coalesce(lob,''), coalesce(language,'')
-                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, source_row DESC
-                   ) row_rank
-            FROM raw.queue_actual r
-            JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
-            WHERE business_date BETWEEN ? AND ?
-        ) x WHERE row_rank=1
+        SELECT business_date, hour_start AS interval_start, hour_start,
+               source_system, queue, NULL AS business_partner,
+               service_scope AS lob, language, offered, answered, abandoned,
+               short_abandoned, answered_within_target, handled_seconds,
+               source_files AS source_file, service_scope, comparison_scope,
+               designation, mapping_sha256
+        FROM mart.call_service_hour
+        WHERE business_date BETWEEN ? AND ?
+        ORDER BY business_date, hour_start, service_scope, queue
         """, [start, end],
     ))
     output: list[dict[str, Any]] = []
     for row in rows:
-        short_abandoned = row["abandoned_20s"] if row["abandoned_20s"] is not None else row["short_calls"]
-        handled_seconds = (
-            float(row["aht_seconds"]) * float(row["answered"])
-            if row["aht_seconds"] is not None and row["answered"] is not None else None
-        )
         components = {
             "offered": row["offered"], "answered": row["answered"],
-            "abandoned": row["abandoned"], "short_abandoned": short_abandoned,
-            "answered_within_target": row["answered_20s"], "handled_seconds": handled_seconds,
+            "abandoned": row["abandoned"], "short_abandoned": row["short_abandoned"],
+            "answered_within_target": row["answered_within_target"],
+            "handled_seconds": row["handled_seconds"],
         }
-        mapped = mapping.map_actual(row["source_system"], row["queue"], row["business_partner"], row["lob"])
         dimensions = {
             "source_system": row["source_system"],
             "queue": row["queue"],
@@ -2837,7 +2817,7 @@ def _build_service(
             metric_catalog, "service_level_gross", row["business_date"], dimensions, components,
         )
         availability = _metric_evaluation(
-            metric_catalog, "service_availability", row["business_date"], dimensions, components,
+            metric_catalog, "service_availability_business", row["business_date"], dimensions, components,
         )
         abandon = _metric_evaluation(
             metric_catalog, "abandon_rate", row["business_date"], dimensions, components,
@@ -2851,8 +2831,9 @@ def _build_service(
                 "business_partner", "lob", "language", "offered", "answered", "abandoned",
                 "source_file",
             )},
-            "short_abandoned": short_abandoned, "answered_within_target": row["answered_20s"],
-            "handled_seconds": handled_seconds,
+            "short_abandoned": row["short_abandoned"],
+            "answered_within_target": row["answered_within_target"],
+            "handled_seconds": row["handled_seconds"],
             "sl_gross": gross.value,
             "sl_adjusted": service_level.value,
             "sl_profile": service_level.method.method_id,
@@ -2861,9 +2842,10 @@ def _build_service(
             "abandon_rate": abandon.value,
             "aht_seconds": aht.value,
             "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
-            "service_scope": mapped.service_scope, "comparison_scope": mapped.comparison_scope,
-            "designation": mapped.designation,
-            "mapping_status": mapped.status, "mapping_sha256": mapping.sha256,
+            "service_scope": row["service_scope"],
+            "comparison_scope": row["comparison_scope"],
+            "designation": row["designation"],
+            "mapping_status": "MAPPED", "mapping_sha256": row["mapping_sha256"],
             "sl_target": service_level.method.target,
             "sl_state": service_level.state,
         })
@@ -2926,20 +2908,18 @@ def _build_quality(
     for family, key in (
         ("fte", "fte_file"), ("schedule", "schedule_folder"), ("lilo", "lilo_folder"),
         ("agent_status", "agent_status_folder"), ("forecast", "forecast_folder"),
-        ("apbe", "apbe_folder"), ("apfr", "apfr_folder"), ("apde", "apde_folder"), ("calls", "call_folder"),
+        ("calls", "call_folder"),
     ):
         if family == "agent_status" and not config.modules.get("agent_status", True):
             continue
         if family == "forecast" and not config.modules.get("forecast", True):
             continue
-        if family in {"apbe", "apfr", "apde"} and not config.modules.get("intraday", True):
-            continue
-        if family == "calls" and not config.modules.get("pcs", True):
-            continue
         path = config.source_path(key)
         if not path.exists():
             add(family, str(path), None, None, "Missing source", "ERROR", f"Expected path does not exist: {path}")
     for row in _dicts(conn.execute("SELECT * FROM meta.source_file WHERE status='ERROR'")):
+        if row["source_family"] in {"apbe", "apfr", "apde"}:
+            continue
         if row["source_family"] == "agent_status" and not config.modules.get("agent_status", False):
             continue
         add(row["source_family"], row["file_name"], None, None, "Source load error", "ERROR", row["error_message"] or "Unknown load error")
@@ -2999,12 +2979,6 @@ def _build_quality(
                 "StartEndTimes coverage incomplete", "REVIEW",
                 f"Using Activities Shift Assignment boundaries for {fallback_assignments:,} agent-day row(s) not covered by a valid StartEndTimes row.",
             )
-    if "ACTIVITIES" not in schedule_variants:
-        add(
-            "schedule", str(config.source_path("schedule_folder")), None, None,
-            "Missing Activities final ledger", "REVIEW",
-            "Final Verint absenteeism and correction reconciliation require an Activities export.",
-        )
     rulebook = load_rulebook(config.home, config.business_rules)
     for row in _dicts(conn.execute(
         """SELECT schedule_date, agent_id_raw, agent_name, parse_ok, f.file_name
@@ -3038,8 +3012,22 @@ def _build_quality(
                 "agent_status", None, business_date, None, "Low Agent Status coverage", "REVIEW",
                 f"{low_rows} agent-day rows have less than {config.rules.minimum_status_coverage:.0%} status coverage; LILO boundaries still remain usable.",
             )
+    for correction_id, imported_from in conn.execute(
+        """SELECT a.correction_id, a.imported_from
+           FROM core.correction_action a
+           LEFT JOIN mart.correction_candidate c
+             ON c.correction_id=a.correction_id
+           WHERE c.correction_id IS NULL
+             AND substr(a.correction_id,1,8) BETWEEN ? AND ?""",
+        [start.strftime("%Y%m%d"), end.strftime("%Y%m%d")],
+    ).fetchall():
+        add(
+            "attendance", imported_from, None, None,
+            "Stale attendance decision", "REVIEW",
+            f"Gap ID {correction_id} no longer matches a current exact interval; rebuild Attendance Review before deciding it again.",
+        )
     forecast_unmapped = conn.execute("SELECT count(*) FROM mart.forecast_hour WHERE mapping_status='UNMAPPED'").fetchone()[0]
-    actual_unmapped = conn.execute("SELECT count(*) FROM mart.intraday_queue_interval WHERE mapping_status='UNMAPPED'").fetchone()[0]
+    actual_unmapped = 0
     if forecast_unmapped or actual_unmapped:
         add(
             "intraday", str(config.queue_mapping), None, None, "Unmapped service scope", "REVIEW",
@@ -3086,31 +3074,8 @@ def _build_quality(
         severity = "REVIEW"
         add(
             "absence", row["source_file"], row["business_date"], row["agent_id"],
-            "Observed gap not verified in Verint", severity,
-            f"{row['activity']} -> {row['category']} ({row['minutes']} minutes). Correct it in Verint, then export Activities and refresh.",
-        )
-    for row in _dicts(conn.execute(
-        """SELECT business_date, agent_id, agent_name, activity, category, minutes, source_file
-           FROM mart.verint_final_exception WHERE business_date BETWEEN ? AND ?""", [start, end]
-    )):
-        add(
-            "schedule", row["source_file"], row["business_date"], row["agent_id"],
-            "Verint final activity without observed gap", "REVIEW",
-            f"{row['activity']} / {row['category']} covers {row['minutes']} minutes for {row['agent_name'] or row['agent_id']}; compare LILO and Agent Status.",
-        )
-    for row in _dicts(conn.execute(
-        """SELECT business_date, agent_id, agent_name, final_ledger_status
-           FROM mart.verint_final_absence_agent_day
-           WHERE business_date BETWEEN ? AND ?
-             AND final_ledger_status IN (
-               'PLANNED_TIME_OFF_NOT_IN_VERINT','TIME_OFF_PARTIALLY_IN_VERINT'
-             )""", [start, end]
-    )):
-        add(
-            "fte", None, row["business_date"], row["agent_id"],
-            "Planned time off not final in Verint", "ERROR",
-            f"{row['agent_name'] or row['agent_id']}: {row['final_ledger_status']}. "
-            "Correct Verint Activities, export again, and refresh before payroll use.",
+            "Observed gap awaiting decision", severity,
+            f"{row['activity']} -> {row['category']} ({row['minutes']} minutes). Classify it in Attendance Review and import the decisions.",
         )
     for row in _dicts(conn.execute(
         """SELECT r.agent_id, r.source_sheet, r.source_row, r.start_date,
@@ -3126,17 +3091,6 @@ def _build_quality(
             "Time-off Agent ID not in active roster", "ERROR",
             f"{row['source_sheet']} row {row['source_row']} ({row['absence_type']}) "
             "does not match an admitted Agent-sheet ID.",
-        )
-    for row in _dicts(conn.execute(
-        """SELECT business_date, agent_id, activity, source_file, sum(minutes) AS minutes
-           FROM mart.verint_final_absence_event
-           WHERE mapped=false AND business_date BETWEEN ? AND ?
-           GROUP BY business_date, agent_id, activity, source_file""", [start, end]
-    )):
-        add(
-            "schedule", row["source_file"], row["business_date"], row["agent_id"],
-            "Unmapped final Verint activity", "REVIEW",
-            f"{row['activity'] or '(blank)'} covers {row['minutes']} minutes and needs a rulebook classification.",
         )
     for row in _dicts(conn.execute(
         """SELECT business_date, source_system, queue, offered, answered, source_file
@@ -3156,8 +3110,8 @@ def _build_quality(
     )):
         add(
             "absence", row["source_file"], row["business_date"], row["agent_id"],
-            "Verint No Activity", "REVIEW",
-            f"No Activity covers {row['minutes']} scheduled minutes. Confirm whether this is shrinkage or a schedule defect.",
+            "Reviewed No Activity", "REVIEW",
+            f"No Activity covers {row['minutes']} scheduled minutes. Confirm the imported decision is intentional.",
         )
     for row in _dicts(conn.execute(
         """SELECT DISTINCT a.business_date, a.agent_id, a.agent_name,
@@ -3203,16 +3157,12 @@ def _build_source_health(conn: DatabaseConnection, config: Config) -> None:
     specs = [
         ("fte", config.source_path("fte_file")), ("schedule", config.source_path("schedule_folder")),
         ("lilo", config.source_path("lilo_folder")), ("agent_status", config.source_path("agent_status_folder")),
-        ("forecast", config.source_path("forecast_folder")), ("apbe", config.source_path("apbe_folder")),
-        ("apfr", config.source_path("apfr_folder")), ("apde", config.source_path("apde_folder")),
-        ("calls", config.source_path("call_folder")),
+        ("forecast", config.source_path("forecast_folder")), ("calls", config.source_path("call_folder")),
     ]
     specs = [
         (family, path) for family, path in specs
         if not (family == "agent_status" and not config.modules.get("agent_status", True))
         and not (family == "forecast" and not config.modules.get("forecast", True))
-        and not (family in {"apbe", "apfr", "apde"} and not config.modules.get("intraday", True))
-        and not (family == "calls" and not config.modules.get("pcs", True))
     ]
     for family, expected in specs:
         latest = conn.execute(
@@ -3234,10 +3184,9 @@ def _build_source_health(conn: DatabaseConnection, config: Config) -> None:
                 UNION ALL SELECT max(extract_date) FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='agent_status'
                 UNION ALL SELECT max(schedule_date) FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='schedule'
                 UNION ALL SELECT max(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='forecast'
-                UNION ALL SELECT max(business_date) FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE source_system=upper(?)
                 UNION ALL SELECT max(business_date) FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='calls'
             ) x
-            """, [family, family, family, family, family, family]
+            """, [family, family, family, family, family]
         ).fetchone()[0]
         if latest:
             file_name, modified, loaded, status, error = latest
@@ -3293,9 +3242,8 @@ def refresh_models(
         start, end = resolve_period(conn, config, start, end, use_config_period)
         stage(2, "Loading schedules")
         schedules = _load_schedules(conn, start, end)
-        stage(3, "Loading schedule activities")
-        events = _load_events(conn, start, end)
-        events_by_agent = _events_by_agent(events)
+        stage(3, "Keeping Verint Activities out of attendance logic")
+        events_by_agent: dict[str, list[dict[str, Any]]] = {}
         stage(4, "Loading LILO")
         lilo, loaded_dates, seen_ids = _load_lilo(conn, start, end)
         stage(5, "Loading Agent Status attendance evidence")
@@ -3339,15 +3287,13 @@ def refresh_models(
         absence, absence_events = _build_absence(
             conn, config, rulebook, metric_catalog, attendance, corrections,
         )
-        stage(16, "Building corrected Verint final absence")
-        final_absence_events, final_absence = _build_verint_final_absence(
-            conn, rulebook, metric_catalog, start, end, evaluation_as_of,
-        )
-        stage(17, "Building service performance and Call-by-Call flashes")
-        service = _build_service(conn, rulebook, metric_catalog, mapping, start, end)
+        stage(16, "Publishing reviewed attendance ledger")
+        final_absence_events, final_absence = _sync_reviewed_absence_compatibility(conn)
+        stage(17, "Building Call-by-Call service performance and flashes")
         call_service = _build_call_service(
             conn, rulebook, metric_catalog, mapping, start, end,
         )
+        service = _build_service(conn, rulebook, metric_catalog, mapping, start, end)
         _record_rule_application(conn, run_id, rulebook)
         _record_mapping_application(conn, run_id, mapping)
         stage(18, "Checking source health")

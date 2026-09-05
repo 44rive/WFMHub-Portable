@@ -171,7 +171,8 @@ class CallServiceModelTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(result[:8], (3, 1, 2, 1, 1, 120.0, 4, 1))
         self.assertAlmostEqual(result[8], 0.5)
-        self.assertAlmostEqual(result[9], 1 / 3)
+        # Storm business availability excludes short abandons from offered demand.
+        self.assertAlmostEqual(result[9], 1 / 2)
         self.assertAlmostEqual(result[10], 2 / 3)
         self.assertAlmostEqual(result[11], 120.0)
         conn.close()

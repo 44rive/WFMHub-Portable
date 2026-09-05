@@ -11,7 +11,7 @@ import hashlib
 import shutil
 import tomllib
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from itertools import combinations
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -195,6 +195,22 @@ def ensure_metric_catalog(home: Path, target: Path | None = None) -> Path:
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(default, target)
+    else:
+        try:
+            current = tomllib.loads(target.read_text(encoding="utf-8")).get("catalog", {})
+            shipped = tomllib.loads(default.read_text(encoding="utf-8")).get("catalog", {})
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            current, shipped = {}, {}
+        if (
+            str(current.get("version", "")) == "2026.09.1"
+            and str(shipped.get("version", "")) == "2026.09.2"
+        ):
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            shutil.copy2(
+                target,
+                target.with_name(f"{target.stem}_pre_business_service_{stamp}{target.suffix}"),
+            )
+            shutil.copy2(default, target)
     return target
 
 

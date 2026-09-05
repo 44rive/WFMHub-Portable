@@ -136,24 +136,24 @@ DATASETS: dict[str, ExportDataset] = {
         "SELECT * FROM mart.absence_agent_day WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id",
     ),
     "absence_events": ExportDataset(
-        "absence_events", "Observed LILO/status gaps with Verint-final reconciliation.",
+        "absence_events", "Reviewed attendance-gap and PTO/Away component intervals.",
         "SELECT * FROM mart.absence_event WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start",
     ),
     "gaps": ExportDataset(
-        "gaps", "Observed correction candidates, Verint checks and saved decisions.",
+        "gaps", "Observed exact correction candidates and saved human decisions.",
         "SELECT * FROM mart.correction_candidate WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, gap_start",
     ),
     "verint_final_exceptions": ExportDataset(
-        "verint_final_exceptions", "Final Verint activities with no supporting observed gap.",
+        "verint_final_exceptions", "Retired compatibility export; always empty.",
         "SELECT * FROM mart.verint_final_exception WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start",
     ),
     "verint_final_absence_events": ExportDataset(
-        "verint_final_absence_events", "Corrected Verint Activities-only final absence event ledger.",
+        "verint_final_absence_events", "Compatibility projection of reviewed absence components.",
         """SELECT * FROM mart.verint_final_absence_event
            WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start""",
     ),
     "verint_final_absence_day": ExportDataset(
-        "verint_final_absence_day", "Corrected Verint Activities-only final absence per agent/day.",
+        "verint_final_absence_day", "Compatibility projection of reviewed absence per agent/day.",
         """SELECT * FROM mart.verint_final_absence_agent_day
            WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id""",
     ),
@@ -229,15 +229,15 @@ DATASETS: dict[str, ExportDataset] = {
            ) x WHERE row_rank=1 ORDER BY extract_date, agent_id, status_start""",
     ),
     "intraday_actual": ExportDataset(
-        "intraday_actual", "Legacy clean Storm APBE/APFR/APDE queue intervals.",
+        "intraday_actual", "Retired legacy queue-interval contract (kept empty).",
         "SELECT * FROM mart.intraday_queue_interval WHERE business_date BETWEEN ? AND ? ORDER BY business_date, interval_start, source_system, queue",
     ),
     "service_actual": ExportDataset(
-        "service_actual", "Rule-versioned service performance; availability means answered/offered.",
+        "service_actual", "Rule-versioned Call-by-Call service performance.",
         "SELECT * FROM mart.service_interval WHERE business_date BETWEEN ? AND ? ORDER BY business_date, interval_start, source_system, queue",
     ),
     "daily_service_lob": ExportDataset(
-        "daily_service_lob", "APDE service counters and configured semantic metric values.",
+        "daily_service_lob", "Call-by-Call service counters and configured semantic metric values.",
         None, contract="service_scope_interval",
     ),
     "forecast": ExportDataset(

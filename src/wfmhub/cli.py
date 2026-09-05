@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import __version__
 from .analytics import load_analytics_rules, validate_analytics_rules
+from .actions import import_attendance_decisions
 from .bonus import import_bonus_matrix
 from .config import ConfigError, ensure_user_config, load_config, write_source_root
 from .database import HubLockedError, backup_database, connect, migrate, write_session
@@ -24,7 +25,7 @@ from .metrics import diff_metric_catalogs, evaluate_metric, load_metric_catalog,
 from .on_demand_analysis import ANALYSIS_DOMAINS, COMPARISON_MODES, build_analysis_workbook
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
 from .progress import ProgressBar, ProgressCallback
-from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack
+from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack, report_current_path
 from .report_specs import load_report_catalog, validate_report_catalog
 from .rules import load_rulebook, validate_rulebook
 from .semantic import SOURCE_COMPONENTS
@@ -37,7 +38,9 @@ from .ui import clear_screen, render_dashboard
 SOURCE_GROUPS = {
     "all": None,
     "operations": {"fte", "schedule", "lilo", "agent_status"},
-    "intraday": {"fte", "calls", "forecast", "apbe", "apfr", "apde"},
+    "service": {"fte", "calls", "forecast"},
+    # Command-line compatibility for older shortcuts.  No AP source is loaded.
+    "intraday": {"fte", "calls", "forecast"},
     "pcs": {"fte", "calls"},
 }
 
@@ -194,8 +197,8 @@ def refresh(
     print(f"Gaps        : {model.correction_rows:,} rows")
     print(f"Absence     : {model.absence_rows:,} agent-day + {model.absence_event_rows:,} evidence rows")
     print(
-        f"Service     : {model.service_rows:,} AP actual + "
-        f"{model.call_service_rows:,} Call-by-Call flash + "
+        f"Service     : {model.service_rows:,} governed Call-by-Call + "
+        f"{model.call_service_rows:,} mapped queue/hour + "
         f"{model.forecast_rows:,} forecast rows"
     )
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
@@ -388,7 +391,7 @@ def show_coverage(home: Path) -> int:
         ("LILO", "SELECT min(extract_date), max(extract_date), count(*) FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active"),
         ("Agent Status", "SELECT min(extract_date), max(extract_date), count(*) FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active"),
         ("Calls", "SELECT min(business_date), max(business_date), count(*) FROM core.clean_call_leg"),
-        ("Actuals", "SELECT min(business_date), max(business_date), count(*) FROM raw.queue_actual r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active"),
+        ("Service", "SELECT min(business_date), max(business_date), count(*) FROM mart.call_service_hour"),
         ("Forecast", "SELECT min(business_date), max(business_date), count(*) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active"),
         ("Bonus", "SELECT min(period), max(period), count(*) FROM mart.bonus_agent_month"),
     ]
@@ -543,6 +546,40 @@ def import_bonus_tool(
     return 0
 
 
+def import_attendance_decisions_tool(home: Path, workbook: Path) -> int:
+    """Import exact-gap decisions, recalculate the ledger and rebuild review."""
+
+    config = load_config(home)
+    _logging(config)
+    bar = ProgressBar()
+    try:
+        bar.update(0.05, "Validating Attendance Review decisions")
+        with write_session(config) as conn:
+            rulebook = load_rulebook(home, config.business_rules)
+            imported = import_attendance_decisions(conn, workbook, rulebook)
+            model = refresh_models(
+                conn, config, f"decisions-{uuid.uuid4().hex}",
+                imported.start, imported.end, False,
+                _phase_progress(bar, 0.15, 0.75),
+            )
+            bar.update(0.78, "Updating reviewed absence feeds")
+            publish_shared_feeds(conn, config, model.start, model.end)
+            bar.update(0.88, "Rebuilding Attendance Review")
+            report = build_report_pack(
+                "corrections", conn, config, model.start, model.end,
+            )
+        bar.finish("Attendance decisions imported")
+    except Exception as exc:
+        logging.exception("Attendance decision import failed")
+        bar.fail(str(exc))
+        raise
+    print(f"Decisions    : {imported.imported:,} imported")
+    print(f"Period       : {imported.start} to {imported.end}")
+    print(f"Review file  : {report}")
+    print("Extracts     : unchanged")
+    return 0
+
+
 def analyze_period(
     home: Path,
     domain: str,
@@ -625,7 +662,7 @@ def _choose_source_group() -> str:
     print("4. Agent PCS: FTE and Call by Call")
     choice = input("Choose 1-4: ").strip()
     try:
-        return {"1": "all", "2": "operations", "3": "intraday", "4": "pcs"}[choice]
+        return {"1": "all", "2": "operations", "3": "service", "4": "pcs"}[choice]
     except KeyError as exc:
         raise ValueError("Please choose a data group from 1 to 4") from exc
 
@@ -734,26 +771,42 @@ def _advanced_menu(home: Path) -> None:
         raise ValueError("Please choose a number from 1 to 7")
 
 
+def _attendance_review_menu(home: Path) -> None:
+    print("\nATTENDANCE REVIEW")
+    print("1. Build or rebuild Attendance Review")
+    print("2. Import completed decisions and recalculate")
+    print("3. Back")
+    choice = input("Choose 1-3: ").strip()
+    if choice == "1":
+        _build_menu_product(home, "corrections")
+    elif choice == "2":
+        config = load_config(home)
+        default = report_current_path(config, "corrections")
+        entered = input(f"Workbook path [{default}]: ").strip().strip('"')
+        import_attendance_decisions_tool(home, Path(entered) if entered else default)
+    elif choice != "3":
+        raise ValueError("Please choose a number from 1 to 3")
+
+
 def menu(home: Path) -> int:
     while True:
         clear_screen()
         render_dashboard(home)
         print("\n  UPDATE")
         print("    [1] Refresh source data once")
-        print("\n  TODAY")
+        print("\n  OPERATIONAL")
         print("    [2] Attendance Callout")
-        print("    [3] Staffing & Capacity Plan")
-        print("    [4] Service Flashes")
-        print("    [5] Realisations (all mapped LOBs)")
-        print("    [6] Attendance Review")
-        print("\n  MONTH")
-        print("    [7] Final Absenteeism")
-        print("    [8] Bonus Management")
-        print("\n  PCS")
-        print("    [9] PCS Performance")
-        print("\n  ANALYSE")
-        print("   [10] Analyze a period")
-        print("   [11] Export clean data")
+        print("    [3] Service Flashes")
+        print("    [4] Attendance Review")
+        print("\n  ANALYZE")
+        print("    [5] Analyze a period")
+        print("    [6] Export clean data")
+        print("\n  IN DEVELOPMENT")
+        print("    [7] Staffing")
+        print("    [8] Realisations")
+        print("    [9] Final Absenteeism")
+        print("   [10] Bonus")
+        print("   [11] PCS")
         print("\n  SETTINGS")
         print("   [12] System and advanced tools")
         print("   [13] Exit")
@@ -766,16 +819,25 @@ def menu(home: Path) -> int:
             elif choice == "2":
                 _build_menu_product(home, "attendance")
             elif choice == "3":
-                _build_menu_product(home, "staffing")
-            elif choice == "4":
                 _build_menu_product(home, "service")
+            elif choice == "4":
+                _attendance_review_menu(home)
             elif choice == "5":
-                _build_menu_product(home, "realisations")
+                domain, comparison = _choose_analysis()
+                start, end, use_config = _choose_period()
+                analyze_period(home, domain, start, end, comparison, use_config_period=use_config)
             elif choice == "6":
-                _build_menu_product(home, "corrections")
+                dataset = _choose_dataset()
+                start, end, use_config = _choose_period()
+                file_format = input("Format CSV or XLSX [CSV]: ").strip().lower() or "csv"
+                export_clean(home, dataset, start, end, file_format, use_config_period=use_config)
             elif choice == "7":
-                _build_menu_product(home, "absence")
+                _build_menu_product(home, "staffing")
             elif choice == "8":
+                _build_menu_product(home, "realisations")
+            elif choice == "9":
+                _build_menu_product(home, "absence")
+            elif choice == "10":
                 print("\nBONUS MANAGEMENT")
                 print("1. Import Bonus Matrix v1.2, then build")
                 print("2. Build from the already imported matrix")
@@ -786,17 +848,8 @@ def menu(home: Path) -> int:
                 elif bonus_choice != "2":
                     raise ValueError("Please choose 1 or 2")
                 _build_menu_product(home, "bonus")
-            elif choice == "9":
-                _build_menu_product(home, "pcs")
-            elif choice == "10":
-                domain, comparison = _choose_analysis()
-                start, end, use_config = _choose_period()
-                analyze_period(home, domain, start, end, comparison, use_config_period=use_config)
             elif choice == "11":
-                dataset = _choose_dataset()
-                start, end, use_config = _choose_period()
-                file_format = input("Format CSV or XLSX [CSV]: ").strip().lower() or "csv"
-                export_clean(home, dataset, start, end, file_format, use_config_period=use_config)
+                _build_menu_product(home, "pcs")
             elif choice == "12":
                 _advanced_menu(home)
             elif choice == "13":
@@ -844,6 +897,11 @@ def parser() -> argparse.ArgumentParser:
     custom_p.add_argument("--end", type=_date)
     bonus_p = commands.add_parser("import-bonus", help="Import Bonus Matrix v1.2 without changing the source")
     bonus_p.add_argument("workbook", type=Path)
+    decisions_p = commands.add_parser(
+        "import-attendance-decisions",
+        help="Import Attendance Review decisions and recalculate",
+    )
+    decisions_p.add_argument("workbook", type=Path)
     analysis_p = commands.add_parser("analyze", help="Run on-demand period analysis")
     analysis_p.add_argument("domain", choices=ANALYSIS_DOMAINS)
     analysis_p.add_argument("--start", type=_date)
@@ -878,6 +936,8 @@ def main(argv: list[str] | None = None) -> int:
             return report_only(home, args.start, args.end, args.output, args.pack, service_profile=args.service_profile)
         if args.command == "import-bonus":
             return import_bonus_tool(home, args.workbook)
+        if args.command == "import-attendance-decisions":
+            return import_attendance_decisions_tool(home, args.workbook)
         if args.command == "analyze":
             return analyze_period(home, args.domain, args.start, args.end, args.comparison, args.output)
         if args.command == "export":

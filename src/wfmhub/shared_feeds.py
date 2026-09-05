@@ -208,7 +208,7 @@ def publish_absence_feeds(
     fallback_start: date,
     fallback_end: date,
 ) -> SharedFeedResult:
-    """Publish final Verint absence, component and review-case feeds."""
+    """Publish reviewed attendance-led absence, component and case feeds."""
 
     start, end = _available_period(
         conn, "mart.verint_final_absence_agent_day", fallback_start, fallback_end,

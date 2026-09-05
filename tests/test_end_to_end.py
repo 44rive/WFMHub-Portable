@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfoNotFoundError
 
 from openpyxl import Workbook, load_workbook
 
+from wfmhub.actions import import_attendance_decisions
 from wfmhub.config import ensure_user_config, load_config, write_source_root
 from wfmhub.database import write_session
 from wfmhub.ingestion import ingest_all
@@ -21,6 +22,7 @@ from wfmhub.on_demand_analysis import build_analysis_workbook
 from wfmhub.exports import export_dataset
 from wfmhub.report_packs import build_report_pack
 from wfmhub.reports import build_report
+from wfmhub.rules import load_rulebook
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -153,7 +155,7 @@ def make_calls(path: Path):
             "[Hold Time]": "0:00:30", "[Total Wrap Time]": "0:00:30",
             "[Call Direction]": "I", "[PostCallSurveyMode]": "2", "[PCSStatus]": "1",
             "[Question 1]": "5", "[Question 2]": "4", "[Question 3]": "Good",
-            "[Queue]": "Queue",
+            "[Queue]": "APBN_BRU_MOBILITY_Ford_Assistance_FR",
         })
         writer.writerow({
             "[Call Date/Time]": "8/1/2026 9:00", "[Call End Date/Time]": "8/1/2026 9:02",
@@ -169,7 +171,7 @@ def make_calls(path: Path):
             "[Hold Time]": "0:00:30", "[Total Wrap Time]": "0:00:30",
             "[Call Direction]": "I", "[PostCallSurveyMode]": "2", "[PCSStatus]": "1",
             "[Question 1]": "2", "[Question 2]": "3", "[Question 3]": "Needs follow-up",
-            "[Queue]": "Queue",
+            "[Queue]": "APBN_BRU_MOBILITY_Ford_Assistance_FR",
         })
         for call_id, direction, status, q1, q2 in (
             ("half-score", "I", "1", "4.5", "5"),
@@ -185,7 +187,8 @@ def make_calls(path: Path):
                 "[Agent ID]": "100", "[Agent]": "Agent 100",
                 "[Call Direction]": direction, "[PostCallSurveyMode]": "2",
                 "[PCSStatus]": status, "[Question 1]": q1,
-                "[Question 2]": q2, "[Queue]": "Queue",
+                "[Question 2]": q2,
+                "[Queue]": "APBN_BRU_MOBILITY_Ford_Assistance_FR",
             })
 
 
@@ -395,7 +398,7 @@ class EndToEndTests(unittest.TestCase):
                     conn.execute(
                         "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_id='200'"
                     ).fetchone()[0],
-                    "PLANNED_TIME_OFF_NOT_IN_VERINT",
+                    "CLEAR",
                 )
 
     def test_refresh_builds_safe_attendance_gaps_and_excel(self):
@@ -438,9 +441,9 @@ class EndToEndTests(unittest.TestCase):
                     progress=lambda current, total, label: ingest_progress.append((current, total, label)),
                 )
                 self.assertEqual(ingest.failed, 0)
-                self.assertEqual(ingest.loaded, 12)
+                self.assertEqual(ingest.loaded, 10)
                 self.assertEqual(ingest.scoped_out, 5)
-                self.assertEqual(ingest_progress[-1][:2], (12, 12))
+                self.assertEqual(ingest_progress[-1][:2], (10, 10))
                 self.assertTrue(any(total == 0 and "Call by Call" in label for _, total, label in ingest_progress))
                 for table in ("raw.schedule_shift", "raw.lilo", "raw.agent_status", "raw.call_leg"):
                     self.assertEqual(conn.execute(f"SELECT count(*) FROM {table} WHERE agent_id='999'").fetchone()[0], 0)
@@ -468,12 +471,12 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(late[2], 20)
                 self.assertEqual(
                     conn.execute("SELECT verint_reconciliation FROM mart.correction_candidate WHERE agent_id='100' AND detected_issue='Late'").fetchone()[0],
-                    "PARTIAL",
+                    "PENDING_REVIEW",
                 )
                 status_gap = conn.execute(
                     "SELECT gap_minutes, observed_source, verint_reconciliation FROM mart.correction_candidate WHERE agent_id='100' AND detected_issue='Mid-shift logged off'"
                 ).fetchone()
-                self.assertEqual(status_gap, (60, "AGENT_STATUS", "NOT_CORRECTED"))
+                self.assertEqual(status_gap, (60, "AGENT_STATUS", "PENDING_REVIEW"))
                 self.assertEqual(
                     conn.execute(
                         "SELECT uncoded_early_leave_minutes FROM mart.attendance_agent_day WHERE agent_day_key='20260801-100'"
@@ -500,11 +503,11 @@ class EndToEndTests(unittest.TestCase):
                     ).fetchone(),
                     (10.0, 3.0, 15, 4),
                 )
-                self.assertEqual(model.intraday_rows, 2)
+                self.assertEqual(model.intraday_rows, 0)
                 self.assertEqual(model.pcs_rows, 2)
                 self.assertEqual(model.absence_rows, 4)
                 self.assertGreater(model.absence_event_rows, 0)
-                self.assertEqual(model.service_rows, 2)
+                self.assertEqual(model.service_rows, 3)
                 self.assertGreater(model.metric_rows, 0)
                 self.assertGreater(model.finding_rows, 0)
                 self.assertEqual(
@@ -530,19 +533,19 @@ class EndToEndTests(unittest.TestCase):
                 absence_100 = conn.execute(
                     "SELECT absence_minutes, absence_rate FROM mart.absence_agent_day WHERE agent_day_key='20260801-100'"
                 ).fetchone()
-                self.assertEqual(absence_100[0], 80)
-                self.assertAlmostEqual(absence_100[1], 80 / 480)
+                self.assertEqual(absence_100[0], 0)
+                self.assertEqual(absence_100[1], 0)
                 self.assertEqual(
                     conn.execute(
                         "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_day_key='20260801-200'"
                     ).fetchone()[0],
-                    "UNCODED_EMPTY_SHIFT",
+                    "PENDING_REVIEW",
                 )
                 self.assertEqual(
                     conn.execute(
                         "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_day_key='20260801-100'"
                     ).fetchone()[0],
-                    "PARTIAL_CORRECTION_REVIEW",
+                    "PENDING_REVIEW",
                 )
                 self.assertEqual(
                     conn.execute("SELECT count(*) FROM mart.absence_event WHERE evidence_type IN ('SHIFT_EVENT','SHIFT_ASSIGNMENT')").fetchone()[0],
@@ -553,20 +556,20 @@ class EndToEndTests(unittest.TestCase):
                     0,
                 )
                 self.assertEqual(
-                    conn.execute("SELECT exception_type FROM mart.verint_final_exception WHERE agent_id='300'").fetchone()[0],
-                    "VERINT_FINAL_WITHOUT_OBSERVED_GAP",
+                    conn.execute("SELECT count(*) FROM mart.verint_final_exception").fetchone()[0],
+                    0,
                 )
                 self.assertEqual(
                     conn.execute(
                         "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_day_key='20260801-300'"
                     ).fetchone()[0],
-                    "VERINT_WITHOUT_OBSERVED_GAP",
+                    "CLEAR",
                 )
                 service = conn.execute(
                     "SELECT sum(answered), sum(offered), sum(handled_seconds) FROM mart.service_interval"
                 ).fetchone()
-                self.assertEqual(service[:2], (18, 22))
-                self.assertEqual(service[2], 2390)
+                self.assertEqual(service[:2], (6, 6))
+                self.assertEqual(service[2], 540)
                 self.assertEqual(conn.execute("SELECT count(*) FROM raw.call_leg").fetchone()[0], 14)
                 self.assertEqual(conn.execute("SELECT count(*) FROM core.clean_call_leg").fetchone()[0], 7)
                 pcs = conn.execute(
@@ -656,6 +659,88 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(report.parent, home / "_system" / "legacy_reports")
                 self.assertEqual(report.name, "Legacy Daily Operations.xlsx")
                 corrections_report = build_report_pack("corrections", conn, config, model.start, model.end)
+                decisions_book = load_workbook(corrections_report)
+                decisions = decisions_book["DECISIONS"]
+                decision_headers = {
+                    cell.value: cell.column for cell in decisions[4]
+                }
+                approved_gap = None
+                dismissed_gap = None
+                for row_number in range(5, decisions.max_row + 1):
+                    agent_id = str(
+                        decisions.cell(row_number, decision_headers["Agent ID"]).value or ""
+                    )
+                    if agent_id == "200":
+                        approved_gap = decisions.cell(
+                            row_number, decision_headers["Gap ID"],
+                        ).value
+                        decisions.cell(
+                            row_number, decision_headers["Decision Category"],
+                            "Short sickness",
+                        )
+                        decisions.cell(
+                            row_number, decision_headers["Decision Status"],
+                            "Approved",
+                        )
+                        decisions.cell(
+                            row_number, decision_headers["Reviewed By"], "Reviewer",
+                        )
+                        decisions.cell(
+                            row_number, decision_headers["Reviewed Date"],
+                            date(2026, 8, 3),
+                        )
+                    elif agent_id == "100" and dismissed_gap is None:
+                        dismissed_gap = decisions.cell(
+                            row_number, decision_headers["Gap ID"],
+                        ).value
+                        decisions.cell(
+                            row_number, decision_headers["Decision Status"],
+                            "Dismissed",
+                        )
+                decisions_book.save(corrections_report)
+                decisions_book.close()
+                imported = import_attendance_decisions(
+                    conn, corrections_report,
+                    load_rulebook(home, config.business_rules),
+                )
+                self.assertGreater(imported.imported, 1)
+                self.assertIsNotNone(approved_gap)
+                self.assertIsNotNone(dismissed_gap)
+                refresh_models(
+                    conn, config, "reviewed-decisions",
+                    date(2026, 8, 1), date(2026, 8, 2),
+                    as_of=datetime(2026, 8, 3, 17, 0),
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT absence_minutes, shrinkage_minutes, unverified_minutes "
+                        "FROM mart.absence_agent_day WHERE agent_day_key='20260801-200'"
+                    ).fetchone(),
+                    (480, 480, 0),
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT confirmed_activity, validation_status "
+                        "FROM core.correction_action WHERE correction_id=?",
+                        [approved_gap],
+                    ).fetchone(),
+                    ("Short sickness", "Approved"),
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT confirmed_activity, validation_status "
+                        "FROM core.correction_action WHERE correction_id=?",
+                        [dismissed_gap],
+                    ).fetchone(),
+                    (None, "Dismissed"),
+                )
+                self.assertGreater(
+                    conn.execute(
+                        "SELECT corrected_minutes FROM mart.absence_agent_day "
+                        "WHERE agent_day_key='20260801-100'"
+                    ).fetchone()[0],
+                    0,
+                )
                 pcs_report = build_report_pack("quality_pcs", conn, config, model.start, model.end)
                 focused_pcs_report = build_report_pack("pcs", conn, config, model.start, model.end)
                 service_report = build_report_pack(
@@ -744,16 +829,17 @@ class EndToEndTests(unittest.TestCase):
             corrections_book = load_workbook(corrections_report, read_only=True, data_only=True)
             try:
                 self.assertEqual(corrections_book.sheetnames, [
-                    "DASHBOARD", "VERINT_INJECTION", "SHIFT_VIEW", "DEFINITIONS", "_AUDIT",
+                    "DASHBOARD", "DECISIONS", "SHIFT_VIEW", "DEFINITIONS",
+                    "_LOOKUPS", "_AUDIT",
                 ])
                 self.assertIn("2026-08-01 to 2026-08-02", corrections_book["DASHBOARD"]["A2"].value)
-                injection = corrections_book["VERINT_INJECTION"]
+                injection = corrections_book["DECISIONS"]
                 injection_headers = [cell.value for cell in injection[4]]
-                self.assertIn("Start To Inject", injection_headers)
-                self.assertIn("End To Inject", injection_headers)
-                self.assertNotIn("Validation Status", injection_headers)
-                start_column = injection_headers.index("Start To Inject")
-                end_column = injection_headers.index("End To Inject")
+                self.assertIn("Exact Start", injection_headers)
+                self.assertIn("Exact End", injection_headers)
+                self.assertIn("Decision Status", injection_headers)
+                start_column = injection_headers.index("Exact Start")
+                end_column = injection_headers.index("Exact End")
                 exact_intervals = {
                     (row[start_column], row[end_column])
                     for row in injection.iter_rows(min_row=5, values_only=True)

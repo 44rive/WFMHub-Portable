@@ -1,87 +1,81 @@
 # Governed clean-data contract
 
-These datasets are the governed contracts behind the focused business workbooks.
-The workbook layer formats and filters them; it does not invent a second KPI
-definition. The same contracts remain directly exportable for audit, sending,
-custom Python, or a future report.
-
-Source extracts are opened read-only. FTE defines the admitted agents. Dates
-come from row content, not filenames.
-
-FTE scope is evaluated per business date: Active rows remain eligible, Leavers
-remain eligible through their populated leave date, and every other status is
-excluded. Historical rows before a leave date remain valid.
+The workbook layer formats and filters governed datasets; it does not invent a
+second calculation. Source extracts are opened read-only. FTE defines the
+effective-dated agent population: Active rows remain eligible and Leavers remain
+eligible through their populated leave date.
 
 ## Source boundaries
 
 | Source | Allowed purpose |
 |---|---|
-| Verint StartEndTimes | Operational scheduled start/end and assignment |
-| Storm LILO | Daily presence boundaries |
-| Storm Agent Status | Actual within-shift states and attendance evidence |
-| Verint Activities | Corrected post-day ledger only |
-| APBE/APFR/APDE | Formal service actuals for Realisations and governed service exports |
-| Verint Forecast | Forecast and required staffing only; native 15/60-minute interval retained |
-| Call by Call | Exact-mapped Flash service interactions, call-leg performance, and PCS |
+| FTE Agent/PTO/Away | In-scope roster, organisation, planned leave and long absence |
+| Verint StartEndTimes | Preferred schedule start/end and assignment boundary |
+| Storm Agent Status | Primary within-shift attendance evidence |
+| Storm LILO | Missing-coverage fallback and first/last/blank-row control |
+| Attendance Review decisions | Human category for one exact observed gap |
+| Verint Forecast | Forecast and required staffing only; native 15/60-minute grain retained |
+| Storm Call by Call | All mapped service actuals, Flashes, agent call performance and PCS |
 
-The parser identifies StartEndTimes and Activities from their headers and
-stores `source_variant`. StartEndTimes is preferred. When it is missing for an
-agent/day, a successfully parsed Activities Shift Assignment may provide the
-boundary only with a visible review finding; this fallback is never silent.
+APBE, APFR and APDE are retired: no directory is discovered, required, loaded or
+calculated. Historical raw tables remain physically readable so upgrading is
+non-destructive. Activities intervals are ignored. A parsed Activities Shift
+Assignment may be used only as a visibly flagged emergency schedule boundary
+when StartEndTimes is missing.
 
-## Datasets to validate
+## Key datasets
 
-| Export key | Grain | Workbook use |
+| Dataset | Grain | Business use |
 |---|---|---|
-| `daily_attendance_calls` | Agent/day requiring a call | Daily absent/late call list |
-| `daily_staffing_gaps` | Date/15 minutes/roster LOB/language | Daily staffing gap sheet |
-| `planned_time_off` | Exact schedule-clipped agent interval | Approved PTO and effective Away planning overlay |
-| `daily_service_lob` | Date/interval/service LOB/language | Intraday SL state |
-| `mart.call_service_hour` | Date/hour/mapped queue | Book1-style service Flashes |
-| `forecast` | Native Verint interval/mapped comparison scope | Staffing and clean sharing |
-| `forecast_hour` | Date/hour/mapped comparison scope | Flash, Realisations, analysis |
-| `pcs_agent_day` | Agent/day | PCS detail |
-| `pcs_team_day` | Team/LOB/language/day | PCS team summary |
-| `pcs_agent_month` | Agent/month | PCS monthly view |
-| `yesterday_gap_actions` | One uncovered correction interval | Selected-period completed-day review |
-| `shift_evidence_timeline` | Exact shift segment | Verint-like shift visual |
-| `verint_final_absence_events` | Corrected Activities evidence interval | Final audit detail |
-| `verint_final_absence_day` | Agent/day | Final absenteeism |
+| `mart.attendance_agent_day` | Agent/day | Attendance callout and evidence result |
+| `mart.correction_candidate` | Exact continuous gap | Attendance Review decision row |
+| `mart.shift_timeline_segment` | Exact shift segment | Readable shift evidence |
+| `mart.planned_time_off_segment` | Schedule-clipped interval | PTO/Away planning overlay |
+| `mart.absence_event` | Reviewed or planned exact interval | Absence/shrinkage component audit |
+| `mart.absence_agent_day` | Agent/day | Reviewed absence and shrinkage result |
+| `mart.call_service_hour` | Date/hour/mapped queue | Interaction-deduplicated service actual |
+| `mart.service_interval` | Date/hour/mapped queue | Stable semantic projection of Call-by-Call |
+| `mart.forecast_interval` | Native Verint interval | Staffing and clean sharing |
+| `mart.forecast_hour` | Date/hour/mapped scope | Flash and Realisations comparison |
+| `mart.agent_pcs_day` | Agent/day | PCS result and participation |
 
-`daily_attendance_calls.call_action` is explicit: `CALL_NO_SHOW`, `CALL_LATE`,
-or `CALL_NOT_SEEN_NOW`. Current/future rows are marked `is_provisional`; an
-unfinished current-day shift can never be finalized as early leave.
+Legacy-named exports remain callable so existing jobs do not break.
+`yesterday_gap_actions` covers the entire selected completed period, not only
+yesterday. `mart.verint_final_absence_*` is currently a compatibility projection
+of `mart.absence_*`; Verint Activities do not supply its values.
 
-Staffing uses agent-seconds divided by 900, not averages of headcounts. Agent
-Status has precedence; LILO fills only intervals where Agent Status has no
-state. Explicit Logged Off or Unavailable time remains a gap. The staffing
-product uses actual evidence on completed intervals and compares forecast
-required FTE with net schedules for future intervals.
+## Attendance and decision semantics
 
-`yesterday_gap_actions` is a legacy export key. It contains only the residual pieces not already covered
-by the union of corrected Activities intervals. A partially corrected original
-gap can therefore produce one or more exact residual rows.
+Agent Status has precedence. LILO fills only periods without reliable Status
+coverage and never overwrites explicit Logged Off or Unavailable states. A
+logout followed by a return stays an internal gap. Today never produces an
+early-leave decision.
 
-Final absenteeism amounts and categories are built only from the selected
-Activities snapshot. Evidence is clipped to the Activities shift, overlaps are
-unioned, planned net minutes are capped at the configured standard day (default
-8.75 hours), and each daily classified numerator is capped to that planned net
-value. A final rate therefore cannot exceed 100%.
+The Excel importer reads only Gap ID and the five editable decision columns.
+SQLite supplies the authoritative date, agent and exact start/end. Approved
+decisions use `config\wfm_rules.toml`; Dismissed counts as no loss; Open remains
+unverified. The import is atomic. PTO/Away intervals enter the same classified
+ledger without creating fake gaps.
 
-LILO and Agent Status do not create a payroll category, but they are used as a
-completeness control. `UNCODED_EMPTY_SHIFT`, `UNCORRECTED_OBSERVED_GAP`,
-`PARTIAL_CORRECTION_REVIEW`, `VERINT_WITHOUT_OBSERVED_GAP`, and
-`PROVISIONAL_DAY` remain exceptions. Finalized
-summary rates and the LOB/month export include only `CLEAR` and
-`ABSENCE_RECORDED` agent-days, preventing incomplete rows from acting like zero
-absence.
+Overlapping intervals are unioned before totals. Daily numerators are capped to
+planned net minutes, so rates cannot exceed 100%. Summary rates include only
+`CLEAR` and `ABSENCE_RECORDED` agent-days; `PENDING_REVIEW` and
+`PROVISIONAL_DAY` cannot silently act as zero absence.
 
-Run an export from `WFMHub.cmd > Export clean data`. Each CSV/XLSX is written
-under the visible `Feed` folder with a manifest containing its period,
-row count, rule version, and rule hash.
+## Service semantics
 
-Generated workbooks contain visible source tables, so the first build needs no
-connection. Fixed PCS and Absenteeism CSV feeds provide an optional Power Query
-contract for permanent shared workbooks. Refreshable source/queue tables remain
-separate from editable `COACHING` and `ACTIONS` tables. Coaching Key and Case ID
-keep manual work attached to the correct row; those edits never enter SQLite.
+One interaction may have several call legs. The service mart counts it once per
+mapped comparison scope. Reports use the Storm business reference:
+
+- business offered = raw offered - short abandons below 5 seconds;
+- TSL = answered within 20 seconds / business offered;
+- service availability = answered / business offered;
+- deviation = business offered / forecast;
+- AHT = total talk + hold + wrap seconds / answered.
+
+Technical gross methods remain in the metric catalog. Higher-grain percentages
+are always ratios of summed components, never averages of percentages.
+
+Run **Export clean data** to write a selected CSV/XLSX under `Feed`; every export
+has a manifest with its period, row count and rule provenance. Original extracts
+remain unchanged.

@@ -1170,7 +1170,8 @@ def _service_aggregate(
         _profile_metric(catalog, profile, profile.aht_metric, on_date), components,
     )
     return {
-        "offered": offered,
+        "raw_offered": offered,
+        "offered": max(0.0, offered - short),
         "answered": answered,
         "short_abandoned": short,
         "within_target": within,
@@ -1292,15 +1293,18 @@ def build_realisations_workbook(
         ).fetchall()
         staffing_by_day = {str(row[0])[:10]: row[1:] for row in staffing_rows}
         absence_rows = conn.execute(
-            f"""SELECT business_date, sum(planned_net_minutes)/60.0,
-                       sum(final_absence_minutes)/60.0,
-                       sum(final_vacation_minutes)/60.0,
-                       sum(final_shrinkage_minutes)/60.0,
-                       sum(CASE WHEN final_ledger_status NOT IN ('CLEAR','ABSENCE_RECORDED')
+            f"""SELECT d.business_date, sum(d.planned_net_minutes)/60.0,
+                       sum(d.absence_minutes)/60.0,
+                       sum(d.vacation_minutes)/60.0,
+                       sum(d.shrinkage_minutes)/60.0,
+                       sum(CASE WHEN d.unverified_minutes>0
+                                     OR coalesce(a.is_provisional,false)
                                 THEN 1 ELSE 0 END)
-                FROM mart.verint_final_absence_agent_day
-                WHERE business_date BETWEEN ? AND ? AND lob IN ({staffing_marks})
-                GROUP BY business_date""",
+                FROM mart.absence_agent_day d
+                LEFT JOIN mart.attendance_agent_day a
+                  ON a.agent_day_key=d.agent_day_key
+                WHERE d.business_date BETWEEN ? AND ? AND d.lob IN ({staffing_marks})
+                GROUP BY d.business_date""",
             [start, end, *profile.staffing_lobs],
         ).fetchall()
         absence_by_day = {str(row[0])[:10]: row[1:] for row in absence_rows}
@@ -1389,7 +1393,9 @@ def build_realisations_workbook(
         absence_hours = sum(float(row[22] or 0) for row in rows)
         shrinkage_hours = sum(float(row[25] or 0) for row in rows)
         profile_components = {
-            "offered": offered, "answered": answered,
+            # Daily rows expose business offered. Reconstruct raw offered for
+            # the central metric expression, which subtracts short abandons.
+            "offered": offered + short, "answered": answered,
             "short_abandoned": short, "answered_within_target": within,
             "handled_seconds": handled,
         }
@@ -1419,15 +1425,7 @@ def build_realisations_workbook(
             _ratio(absence_hours, planned_hours),
             _ratio(shrinkage_hours, planned_hours), state,
         ))
-    status, status_text = _source_state(
-        conn,
-        tuple(sorted({
-            system.lower()
-            for profile in selected_profiles
-            for system in profile.source_systems
-        })) + ("forecast",),
-        end,
-    )
+    status, status_text = _source_state(conn, ("calls", "forecast"), end)
     review_days = sum(1 for row in daily_rows if row[-4])
     if review_days:
         status, status_text = "INCOMPLETE", f"{review_days:,} day(s) include absence review cases"
@@ -1452,9 +1450,9 @@ def build_realisations_workbook(
         profile_summary,
         [
             "Queue membership is maintained in Queue Mapping; service and roster LOB links are maintained in Service Profiles.",
-            "Forecast comes from Verint. Actual volume, service level and AHT come from the mapped Storm performance sources.",
-            "Service availability means answered contacts divided by offered contacts. It is not agent availability.",
-            "Absence uses final Verint results for completed days; provisional or review cases remain visible.",
+            "Forecast comes from Verint. Actual volume, service level and AHT come from mapped Call-by-Call interactions.",
+            "Business availability means answered / (offered - short abandons), matching the Storm dashboard; it is not agent availability.",
+            "Absence uses reviewed Attendance decisions; open gaps remain visible and cannot silently dilute results.",
             "Adherence is intentionally excluded.",
         ],
         (("Service Level", 4), ("Availability", 6)),
@@ -1527,7 +1525,7 @@ def build_realisations_workbook(
         ("Service level", "Configured numerator / denominator for each service profile", "Service performance", "Calculated from summed counters; never average LOB percentages"),
         ("Service availability", "Answered / offered", "Ability of the service to answer demand", "Not agent availability"),
         ("Weighted AHT", "Handled seconds / answered contacts", "Workload", "Never average daily AHT values"),
-        ("Absence rate", "Final absence hours / planned hours", "Capacity impact", "Completed-day Verint result"),
+        ("Absence rate", "Reviewed absence hours / planned hours", "Capacity impact", "Open attendance gaps remain review cases"),
     ])
     book.audit(_audit_rows(conn, config, "realisations", start, end, [
         ("Service profiles", ", ".join(profile.profile_id for profile in selected_profiles), profiles.version),
@@ -2420,7 +2418,7 @@ def build_final_absence_product_workbook(
     end: date,
     output: Path | None = None,
 ) -> Path:
-    """Build the final Absenteeism and Shrinkage collaboration report."""
+    """Build the reviewed Absenteeism and Shrinkage collaboration report."""
 
     from .shared_feeds import publish_absence_feeds
 
@@ -2480,12 +2478,12 @@ def build_final_absence_product_workbook(
         [start, end],
     ).fetchone()[0]
     status, status_text = _source_state(
-        conn, ("fte", "start_end", "activities"), end, final=True,
+        conn, ("fte", "start_end", "lilo", "agent_status"), end, final=True,
     )
     if unmapped:
-        status, status_text = "INCOMPLETE", f"{unmapped / 60:,.2f} hour(s) still need an activity mapping"
+        status, status_text = "INCOMPLETE", f"{unmapped / 60:,.2f} exact gap hour(s) still need a human decision"
     elif uncoded_empty:
-        status, status_text = "INCOMPLETE", f"{uncoded_empty:,} scheduled shift(s) have no final code or reliable login evidence"
+        status, status_text = "INCOMPLETE", f"{uncoded_empty:,} scheduled shift(s) lack reliable attendance evidence"
     elif exceptions:
         status, status_text = "INCOMPLETE", f"{exceptions:,} case(s) still require review"
 
@@ -2527,8 +2525,8 @@ def build_final_absence_product_workbook(
         ],
         period_rows,
         [
-            "Final results use Verint Activities inside the preferred StartEndTimes boundary or its reviewed Shift Assignment fallback.",
-            "Agent Status and LILO are used to find missing or unsupported corrections; they do not assign payroll categories.",
+            "Results use exact Agent Status/LILO gaps inside schedule boundaries and the imported Attendance Review decisions.",
+            "Agent Status is primary evidence; LILO fills missing coverage. Neither source assigns a reason without human review.",
             "Absence and shrinkage are parallel views. Do not add their percentages together.",
             "Open ACTIONS for unresolved cases and use ACTIVITY_DETAIL when an exact interval needs investigation.",
         ],
@@ -2681,12 +2679,12 @@ def build_final_absence_product_workbook(
     )
     book.table(
         "ABSENCE_COMPONENTS", "Absence components",
-        "Overlapping Activities are counted once so component hours reconcile to the selected final absence scope.",
+        "Overlapping reviewed intervals are counted once so component hours reconcile to the selected absence scope.",
         absence_headers, absence_components,
     )
     book.table(
         "SHRINKAGE_COMPONENTS", "Shrinkage components",
-        "Overlapping Activities are counted once inside the shrinkage view. Do not add this table to Absence Components.",
+        "Overlapping reviewed intervals are counted once inside the shrinkage view. Do not add this table to Absence Components.",
         shrinkage_headers, shrinkage_components,
     )
     _add_absence_component_view(book)
@@ -2705,8 +2703,8 @@ def build_final_absence_product_workbook(
         [data_start, latest],
     )
     book.table(
-        "ACTIVITY_DETAIL", "Final Verint activity detail",
-        "Exact classified intervals for investigation. Use component sheets or ABSENCE_DATA for totals.",
+        "ACTIVITY_DETAIL", "Reviewed attendance component detail",
+        "Exact classified decision and PTO/Away intervals. Use component sheets or ABSENCE_DATA for totals.",
         activity_headers, activity_rows,
     )
 
@@ -2738,11 +2736,11 @@ def build_final_absence_product_workbook(
         "HELP", "How to use this report", "A short operating guide for the shared workbook.",
         ["Step", "What to do", "Why"],
         [
-            (1, "Run WFM Hub refresh and confirm the latest source date.", "Updates the clean Absenteeism feeds."),
-            (2, "Use TEAM_VIEW for period, LOB, Team Leader and Agent selection.", "Agent results, cases and components follow one selection."),
-            (3, "For a permanent shared file, connect ABSENCE_DATA, ACTION_QUEUE and ACTIVITY_DETAIL once to the three fixed CSV feeds.", "Data > Refresh All updates facts without replacing the workbook."),
-            (4, "Copy new Case IDs from ACTION_QUEUE into ACTIONS and fill only the blue fields.", "The permanent action log remains safe while facts refresh."),
-            (5, "Review Finalized coverage and unresolved cases before sharing totals.", "Incomplete rows must not dilute the rate."),
+            (1, "Run WFM Hub refresh and confirm the latest source date.", "Updates Agent Status, LILO, schedules and clean feeds."),
+            (2, "Build Attendance Review, classify exact gaps and import the saved workbook.", "Turns observed gaps into reviewed components."),
+            (3, "Use TEAM_VIEW for period, LOB, Team Leader and Agent selection.", "Agent results, cases and components follow one selection."),
+            (4, "For a permanent shared file, connect ABSENCE_DATA, ACTION_QUEUE and ACTIVITY_DETAIL once to the fixed CSV feeds.", "Data > Refresh All updates facts without replacing the workbook."),
+            (5, "Review Finalized coverage and unresolved cases before sharing totals.", "Open decisions must not dilute the rate."),
             (6, "Use COMPONENT_VIEW for totals and ACTIVITY_DETAIL for exact intervals.", "Raw intervals may overlap; KPI components remain separate."),
         ],
     )
@@ -2750,7 +2748,7 @@ def build_final_absence_product_workbook(
         ("Absence rate", "Final absence minutes / finalized planned net minutes", "Payroll and attendance result", "Incomplete cases are shown separately"),
         ("Shrinkage rate", "Final shrinkage minutes / finalized planned net minutes", "Capacity loss", "A parallel view; do not add to absence rate"),
         ("Finalized coverage", "Finalized planned minutes / all planned minutes", "Confidence in the headline", "Review when below 100%"),
-        ("Uncoded empty shift", "Completed scheduled shift with no final code and no reliable login evidence", "Correction completeness", "Never treated as zero absence"),
+        ("Pending review", "Observed exact gap with no imported Approved or Dismissed decision", "Review completeness", "Never treated as zero absence"),
         ("Component", "One exclusive activity classification inside its KPI view", "Management breakdown", "Raw overlapping intervals are counted once"),
     ])
     _add_absence_lookups(book)
@@ -2769,7 +2767,7 @@ def build_final_absence_product_workbook(
     return _finish(book, partial, target)
 
 
-def build_attendance_corrections_workbook(
+def _legacy_build_attendance_corrections_workbook(
     conn: DatabaseConnection,
     config: Config,
     start: date,
@@ -2880,5 +2878,176 @@ def build_attendance_corrections_workbook(
     book.audit(_audit_rows(
         conn, config, "corrections", start, end,
         (("Completed-date cutoff", completed_through, "Today is excluded from correction review"),),
+    ))
+    return _finish(book, partial, target)
+
+
+def build_attendance_corrections_workbook(
+    conn: DatabaseConnection,
+    config: Config,
+    start: date,
+    end: date,
+    output: Path | None = None,
+) -> Path:
+    """Build the editable, exact-gap Attendance Review decision ledger."""
+
+    from .shift_view import add_shift_view
+
+    today = date.today()
+    completed_through = min(end, today - timedelta(days=1))
+    book, partial, target = _atomic_book(
+        config, "corrections", "ATTENDANCE REVIEW", start, end, output,
+    )
+    gap_count, gap_minutes, agents, approved, dismissed, open_count = conn.execute(
+        """SELECT count(*), coalesce(sum(gap_minutes),0), count(DISTINCT agent_id),
+                  coalesce(sum(CASE WHEN validation_status='Approved' THEN 1 ELSE 0 END),0),
+                  coalesce(sum(CASE WHEN validation_status='Dismissed' THEN 1 ELSE 0 END),0),
+                  coalesce(sum(CASE WHEN validation_status='Open' THEN 1 ELSE 0 END),0)
+           FROM mart.correction_candidate
+           WHERE business_date BETWEEN ? AND ? AND business_date<?
+             AND gap_start IS NOT NULL AND gap_end IS NOT NULL""",
+        [start, end, today],
+    ).fetchone()
+    missing = conn.execute(
+        """SELECT count(*) FROM mart.attendance_agent_day
+           WHERE business_date BETWEEN ? AND ? AND business_date<?
+             AND assignment_type NOT IN ('Off','Planned absence')
+             AND attendance_result IN
+               ('Schedule parse error','Data not loaded','Missing actual evidence',
+                'Incomplete actual evidence','No schedule overlap')""",
+        [start, end, today],
+    ).fetchone()[0]
+    status, status_text = _source_state(
+        conn, ("fte", "start_end", "lilo", "agent_status"), completed_through,
+        final=True,
+    )
+    if open_count or missing:
+        status = "INCOMPLETE"
+        status_text = (
+            f"{open_count:,} exact gap(s) await a decision; "
+            f"{missing:,} scheduled row(s) lack complete evidence"
+        )
+    book.dashboard(
+        [
+            KpiCard("Exact gaps", gap_count, "integer"),
+            KpiCard("Gap hours", gap_minutes / 60 if gap_minutes else 0, "decimal"),
+            KpiCard("Agents", agents, "integer"),
+            KpiCard("Open decisions", open_count, "integer"),
+            KpiCard("Approved", approved, "integer"),
+            KpiCard("Dismissed", dismissed, "integer"),
+            KpiCard("Missing evidence", missing, "integer"),
+        ],
+        status,
+        status_text,
+        ["Measure", "Value"],
+        [
+            ("Exact gaps", gap_count), ("Gap hours", gap_minutes / 60 if gap_minutes else 0),
+            ("Open", open_count), ("Approved", approved), ("Dismissed", dismissed),
+        ],
+        [
+            f"Every completed date from {start:%Y-%m-%d} through {completed_through:%Y-%m-%d} is included; today is excluded.",
+            "Agent Status is the primary evidence. LILO fills missing coverage and acts as a control; extracts are never edited.",
+            "Each Gap ID owns one exact start/end interval. Edit only the five blue decision columns in DECISIONS.",
+            "Approved uses the selected rulebook category; Dismissed counts as no loss; Open remains unverified.",
+            "Import this same workbook from the Attendance Review menu to recalculate absence and shrinkage.",
+            "SHIFT_VIEW is a readable visual of the evidence; DECISIONS holds the exact auditable timestamps.",
+        ],
+    )
+    headers, rows = _query(
+        conn,
+        """SELECT c.correction_id AS gap_id, c.business_date, c.agent_id,
+                  c.agent_name, c.team_leader, c.ops_manager, c.lob,
+                  c.detected_issue, c.gap_start AS exact_start,
+                  c.gap_end AS exact_end, c.gap_minutes AS minutes,
+                  a.actual_evidence, c.observed_source, c.source_file,
+                  c.suggested_activity,
+                  c.confirmed_activity AS decision_category,
+                  c.validation_status AS decision_status,
+                  c.owner AS reviewed_by, c.comment,
+                  c.injected_date AS reviewed_date
+           FROM mart.correction_candidate c
+           LEFT JOIN mart.attendance_agent_day a
+             ON a.business_date=c.business_date AND a.agent_id=c.agent_id
+           WHERE c.business_date BETWEEN ? AND ? AND c.business_date<?
+             AND c.gap_start IS NOT NULL AND c.gap_end IS NOT NULL
+           ORDER BY c.business_date, c.priority, c.gap_minutes DESC,
+                    c.agent_id, c.gap_start""",
+        [start, end, today],
+    )
+    editable = {
+        "Decision Category", "Decision Status", "Reviewed By", "Comment",
+        "Reviewed Date",
+    }
+    decision_sheet = book.table(
+        "DECISIONS", "Exact attendance-gap decisions",
+        "Immutable evidence is white. Complete only the blue columns, save, then import this workbook in WFM Hub.",
+        headers, rows, editable_headers=editable,
+    )
+    if rows:
+        decision_column = headers.index("decision_category")
+        status_column = headers.index("decision_status")
+        reviewed_date_column = headers.index("reviewed_date")
+        rulebook = load_rulebook(config.home, config.business_rules)
+        choices = list(dict.fromkeys(
+            rule.patterns[0] for rule in rulebook.activity_rules
+            if rule.category not in {"OFF"}
+        ))
+        decision_sheet.data_validation(
+            4, decision_column, 3 + len(rows), decision_column,
+            {"validate": "list", "source": choices},
+        )
+        decision_sheet.data_validation(
+            4, status_column, 3 + len(rows), status_column,
+            {"validate": "list", "source": ["Open", "Approved", "Dismissed"]},
+        )
+        decision_sheet.data_validation(
+            4, reviewed_date_column, 3 + len(rows), reviewed_date_column,
+            {"validate": "date", "criteria": "between",
+             "minimum": date(2020, 1, 1), "maximum": date(2100, 12, 31)},
+        )
+
+    timeline_headers, timeline_rows = _query(
+        conn,
+        """SELECT business_date, agent_id, agent_name, team_leader,
+                  ops_manager, lob, language, scheduled_start, scheduled_end,
+                  segment_start, segment_end, segment_minutes, planned_state,
+                  actual_status, actual_category, mismatch_type, is_gap,
+                  observed_source, source_file, evaluation_as_of
+           FROM mart.shift_timeline_segment t
+           WHERE business_date BETWEEN ? AND ? AND business_date<?
+             AND EXISTS (
+                 SELECT 1 FROM mart.correction_candidate c
+                 WHERE c.business_date=t.business_date AND c.agent_id=t.agent_id
+                   AND c.gap_start IS NOT NULL AND c.gap_end IS NOT NULL
+             )
+           ORDER BY business_date, agent_id, segment_start""",
+        [start, end, today],
+    )
+    add_shift_view(
+        book.report, [dict(zip(timeline_headers, row)) for row in timeline_rows],
+        start, completed_through,
+    )
+    book.tables.append(ModelTable("TIMELINE", timeline_headers, timeline_rows))
+    book.definitions([
+        ("Exact gap", "One continuous scheduled interval without accepted working evidence", "Human review unit", "Never rounded or merged across a return"),
+        ("Gap ID", "Stable date/agent/start/end/issue key", "Safe import key", "Edited timestamps are never trusted on import"),
+        ("Approved", "The reviewer accepts the gap and assigns a rulebook category", "Calculates absence/shrinkage flags", "Category is mandatory"),
+        ("Dismissed", "The detected gap should not count as loss", "Removes it from absence/shrinkage", "Comment recommended"),
+        ("Open", "No final human decision exists", "Unverified minutes", "Never silently treated as absence or zero"),
+        ("Current-day tail", "Unfinished part of today's shift", "No review row", "Never classified as early leave"),
+    ])
+    lookup = book.report.workbook.add_worksheet("_LOOKUPS")
+    lookup.write_row(0, 0, ["Decision Status", "Meaning"])
+    lookup.write_row(1, 0, ["Open", "Awaiting review"])
+    lookup.write_row(2, 0, ["Approved", "Use selected category"])
+    lookup.write_row(3, 0, ["Dismissed", "Do not count as loss"])
+    lookup.hide()
+    book.audit(_audit_rows(
+        conn, config, "corrections", start, end,
+        (
+            ("Completed-date cutoff", completed_through, "Today is excluded"),
+            ("Decision authority", "core.correction_action", "Persistent human ledger"),
+            ("Classification authority", rulebook.sha256, rulebook.version),
+        ),
     ))
     return _finish(book, partial, target)

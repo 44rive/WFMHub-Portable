@@ -219,19 +219,12 @@ def discover_sources(config: Config) -> list[SourceCandidate]:
         ("lilo", "lilo_folder", ("*.csv",)),
         ("agent_status", "agent_status_folder", ("*.csv",)),
         ("forecast", "forecast_folder", ("*.txt",)),
-        ("apbe", "apbe_folder", ("*.xlsx", "*.csv")),
-        ("apfr", "apfr_folder", ("*.xlsx", "*.csv")),
-        ("apde", "apde_folder", ("*.xlsx", "*.csv")),
         ("calls", "call_folder", ("*.csv",)),
     )
     for family, key, patterns in specs:
         if family in {"agent_status"} and not config.modules.get("agent_status", True):
             continue
         if family in {"forecast"} and not config.modules.get("forecast", True):
-            continue
-        if family in {"apbe", "apfr", "apde"} and not config.modules.get("intraday", True):
-            continue
-        if family == "calls" and not config.modules.get("pcs", True):
             continue
         folder = config.source_path(key)
         if not folder.is_dir():
@@ -1236,9 +1229,6 @@ PARSERS: dict[str, Callable[[Path, str, AgentScope | None], ParseResult]] = {
     "lilo": parse_lilo,
     "agent_status": parse_agent_status,
     "forecast": lambda path, file_id, scope: parse_forecast(path, file_id),
-    "apbe": lambda path, file_id, scope: parse_queue_actual(path, file_id, "APBE"),
-    "apfr": lambda path, file_id, scope: parse_queue_actual(path, file_id, "APFR"),
-    "apde": lambda path, file_id, scope: parse_queue_actual(path, file_id, "APDE"),
     "calls": parse_calls,
 }
 

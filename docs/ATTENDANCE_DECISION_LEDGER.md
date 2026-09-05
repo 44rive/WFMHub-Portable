@@ -1,0 +1,54 @@
+# Attendance decision ledger
+
+## The business flow
+
+WFMHub never edits an extract. Verint schedule boundaries say when an agent was
+expected. Agent Status is the primary proof of what happened inside that shift.
+LILO fills missing Status coverage and remains a control for first login, last
+logout, blank daily rows, and incomplete Status exports.
+
+The Hub detects continuous gaps at their exact timestamps. It does not round a
+gap to 15 minutes and does not bridge two gaps when an agent returns between
+them. Today is excluded from Attendance Review, so an unfinished shift cannot
+become an early leave.
+
+## How to operate it
+
+1. Refresh Attendance sources.
+2. Open **Operational > Attendance Review > Build or rebuild**.
+3. Open `Reports\Attendance Review.xlsx`.
+4. On `DECISIONS`, edit only Decision Category, Decision Status, Reviewed By,
+   Comment, and Reviewed Date.
+5. Use `Approved` when the interval and category are correct.
+6. Use `Dismissed` when the detected interval must count as no loss.
+7. Leave it `Open` when it is not decided.
+8. Save and close Excel.
+9. Choose **Attendance Review > Import completed decisions**.
+
+The import is atomic: one invalid or stale row rejects the whole file. Gap ID
+retrieves the authoritative date, agent, start and end from SQLite. Changing a
+white evidence cell in Excel cannot alter the stored gap.
+
+## Calculation result
+
+- Approved decisions use the flags in `config\wfm_rules.toml`.
+- Dismissed gaps count as neither absence nor shrinkage.
+- Open gaps remain unverified and make the affected result incomplete.
+- Approved PTO and effective Away intervals come directly from the FTE workbook
+  registers. They do not create fake no-show gaps.
+- Overlapping intervals are unioned before totals; they are never added twice.
+- Absence and shrinkage are parallel measures and must not be added together.
+
+The authoritative outputs are `mart.absence_event` at exact interval grain and
+`mart.absence_agent_day` at agent/day grain. Tables whose names begin
+`mart.verint_final_absence_` are temporary compatibility projections of those
+reviewed marts for existing Excel feeds; Verint Activities no longer supply
+their values.
+
+## Audit controls
+
+Every generated event records the rulebook version and SHA-256. Every decision
+records its Gap ID, reviewer fields, import filename, and update timestamp in
+`core.correction_action`. Rebuilding the model reattaches the stored decision
+when the exact Gap ID still exists. A changed physical gap produces a different
+ID rather than silently inheriting an old decision.

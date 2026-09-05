@@ -55,17 +55,18 @@ The flags answer separate questions. A category may count as both absence and
 shrinkage. WFMHub unions overlapping intervals before daily totals, so the same
 minute is not counted twice inside one category metric.
 
-## Add an unmapped Verint activity
+## Add a decision category
 
-1. Open Final Absenteeism and read `UNMAPPED_REVIEW`.
-2. Copy the exact activity wording.
+1. Decide the plain-language value reviewers should choose in `DECISIONS`.
+2. Use that exact wording as the first pattern.
 3. Add a specific rule above broad Production rules.
 4. Choose the flags with the payroll/process owner.
 5. Increase the version, validate, and refresh the same dates.
-6. Confirm the row moved to its intended category.
+6. Confirm an Approved test decision moved to its intended category.
 
-Activity rules classify final Verint evidence. They never invent the original
-attendance gap; observed gaps come from schedule + LILO + Agent Status.
+Activity rules classify Approved human decisions and PTO/Away labels. They
+never invent the original gap; observed gaps come from schedule + Agent Status
++ LILO.
 
 ## Engine rules that are not text configuration
 

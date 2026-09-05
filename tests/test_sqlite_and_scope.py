@@ -396,6 +396,34 @@ class SQLiteLifecycleTests(unittest.TestCase):
             self.assertEqual(legacy.read_bytes(), b"duckdb stays")
             self.assertEqual(len(list((home / "config").glob("wfmhub_pre_sqlite_*.toml"))), 1)
 
+    def test_existing_config_retires_ap_source_switches_with_backup(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder) / "hub"
+            (home / "config").mkdir(parents=True)
+            default = (REPO / "config" / "default.toml").read_text(encoding="utf-8")
+            legacy = default.replace(
+                'call_folder = "Storm/Call by Call"',
+                'call_folder = "Storm/Call by Call"\n'
+                'apbe_folder = "Storm/APBE ALL WFM"\n'
+                'apfr_folder = "Storm/APFR KPI SUIVI JOUR"\n'
+                'apde_folder = "Storm/APDE"',
+            ).replace("attendance = true", "attendance = true\nintraday = true")
+            (home / "config" / "default.toml").write_text(default, encoding="utf-8")
+            (home / "config" / "wfmhub.toml").write_text(legacy, encoding="utf-8")
+
+            ensure_user_config(home)
+
+            upgraded = (home / "config" / "wfmhub.toml").read_text(encoding="utf-8")
+            self.assertNotIn("apbe_folder", upgraded)
+            self.assertNotIn("apfr_folder", upgraded)
+            self.assertNotIn("apde_folder", upgraded)
+            self.assertNotIn("intraday =", upgraded)
+            self.assertIn('call_folder = "Storm/Call by Call"', upgraded)
+            self.assertEqual(
+                len(list((home / "config").glob("wfmhub_pre_ap_retirement_*.toml"))),
+                1,
+            )
+
     def test_packaged_upgrade_moves_legacy_state_under_system(self):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "WFMHub"

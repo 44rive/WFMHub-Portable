@@ -33,9 +33,6 @@ schedule_folder = "Verint/Schedules & Activities"
 # Verint forecast exports may be 15- or 60-minute. Native intervals are kept
 # for staffing; WFMHub derives hourly totals for Flash and daily reporting.
 forecast_folder = "Verint/Forecast"
-apbe_folder = "Storm/APBE ALL WFM"
-apfr_folder = "Storm/APFR KPI SUIVI JOUR"
-apde_folder = "Storm/APDE Standard KPIs Inbound Calls"
 call_folder = "Storm/Call by Call"
 
 [period]
@@ -57,7 +54,6 @@ attendance = true
 # Agent Status is actual attendance evidence. It does not enable or calculate
 # adherence/conformance; it finds observed gaps inside the LILO boundaries.
 agent_status = true
-intraday = true
 forecast = true
 pcs = true
 absence = true

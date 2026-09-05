@@ -126,7 +126,7 @@ def _records(conn: DatabaseConnection, source_model: str, start: date, end: date
                ), actual AS (
                    SELECT business_date, hour_start,
                           coalesce(comparison_scope, service_scope, lob, queue, '(unmapped)') AS scope,
-                          sum(offered) AS actual_volume
+                          sum(max(0, offered-short_abandoned)) AS actual_volume
                    FROM mart.service_interval
                    WHERE business_date BETWEEN ? AND ? AND mapping_status='MAPPED'
                    GROUP BY business_date, hour_start,
@@ -199,11 +199,14 @@ def _records(conn: DatabaseConnection, source_model: str, start: date, end: date
     if source_model == "final_absence_agent_day":
         cursor = conn.execute(
             """SELECT agent_day_key, business_date, agent_id, team_leader, lob, language,
-                      planned_net_minutes, final_absence_minutes, final_vacation_minutes,
-                      final_unpaid_minutes, final_shrinkage_minutes
-               FROM mart.verint_final_absence_agent_day
-               WHERE business_date BETWEEN ? AND ?
-                 AND final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')
+                      planned_net_minutes, absence_minutes, vacation_minutes,
+                      unpaid_minutes, shrinkage_minutes
+               FROM mart.absence_agent_day d
+               WHERE business_date BETWEEN ? AND ? AND unverified_minutes=0
+                 AND NOT EXISTS (
+                     SELECT 1 FROM mart.attendance_agent_day a
+                     WHERE a.agent_day_key=d.agent_day_key AND a.is_provisional=true
+                 )
                ORDER BY business_date, agent_id""",
             [start, end],
         )

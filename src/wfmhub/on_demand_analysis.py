@@ -126,7 +126,7 @@ def _evidence(conn: DatabaseConnection, domain: str, start: date, end: date) -> 
                         ), actual AS (
                             SELECT business_date, hour_start,
                                    coalesce(comparison_scope, service_scope, lob, queue, '(unmapped)') AS comparison_scope,
-                                   sum(offered) AS actual_volume
+                                   sum(max(0, offered-short_abandoned)) AS actual_volume
                             FROM mart.service_interval
                             WHERE business_date BETWEEN ? AND ? AND mapping_status='MAPPED'
                             GROUP BY business_date, hour_start,
@@ -154,12 +154,17 @@ def _evidence(conn: DatabaseConnection, domain: str, start: date, end: date) -> 
                                 source_loaded, is_provisional
                          FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ?
                          ORDER BY business_date, lob, team_leader, agent_name""",
-        "absence": """SELECT business_date, agent_id, agent_name, team_leader, lob, language,
-                             planned_net_minutes, final_absence_minutes, final_vacation_minutes,
-                             final_unpaid_minutes, final_shrinkage_minutes, final_unmapped_minutes,
-                             final_absence_rate, final_ledger_status
-                      FROM mart.verint_final_absence_agent_day WHERE business_date BETWEEN ? AND ?
-                      ORDER BY business_date, lob, team_leader, agent_name""",
+        "absence": """SELECT d.business_date, d.agent_id, d.agent_name, d.team_leader, d.lob, d.language,
+                             d.planned_net_minutes, d.absence_minutes, d.vacation_minutes,
+                             d.unpaid_minutes, d.shrinkage_minutes, d.unverified_minutes,
+                             d.absence_rate,
+                             CASE WHEN coalesce(a.is_provisional,false) THEN 'PROVISIONAL_DAY'
+                                  WHEN d.unverified_minutes>0 THEN 'PENDING_REVIEW'
+                                  WHEN d.absence_day THEN 'ABSENCE_RECORDED' ELSE 'CLEAR' END
+                      FROM mart.absence_agent_day d
+                      LEFT JOIN mart.attendance_agent_day a ON a.agent_day_key=d.agent_day_key
+                      WHERE d.business_date BETWEEN ? AND ?
+                      ORDER BY d.business_date, d.lob, d.team_leader, d.agent_name""",
     }
     if domain == "bonus":
         cursor = conn.execute(

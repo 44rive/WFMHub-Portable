@@ -108,6 +108,10 @@ def _aggregate(
     )
     return {
         **components,
+        "raw_offered": components["offered"],
+        # Storm's business display removes abandons below the configured short
+        # threshold from volume, availability and forecast comparison.
+        "offered": max(0.0, components["offered"] - components["short_abandoned"]),
         "service_level": service.value,
         "service_target": service.method.target,
         "service_method": service.method.method_id,
@@ -727,7 +731,7 @@ def _add_control_sheet(
     notes = [
         "Open a Flash name to jump to its hourly sheet.",
         "Deviation follows the reference workbook: actual offered / forecast through the latest actual hour.",
-        "Availability means handled / offered. TSL follows the effective metric configured for each Flash.",
+        "Availability and TSL use offered after short abandons are removed, matching the Storm business dashboard.",
         "No mapped calls and missing forecasts remain blank; the workbook never turns missing evidence into zero.",
     ]
     ws.write("A10", "OPERATING NOTES", book.report.section)
@@ -908,10 +912,10 @@ def build_service_flashes_workbook(
             ("OEM visible scope", " and ".join(oem_groups) or "Every configured group", "Matches the Book1 OEM image", "Other mapped groups remain in the hub but are excluded from OEM Flash totals"),
             ("Volume Handled", "Mapped interaction with an inbound handled agent leg", "Service availability numerator", "Agent may be outside the FTE roster; the queue is the service boundary"),
             ("Volume Handled in SL", f"Handled interaction with queue wait <= {rulebook.target_seconds} seconds", "TSL numerator", "Threshold is editable in wfm_rules.toml"),
-            ("Short Abandon", f"Unanswered interaction with queue wait < {rulebook.short_abandon_seconds} seconds", "Adjusted TSL denominator", "Configured centrally"),
-            ("Deviation", "Actual offered / forecast through the latest actual hour", "Demand tracking", "The label follows Book1; mathematically this is forecast attainment"),
-            ("Availability", "Handled / actual offered", "Service availability", "Not agent availability and not adherence"),
-            ("TSL", "Configured ratio of summed counters", "Service-level control", "Ford OEM uses gross TSL; other profiles use adjusted TSL"),
+            ("Short Abandon", f"Unanswered interaction with queue wait < {rulebook.short_abandon_seconds} seconds", "Removed from business offered", "Configured centrally"),
+            ("Deviation", "Business offered / forecast through the latest actual hour", "Demand tracking", "Business offered excludes short abandons"),
+            ("Availability", "Handled / business offered", "Service availability", "Matches Storm dashboard; not agent availability or adherence"),
+            ("TSL", "Handled within target / business offered", "Service-level control", "Business reference; a gross technical method remains available in the KPI catalog"),
             ("AHT", "Sum of inbound talk + hold + wrap / handled interactions", "Workload", "Weighted; never an average of hourly averages"),
             ("Ford NL workload cards", "Dispatch, Follow-up and Mailbox BNL remain N/C", "Data integrity", "Book1 provides labels but no governed source or formula; values are not invented"),
         ])

@@ -66,6 +66,12 @@ finding_dimensions = ["source_system", "lob", "language"]
 
 Percentages are decimals: `0.80` means 80%.
 
+For service reporting, `service_level` and
+`service_availability_business` are the Storm dashboard business methods and
+exclude short abandons from offered. `service_level_gross` and
+`service_availability` retain the technical raw-offered alternatives for audit.
+See `SERVICE_KPI_REFERENCE.md` before changing a service profile.
+
 ## Change a target only
 
 1. Copy `metric_catalog.toml` to a dated backup.

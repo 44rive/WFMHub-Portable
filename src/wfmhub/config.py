@@ -158,7 +158,38 @@ def ensure_user_config(home: Path) -> Path:
                 _migrate_packaged_layout(home, stamp)
                 print("WFMHub moved the old technical folders under _system.")
                 print(f"Previous config backup: {backup}")
+        _retire_ap_config(target, config_dir)
     return target
+
+
+def _retire_ap_config(target: Path, config_dir: Path) -> None:
+    """Remove obsolete AP source switches while preserving every other setting."""
+
+    original = target.read_text(encoding="utf-8")
+    section = ""
+    output: list[str] = []
+    removed = False
+    retired_source_keys = {"apbe_folder", "apfr_folder", "apde_folder"}
+    for line in original.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1].strip().lower()
+        key = stripped.split("=", 1)[0].strip().lower() if "=" in stripped else ""
+        if (
+            (section == "sources" and key in retired_source_keys)
+            or (section == "modules" and key == "intraday")
+        ):
+            removed = True
+            continue
+        output.append(line)
+    if not removed:
+        return
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    backup = config_dir / f"wfmhub_pre_ap_retirement_{stamp}.toml"
+    shutil.copy2(target, backup)
+    target.write_text("\n".join(output) + "\n", encoding="utf-8")
+    print("WFMHub retired the obsolete APBE/APFR/APDE source settings.")
+    print(f"Previous config backup: {backup}")
 
 
 def _migrate_packaged_layout(home: Path, stamp: str) -> None:
@@ -235,7 +266,6 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         service_profiles=_portable_path(home, str(paths.get("service_profiles", "config/service_profiles.toml"))),
         sources={
             "call_folder": "Storm/Call by Call",
-            "apde_folder": "Storm/APDE Standard KPIs Inbound Calls",
             **{str(k): str(v) for k, v in raw.get("sources", {}).items()},
         },
         period_start=_date_or_none(period.get("start"), "period.start"),

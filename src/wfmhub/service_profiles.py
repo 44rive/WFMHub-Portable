@@ -108,13 +108,13 @@ def ensure_service_profiles(home: Path, target: Path | None = None) -> Path:
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             current, default = {}, {}
         if (
-            str(current.get("version", "")) in {"2026.09.3", "2026.09.4"}
-            and str(default.get("version", "")) == "2026.09.5"
+            str(current.get("version", "")) in {"2026.09.3", "2026.09.4", "2026.09.5"}
+            and str(default.get("version", "")) in {"2026.09.5", "2026.09.6"}
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(
                 target,
-                target.with_name(f"{target.stem}_pre_flash_layout_{stamp}{target.suffix}"),
+                target.with_name(f"{target.stem}_pre_call_service_{stamp}{target.suffix}"),
             )
             shutil.copy2(source, target)
     return target

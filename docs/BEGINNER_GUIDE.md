@@ -45,7 +45,8 @@ Populate them using the dropdowns and inclusive dates. Approved PTO and
 Active/Closed Away are removed from expected-work minutes, attendance calls,
 correction gaps, and net staffing. Planned Away changes future staffing only;
 it never hides a current or historical no-show. Partial-day PTO uses its exact
-start/end time. Verint Activities remain the final payroll record.
+start/end time. Reviewed Attendance decisions plus these registers drive the
+Hub absence/shrinkage ledger.
 
 ## The normal daily routine
 
@@ -167,47 +168,29 @@ and quarter. Adherence is not included.
 Use this after the operating day is complete. Current Week includes every
 completed date from Monday through yesterday—not just yesterday. Today is
 excluded so an unfinished shift can never become an early-leave correction.
-WFMHub compares schedule with LILO and Agent Status, then checks whether Verint
-Activities already cover each gap.
+WFMHub compares schedule with Agent Status first and uses LILO as fallback and
+control evidence.
 
-1. Open `VERINT_INJECTION`.
-2. Each row is one exact continuous interval; use **Start to inject** and
-   **End to inject** without rounding or combining rows.
-3. Use `SHIFT_VIEW` only when you need to verify the complete shift evidence.
-4. Correct the intervals in Verint.
-5. Export Activities again and refresh WFMHub. Corrected intervals disappear
-   automatically; never import this workbook back into the Hub.
+1. Open `DECISIONS`.
+2. Each row is one exact continuous interval. White evidence cells are not
+   imported; edit only the five blue decision cells.
+3. Choose `Approved` plus a category, `Dismissed`, or leave `Open`.
+4. Use `SHIFT_VIEW` when you need to verify the full-shift visual.
+5. Save and close the workbook.
+6. In WFMHub choose **Attendance Review > Import completed decisions**.
 
 ## Final Absenteeism
 
-This is the final payroll/reporting ledger. It uses corrected Verint Activities
-inside the preferred StartEndTimes boundaries. If that dedicated file is not
-available, successfully parsed Activities Shift Assignment boundaries are used
-with a visible review warning. LILO and Agent Status detect operational gaps;
-they do not invent the final payroll category.
-
-Resolve every unmapped activity before using the report as final.
-Resolve every final-ledger exception:
-
-- `UNCODED_EMPTY_SHIFT`: completed working shift, no final Verint code, and no
-  reliable Agent Status/LILO work evidence;
-- `UNCORRECTED_OBSERVED_GAP`: the operational evidence proves a gap but Verint
-  has no final code;
-- `PARTIAL_CORRECTION_REVIEW`: Verint has a code but it does not cover the whole
-  observed gap;
-- `PLANNED_TIME_OFF_NOT_IN_VERINT`: FTE says completed PTO/Away but the final
-  Activities export has no matching absence code;
-- `TIME_OFF_PARTIALLY_IN_VERINT`: a final code exists but covers fewer minutes
-  than the planned-time-off interval;
-- `VERINT_WITHOUT_OBSERVED_GAP`: Verint contains a final code but the operational
-  evidence does not support that interval;
-- `PROVISIONAL_DAY`: the shift is not complete and cannot be finalized yet.
+This report uses imported Attendance Review decisions plus PTO/Away registers.
+`PENDING_REVIEW` means at least one exact gap is still Open. `PROVISIONAL_DAY`
+means the shift is not complete. Both remain incomplete and are never allowed
+to dilute the headline rate as silent zero absence.
 
 These rows are never allowed to dilute the headline rate as silent zero absence.
 
 For a long-lived team workbook, use `TEAM_VIEW` for filtered agent results and
 cases, `COMPONENT_VIEW` for absence/shrinkage categories, and
-`ACTIVITY_DETAIL` for exact final Verint intervals. The blue `ACTIONS` table is
+`ACTIVITY_DETAIL` for exact reviewed intervals. The blue `ACTIONS` table is
 your permanent log. Link the three fixed feeds once with Power Query and use
 **Data > Refresh All**; never point Power Query at `ACTIONS`.
 
