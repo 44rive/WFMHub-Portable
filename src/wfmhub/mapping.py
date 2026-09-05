@@ -8,6 +8,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 
 class QueueMappingError(RuntimeError):
@@ -58,6 +59,17 @@ class QueueMapping:
             scope = str(raw_queue).strip()
             return MappingResult(scope, scope, None, "FALLBACK_QUEUE")
         return MappingResult("UNMAPPED", "UNMAPPED", None, "UNMAPPED")
+
+    def comparison_scopes_for(self, service_scopes: Iterable[str]) -> tuple[str, ...]:
+        """Return forecast rollups matching a set of detailed actual scopes."""
+
+        wanted = set(service_scopes)
+        values = {
+            result.comparison_scope
+            for result in self.queue_rows.values()
+            if result.service_scope in wanted
+        }
+        return tuple(sorted(values or wanted))
 
 
 def _key(value: str | None) -> str:

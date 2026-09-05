@@ -12,6 +12,7 @@ from openpyxl import load_workbook
 
 from .config import Config
 from .database import DatabaseConnection
+from .mapping import load_queue_mapping
 from .metrics import MetricCatalog, evaluate_metric, load_metric_catalog
 from .report_packs import publish_report, report_current_path
 from .reports import COLORS, _query
@@ -1221,6 +1222,7 @@ def build_realisations_workbook(
         else tuple(profile for profile in profiles.profiles if profile.active_on(end))
     )
     metrics_catalog = load_metric_catalog(config.home, config.metric_catalog)
+    queue_mapping = load_queue_mapping(config.queue_mapping)
     title = (
         f"REALISATIONS  /  {selected_profiles[0].label.upper()}"
         if len(selected_profiles) == 1
@@ -1237,17 +1239,39 @@ def build_realisations_workbook(
         source_rows = _service_rows(conn, profile, start, end)
         for row in source_rows:
             all_source_rows.append({**row, "reporting_lob": profile.label})
-        forecast_marks = ",".join("?" for _ in profile.service_scopes)
+        forecast_scopes = queue_mapping.comparison_scopes_for(
+            profile.service_scopes,
+        )
+        forecast_marks = ",".join("?" for _ in forecast_scopes)
         forecasts = conn.execute(
-            f"""SELECT business_date, sum(volume_forecast), sum(fte_forecast),
-                       sum(fte_required), avg(sl_forecast), avg(sl_required),
-                       CASE WHEN sum(volume_forecast)>0
-                            THEN sum(aht_forecast_seconds*volume_forecast)/sum(volume_forecast) END
+            f"""SELECT business_date, sum(volume_forecast), avg(fte_forecast),
+                       avg(fte_required),
+                       CASE WHEN sum(CASE WHEN sl_forecast IS NOT NULL
+                                          THEN volume_forecast ELSE 0 END)>0
+                            THEN sum(CASE WHEN sl_forecast IS NOT NULL
+                                          THEN sl_forecast*volume_forecast ELSE 0 END)
+                                 /sum(CASE WHEN sl_forecast IS NOT NULL
+                                           THEN volume_forecast ELSE 0 END)
+                            ELSE avg(sl_forecast) END,
+                       CASE WHEN sum(CASE WHEN sl_required IS NOT NULL
+                                          THEN volume_forecast ELSE 0 END)>0
+                            THEN sum(CASE WHEN sl_required IS NOT NULL
+                                          THEN sl_required*volume_forecast ELSE 0 END)
+                                 /sum(CASE WHEN sl_required IS NOT NULL
+                                           THEN volume_forecast ELSE 0 END)
+                            ELSE avg(sl_required) END,
+                       CASE WHEN sum(CASE WHEN aht_forecast_seconds IS NOT NULL
+                                          THEN volume_forecast ELSE 0 END)>0
+                            THEN sum(CASE WHEN aht_forecast_seconds IS NOT NULL
+                                          THEN aht_forecast_seconds*volume_forecast ELSE 0 END)
+                                 /sum(CASE WHEN aht_forecast_seconds IS NOT NULL
+                                           THEN volume_forecast ELSE 0 END)
+                            ELSE avg(aht_forecast_seconds) END
                 FROM mart.forecast_hour
                 WHERE business_date BETWEEN ? AND ?
-                  AND service_scope IN ({forecast_marks})
+                  AND comparison_scope IN ({forecast_marks})
                 GROUP BY business_date ORDER BY business_date""",
-            [start, end, *profile.service_scopes],
+            [start, end, *forecast_scopes],
         ).fetchall()
         forecast_by_day = {str(row[0])[:10]: row[1:] for row in forecasts}
         staffing_marks = ",".join("?" for _ in profile.staffing_lobs)
@@ -1636,33 +1660,56 @@ def build_staffing_coverage_workbook(
         for lob in profile.staffing_lobs:
             staffing_profile.setdefault(lob.casefold(), profile)
 
-    forecast_by_lob_hour: dict[tuple[str, str, datetime], tuple[Any, ...]] = {}
+    forecast_by_lob_interval: dict[tuple[str, str, datetime], tuple[Any, ...]] = {}
     for profile in active_profiles:
         for service_scope, staffing_lob in profile.staffing_pairs():
             forecast_rows = conn.execute(
-                """SELECT business_date, hour_start, sum(volume_forecast),
-                          sum(fte_forecast), sum(fte_required), avg(sl_required)
-                   FROM mart.forecast_hour
+                """SELECT business_date, interval_start, max(interval_minutes),
+                          sum(volume_forecast), sum(fte_forecast),
+                          sum(fte_required), avg(sl_required)
+                   FROM mart.forecast_interval
                    WHERE business_date BETWEEN ? AND ? AND service_scope=?
-                   GROUP BY business_date, hour_start""",
+                   GROUP BY business_date, interval_start""",
                 [start, end, service_scope],
             ).fetchall()
-            for business_date, hour_start, volume, fte_forecast, fte_required, sl_required in forecast_rows:
-                stamp = hour_start
+            for (
+                business_date, interval_start, interval_minutes, volume,
+                fte_forecast, fte_required, sl_required,
+            ) in forecast_rows:
+                stamp = interval_start
                 if isinstance(stamp, str):
                     stamp = datetime.fromisoformat(stamp)
-                key = (
-                    staffing_lob.casefold(), str(business_date)[:10],
-                    stamp.replace(minute=0, second=0, microsecond=0),
+                source_minutes = max(15, int(interval_minutes or 60))
+                slots = max(1, (source_minutes + 14) // 15)
+                volume_per_slot = (
+                    float(volume) / slots if volume is not None else None
                 )
-                previous = forecast_by_lob_hour.get(key)
-                if previous:
-                    volume = float(previous[1] or 0) + float(volume or 0)
-                    fte_forecast = float(previous[2] or 0) + float(fte_forecast or 0)
-                    fte_required = float(previous[3] or 0) + float(fte_required or 0)
-                forecast_by_lob_hour[key] = (
-                    profile, volume, fte_forecast, fte_required, sl_required,
-                )
+                for offset in range(slots):
+                    key = (
+                        staffing_lob.casefold(), str(business_date)[:10],
+                        stamp + timedelta(minutes=15 * offset),
+                    )
+                    previous = forecast_by_lob_interval.get(key)
+                    slot_volume = volume_per_slot
+                    slot_fte_forecast = fte_forecast
+                    slot_fte_required = fte_required
+                    if previous:
+                        slot_volume = (
+                            float(previous[1] or 0)
+                            + float(volume_per_slot or 0)
+                        )
+                        slot_fte_forecast = (
+                            float(previous[2] or 0)
+                            + float(fte_forecast or 0)
+                        )
+                        slot_fte_required = (
+                            float(previous[3] or 0)
+                            + float(fte_required or 0)
+                        )
+                    forecast_by_lob_interval[key] = (
+                        profile, slot_volume, slot_fte_forecast,
+                        slot_fte_required, sl_required,
+                    )
 
     raw_headers, raw_rows = _query(
         conn,
@@ -1693,7 +1740,7 @@ def build_staffing_coverage_workbook(
     plan_headers = [
         "business_date", "iso_week", "interval_start", "interval_end",
         "reporting_lob", "roster_lob", "language", "mode",
-        "forecast_volume_hour", "fte_forecast", "fte_required",
+        "forecast_volume_interval", "fte_forecast", "fte_required",
         "gross_scheduled_fte", "planned_time_off_fte", "net_scheduled_fte",
         "capacity_variance_fte", "capacity_gap_fte", "observed_fte",
         "productive_fte", "actual_gap_fte", "decision_state",
@@ -1717,9 +1764,9 @@ def build_staffing_coverage_workbook(
             evaluation_as_of = datetime.fromisoformat(evaluation_as_of)
         roster_lob = str(values["lob"] or "")
         profile = staffing_profile.get(roster_lob.casefold())
-        forecast = forecast_by_lob_hour.get((
+        forecast = forecast_by_lob_interval.get((
             roster_lob.casefold(), business_date.isoformat(),
-            interval_start.replace(minute=0, second=0, microsecond=0),
+            interval_start,
         ))
         if forecast:
             profile = forecast[0]
@@ -1751,32 +1798,32 @@ def build_staffing_coverage_workbook(
 
     # A demand interval with zero scheduled agents does not exist in the
     # staffing mart. Add it here so an empty roster can never hide a shortage.
-    for (lob_key, business_date_text, hour_start), forecast in forecast_by_lob_hour.items():
+    for (
+        lob_key, business_date_text, interval_start,
+    ), forecast in forecast_by_lob_interval.items():
         profile, volume, fte_forecast, fte_required, _sl_required = forecast
         roster_lob = next(
             (lob for lob in profile.staffing_lobs if lob.casefold() == lob_key), lob_key,
         )
         business_date = date.fromisoformat(business_date_text)
         language = " / ".join(sorted(known_languages.get(lob_key, {"Unspecified"})))
-        for offset in range(4):
-            interval_start = hour_start + timedelta(minutes=15 * offset)
-            key = (lob_key, business_date_text, interval_start)
-            if key in covered_intervals:
-                continue
-            interval_end = interval_start + timedelta(minutes=15)
-            required = float(fte_required or 0)
-            future = interval_start > evaluation_default
-            mode = "FUTURE PLAN" if future else "ACTUAL CONTROL"
-            state = "FUTURE GAP" if future and required > 0 else "NO SCHEDULE"
-            plan_rows.append((
-                business_date,
-                f"{business_date.isocalendar().year}-W{business_date.isocalendar().week:02d}",
-                interval_start, interval_end, profile.label, roster_lob, language,
-                mode, volume, fte_forecast, fte_required, 0.0, 0.0, 0.0,
-                -required, required, None, None, required if not future else None,
-                state, "Forecast demand with no scheduled roster interval",
-                evaluation_default,
-            ))
+        key = (lob_key, business_date_text, interval_start)
+        if key in covered_intervals:
+            continue
+        interval_end = interval_start + timedelta(minutes=15)
+        required = float(fte_required or 0)
+        future = interval_start > evaluation_default
+        mode = "FUTURE PLAN" if future else "ACTUAL CONTROL"
+        state = "FUTURE GAP" if future and required > 0 else "NO SCHEDULE"
+        plan_rows.append((
+            business_date,
+            f"{business_date.isocalendar().year}-W{business_date.isocalendar().week:02d}",
+            interval_start, interval_end, profile.label, roster_lob, language,
+            mode, volume, fte_forecast, fte_required, 0.0, 0.0, 0.0,
+            -required, required, None, None, required if not future else None,
+            state, "Forecast demand with no scheduled roster interval",
+            evaluation_default,
+        ))
 
     plan_rows.sort(key=lambda row: (row[0], row[2], str(row[5]), str(row[6])))
 
@@ -1883,7 +1930,7 @@ def build_staffing_coverage_workbook(
         plan_headers, actions,
     )
     book.definitions([
-        ("Required FTE", "Verint required FTE repeated across its four 15-minute intervals", "Demand requirement", "Forecast only; missing stays blank"),
+        ("Required FTE", "Verint required FTE at native 15-minute grain; historical hourly files expand to four quarters", "Demand requirement", "Forecast only; missing stays blank"),
         ("Gross scheduled FTE", "Scheduled agent-seconds / 900 before time off", "Roster capacity", "FTE roster LOB/language"),
         ("Net scheduled FTE", "Gross scheduled FTE - approved PTO/effective Away FTE", "Usable planned capacity", "Planned Away affects future only"),
         ("Future capacity gap", "MAX(0, required FTE - net scheduled FTE)", "Hiring, OT or redeployment action", "15-minute interval"),

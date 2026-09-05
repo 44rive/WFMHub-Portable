@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.17.1 — 2026-09-05
+
+- Added native 15-minute Verint forecast support without changing extracts.
+  WFMHub now keeps a mapped clean interval mart for capacity planning and
+  derives a separate hourly mart for Flash and daily reporting. Forecast
+  volume is summed; FTE/headcount levels are averaged; SL and AHT are weighted
+  by forecast volume, preventing the four quarter-hours from becoming four
+  times the hourly demand or staffing requirement.
+- Recognized the reviewed monthly names `RSA_NL_MM-YYYY`, `RSA_BE_MM-YYYY`,
+  `FORD_NL_MM-YYYY`, and `FORD_FR_MM-YYYY`, including optional filename text
+  around those tokens. The clean export now exposes native forecast intervals,
+  with a separate `forecast_hour` export for the derived rollup.
+- Rebuilt the Ford OEM Flash contract around the exact visible Ford/Toyota
+  layout and KPI family in the reference. Chery remains mapped and auditable
+  in the hub but is excluded from the OEM Flash total; the queue-control sheet
+  shows both the resolved group and whether each queue is used.
+- Fixed Realisations forecast lookup to use the mapped comparison scope, so
+  the combined RSA Belgium forecast can be compared with the detailed French
+  and Dutch actual scopes. Existing service-profile configuration upgrades
+  automatically with a timestamped backup.
+
 ## 0.17.0 — 2026-09-05
 
 - Reconstructed all four `TOLEARN/Book1.xlsx` service flashes as one native,

@@ -21,7 +21,7 @@ excluded. Historical rows before a leave date remain valid.
 | Storm Agent Status | Actual within-shift states and attendance evidence |
 | Verint Activities | Corrected post-day ledger only |
 | APBE/APFR/APDE | Formal service actuals for Realisations and governed service exports |
-| Verint Forecast | Forecast and required staffing only |
+| Verint Forecast | Forecast and required staffing only; native 15/60-minute interval retained |
 | Call by Call | Exact-mapped Flash service interactions, call-leg performance, and PCS |
 
 The parser identifies StartEndTimes and Activities from their headers and
@@ -38,6 +38,8 @@ boundary only with a visible review finding; this fallback is never silent.
 | `planned_time_off` | Exact schedule-clipped agent interval | Approved PTO and effective Away planning overlay |
 | `daily_service_lob` | Date/interval/service LOB/language | Intraday SL state |
 | `mart.call_service_hour` | Date/hour/mapped queue | Book1-style service Flashes |
+| `forecast` | Native Verint interval/mapped comparison scope | Staffing and clean sharing |
+| `forecast_hour` | Date/hour/mapped comparison scope | Flash, Realisations, analysis |
 | `pcs_agent_day` | Agent/day | PCS detail |
 | `pcs_team_day` | Team/LOB/language/day | PCS team summary |
 | `pcs_agent_month` | Agent/month | PCS monthly view |

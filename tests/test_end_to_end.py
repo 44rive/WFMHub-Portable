@@ -102,7 +102,10 @@ def make_forecast(path: Path):
     path.write_text(
         "DATE_TIME_FORMAT\nMM/DD/YYYY hh:mm A\n"
         "Queue Name\tDate\tTime\tTime Interval\tVolume (Absolute For)\tAbandons (Absolute For)\tService Level (Absolute For)\tService Level (Absolute Req)\tActivity Handling Time (Absolute For)\tHeadcount Staffing (Absolute For)\tNet Staffing (Absolute For)\tFull Time Equivalents (Absolute For)\tFull Time Equivalents (Absolute Req)\n"
-        "All\t08/01/2026\t09:00 AM\t1:00\t10\t1\t79\t80\t200\t3\t-1\t2\t3\n",
+        "All\t08/01/2026\t09:00 AM\t0:15\t2\t1\t70\t80\t180\t3\t-1\t2\t3\n"
+        "All\t08/01/2026\t09:15 AM\t0:15\t3\t0\t80\t80\t200\t3\t-1\t2\t3\n"
+        "All\t08/01/2026\t09:30 AM\t0:15\t2\t0\t80\t80\t200\t3\t-1\t2\t3\n"
+        "All\t08/01/2026\t09:45 AM\t0:15\t3\t0\t90\t80\t220\t3\t-1\t2\t3\n",
         encoding="cp1252",
     )
 
@@ -485,6 +488,18 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertEqual(conn.execute("SELECT count(*) FROM mart.conformance_agent_day").fetchone()[0], 0)
                 self.assertEqual(model.forecast_rows, 1)
+                self.assertEqual(
+                    conn.execute("SELECT count(*) FROM mart.forecast_interval").fetchone()[0],
+                    4,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        """SELECT volume_forecast, fte_required,
+                                  source_interval_minutes, source_interval_count
+                           FROM mart.forecast_hour"""
+                    ).fetchone(),
+                    (10.0, 3.0, 15, 4),
+                )
                 self.assertEqual(model.intraday_rows, 2)
                 self.assertEqual(model.pcs_rows, 2)
                 self.assertEqual(model.absence_rows, 4)
@@ -807,6 +822,14 @@ class EndToEndTests(unittest.TestCase):
                     "DEFINITIONS", "_AUDIT",
                 ])
                 self.assertEqual(service_book["CONTROL"]["A1"].value, "SERVICE FLASH CONTROL")
+                self.assertEqual(
+                    [cell.value for cell in service_book["Flash OEM"][11]][:8],
+                    [
+                        "Hour", "Volume Forecasted", "Volume Ford",
+                        "Volume Toyota", "SL Ford", "Availability Ford",
+                        "Availability Toyota", "AHT",
+                    ],
+                )
                 self.assertEqual(service_book.properties.creator, "Anass ASSRI")
                 self.assertEqual(len(service_book._external_links), 0)
                 self.assertGreaterEqual(len(service_book["CONTROL"]._charts), 1)

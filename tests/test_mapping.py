@@ -16,8 +16,24 @@ class QueueMappingTests(unittest.TestCase):
         self.assertEqual((forecast.service_scope, forecast.comparison_scope), ("RSA BE", "RSA BE"))
         prefixed = mapping.map_forecast("Forecast_RSA_NL_August.txt", "Combined - All Media")
         self.assertEqual((prefixed.service_scope, prefixed.comparison_scope), ("RSA NL", "RSA NL"))
+        september = {
+            "RSA_NL_09-2026.txt": "RSA NL",
+            "RSA_BE_09-2026.txt": "RSA BE",
+            "FORD_NL_09-2026.txt": "Ford NL",
+            "FORD_FR_09-2026.txt": "Ford FR",
+        }
+        for filename, scope in september.items():
+            result = mapping.map_forecast(filename, "Combined - All Media")
+            self.assertEqual(
+                (result.service_scope, result.comparison_scope),
+                (scope, scope),
+            )
         belgium = mapping.map_actual("APBE", "APBN_BRU_RSA_INTERNAT_All_FR", None, "RSA")
         self.assertEqual((belgium.service_scope, belgium.comparison_scope), ("RSA BE FR", "RSA BE"))
+        self.assertEqual(
+            mapping.comparison_scopes_for(("RSA BE FR", "RSA BE VL")),
+            ("RSA BE",),
+        )
         ford_nl = mapping.map_actual("APBE", "APBN_AMS_MOBILITY_Ford_Assistance_NL", None, "FORD")
         self.assertEqual((ford_nl.service_scope, ford_nl.comparison_scope), ("Ford NL", "Ford NL"))
 

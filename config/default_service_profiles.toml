@@ -3,7 +3,7 @@
 # applies. Formulas and targets remain centralized in metric_catalog.toml.
 
 [catalog]
-version = "2026.09.4"
+version = "2026.09.5"
 default_profile = "ford_oem_fr"
 description = "Effective-dated service and Book1 Flash profiles for RSA Netherlands, RSA Belgium, Ford Netherlands, and Ford OEM France."
 
@@ -19,6 +19,7 @@ flash_layout = "oem_split"
 operating_start_hour = 0
 operating_end_hour = 23
 display_order = 4
+flash_total_groups = ["Ford", "Toyota"]
 service_level_metric = "service_level_gross"
 availability_metric = "service_availability"
 aht_metric = "aht_seconds"

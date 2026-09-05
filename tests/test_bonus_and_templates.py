@@ -159,6 +159,37 @@ class ExcelTemplateTests(unittest.TestCase):
         self.assertEqual(ford.staffing_lobs, ("Ford FR",))
         self.assertEqual([group.label for group in ford.groups], ["Toyota", "Chery", "Ford"])
 
+    def test_previous_service_profile_catalog_upgrades_with_backup(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            config = home / "config"
+            config.mkdir()
+            default_text = (
+                REPO / "config" / "default_service_profiles.toml"
+            ).read_text(encoding="utf-8")
+            (config / "default_service_profiles.toml").write_text(
+                default_text, encoding="utf-8",
+            )
+            previous_text = default_text.replace(
+                'version = "2026.09.5"', 'version = "2026.09.4"', 1,
+            ).replace(
+                'flash_total_groups = ["Ford", "Toyota"]\n', "", 1,
+            )
+            target = config / "service_profiles.toml"
+            target.write_text(previous_text, encoding="utf-8")
+
+            catalog = load_service_profiles(home, target)
+
+            self.assertEqual(catalog.version, "2026.09.5")
+            self.assertEqual(
+                catalog.select("ford_oem_fr", date(2026, 9, 1)).flash_total_groups,
+                ("Ford", "Toyota"),
+            )
+            self.assertEqual(
+                len(list(config.glob("service_profiles_pre_flash_layout_*.toml"))),
+                1,
+            )
+
     def test_forecast_analysis_uses_materialized_forecast_and_service_tables(self):
         with tempfile.TemporaryDirectory() as folder:
             home = _home(Path(folder))

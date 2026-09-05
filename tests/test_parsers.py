@@ -399,6 +399,19 @@ class ParserTests(unittest.TestCase):
             self.assertIsNone(row["fte_forecast"])
             self.assertIsNone(row["sl_forecast"])
 
+    def test_forecast_preserves_new_fifteen_minute_grain(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "RSA_NL_09-2026.txt"
+            path.write_text(
+                "DATE_TIME_FORMAT\nMM/DD/YYYY hh:mm A\n"
+                "Queue Name\tDate\tTime\tTime Interval\tVolume (Absolute For)\n"
+                "Combined - All Media\t09/01/2026\t08:15 AM\t0:15\t6\n",
+                encoding="cp1252",
+            )
+            row = parse_forecast(path, "file").tables["raw.forecast_interval"][0]
+            self.assertEqual(row["interval_minutes"], 15)
+            self.assertEqual(str(row["interval_start"]), "2026-09-01 08:15:00")
+
     def test_apde_bracketed_csv_is_supported(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "APDE-Standard-KPIs---Inbound-Calls 2026-08-01.csv"

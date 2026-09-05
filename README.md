@@ -105,9 +105,12 @@ That keeps abandoned calls with no Agent ID and mapped service contacts handled
 outside the FTE roster without admitting unrelated worldwide queues. PCS stays
 limited to the effective-dated FTE roster.
 
-Verint Forecast supplies forecast only. `Deviation`, following the Book1 label,
-means `actual offered / forecast through the latest actual hour`. Availability
-is `handled / offered`; TSL uses the effective gross or short-abandon-adjusted
+Verint Forecast supplies forecast only. New 15-minute exports stay at their
+native grain for Staffing and are rolled into hours for the Flashes. Hourly
+volume is the sum of the four quarters; FTE is an average level; forecast SL
+and AHT are weighted by volume. `Deviation`, following the Book1 label, means
+`actual offered / forecast through the latest actual hour`. Availability is
+`handled / offered`; TSL uses the effective gross or short-abandon-adjusted
 method selected for that profile; AHT is weighted handled seconds per answered
 interaction.
 

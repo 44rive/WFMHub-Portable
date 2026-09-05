@@ -241,7 +241,11 @@ DATASETS: dict[str, ExportDataset] = {
         None, contract="service_scope_interval",
     ),
     "forecast": ExportDataset(
-        "forecast", "Clean Verint forecast and required staffing hours.",
+        "forecast", "Clean Verint forecast at its native source grain.",
+        "SELECT * FROM mart.forecast_interval WHERE business_date BETWEEN ? AND ? ORDER BY business_date, interval_start, queue_name",
+    ),
+    "forecast_hour": ExportDataset(
+        "forecast_hour", "Derived hourly forecast used by Flash and daily reporting.",
         "SELECT * FROM mart.forecast_hour WHERE business_date BETWEEN ? AND ? ORDER BY business_date, hour_start, queue_name",
     ),
     "source_health": ExportDataset(

@@ -45,12 +45,7 @@ def _profile_comparison_scopes(
     profile: ServiceProfile,
     mapping: QueueMapping,
 ) -> tuple[str, ...]:
-    values = {
-        result.comparison_scope
-        for result in mapping.queue_rows.values()
-        if result.service_scope in profile.service_scopes
-    }
-    return tuple(sorted(values or set(profile.service_scopes)))
+    return mapping.comparison_scopes_for(profile.service_scopes)
 
 
 def _profile_method(
@@ -148,6 +143,16 @@ def _profile_rows(
     return [dict(zip(headers, row)) for row in cursor.fetchall()]
 
 
+def _included_in_flash_total(
+    profile: ServiceProfile,
+    row: dict[str, Any],
+) -> bool:
+    return (
+        not profile.flash_total_groups
+        or profile.group_for(row.get("queue")) in profile.flash_total_groups
+    )
+
+
 def _forecast_by_hour(
     conn: DatabaseConnection,
     profile: ServiceProfile,
@@ -234,7 +239,11 @@ def _hourly_model(
     report_day: date,
     all_rows: Sequence[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, dict[str, Any] | None], int | None]:
-    rows = [row for row in all_rows if str(row["business_date"])[:10] == report_day.isoformat()]
+    rows = [
+        row for row in all_rows
+        if str(row["business_date"])[:10] == report_day.isoformat()
+        and _included_in_flash_total(profile, row)
+    ]
     by_hour: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         hour = _as_datetime(row.get("hour_start"))
@@ -383,7 +392,12 @@ def _write_card(
 
 def _table_value_format(book: DecisionWorkbook, header: str):
     lowered = header.casefold()
-    if any(token in lowered for token in ("availability", "deviation", "service level", "tsl", "absence rate")):
+    if (
+        lowered.startswith("sl ")
+        or any(token in lowered for token in (
+            "availability", "deviation", "service level", "tsl", "absence rate",
+        ))
+    ):
         return book.report.percent
     if "aht" in lowered:
         return book.report.workbook.add_format({
@@ -401,27 +415,20 @@ def _flash_columns(
 ) -> tuple[list[str], list[list[Any]], int, int, int]:
     if profile.flash_layout == "oem_split":
         headers = [
-            "Hour", "Volume Forecasted", "Ford Actual", "Toyota Actual",
-            "Chery Actual", "OEM Actual", "Ford Handled", "Toyota Handled",
-            "Ford in SL", "Toyota in SL", "Deviation", "Ford TSL",
-            "Toyota TSL", "OEM Availability", "OEM TSL", "AHT",
-            "Data State",
+            "Hour", "Volume Forecasted", "Volume Ford", "Volume Toyota",
+            "SL Ford", "Availability Ford", "Availability Toyota", "AHT",
         ]
         rows = []
         for row in hourly:
             ford = row["groups"].get("Ford") or {}
             toyota = row["groups"].get("Toyota") or {}
-            chery = row["groups"].get("Chery") or {}
             rows.append([
                 row["hour_label"], row["forecast"], ford.get("offered"),
-                toyota.get("offered"), chery.get("offered"), row["offered"],
-                ford.get("answered"), toyota.get("answered"),
-                ford.get("answered_within_target"), toyota.get("answered_within_target"),
-                row["forecast_attainment"], ford.get("service_level"),
-                toyota.get("service_level"), row["availability"],
-                row["service_level"], row["aht_seconds"], row["data_state"],
+                toyota.get("offered"), ford.get("service_level"),
+                ford.get("availability"), toyota.get("availability"),
+                row["aht_seconds"],
             ])
-        return headers, rows, 1, 5, 14
+        return headers, rows, 1, 2, 4
     if profile.flash_layout == "workforce":
         headers = [
             "Hour", "Volume Forecasted", "Volume Actual", "Volume Handled",
@@ -463,13 +470,12 @@ def _flash_cards(
         ford, toyota = groups.get("Ford") or {}, groups.get("Toyota") or {}
         return [
             ("Availability OEM", value.get("availability"), "percent", "Handled / actual"),
-            ("TSL OEM", value.get("service_level"), "percent", value.get("service_method") or "Configured method"),
             ("Availability Ford", ford.get("availability"), "percent", "Mapped Ford queues"),
-            ("TSL Ford", ford.get("service_level"), "percent", "Mapped Ford queues"),
             ("Availability Toyota", toyota.get("availability"), "percent", "Toyota and Lexus"),
-            ("TSL Toyota", toyota.get("service_level"), "percent", "Toyota and Lexus"),
             ("Deviation", value.get("forecast_attainment"), "percent", "Actual / forecast through cutoff"),
-            ("AHT", value.get("aht_seconds"), "seconds", "Weighted handled seconds"),
+            ("TSL OEM", value.get("service_level"), "percent", value.get("service_method") or "Configured method"),
+            ("TSL Ford", ford.get("service_level"), "percent", "Mapped Ford queues"),
+            ("TSL Toyota", toyota.get("service_level"), "percent", "Toyota and Lexus"),
         ]
     if profile.flash_layout == "workforce":
         planned = max((row.get("planned_hc") or 0 for row in hourly), default=0)
@@ -544,18 +550,13 @@ def _add_flash_sheet(
     ws.write(total_row, 0, label, formats["total"])
     total_values = total or {}
     if profile.flash_layout == "oem_split":
-        ford, toyota, chery = (
+        ford, toyota = (
             group_totals.get("Ford") or {}, group_totals.get("Toyota") or {},
-            group_totals.get("Chery") or {},
         )
         values = [
             total_values.get("forecast"), ford.get("offered"), toyota.get("offered"),
-            chery.get("offered"), total_values.get("offered"), ford.get("answered"),
-            toyota.get("answered"), ford.get("answered_within_target"),
-            toyota.get("answered_within_target"), total_values.get("forecast_attainment"),
-            ford.get("service_level"), toyota.get("service_level"),
-            total_values.get("availability"), total_values.get("service_level"),
-            total_values.get("aht_seconds"), "READY" if total else "INCOMPLETE",
+            ford.get("service_level"), ford.get("availability"),
+            toyota.get("availability"), total_values.get("aht_seconds"),
         ]
     elif profile.flash_layout == "workforce":
         values = [
@@ -583,7 +584,10 @@ def _add_flash_sheet(
         header = headers[column]
         lowered = header.casefold()
         fmt = (
-            formats["total_percent"] if any(token in lowered for token in ("availability", "deviation", "tsl", "absence rate"))
+            formats["total_percent"] if lowered.startswith("sl ") or any(
+                token in lowered
+                for token in ("availability", "deviation", "tsl", "absence rate")
+            )
             else formats["total_seconds"] if "aht" in lowered
             else formats["total_integer"] if isinstance(value, (int, float)) and value is not None
             else formats["total"]
@@ -596,10 +600,19 @@ def _add_flash_sheet(
     data_last_row = table_row + len(display_rows)
     if display_rows:
         chart = book.report.workbook.add_chart({"type": "column"})
-        for label_text, column, color in (
-            ("Forecast", forecast_col, COLORS["muted"]),
-            ("Actual", actual_col, COLORS["teal"]),
-        ):
+        volume_series = (
+            (
+                ("Forecast", forecast_col, COLORS["muted"]),
+                ("Ford", 2, COLORS["teal"]),
+                ("Toyota", 3, COLORS["gold"]),
+            )
+            if profile.flash_layout == "oem_split"
+            else (
+                ("Forecast", forecast_col, COLORS["muted"]),
+                ("Actual", actual_col, COLORS["teal"]),
+            )
+        )
+        for label_text, column, color in volume_series:
             chart.add_series({
                 "name": label_text,
                 "categories": [profile.flash_sheet, table_row + 1, 0, data_last_row, 0],
@@ -739,14 +752,13 @@ def _flat_hour_rows(
         "short_sickness_hc", "long_sickness_hc", "late_early_hc",
         "absence_hc", "absence_rate", "ford_offered", "ford_answered",
         "ford_service_level", "toyota_offered", "toyota_answered",
-        "toyota_service_level", "chery_offered", "data_state",
+        "toyota_service_level", "data_state",
     ]
     rows: list[tuple[Any, ...]] = []
     for profile in profiles:
         for row in hourly_by_profile[profile.profile_id]:
-            ford, toyota, chery = (
+            ford, toyota = (
                 row["groups"].get("Ford") or {}, row["groups"].get("Toyota") or {},
-                row["groups"].get("Chery") or {},
             )
             rows.append(tuple([
                 row.get("profile_id"), row.get("flash"), row.get("business_date"),
@@ -761,7 +773,7 @@ def _flat_hour_rows(
                 row.get("absence_hc"), row.get("absence_rate"),
                 ford.get("offered"), ford.get("answered"), ford.get("service_level"),
                 toyota.get("offered"), toyota.get("answered"), toyota.get("service_level"),
-                chery.get("offered"), row.get("data_state"),
+                row.get("data_state"),
             ]))
     return headers, rows
 
@@ -820,9 +832,8 @@ def build_service_flashes_workbook(
             source_mapping = list(csv.DictReader(handle))
         mapping_headers = [
             "mapping_type", "source_system", "source_value", "service_scope",
-            "comparison_scope", "designation", "used_by_flash",
+            "comparison_scope", "designation", "flash_group", "used_by_flash",
         ]
-        profile_scopes = {scope for profile in profiles for scope in profile.service_scopes}
         mapping_rows = []
         for row in source_mapping:
             if str(row.get("mapping_type") or "").strip().lower() != "queue":
@@ -830,11 +841,29 @@ def build_service_flashes_workbook(
             mapped = mapping.map_actual(
                 row.get("source_system"), row.get("source_value"), None, None,
             )
+            matching_profile = next(
+                (
+                    profile for profile in profiles
+                    if mapped.service_scope in profile.service_scopes
+                ),
+                None,
+            )
+            flash_group = (
+                matching_profile.group_for(row.get("source_value"))
+                if matching_profile is not None else None
+            )
+            used = (
+                matching_profile is not None
+                and (
+                    not matching_profile.flash_total_groups
+                    or flash_group in matching_profile.flash_total_groups
+                )
+            )
             mapping_rows.append((
                 row.get("mapping_type"), row.get("source_system"),
                 row.get("source_value"), mapped.service_scope,
-                mapped.comparison_scope, mapped.designation,
-                "YES" if mapped.service_scope in profile_scopes else "NO",
+                mapped.comparison_scope, mapped.designation, flash_group,
+                "YES" if used else "NO",
             ))
         book.table(
             "QUEUE_MAP", "Queue-to-Flash control",
@@ -867,8 +896,16 @@ def build_service_flashes_workbook(
             "Only missing evidence and below-target service intervals requiring review.",
             exception_headers, exception_rows,
         )
+        oem_groups = next(
+            (
+                profile.flash_total_groups for profile in profiles
+                if profile.flash_layout == "oem_split"
+            ),
+            (),
+        )
         book.definitions([
             ("Volume Actual", "One unique inbound interaction in a mapped Flash scope", "Demand", "Transferred call legs are not double-counted inside the same Flash scope"),
+            ("OEM visible scope", " and ".join(oem_groups) or "Every configured group", "Matches the Book1 OEM image", "Other mapped groups remain in the hub but are excluded from OEM Flash totals"),
             ("Volume Handled", "Mapped interaction with an inbound handled agent leg", "Service availability numerator", "Agent may be outside the FTE roster; the queue is the service boundary"),
             ("Volume Handled in SL", f"Handled interaction with queue wait <= {rulebook.target_seconds} seconds", "TSL numerator", "Threshold is editable in wfm_rules.toml"),
             ("Short Abandon", f"Unanswered interaction with queue wait < {rulebook.short_abandon_seconds} seconds", "Adjusted TSL denominator", "Configured centrally"),
@@ -897,6 +934,7 @@ def build_service_flashes_workbook(
             ("Mapped Flash offered", mapped_offered, "One per interaction/comparison scope"),
             ("Queue mapping", mapping.file.name, mapping.sha256),
             ("Service profiles", catalog.version, catalog.sha256),
+            ("OEM visible groups", " | ".join(oem_groups) or "ALL", "Configured in service_profiles.toml"),
             ("Metric catalog", metrics.version, metrics.sha256),
             ("Rulebook", rulebook.version, rulebook.sha256),
             ("Design reference", "TOLEARN/Book1.xlsx", "Four pasted Flash references reconstructed as native Excel"),

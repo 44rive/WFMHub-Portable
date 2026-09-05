@@ -394,16 +394,26 @@ joined only through the reviewed `config/queue_mapping.csv`. The raw source
 queue/LOB and the mapped detailed/comparison scopes are all retained. Volume-only
 forecast exports are valid; absent forecast measures remain NULL.
 
+Forecast has two governed presentation grains. `mart.forecast_interval` keeps
+the native Verint interval (15 minutes for new exports; historical hourly files
+remain valid) for capacity planning and clean export. `mart.forecast_hour` is a
+derived Flash/reporting rollup. Within an hour, volume is additive, FTE and
+headcount are averaged because they are staffing levels, and SL/AHT are weighted
+by forecast volume (or averaged when all interval volumes are zero). The source
+grain and number of rolled intervals remain on the hourly row for audit.
+
 ## Capacity planning
 
 Service profiles own explicit parallel mappings from `service_scopes` to
 `staffing_lobs`. Staffing expands the complete selected period at 15-minute
-grain. Completed intervals preserve observed and productive FTE; future
-intervals compare Verint required FTE with net scheduled FTE after approved PTO
-and effective Away. If forecast demand exists but no staffing row exists, four
-zero-schedule quarter-hours are created for that hour so an empty roster cannot
-hide a shortage. `WEEKLY_PLAN` rolls additive FTE-hours up by ISO week,
-management LOB, roster LOB, and language.
+grain. A native 15-minute forecast is used directly; an older hourly forecast
+is safely spread across its four quarters, with required FTE repeated as a
+level and volume divided across the quarters. Completed intervals preserve
+observed and productive FTE; future intervals compare Verint required FTE with
+net scheduled FTE after approved PTO and effective Away. If forecast demand
+exists but no staffing row exists, a zero-schedule quarter-hour is created so
+an empty roster cannot hide a shortage. `WEEKLY_PLAN` rolls additive FTE-hours
+up by ISO week, management LOB, roster LOB, and language.
 
 Realisations iterates every active service profile by default. Each profile
 uses its configured SLA method and target. The dashboard never blends different

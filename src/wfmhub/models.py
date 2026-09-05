@@ -1942,6 +1942,15 @@ def _build_rta(
 FORECAST_HOUR_COLUMNS = [
     "business_date", "hour_start", "queue_name", "volume_forecast", "fte_forecast",
     "fte_required", "sl_forecast", "sl_required", "aht_forecast_seconds", "source_file",
+    "source_interval_minutes", "source_interval_count", "service_scope",
+    "comparison_scope", "mapping_status", "mapping_sha256",
+]
+
+FORECAST_INTERVAL_COLUMNS = [
+    "business_date", "interval_start", "interval_end", "interval_minutes",
+    "queue_name", "volume_forecast", "abandons_forecast", "fte_forecast",
+    "fte_required", "headcount_forecast", "net_staffing_forecast",
+    "sl_forecast", "sl_required", "aht_forecast_seconds", "source_file",
     "service_scope", "comparison_scope", "mapping_status", "mapping_sha256",
 ]
 
@@ -1954,6 +1963,127 @@ INTRADAY_COLUMNS = [
 ]
 
 
+def _mean_present(rows: list[dict[str, Any]], field: str) -> float | None:
+    values = [float(row[field]) for row in rows if row.get(field) is not None]
+    return sum(values) / len(values) if values else None
+
+
+def _forecast_weighted_mean(
+    rows: list[dict[str, Any]],
+    field: str,
+) -> float | None:
+    values = [row for row in rows if row.get(field) is not None]
+    if not values:
+        return None
+    weighted = [
+        (float(row[field]), float(row.get("volume_forecast") or 0))
+        for row in values
+    ]
+    weight = sum(max(0.0, item[1]) for item in weighted)
+    if weight > 0:
+        return sum(value * max(0.0, volume) for value, volume in weighted) / weight
+    return sum(value for value, _ in weighted) / len(weighted)
+
+
+def _map_forecast_interval_rows(
+    source_rows: list[dict[str, Any]],
+    mapping: QueueMapping,
+) -> list[dict[str, Any]]:
+    """Map the clean source intervals without changing their native grain."""
+
+    output: list[dict[str, Any]] = []
+    for row in source_rows:
+        mapped = mapping.map_forecast(row["source_file"], row["queue_name"])
+        minutes = int(row["interval_minutes"] or 0)
+        output.append({
+            "business_date": row["business_date"],
+            "interval_start": row["interval_start"],
+            "interval_end": (
+                row["interval_start"] + timedelta(minutes=minutes)
+                if minutes > 0 else None
+            ),
+            "interval_minutes": minutes or None,
+            "queue_name": row.get("queue_name"),
+            "volume_forecast": row.get("volume_forecast"),
+            "abandons_forecast": row.get("abandons_forecast"),
+            "fte_forecast": row.get("fte_forecast"),
+            "fte_required": row.get("fte_required"),
+            "headcount_forecast": row.get("headcount_forecast"),
+            "net_staffing_forecast": row.get("net_staffing_forecast"),
+            "sl_forecast": row.get("sl_forecast"),
+            "sl_required": row.get("sl_required"),
+            "aht_forecast_seconds": row.get("aht_forecast_seconds"),
+            "source_file": row["source_file"],
+            "service_scope": mapped.service_scope,
+            "comparison_scope": mapped.comparison_scope,
+            "mapping_status": mapped.status,
+            "mapping_sha256": mapping.sha256,
+        })
+    return output
+
+
+def _aggregate_forecast_hour_rows(
+    source_rows: list[dict[str, Any]],
+    mapping: QueueMapping,
+) -> list[dict[str, Any]]:
+    """Roll Verint forecast intervals into one governed hourly row.
+
+    Volume is additive. FTE/headcount values are point-in-time levels and are
+    averaged across the source intervals. AHT and SL percentages are weighted
+    by forecast volume. This supports both historical 60-minute files and the
+    new 15-minute export without quadrupling hourly staffing.
+    """
+
+    buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for row in source_rows:
+        mapped = mapping.map_forecast(row["source_file"], row["queue_name"])
+        hour_start = row["interval_start"].replace(minute=0, second=0, microsecond=0)
+        key = (
+            row["business_date"], hour_start, row.get("queue_name"),
+            row["source_file"], mapped.service_scope, mapped.comparison_scope,
+            mapped.status,
+        )
+        buckets[key].append(row)
+
+    output: list[dict[str, Any]] = []
+    for key, rows in sorted(
+        buckets.items(), key=lambda item: tuple(str(value or "") for value in item[0]),
+    ):
+        (
+            business_date, hour_start, queue_name, source_file,
+            service_scope, comparison_scope, mapping_status,
+        ) = key
+        volumes = [
+            float(row["volume_forecast"])
+            for row in rows if row.get("volume_forecast") is not None
+        ]
+        grains = {
+            int(row["interval_minutes"])
+            for row in rows if row.get("interval_minutes") is not None
+        }
+        output.append({
+            "business_date": business_date,
+            "hour_start": hour_start,
+            "queue_name": queue_name,
+            "volume_forecast": sum(volumes) if volumes else None,
+            "fte_forecast": _mean_present(rows, "fte_forecast"),
+            "fte_required": _mean_present(rows, "fte_required"),
+            "sl_forecast": _forecast_weighted_mean(rows, "sl_forecast"),
+            "sl_required": _forecast_weighted_mean(rows, "sl_required"),
+            "aht_forecast_seconds": _forecast_weighted_mean(
+                rows, "aht_forecast_seconds",
+            ),
+            "source_file": source_file,
+            "source_interval_minutes": min(grains) if grains else None,
+            "source_interval_count": len(rows),
+            "service_scope": service_scope,
+            "comparison_scope": comparison_scope,
+            "mapping_status": mapping_status,
+            "mapping_sha256": mapping.sha256,
+        })
+    return output
+
+
 def _build_intraday(
     conn: DatabaseConnection,
     start: date,
@@ -1961,12 +2091,14 @@ def _build_intraday(
     mapping: QueueMapping,
     metric_catalog: MetricCatalog,
 ) -> tuple[int, int]:
+    conn.execute("DELETE FROM mart.forecast_interval")
     conn.execute("DELETE FROM mart.forecast_hour")
     forecast_source = _dicts(conn.execute(
         """
-        SELECT business_date, interval_start, queue_name, volume_forecast,
-               fte_forecast, fte_required, sl_forecast, sl_required,
-               aht_forecast_seconds, source_file
+        SELECT business_date, interval_start, interval_minutes, queue_name,
+               volume_forecast, abandons_forecast, fte_forecast, fte_required,
+               headcount_forecast, net_staffing_forecast, sl_forecast,
+               sl_required, aht_forecast_seconds, source_file
         FROM (
             SELECT r.*, f.file_name AS source_file, f.source_path,
                    row_number() OVER (
@@ -1979,19 +2111,14 @@ def _build_intraday(
         """,
         [start, end],
     ))
-    forecast_rows: list[dict[str, Any]] = []
-    for row in forecast_source:
-        mapped = mapping.map_forecast(row["source_file"], row["queue_name"])
-        forecast_rows.append({
-            **{key: row[key] for key in (
-                "business_date", "queue_name", "volume_forecast", "fte_forecast",
-                "fte_required", "sl_forecast", "sl_required", "aht_forecast_seconds", "source_file",
-            )},
-            "hour_start": row["interval_start"].replace(minute=0, second=0, microsecond=0),
-            "service_scope": mapped.service_scope, "comparison_scope": mapped.comparison_scope,
-            "mapping_status": mapped.status,
-            "mapping_sha256": mapping.sha256,
-        })
+    forecast_interval_rows = _map_forecast_interval_rows(
+        forecast_source, mapping,
+    )
+    _insert_dicts(
+        conn, "mart.forecast_interval", FORECAST_INTERVAL_COLUMNS,
+        forecast_interval_rows,
+    )
+    forecast_rows = _aggregate_forecast_hour_rows(forecast_source, mapping)
     _insert_dicts(conn, "mart.forecast_hour", FORECAST_HOUR_COLUMNS, forecast_rows)
     conn.execute("DELETE FROM mart.intraday_queue_interval")
     actual_source = _dicts(conn.execute(

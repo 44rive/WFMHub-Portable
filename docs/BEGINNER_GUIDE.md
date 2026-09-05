@@ -144,6 +144,12 @@ hours; use `QUEUE_MAP` to see the exact included queues.
 Service availability is `handled / offered`. It is not agent availability.
 The `Deviation` label follows Book1 and means `actual offered / forecast`.
 
+From September 2026 onward, export Verint Forecast at 15-minute grain. Put the
+files in the same configured `Verint\Forecast` folder; do not edit them. Names
+such as `RSA_NL_09-2026.txt`, `RSA_BE_09-2026.txt`, `FORD_NL_09-2026.txt`, and
+`FORD_FR_09-2026.txt` are recognized automatically. WFMHub keeps those quarters
+for Staffing and builds the hourly Flash forecast itself.
+
 The old Flash also contained manually sourced back-office counters. Until a
 reliable source is configured, WFMHub shows `NOT_CONFIGURED` instead of making
 up a number.

@@ -47,6 +47,7 @@ class ServiceProfile:
     operating_start_hour: int
     operating_end_hour: int
     display_order: int
+    flash_total_groups: tuple[str, ...]
 
     def active_on(self, value: date) -> bool:
         return self.effective_from <= value and (self.effective_to is None or value <= self.effective_to)
@@ -107,8 +108,8 @@ def ensure_service_profiles(home: Path, target: Path | None = None) -> Path:
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             current, default = {}, {}
         if (
-            str(current.get("version", "")) == "2026.09.3"
-            and str(default.get("version", "")) == "2026.09.4"
+            str(current.get("version", "")) in {"2026.09.3", "2026.09.4"}
+            and str(default.get("version", "")) == "2026.09.5"
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(
@@ -152,6 +153,11 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
             operating_start = int(item.get("operating_start_hour", 0))
             operating_end = int(item.get("operating_end_hour", 23))
             display_order = int(item.get("display_order", 100))
+            flash_total_groups = tuple(
+                str(value).strip()
+                for value in item.get("flash_total_groups", [])
+                if str(value).strip()
+            )
         except (KeyError, TypeError, ValueError) as exc:
             raise ServiceProfileError(f"Invalid service profile item {index}: {exc}") from exc
         if not profile_id or not scopes or not staffing_lobs or not systems or not flash_systems:
@@ -196,6 +202,7 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
             operating_start_hour=operating_start,
             operating_end_hour=operating_end,
             display_order=display_order,
+            flash_total_groups=flash_total_groups,
         ))
     if not profiles or default_profile not in {profile.profile_id for profile in profiles}:
         raise ServiceProfileError("default_profile must identify at least one profile")
@@ -228,6 +235,15 @@ def validate_service_profiles(
                 )
     for profile in catalog.profiles:
         profile.staffing_pairs()
+        unknown_total_groups = sorted(
+            set(profile.flash_total_groups)
+            - {group.label for group in profile.groups}
+        )
+        if unknown_total_groups:
+            raise ServiceProfileError(
+                f"Service profile {profile.profile_id!r} has unknown "
+                f"flash_total_groups: {', '.join(unknown_total_groups)}"
+            )
         key = profile.flash_sheet.casefold()
         if key in flash_sheets:
             raise ServiceProfileError(
