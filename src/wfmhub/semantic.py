@@ -42,7 +42,7 @@ class MetricAggregate:
 SOURCE_COMPONENTS: dict[str, frozenset[str]] = {
     "service_interval": frozenset({
         "offered", "answered", "abandoned", "short_abandoned",
-        "answered_within_target", "handled_seconds",
+        "abandoned_within_target", "answered_within_target", "handled_seconds",
     }),
     "forecast_comparison_hour": frozenset({"forecast_volume", "actual_volume"}),
     "pcs_agent_day": frozenset({
@@ -93,7 +93,8 @@ def _records(conn: DatabaseConnection, source_model: str, start: date, end: date
         cursor = conn.execute(
             """SELECT business_date, interval_start, source_system, queue,
                       business_partner, lob, language, offered, answered,
-                      abandoned, short_abandoned, answered_within_target,
+                      abandoned, short_abandoned, abandoned_within_target,
+                      answered_within_target,
                       handled_seconds
                FROM mart.service_interval
                WHERE business_date BETWEEN ? AND ?
@@ -109,7 +110,8 @@ def _records(conn: DatabaseConnection, source_model: str, start: date, end: date
                 {"source_system": source, "queue": queue, "business_partner": partner,
                  "lob": lob, "language": language},
                 dict(zip(("offered", "answered", "abandoned", "short_abandoned",
-                          "answered_within_target", "handled_seconds"), values)),
+                          "abandoned_within_target", "answered_within_target",
+                          "handled_seconds"), values)),
             )
         return
 

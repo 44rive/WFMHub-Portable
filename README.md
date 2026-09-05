@@ -42,9 +42,9 @@ intraday control page, Attendance is a call list, Corrections is a shift
 timeline, and Final Absenteeism is a ledger.
 
 Adherence is not calculated. Reported service availability means **answered /
-(offered - short abandons)**, matching the Storm business dashboard; it never
-means agent availability. The technical answered/offered method remains in the
-KPI catalog for audit and comparison.
+(offered - short abandons)**. Reported TSL means **answered inside target /
+(offered - short abandons - non-short abandons inside target)**. Both follow
+the Storm business reference; availability never means agent availability.
 
 ## Source authority
 
@@ -112,8 +112,9 @@ volume is the sum of the four quarters; FTE is an average level; forecast SL
 and AHT are weighted by volume. `Deviation`, following the Book1 label, means
 `business offered / forecast through the latest actual hour`. Business offered
 is unique offered interactions less short abandons. Availability is `handled /
-business offered`; TSL is `handled within 20 seconds / business offered`; AHT
-is weighted handled seconds per answered interaction.
+business offered`; TSL is `handled within 20 seconds / (business offered -
+non-short abandons within 20 seconds)`; AHT is weighted handled seconds per
+answered interaction. The threshold clock is total queue wait plus ringing.
 
 Ford NL's Dispatch, Follow-up, and Mailbox BNL cards remain `N/C` because Book1
 contains the labels but no governed source or formula. WFMHub does not invent

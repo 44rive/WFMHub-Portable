@@ -87,6 +87,7 @@ def service_scope_interval(
                   sum(offered) AS offered, sum(answered) AS answered,
                   sum(abandoned) AS abandoned,
                   sum(short_abandoned) AS short_abandoned,
+                  sum(abandoned_within_target) AS abandoned_within_target,
                   sum(answered_within_target) AS answered_within_target,
                   max(mapping_status) AS mapping_status
            FROM mart.service_interval
@@ -104,19 +105,20 @@ def service_scope_interval(
         availability = scoped.get("service_availability_business")
         abandon = scoped.get("abandon_rate")
         aht = scoped.get("aht_seconds")
-        rows.append((*base_row[:5], *base_row[5:10],
+        rows.append((*base_row[:5], *base_row[5:11],
                      service.value if service else None,
                      availability.value if availability else None,
                      abandon.value if abandon else None,
                      aht.value if aht else None,
                      service.target if service else None,
                      service.state if service else "NO_DATA",
-                     base_row[10]))
+                     base_row[11]))
     return Dataset(
         "service_scope_interval", DATASET_CONTRACTS["service_scope_interval"].grain,
         DATASET_CONTRACTS["service_scope_interval"].purpose,
         ["business_date", "interval_start", "source_system", "lob", "language",
-         "offered", "answered", "abandoned", "short_abandoned", "answered_within_target",
+         "offered", "answered", "abandoned", "short_abandoned",
+         "abandoned_within_target", "answered_within_target",
          "service_level", "service_availability", "abandon_rate", "aht_seconds",
          "sl_target", "sl_state", "mapping_status"], rows,
     )

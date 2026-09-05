@@ -111,6 +111,7 @@ def _evidence(conn: DatabaseConnection, domain: str, start: date, end: date) -> 
                   ORDER BY business_date, lob, team_leader, agent_name""",
         "service": """SELECT business_date, interval_start, source_system, queue, service_scope,
                              comparison_scope, offered, answered, short_abandoned,
+                             abandoned_within_target,
                              answered_within_target, service_level, service_availability,
                              aht_seconds, mapping_status
                       FROM mart.service_interval WHERE business_date BETWEEN ? AND ?

@@ -89,7 +89,8 @@ def _aggregate(
         name: sum(float(row.get(name) or 0) for row in values)
         for name in (
             "offered", "answered", "abandoned", "short_abandoned",
-            "answered_within_target", "handled_seconds",
+            "abandoned_within_target", "answered_within_target",
+            "handled_seconds",
         )
     }
     service = evaluate_metric(
@@ -132,6 +133,7 @@ def _profile_rows(
         f"""SELECT business_date, hour_start, source_system, service_scope,
                    comparison_scope, queue, designation, language, offered,
                    answered, abandoned, short_abandoned,
+                   abandoned_within_target,
                    answered_within_target, talk_seconds, hold_seconds,
                    wrap_seconds, handled_seconds, service_level,
                    service_availability, abandon_rate, aht_seconds, call_legs,
@@ -286,7 +288,8 @@ def _hourly_model(
             "forecast_attainment": _ratio(actual_value, forecast_value),
             "data_state": state, **(aggregate or {
                 "offered": None, "answered": None, "abandoned": None,
-                "short_abandoned": None, "answered_within_target": None,
+                "short_abandoned": None, "abandoned_within_target": None,
+                "answered_within_target": None,
                 "handled_seconds": None, "service_level": None,
                 "service_target": _profile_method(
                     metrics, profile, profile.service_level_metric, report_day,
@@ -731,7 +734,7 @@ def _add_control_sheet(
     notes = [
         "Open a Flash name to jump to its hourly sheet.",
         "Deviation follows the reference workbook: actual offered / forecast through the latest actual hour.",
-        "Availability and TSL use offered after short abandons are removed, matching the Storm business dashboard.",
+        "Availability uses business offered; TSL also removes non-short abandons inside target, matching Storm.",
         "No mapped calls and missing forecasts remain blank; the workbook never turns missing evidence into zero.",
     ]
     ws.write("A10", "OPERATING NOTES", book.report.section)
@@ -750,7 +753,8 @@ def _flat_hour_rows(
 ) -> tuple[list[str], list[tuple[Any, ...]]]:
     headers = [
         "profile_id", "flash", "business_date", "hour", "forecast", "offered",
-        "answered", "abandoned", "short_abandoned", "answered_within_target",
+        "answered", "abandoned", "short_abandoned",
+        "abandoned_within_target", "answered_within_target",
         "forecast_attainment", "availability", "service_level", "service_target",
         "service_method", "abandon_rate", "aht_seconds", "planned_hc",
         "short_sickness_hc", "long_sickness_hc", "late_early_hc",
@@ -768,6 +772,7 @@ def _flat_hour_rows(
                 row.get("profile_id"), row.get("flash"), row.get("business_date"),
                 row.get("hour"), row.get("forecast"), row.get("offered"),
                 row.get("answered"), row.get("abandoned"), row.get("short_abandoned"),
+                row.get("abandoned_within_target"),
                 row.get("answered_within_target"), row.get("forecast_attainment"),
                 row.get("availability"), row.get("service_level"),
                 row.get("service_target"), row.get("service_method"),
@@ -911,11 +916,13 @@ def build_service_flashes_workbook(
             ("Volume Actual", "One unique inbound interaction in a mapped Flash scope", "Demand", "Transferred call legs are not double-counted inside the same Flash scope"),
             ("OEM visible scope", " and ".join(oem_groups) or "Every configured group", "Matches the Book1 OEM image", "Other mapped groups remain in the hub but are excluded from OEM Flash totals"),
             ("Volume Handled", "Mapped interaction with an inbound handled agent leg", "Service availability numerator", "Agent may be outside the FTE roster; the queue is the service boundary"),
-            ("Volume Handled in SL", f"Handled interaction with queue wait <= {rulebook.target_seconds} seconds", "TSL numerator", "Threshold is editable in wfm_rules.toml"),
-            ("Short Abandon", f"Unanswered interaction with queue wait < {rulebook.short_abandon_seconds} seconds", "Removed from business offered", "Configured centrally"),
+            ("Response time", "Total Queue Wait Time + Ringing Duration", "Storm threshold clock", "Reproduced from the Call-by-Call business reference"),
+            ("Volume Handled in SL", f"Handled interaction with response time < {rulebook.target_seconds} seconds", "TSL numerator", "Threshold is editable in wfm_rules.toml"),
+            ("Short Abandon", f"Unanswered interaction with response time < {rulebook.short_abandon_seconds} seconds", "Removed from business offered", "Configured centrally"),
+            ("Abandoned in SL", f"Non-short unanswered interaction with response time < {rulebook.target_seconds} seconds", "Removed from the Storm SL denominator", "Kept separate from short abandons"),
             ("Deviation", "Business offered / forecast through the latest actual hour", "Demand tracking", "Business offered excludes short abandons"),
             ("Availability", "Handled / business offered", "Service availability", "Matches Storm dashboard; not agent availability or adherence"),
-            ("TSL", "Handled within target / business offered", "Service-level control", "Business reference; a gross technical method remains available in the KPI catalog"),
+            ("TSL", "Handled within target / (business offered - abandoned in SL)", "Service-level control", "Storm business reference; a gross technical method remains available in the KPI catalog"),
             ("AHT", "Sum of inbound talk + hold + wrap / handled interactions", "Workload", "Weighted; never an average of hourly averages"),
             ("Ford NL workload cards", "Dispatch, Follow-up and Mailbox BNL remain N/C", "Data integrity", "Book1 provides labels but no governed source or formula; values are not invented"),
         ])

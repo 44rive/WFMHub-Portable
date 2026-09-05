@@ -68,7 +68,9 @@ One interaction may have several call legs. The service mart counts it once per
 mapped comparison scope. Reports use the Storm business reference:
 
 - business offered = raw offered - short abandons below 5 seconds;
-- TSL = answered within 20 seconds / business offered;
+- response time = total queue wait + ringing duration;
+- TSL = answered within 20 seconds / (business offered - non-short abandons
+  within 20 seconds);
 - service availability = answered / business offered;
 - deviation = business offered / forecast;
 - AHT = total talk + hold + wrap seconds / answered.

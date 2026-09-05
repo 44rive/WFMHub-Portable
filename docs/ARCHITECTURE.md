@@ -357,11 +357,13 @@ no loss.
 `mart.call_service_hour`. Reports use the Storm business definition:
 
 ```text
-answered / (offered - short_abandoned)
+answered_within_target /
+(offered - short_abandoned - abandoned_within_target)
 ```
 
-The metric catalog also retains technical gross availability/SL and the
-short-abandon-adjusted business methods. Queue scopes
+The threshold clock is Call-by-Call total queue wait plus ringing duration.
+Business availability remains answered divided by offered less short abandons.
+The metric catalog also retains technical gross availability/SL. Queue scopes
 choose the reported profile, while both variants remain available for audit.
 AHT is weighted from handled seconds divided by answered contacts. Higher-grain
 reports use ratios of summed components, never averages of interval percentages.

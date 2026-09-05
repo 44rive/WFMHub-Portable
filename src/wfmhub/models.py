@@ -2592,7 +2592,8 @@ def _sync_reviewed_absence_compatibility(conn: DatabaseConnection) -> tuple[int,
 SERVICE_COLUMNS = [
     "business_date", "interval_start", "hour_start", "source_system", "queue",
     "business_partner", "lob", "language", "offered", "answered", "abandoned",
-    "short_abandoned", "answered_within_target", "handled_seconds", "sl_gross",
+    "short_abandoned", "abandoned_within_target", "answered_within_target",
+    "handled_seconds", "sl_gross",
     "sl_adjusted", "sl_profile", "service_level", "service_availability",
     "abandon_rate", "aht_seconds", "source_file", "rule_version", "rule_sha256",
     "service_scope", "comparison_scope", "designation", "mapping_status", "mapping_sha256",
@@ -2602,7 +2603,8 @@ SERVICE_COLUMNS = [
 CALL_SERVICE_COLUMNS = [
     "business_date", "hour_start", "source_system", "service_scope",
     "comparison_scope", "queue", "designation", "language", "offered",
-    "answered", "abandoned", "short_abandoned", "answered_within_target",
+    "answered", "abandoned", "short_abandoned", "abandoned_within_target",
+    "answered_within_target",
     "talk_seconds", "hold_seconds", "wrap_seconds", "handled_seconds",
     "service_level", "service_availability", "abandon_rate", "aht_seconds",
     "call_legs", "transferred_legs", "source_files", "mapping_sha256",
@@ -2631,7 +2633,7 @@ def _build_call_service(
     rows = _dicts(conn.execute(
         """
         SELECT business_date, interaction_key, call_key, call_start,
-               call_direction, queue, queue_wait_seconds, agent_id,
+               call_direction, queue, queue_wait_seconds, ringing_seconds, agent_id,
                talk_seconds, hold_seconds, wrap_seconds, transferred,
                language, lob, source_file
         FROM core.clean_call_leg
@@ -2674,15 +2676,25 @@ def _build_call_service(
             ]
             answered = 1 if handled_legs else 0
             wait_seconds = selected.get("queue_wait_seconds")
+            response_seconds = (
+                float(wait_seconds) + float(selected.get("ringing_seconds") or 0)
+                if wait_seconds is not None else None
+            )
             short_abandoned = int(
                 not answered
-                and wait_seconds is not None
-                and float(wait_seconds) < rulebook.short_abandon_seconds
+                and response_seconds is not None
+                and response_seconds < rulebook.short_abandon_seconds
+            )
+            abandoned_within_target = int(
+                not answered
+                and response_seconds is not None
+                and rulebook.short_abandon_seconds <= response_seconds
+                and response_seconds < rulebook.target_seconds
             )
             within_target = int(
                 bool(answered)
-                and wait_seconds is not None
-                and float(wait_seconds) <= rulebook.target_seconds
+                and response_seconds is not None
+                and response_seconds < rulebook.target_seconds
             )
             call_start = selected.get("call_start")
             if call_start is None:
@@ -2701,7 +2713,8 @@ def _build_call_service(
             )
             bucket = aggregates.setdefault(key, {
                 "offered": 0, "answered": 0, "abandoned": 0,
-                "short_abandoned": 0, "answered_within_target": 0,
+                "short_abandoned": 0, "abandoned_within_target": 0,
+                "answered_within_target": 0,
                 "talk_seconds": 0.0, "hold_seconds": 0.0,
                 "wrap_seconds": 0.0, "handled_seconds": 0.0,
                 "call_legs": 0, "transferred_legs": 0,
@@ -2711,6 +2724,7 @@ def _build_call_service(
             bucket["answered"] += answered
             bucket["abandoned"] += 1 - answered
             bucket["short_abandoned"] += short_abandoned
+            bucket["abandoned_within_target"] += abandoned_within_target
             bucket["answered_within_target"] += within_target
             for name in ("talk_seconds", "hold_seconds", "wrap_seconds"):
                 bucket[name] += sum(float(leg.get(name) or 0) for leg in handled_legs)
@@ -2732,7 +2746,8 @@ def _build_call_service(
             name: values[name]
             for name in (
                 "offered", "answered", "abandoned", "short_abandoned",
-                "answered_within_target", "handled_seconds",
+                "abandoned_within_target", "answered_within_target",
+                "handled_seconds",
             )
         }
         dimensions = {
@@ -2758,7 +2773,8 @@ def _build_call_service(
             "designation": designation, "language": language,
             **{name: values[name] for name in (
                 "offered", "answered", "abandoned", "short_abandoned",
-                "answered_within_target", "talk_seconds", "hold_seconds",
+                "abandoned_within_target", "answered_within_target",
+                "talk_seconds", "hold_seconds",
                 "wrap_seconds", "handled_seconds", "call_legs", "transferred_legs",
             )},
             "service_level": service_level.value,
@@ -2787,7 +2803,8 @@ def _build_service(
         SELECT business_date, hour_start AS interval_start, hour_start,
                source_system, queue, NULL AS business_partner,
                service_scope AS lob, language, offered, answered, abandoned,
-               short_abandoned, answered_within_target, handled_seconds,
+               short_abandoned, abandoned_within_target,
+               answered_within_target, handled_seconds,
                source_files AS source_file, service_scope, comparison_scope,
                designation, mapping_sha256
         FROM mart.call_service_hour
@@ -2800,6 +2817,7 @@ def _build_service(
         components = {
             "offered": row["offered"], "answered": row["answered"],
             "abandoned": row["abandoned"], "short_abandoned": row["short_abandoned"],
+            "abandoned_within_target": row["abandoned_within_target"],
             "answered_within_target": row["answered_within_target"],
             "handled_seconds": row["handled_seconds"],
         }
@@ -2832,6 +2850,7 @@ def _build_service(
                 "source_file",
             )},
             "short_abandoned": row["short_abandoned"],
+            "abandoned_within_target": row["abandoned_within_target"],
             "answered_within_target": row["answered_within_target"],
             "handled_seconds": row["handled_seconds"],
             "sl_gross": gross.value,

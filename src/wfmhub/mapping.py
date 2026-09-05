@@ -7,6 +7,7 @@ import hashlib
 import re
 import shutil
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -88,6 +89,41 @@ def ensure_queue_mapping(home: Path, target: Path | None = None) -> Path:
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    elif source.resolve() != target:
+        # Shipped mappings are additive business references. Merge newly
+        # supplied queue identities without replacing any local override.
+        with source.open("r", encoding="utf-8-sig", newline="") as handle:
+            shipped = list(csv.DictReader(handle))
+        with target.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            fieldnames = list(reader.fieldnames or [])
+            current = list(reader)
+        required = [
+            "mapping_type", "source_system", "source_value",
+            "service_scope", "designation",
+        ]
+        if all(name in fieldnames for name in required):
+            identity = lambda row: (
+                str(row.get("mapping_type") or "").strip().casefold(),
+                _key(row.get("source_system")),
+                _key(row.get("source_value")),
+            )
+            known = {identity(row) for row in current}
+            additions = [row for row in shipped if identity(row) not in known]
+            if additions:
+                stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                shutil.copy2(
+                    target,
+                    target.with_name(f"{target.stem}_pre_default_merge_{stamp}{target.suffix}"),
+                )
+                with target.open("w", encoding="utf-8-sig", newline="") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(current)
+                    writer.writerows(
+                        {name: row.get(name, "") for name in fieldnames}
+                        for row in additions
+                    )
     return target
 
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
-from wfmhub.mapping import load_queue_mapping
+from wfmhub.mapping import ensure_queue_mapping, load_queue_mapping
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -36,6 +38,45 @@ class QueueMappingTests(unittest.TestCase):
         )
         ford_nl = mapping.map_actual("APBE", "APBN_AMS_MOBILITY_Ford_Assistance_NL", None, "FORD")
         self.assertEqual((ford_nl.service_scope, ford_nl.comparison_scope), ("Ford NL", "Ford NL"))
+        reference_additions = {
+            "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL": "RSA NL",
+            "APBN_BRU_MOBILITY_BIKE_Bike_FR": "RSA BE FR",
+            "APBN_BRU_MOBILITY_BIKE_Bike_VL": "RSA BE VL",
+            "APBN_BRU_MOBILITY_Ford_Assistance_DE": "Ford NL",
+        }
+        for queue, scope in reference_additions.items():
+            self.assertEqual(
+                mapping.map_actual("STORM", queue, None, None).service_scope,
+                scope,
+            )
+
+    def test_new_defaults_merge_without_replacing_local_queue_override(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            (home / "config").mkdir()
+            shipped = home / "config" / "default_queue_mapping.csv"
+            shutil.copy2(REPO / "config" / "default_queue_mapping.csv", shipped)
+            target = home / "config" / "queue_mapping.csv"
+            target.write_text(
+                "mapping_type,source_system,source_value,service_scope,designation\n"
+                "queue,STORM,APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL,CUSTOM,Custom\n",
+                encoding="utf-8",
+            )
+            ensure_queue_mapping(home, target)
+            mapping = load_queue_mapping(target)
+            self.assertEqual(
+                mapping.map_actual(
+                    "STORM", "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL", None, None,
+                ).service_scope,
+                "CUSTOM",
+            )
+            self.assertEqual(
+                mapping.map_actual(
+                    "STORM", "APBN_BRU_MOBILITY_Ford_Assistance_DE", None, None,
+                ).service_scope,
+                "Ford NL",
+            )
+            self.assertTrue(list((home / "config").glob("queue_mapping_pre_default_merge_*.csv")))
 
     def test_unlisted_apde_partner_falls_back_to_raw_lob(self):
         mapping = load_queue_mapping(REPO / "config" / "default_queue_mapping.csv")

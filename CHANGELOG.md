@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.18.1 — 2026-09-05
+
+- Fixed Attendance Review generation when a selected period has no exact gaps;
+  the rulebook audit authority is now initialized for empty and populated files.
+- Aligned Call-by-Call service timing with the supplied business reference:
+  response time is total queue wait plus ringing and the 20-second boundary is
+  evaluated consistently.
+- Added a distinct `abandoned_within_target` counter. Storm TSL is now
+  `answered_within_target / (offered - short_abandoned - abandoned_within_target)`;
+  service availability remains `answered / (offered - short_abandoned)`.
+- Added the four queues found missing from the supplied correspondence files:
+  NL Various Assistance, prefixed BE Bike FR/VL, and Ford Assistance DE.
+- Existing editable queue maps now receive new shipped mappings additively,
+  with a timestamped backup and without replacing local overrides.
+- Expanded Flash data, definitions, semantic datasets, analysis evidence, and
+  documentation so the revised counters and formula remain auditable.
+
 ## 0.18.0 — 2026-09-05
 
 - Retired APBE, APFR, and APDE from source discovery, refresh groups, health

@@ -120,12 +120,20 @@ class CallServiceModelTests(unittest.TestCase):
             """CREATE TABLE core.clean_call_leg (
                    business_date DATE, interaction_key VARCHAR, call_key VARCHAR,
                    call_start TIMESTAMP, call_direction VARCHAR, queue VARCHAR,
-                   queue_wait_seconds DOUBLE, agent_id VARCHAR, talk_seconds DOUBLE,
+                   queue_wait_seconds DOUBLE, ringing_seconds DOUBLE,
+                   agent_id VARCHAR, talk_seconds DOUBLE,
                    hold_seconds DOUBLE, wrap_seconds DOUBLE, transferred BOOLEAN,
                    language VARCHAR, lob VARCHAR, source_file VARCHAR
                )"""
         )
-        migration = (REPO / "sql" / "migrations" / "013_call_service_flash.sql").read_text(
+        for migration_name in ("013_call_service_flash.sql",):
+            migration = (REPO / "sql" / "migrations" / migration_name).read_text(
+                encoding="utf-8",
+            )
+            for statement in _migration_statements(migration):
+                conn.execute(statement)
+        conn.execute("CREATE TABLE mart.service_interval (placeholder INTEGER)")
+        migration = (REPO / "sql" / "migrations" / "015_storm_service_reference.sql").read_text(
             encoding="utf-8",
         )
         for statement in _migration_statements(migration):
@@ -133,16 +141,19 @@ class CallServiceModelTests(unittest.TestCase):
 
         rows = [
             # Two legs, one customer interaction. Only one offered call.
-            (date(2026, 8, 1), "transfer", "leg-1", datetime(2026, 8, 1, 9, 0), "I", "MAPPED_QUEUE", 10, None, 0, 0, 0, False, "NL", None, "calls.csv"),
-            (date(2026, 8, 1), "transfer", "leg-2", datetime(2026, 8, 1, 9, 1), "I", "MAPPED_QUEUE", 0, "999", 100, 10, 10, True, "NL", None, "calls.csv"),
-            # Two unanswered interactions: one short abandon, one normal abandon.
-            (date(2026, 8, 1), "short", "leg-3", datetime(2026, 8, 1, 9, 10), "I", "MAPPED_QUEUE", 3, None, 0, 0, 0, False, "NL", None, "calls.csv"),
-            (date(2026, 8, 1), "long", "leg-4", datetime(2026, 8, 1, 9, 20), "I", "MAPPED_QUEUE", 30, None, 0, 0, 0, False, "NL", None, "calls.csv"),
+            (date(2026, 8, 1), "transfer", "leg-1", datetime(2026, 8, 1, 9, 0), "I", "MAPPED_QUEUE", 10, 0, None, 0, 0, 0, False, "NL", None, "calls.csv"),
+            (date(2026, 8, 1), "transfer", "leg-2", datetime(2026, 8, 1, 9, 1), "I", "MAPPED_QUEUE", 0, 0, "999", 100, 10, 10, True, "NL", None, "calls.csv"),
+            # Three unanswered interactions: short, in-target non-short and long.
+            (date(2026, 8, 1), "short", "leg-3", datetime(2026, 8, 1, 9, 10), "I", "MAPPED_QUEUE", 3, 0, None, 0, 0, 0, False, "NL", None, "calls.csv"),
+            (date(2026, 8, 1), "in-target", "leg-4", datetime(2026, 8, 1, 9, 15), "I", "MAPPED_QUEUE", 10, 0, None, 0, 0, 0, False, "NL", None, "calls.csv"),
+            (date(2026, 8, 1), "long", "leg-5", datetime(2026, 8, 1, 9, 20), "I", "MAPPED_QUEUE", 30, 0, None, 0, 0, 0, False, "NL", None, "calls.csv"),
+            # Wait is below 20, but wait + ringing is not: outside target.
+            (date(2026, 8, 1), "ring", "leg-6", datetime(2026, 8, 1, 9, 25), "I", "MAPPED_QUEUE", 18, 3, "999", 50, 0, 0, False, "NL", None, "calls.csv"),
             # Mapped outbound traffic does not enter inbound service demand.
-            (date(2026, 8, 1), "outbound", "leg-5", datetime(2026, 8, 1, 9, 30), "O", "MAPPED_QUEUE", 0, "999", 50, 0, 0, False, "NL", None, "calls.csv"),
+            (date(2026, 8, 1), "outbound", "leg-7", datetime(2026, 8, 1, 9, 30), "O", "MAPPED_QUEUE", 0, 0, "999", 50, 0, 0, False, "NL", None, "calls.csv"),
         ]
         conn.executemany(
-            "INSERT INTO core.clean_call_leg VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO core.clean_call_leg VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             rows,
         )
         with tempfile.TemporaryDirectory() as folder:
@@ -164,17 +175,18 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertEqual(count, 1)
         result = conn.execute(
             """SELECT offered, answered, abandoned, short_abandoned,
-                      answered_within_target, handled_seconds, call_legs,
+                      abandoned_within_target, answered_within_target,
+                      handled_seconds, call_legs,
                       transferred_legs, service_level, service_availability,
                       abandon_rate, aht_seconds
                FROM mart.call_service_hour"""
         ).fetchone()
-        self.assertEqual(result[:8], (3, 1, 2, 1, 1, 120.0, 4, 1))
-        self.assertAlmostEqual(result[8], 0.5)
+        self.assertEqual(result[:9], (5, 2, 3, 1, 1, 1, 170.0, 6, 1))
+        self.assertAlmostEqual(result[9], 1 / 3)
         # Storm business availability excludes short abandons from offered demand.
-        self.assertAlmostEqual(result[9], 1 / 2)
-        self.assertAlmostEqual(result[10], 2 / 3)
-        self.assertAlmostEqual(result[11], 120.0)
+        self.assertAlmostEqual(result[10], 1 / 2)
+        self.assertAlmostEqual(result[11], 3 / 5)
+        self.assertAlmostEqual(result[12], 85.0)
         conn.close()
 
 

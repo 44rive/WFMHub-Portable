@@ -422,6 +422,7 @@ def create_backup(home: Path) -> int:
 _METRIC_TEST_COMPONENTS = {
     "service_interval": {
         "offered": 100, "answered": 90, "abandoned": 10, "short_abandoned": 5,
+        "abandoned_within_target": 2,
         "answered_within_target": 75, "handled_seconds": 27_000,
     },
     "forecast_comparison_hour": {"forecast_volume": 100, "actual_volume": 90},

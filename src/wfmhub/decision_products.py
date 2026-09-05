@@ -1104,6 +1104,7 @@ def _service_rows(
         f"""SELECT business_date, interval_start, hour_start, source_system, queue,
                    service_scope, comparison_scope, designation, mapping_status,
                    offered, answered, abandoned, short_abandoned,
+                   abandoned_within_target,
                    answered_within_target, handled_seconds, source_file
             FROM mart.service_interval
             WHERE business_date BETWEEN ? AND ?
@@ -1150,6 +1151,9 @@ def _service_aggregate(
     answered = sum(float(row.get("answered") or 0) for row in values)
     abandoned = sum(float(row.get("abandoned") or 0) for row in values)
     short = sum(float(row.get("short_abandoned") or 0) for row in values)
+    abandoned_in_target = sum(
+        float(row.get("abandoned_within_target") or 0) for row in values
+    )
     within = sum(float(row.get("answered_within_target") or 0) for row in values)
     handled = sum(float(row.get("handled_seconds") or 0) for row in values)
     components = {
@@ -1157,6 +1161,7 @@ def _service_aggregate(
         "answered": answered,
         "abandoned": abandoned,
         "short_abandoned": short,
+        "abandoned_within_target": abandoned_in_target,
         "answered_within_target": within,
         "handled_seconds": handled,
     }
@@ -1174,6 +1179,7 @@ def _service_aggregate(
         "offered": max(0.0, offered - short),
         "answered": answered,
         "short_abandoned": short,
+        "abandoned_within_target": abandoned_in_target,
         "within_target": within,
         "service_level": service_level.value,
         "service_target": service_level.method.target,
@@ -1341,6 +1347,7 @@ def build_realisations_workbook(
                 if forecast_volume is not None else None,
                 _ratio(actual["offered"], forecast_volume), actual["answered"],
                 actual["within_target"], actual["short_abandoned"],
+                actual["abandoned_within_target"],
                 actual["service_level"], actual["availability"],
                 actual["aht_seconds"],
                 _ratio(
@@ -1358,7 +1365,8 @@ def build_realisations_workbook(
         "business_date", "month", "iso_week", "quarter", "lob",
         "service_scopes", "actual_volume", "forecast_volume",
         "variance_calls", "forecast_attainment", "answered",
-        "answered_within_target", "short_abandoned", "service_level",
+        "answered_within_target", "short_abandoned",
+        "abandoned_within_target", "service_level",
         "service_availability", "aht_seconds", "processing_hours",
         "scheduled_fte", "observed_fte", "productive_fte", "peak_gap_fte",
         "planned_hours", "absence_hours", "absence_rate", "vacation_hours",
@@ -1373,11 +1381,11 @@ def build_realisations_workbook(
     total_within = sum(float(row[11] or 0) for row in daily_rows)
     total_short = sum(float(row[12] or 0) for row in daily_rows)
     total_handled_seconds = sum(
-        float(row[15] or 0) * float(row[10] or 0) for row in daily_rows
+        float(row[16] or 0) * float(row[10] or 0) for row in daily_rows
     )
-    total_planned = sum(float(row[21] or 0) for row in daily_rows)
-    total_absence = sum(float(row[22] or 0) for row in daily_rows)
-    total_shrinkage = sum(float(row[25] or 0) for row in daily_rows)
+    total_planned = sum(float(row[22] or 0) for row in daily_rows)
+    total_absence = sum(float(row[23] or 0) for row in daily_rows)
+    total_shrinkage = sum(float(row[26] or 0) for row in daily_rows)
     availability_value = _ratio(total_answered, total_actual)
     aht_value = _ratio(total_handled_seconds, total_answered)
     profile_summary: list[tuple[Any, ...]] = []
@@ -1388,15 +1396,18 @@ def build_realisations_workbook(
         answered = sum(float(row[10] or 0) for row in rows)
         within = sum(float(row[11] or 0) for row in rows)
         short = sum(float(row[12] or 0) for row in rows)
-        handled = sum(float(row[15] or 0) * float(row[10] or 0) for row in rows)
-        planned_hours = sum(float(row[21] or 0) for row in rows)
-        absence_hours = sum(float(row[22] or 0) for row in rows)
-        shrinkage_hours = sum(float(row[25] or 0) for row in rows)
+        abandoned_in_target = sum(float(row[13] or 0) for row in rows)
+        handled = sum(float(row[16] or 0) * float(row[10] or 0) for row in rows)
+        planned_hours = sum(float(row[22] or 0) for row in rows)
+        absence_hours = sum(float(row[23] or 0) for row in rows)
+        shrinkage_hours = sum(float(row[26] or 0) for row in rows)
         profile_components = {
             # Daily rows expose business offered. Reconstruct raw offered for
             # the central metric expression, which subtracts short abandons.
             "offered": offered + short, "answered": answered,
-            "short_abandoned": short, "answered_within_target": within,
+            "short_abandoned": short,
+            "abandoned_within_target": abandoned_in_target,
+            "answered_within_target": within,
             "handled_seconds": handled,
         }
         sl_result = evaluate_metric(
@@ -1474,13 +1485,16 @@ def build_realisations_workbook(
             answered = sum(float(row[10] or 0) for row in group)
             within = sum(float(row[11] or 0) for row in group)
             short = sum(float(row[12] or 0) for row in group)
-            handled = sum(float(row[15] or 0) * float(row[10] or 0) for row in group)
-            planned_hours = sum(float(row[21] or 0) for row in group)
-            absence_hours = sum(float(row[22] or 0) for row in group)
-            shrinkage_hours = sum(float(row[25] or 0) for row in group)
+            abandoned_in_target = sum(float(row[13] or 0) for row in group)
+            handled = sum(float(row[16] or 0) * float(row[10] or 0) for row in group)
+            planned_hours = sum(float(row[22] or 0) for row in group)
+            absence_hours = sum(float(row[23] or 0) for row in group)
+            shrinkage_hours = sum(float(row[26] or 0) for row in group)
             trend_components = {
-                "offered": offered, "answered": answered,
-                "short_abandoned": short, "answered_within_target": within,
+                "offered": offered + short, "answered": answered,
+                "short_abandoned": short,
+                "abandoned_within_target": abandoned_in_target,
+                "answered_within_target": within,
                 "handled_seconds": handled,
             }
             trend_profile = profile_by_label[lob_label]
@@ -1511,7 +1525,8 @@ def build_realisations_workbook(
     detail_headers = [
         "reporting_lob", "business_date", "interval_start", "source_system", "queue",
         "service_scope", "designation", "mapping_status", "offered", "answered",
-        "abandoned", "short_abandoned", "answered_within_target",
+        "abandoned", "short_abandoned", "abandoned_within_target",
+        "answered_within_target",
         "handled_seconds", "source_file",
     ]
     detail_rows = [tuple(row.get(header) for header in detail_headers) for row in all_source_rows]
@@ -2898,6 +2913,10 @@ def build_attendance_corrections_workbook(
     book, partial, target = _atomic_book(
         config, "corrections", "ATTENDANCE REVIEW", start, end, output,
     )
+    # The rulebook is audit authority even when the selected period has no
+    # reviewable gaps. Load it before conditional validation setup so an empty
+    # Attendance Review can still be generated and audited.
+    rulebook = load_rulebook(config.home, config.business_rules)
     gap_count, gap_minutes, agents, approved, dismissed, open_count = conn.execute(
         """SELECT count(*), coalesce(sum(gap_minutes),0), count(DISTINCT agent_id),
                   coalesce(sum(CASE WHEN validation_status='Approved' THEN 1 ELSE 0 END),0),
@@ -2987,7 +3006,6 @@ def build_attendance_corrections_workbook(
         decision_column = headers.index("decision_category")
         status_column = headers.index("decision_status")
         reviewed_date_column = headers.index("reviewed_date")
-        rulebook = load_rulebook(config.home, config.business_rules)
         choices = list(dict.fromkeys(
             rule.patterns[0] for rule in rulebook.activity_rules
             if rule.category not in {"OFF"}

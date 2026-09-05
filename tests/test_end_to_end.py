@@ -519,7 +519,8 @@ class EndToEndTests(unittest.TestCase):
                        FROM mart.metric_value WHERE metric_id='service_level'"""
                 ).fetchone()
                 service_components = conn.execute(
-                    """SELECT sum(answered_within_target), sum(offered-short_abandoned)
+                    """SELECT sum(answered_within_target),
+                              sum(offered-short_abandoned-abandoned_within_target)
                        FROM mart.service_interval"""
                 ).fetchone()
                 self.assertAlmostEqual(
@@ -659,6 +660,23 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(report.parent, home / "_system" / "legacy_reports")
                 self.assertEqual(report.name, "Legacy Daily Operations.xlsx")
                 corrections_report = build_report_pack("corrections", conn, config, model.start, model.end)
+                empty_corrections_report = build_report_pack(
+                    "corrections", conn, config, date(2025, 1, 1), date(2025, 1, 1),
+                    output=home / "Reports" / "Attendance Review - Empty.xlsx",
+                )
+                empty_corrections_book = load_workbook(
+                    empty_corrections_report, read_only=True, data_only=True,
+                )
+                try:
+                    self.assertIn("DECISIONS", empty_corrections_book.sheetnames)
+                    audit_values = {
+                        str(cell.value)
+                        for row in empty_corrections_book["_AUDIT"].iter_rows()
+                        for cell in row if cell.value is not None
+                    }
+                    self.assertIn("Classification authority", audit_values)
+                finally:
+                    empty_corrections_book.close()
                 decisions_book = load_workbook(corrections_report)
                 decisions = decisions_book["DECISIONS"]
                 decision_headers = {
