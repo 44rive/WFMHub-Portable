@@ -75,6 +75,7 @@ Reports\Attendance Review.xlsx
 Reports\Final Absenteeism.xlsx
 Reports\Bonus Management.xlsx
 Reports\PCS Performance.xlsx
+Reports\Analysis\...xlsx
 ```
 
 When a report is replaced, WFMHub first saves its previous version in
@@ -114,12 +115,13 @@ the outer login/logout boundaries when Agent Status coverage is too sparse.
 Choose Current Week to receive every actionable case in the week, not only
 yesterday.
 
-## Staffing Gaps
+## Staffing and Capacity Plan
 
-This report compares scheduled, observed, and productive FTE by 15-minute
-interval, LOB, and language. Future or missing intervals remain unknown instead
-of becoming fake shortages. It keeps gross scheduled FTE, planned-time-off FTE,
-and net scheduled FTE separately so planned absence never erases demand.
+This report uses every date you select. Completed intervals compare scheduled,
+observed, and productive FTE. Future intervals compare Verint required FTE with
+net scheduled FTE after approved PTO and Away. `WEEKLY_PLAN` summarizes the
+same capacity as FTE-hours by week, LOB, and language. Missing forecast remains
+`NO FORECAST`; forecast demand with nobody scheduled remains a visible gap.
 
 ## OEM Flash
 
@@ -142,10 +144,11 @@ up a number.
 
 ## Realisations
 
-The first Realisations pilot follows Flash OEM. It puts one LOB/day row in
-`LOB_RESULTS`, with actual and forecast volume, service level, service
-availability, weighted AHT, staffing, absence, and shrinkage. `TREND` summarizes
-the same counters by month, ISO week, and quarter. Adherence is not included.
+The normal report includes every configured management LOB in one workbook.
+`LOB_RESULTS` has one LOB/day row with actual and forecast volume, the LOB's
+configured service level, service availability, weighted AHT, staffing,
+absence, and shrinkage. `TREND` summarizes the same counters by month, ISO week,
+and quarter. Adherence is not included.
 
 ## Attendance Review
 
@@ -190,6 +193,12 @@ Resolve every final-ledger exception:
 
 These rows are never allowed to dilute the headline rate as silent zero absence.
 
+For a long-lived team workbook, use `TEAM_VIEW` for filtered agent results and
+cases, `COMPONENT_VIEW` for absence/shrinkage categories, and
+`ACTIVITY_DETAIL` for exact final Verint intervals. The blue `ACTIONS` table is
+your permanent log. Link the three fixed feeds once with Power Query and use
+**Data > Refresh All**; never point Power Query at `ACTIONS`.
+
 ## Bonus Management
 
 Choose Bonus Management and then:
@@ -212,9 +221,10 @@ Previous-month same days, Previous full month, or Custom period. Then choose
 LOB, Team Leader, or Agent. The KPI cards, benchmark, and chart all recalculate
 from the included `PCS_DATA` table.
 
-Open `AGENT_RESULTS` and filter the Team Leader column for the ready-made TL
-realization list: latest day, selected period, previous-month same-days, movement,
-participation, sample, low scores, and next action.
+Open `TEAM_VIEW` for the easiest TL workflow. It follows the Dashboard's LOB,
+Team Leader, Agent and period choices and shows the realization list beside the
+matching coaching opportunities. `AGENT_RESULTS` remains the full filterable
+detail.
 
 PCS formulas:
 
@@ -244,8 +254,9 @@ If you prefer native slicers, click inside `PCS_DATA` or `COACHING` and choose
 
 ## Analysis and clean data
 
-**Analyze a period** creates a separate evidence workbook for a selected domain
-and comparison. Every observation points to its source metric and evidence.
+**Analyze a period** creates a separate evidence workbook under
+`Reports\Analysis` for a selected domain and comparison. Every observation
+points to its source metric and evidence.
 
 **Export clean data** creates CSV or XLSX for the selected dataset and dates.
 Use CSV for large Call by Call data.

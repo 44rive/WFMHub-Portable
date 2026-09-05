@@ -77,11 +77,35 @@ survey call.
 The `ACTIONS` sheet is the permanent review log. Do not load a query into it.
 Case ID keeps each comment attached to the correct agent and day.
 
-Power Query updates the `ABSENCE_DATA` table for your own PivotTables and
-slicers. The supplied Dashboard, Team Summary, Agent Results, component sheets
-and new review-case list are rebuilt by WFMHub. Close the shared workbook before
-building Final Absenteeism again; the five blue ACTIONS fields carry forward by
-Case ID. This prevents a data refresh from overwriting a colleague's notes.
+## Absenteeism: connect the review queue
+
+1. Confirm `Feed\Absenteeism\ABSENCE_REVIEW_CASE_CURRENT.csv` exists.
+2. Repeat the Power Query steps on `ACTION_QUEUE`, loading at
+   `ACTION_QUEUE!$A$4`.
+3. Rename the table exactly to `tblActionQueue`.
+4. Add one table column at the right named `Action Status`.
+5. In its first data row, enter:
+
+   ```excel
+   =IFERROR(XLOOKUP([@[Case ID]],tblActions[Case ID],tblActions[Review Status]),"Not started")
+   ```
+
+   Excel fills the formula down.
+6. Copy a new case into `ACTIONS` only when someone must own and comment on it.
+
+## Absenteeism: connect exact activity detail
+
+1. Confirm `Feed\Absenteeism\ABSENCE_COMPONENT_CURRENT.csv` exists.
+2. Repeat the Power Query steps on `ACTIVITY_DETAIL`, loading at
+   `ACTIVITY_DETAIL!$A$4`.
+3. In Power Query set `Date` to **Date** and `Start`/`End` to **Date/Time**.
+4. Rename the table exactly to `tblActivityDetail`.
+
+`TEAM_VIEW` now follows the newest ledger date and shows filtered results and
+review cases. `COMPONENT_VIEW` follows the same selectors and explains absence
+and shrinkage by category. The `ACTIONS` sheet is the permanent review log;
+Power Query must never load into it. Case ID keeps each comment attached to the
+correct agent and day.
 
 ## Normal refresh after setup
 
@@ -91,9 +115,9 @@ Case ID. This prevents a data refresh from overwriting a colleague's notes.
 4. For PCS, open the shared workbook and choose **Data > Refresh All**.
 5. Wait until **Queries & Connections** shows no query still refreshing, then
    save.
-6. For the complete supplied Absenteeism report, make sure colleagues close
-   the shared workbook, build **Final Absenteeism**, then reopen it. Existing
-   blue ACTIONS values are retained by Case ID.
+6. For Absenteeism, the same **Refresh All** updates `TEAM_VIEW`,
+   `COMPONENT_VIEW`, and the review queue. Do not rebuild the shared workbook
+   unless WFMHub ships a new workbook design.
 
 ## If Excel shows an error
 
@@ -105,6 +129,6 @@ Case ID. This prevents a data refresh from overwriting a colleague's notes.
   choose them again from left to right.
 - **Someone is editing:** do not replace the workbook. Refresh only the query,
   and use a personal Sheet View before applying table filters.
-- **A new agent is missing from AGENT_RESULTS:** rebuild PCS once while the
-  shared workbook is closed; existing coaching fields are carried by Coaching
-  Key. New daily data for existing agents does not require a rebuild.
+- **A new agent is missing:** confirm the correct fixed CSV was refreshed, then
+  set LOB, Team Leader, and Agent back to `All`. `TEAM_VIEW` reads new agents
+  directly from the refreshed table; no report rebuild is required.

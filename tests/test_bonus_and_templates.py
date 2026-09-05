@@ -156,6 +156,7 @@ class ExcelTemplateTests(unittest.TestCase):
         ford = catalog.select("ford_oem_fr", date(2026, 8, 25))
         self.assertEqual(ford.service_level_metric, "service_level_gross")
         self.assertEqual(ford.availability_metric, "service_availability")
+        self.assertEqual(ford.staffing_lobs, ("Ford FR",))
         self.assertEqual([group.label for group in ford.groups], ["Toyota", "Chery", "Ford"])
 
     def test_forecast_analysis_uses_materialized_forecast_and_service_tables(self):

@@ -191,7 +191,7 @@ def build_analysis_workbook(
     generated = datetime.now()
     target = (
         output
-        or config.output / "analysis"
+        or config.reports / "Analysis"
         / f"WFMHub_Analysis_{domain.title()}_{start:%Y-%m-%d}_to_{end:%Y-%m-%d}_{generated:%H%M%S_%f}.xlsx"
     ).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -235,7 +235,7 @@ def build_analysis_workbook(
         [
             "Every statement points to its metric, comparison and evidence dataset.",
             "A comparison is descriptive, not proof of causality. Validate operational drivers against the EVIDENCE sheet.",
-            "For deeper writing help, attach only this finished workbook to the approved Copilot account and use the hub prompt file.",
+            "Use the EVIDENCE sheet to validate each finding before it enters an operational or management message.",
         ],
     )
     finding_headers = ["finding_rank", "severity", "finding_type", "metric_id", "title", "summary", "current_value", "reference_value", "target_value", "delta_value", "unit", "lob", "language", "team_leader", "agent_id", "evidence_dataset", "evidence_filter"]

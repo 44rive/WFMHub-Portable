@@ -25,8 +25,9 @@ excluded. Historical rows before a leave date remain valid.
 | Call by Call | Call-leg performance and PCS |
 
 The parser identifies StartEndTimes and Activities from their headers and
-stores `source_variant`. A missing StartEndTimes file is an error; Activities
-cannot silently substitute for the operational schedule.
+stores `source_variant`. StartEndTimes is preferred. When it is missing for an
+agent/day, a successfully parsed Activities Shift Assignment may provide the
+boundary only with a visible review finding; this fallback is never silent.
 
 ## Datasets to validate
 
@@ -50,8 +51,9 @@ unfinished current-day shift can never be finalized as early leave.
 
 Staffing uses agent-seconds divided by 900, not averages of headcounts. Agent
 Status has precedence; LILO fills only intervals where Agent Status has no
-state. Explicit Logged Off or Unavailable time remains a gap. Future interval
-gap and variance values are NULL.
+state. Explicit Logged Off or Unavailable time remains a gap. The staffing
+product uses actual evidence on completed intervals and compares forecast
+required FTE with net schedules for future intervals.
 
 `yesterday_gap_actions` is a legacy export key. It contains only the residual pieces not already covered
 by the union of corrected Activities intervals. A partially corrected original
@@ -75,8 +77,8 @@ Run an export from `WFMHub.cmd > Export clean data`. Each CSV/XLSX is written
 under the visible `Feed` folder with a manifest containing its period,
 row count, rule version, and rule hash.
 
-PCS does not use a separate feed contract. Its generated workbook contains a
-visible `PCS_DATA` Excel Table and a visible `COACHING` Excel Table. Dashboard
-formulas read those tables directly, so there is no connection or refresh step.
-Editable coaching cells carry forward from the previous current workbook by
-Coaching Key and never enter SQLite.
+Generated workbooks contain visible source tables, so the first build needs no
+connection. Fixed PCS and Absenteeism CSV feeds provide an optional Power Query
+contract for permanent shared workbooks. Refreshable source/queue tables remain
+separate from editable `COACHING` and `ACTIONS` tables. Coaching Key and Case ID
+keep manual work attached to the correct row; those edits never enter SQLite.

@@ -18,3 +18,7 @@ replaced, so Excel never sees a half-written feed.
 The original FTE, Storm, and Verint extracts are never moved or changed.
 Agent ID and Case/Coaching Key are the matching fields. Display names are not
 used as keys.
+
+For a permanent shared workbook, Power Query may replace the PCS data and
+opportunity tables or the Absenteeism data, review-queue, and activity-detail
+tables. It must never load into the editable COACHING or ACTIONS tables.

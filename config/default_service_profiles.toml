@@ -3,7 +3,7 @@
 # applies. Formulas and targets remain centralized in metric_catalog.toml.
 
 [catalog]
-version = "2026.09.2"
+version = "2026.09.3"
 default_profile = "ford_oem_fr"
 description = "Effective-dated service report profiles, starting with the Flash Ford OEM reconciliation pilot."
 
@@ -11,6 +11,7 @@ description = "Effective-dated service report profiles, starting with the Flash 
 id = "ford_oem_fr"
 label = "Ford OEM France"
 service_scopes = ["Ford FR"]
+staffing_lobs = ["Ford FR"]
 source_systems = ["APBE", "APFR"]
 service_level_metric = "service_level_gross"
 availability_metric = "service_availability"
@@ -33,6 +34,7 @@ queue_contains = ["FORD"]
 id = "ford_nl"
 label = "Ford Netherlands"
 service_scopes = ["Ford NL"]
+staffing_lobs = ["Ford Dutch"]
 source_systems = ["APBE"]
 service_level_metric = "service_level"
 availability_metric = "service_availability"
@@ -47,6 +49,7 @@ queue_contains = ["FORD"]
 id = "rsa_be"
 label = "RSA Belgium"
 service_scopes = ["RSA BE FR", "RSA BE VL"]
+staffing_lobs = ["RSA FR", "RSA VL"]
 source_systems = ["APBE"]
 service_level_metric = "service_level"
 availability_metric = "service_availability"
@@ -61,6 +64,7 @@ queue_contains = ["RSA", "MOBILITY"]
 id = "rsa_nl"
 label = "RSA Netherlands"
 service_scopes = ["RSA NL"]
+staffing_lobs = ["RSA NL"]
 source_systems = ["APBE"]
 service_level_metric = "service_level"
 availability_metric = "service_availability"

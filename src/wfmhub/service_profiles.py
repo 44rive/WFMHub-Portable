@@ -33,6 +33,7 @@ class ServiceProfile:
     profile_id: str
     label: str
     service_scopes: tuple[str, ...]
+    staffing_lobs: tuple[str, ...]
     source_systems: tuple[str, ...]
     service_level_metric: str
     availability_metric: str
@@ -49,6 +50,18 @@ class ServiceProfile:
             if group.matches(queue):
                 return group.label
         return "Other"
+
+    def staffing_pairs(self) -> tuple[tuple[str, str], ...]:
+        """Return explicit service-scope to roster-LOB planning links."""
+
+        if len(self.service_scopes) == len(self.staffing_lobs):
+            return tuple(zip(self.service_scopes, self.staffing_lobs))
+        if len(self.staffing_lobs) == 1:
+            return tuple((scope, self.staffing_lobs[0]) for scope in self.service_scopes)
+        raise ServiceProfileError(
+            f"Service profile {self.profile_id!r} must define one staffing LOB "
+            "or one staffing LOB per service scope"
+        )
 
 
 @dataclass(frozen=True)
@@ -103,11 +116,18 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
             effective_from = date.fromisoformat(str(item["effective_from"]))
             effective_to = date.fromisoformat(str(item["effective_to"])) if item.get("effective_to") else None
             scopes = tuple(str(value).strip() for value in item["service_scopes"] if str(value).strip())
+            staffing_lobs = tuple(
+                str(value).strip()
+                for value in item.get("staffing_lobs", item["service_scopes"])
+                if str(value).strip()
+            )
             systems = tuple(str(value).strip().upper() for value in item["source_systems"] if str(value).strip())
         except (KeyError, TypeError, ValueError) as exc:
             raise ServiceProfileError(f"Invalid service profile item {index}: {exc}") from exc
-        if not profile_id or not scopes or not systems:
-            raise ServiceProfileError(f"Invalid service profile item {index}: id/scopes/systems")
+        if not profile_id or not scopes or not staffing_lobs or not systems:
+            raise ServiceProfileError(
+                f"Invalid service profile item {index}: id/scopes/staffing_lobs/systems"
+            )
         groups = tuple(
             ServiceGroup(str(group.get("label", "")).strip(), tuple(str(value) for value in group.get("queue_contains", [])))
             for group in item.get("groups", [])
@@ -118,6 +138,7 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
             profile_id=profile_id,
             label=str(item.get("label", profile_id)).strip(),
             service_scopes=scopes,
+            staffing_lobs=staffing_lobs,
             source_systems=systems,
             service_level_metric=str(item.get("service_level_metric", "service_level")).strip(),
             availability_metric=str(item.get("availability_metric", "service_availability")).strip(),
@@ -154,6 +175,8 @@ def validate_service_profiles(
                 raise ServiceProfileError(
                     f"Service profile {profile.profile_id!r} selects unknown metric(s): {', '.join(missing)}"
                 )
+    for profile in catalog.profiles:
+        profile.staffing_pairs()
     return [
         f"Service profiles {catalog.version} are valid.",
         f"SHA-256: {catalog.sha256}",

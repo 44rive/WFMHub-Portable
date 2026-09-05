@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.16.0 — 2026-09-05
+
+- Added a novice-facing PCS `TEAM_VIEW` driven by the existing period, LOB,
+  Team Leader, and Agent selectors. It shows agent realizations beside the
+  matching coaching queue and reads new agents directly from the refreshable
+  Excel Tables; the permanent `COACHING` log remains separate.
+- Turned Final Absenteeism into a long-lived collaboration workbook with a
+  selector-driven team view, refreshable review queue, filtered absence and
+  shrinkage component view, exact Activities detail, and a permanent editable
+  `ACTIONS` log keyed by Case ID.
+- Rebuilt Staffing as a full-period actual-control and future-capacity product.
+  It compares forecast required FTE with net schedules after PTO/Away, exposes
+  weekly FTE-hours, and surfaces demand even when no roster interval exists.
+- Expanded Realisations from the Ford pilot to every active mapped service
+  profile in one management workbook. Service scopes and roster LOBs are now
+  explicitly paired, while each LOB retains its own configured SLA method and
+  target.
+- Moved default on-demand analysis outputs into visible `Reports\Analysis`,
+  improved command logging so a run always leaves usable evidence, and removed
+  the public-workbook Copilot suggestion while retaining the optional static
+  prompt file requested for manual use.
+- Added regression coverage for dynamic shared views, all-LOB Realisations,
+  full-period Staffing, visible analysis output, workbook contracts, and
+  external-link safety.
+
 ## 0.15.0 — 2026-09-05
 
 - Rebuilt the public report suite around one WFM Hub visual identity and fixed

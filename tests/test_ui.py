@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shutil
 import tempfile
 import unittest
@@ -7,6 +8,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from wfmhub.config import ensure_user_config, load_config
+from wfmhub.cli import _logging
 from wfmhub.database import migrate, write_session
 from wfmhub.ui import DashboardStatus, dashboard_text, load_dashboard_status
 
@@ -116,6 +118,13 @@ class DashboardTests(unittest.TestCase):
             status = load_dashboard_status(self.make_home(folder, include_sql=False))
             self.assertEqual(status.state, "SETUP REQUIRED")
             self.assertEqual(status.last_status, "NEVER")
+
+    def test_logging_always_writes_a_run_header(self):
+        with tempfile.TemporaryDirectory() as folder:
+            config = load_config(self.make_home(folder))
+            path = _logging(config)
+            logging.shutdown()
+            self.assertIn("log opened", path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

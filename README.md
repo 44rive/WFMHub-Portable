@@ -13,7 +13,7 @@ Normal users work from three obvious folders:
 
 ```text
 WFMHub/
-  Reports/     finished Excel reports
+  Reports/     finished Excel reports, including on-demand analysis
   Feed/        fixed shared-report feeds plus clean exports you request
   config/      business rules, KPI methods, queue maps, and source settings
   _system/     runtime, database, logs, backups, code, and documentation
@@ -29,9 +29,9 @@ Technical files live under `_system`. You normally do not open that folder.
 | Product | Operational decision |
 |---|---|
 | Attendance Callout | Who must be contacted for absence, lateness, or not-seen status? |
-| Staffing Gaps | Where is scheduled capacity missing by LOB, language, and interval? |
+| Staffing & Capacity Plan | Where is capacity missing now, and where will forecast demand exceed net schedules in future weeks? |
 | OEM Flash | What is Ford OEM service, demand, forecast, and staffing state? |
-| Realisations | How did actual volume, service, forecast, staffing, absence, and shrinkage perform by LOB and period? |
+| Realisations | How did actual volume, service, forecast, staffing, absence, and shrinkage perform across every mapped LOB and period? |
 | Attendance Review | Which gaps across the selected completed dates still need a Verint correction? |
 | Final Absenteeism | What does corrected Verint contain for final absence and shrinkage? |
 | Bonus Management | What did Bonus Matrix v1.2 calculate, and is it safe to release? |
@@ -126,6 +126,8 @@ stable CSV feeds under `Feed\PCS`; the file names never change.
 - selector boxes for latest day, current/previous week, current/previous month,
   custom dates, LOB, team leader, and Agent ID;
 - KPI cards that recalculate in desktop Excel from the included clean table;
+- a novice-facing `TEAM_VIEW` where one selection shows both agent realization
+  and coaching opportunities;
 - a selector-driven trend and a ready-made `AGENT_RESULTS` realization list;
 - a collaborative `COACHING` action plan and separate `COACHING_QUEUE`;
 - a visible `PCS_DATA` Excel Table at agent/day grain.
@@ -139,7 +141,29 @@ report is rebuilt while closed, action fields carry forward by Coaching Key.
 For a long-lived team file, make a one-time Power Query from
 `Feed\PCS\PCS_AGENT_DAY_CURRENT.csv` into the existing `tblPcsData` table. After
 that, **Data > Refresh All** updates the dashboard without replacing coaching
-work. The `HELP` sheet gives the exact operating steps.
+work. `TEAM_VIEW` reads new agents directly from the refreshed table, so a
+rebuild is needed only for a new workbook design. The `HELP` sheet gives the
+exact operating steps.
+
+## Shared Final Absenteeism
+
+`Reports\Final Absenteeism.xlsx` follows the same long-lived-file principle.
+`TEAM_VIEW` filters agent results and review cases; `COMPONENT_VIEW` explains
+absence and shrinkage by final Verint category; `ACTIVITY_DETAIL` holds exact
+start/end evidence. The blue `ACTIONS` table is the permanent team-owned log
+and is never a Power Query target. Link the three fixed Absenteeism feeds once,
+then use **Data > Refresh All** without regenerating the shared workbook.
+
+## Staffing and Realisations
+
+Staffing covers the whole selected range, not only its last day. Past intervals
+use observed attendance evidence; future intervals compare Verint required FTE
+with gross schedules minus approved PTO and effective Away. Forecast demand
+with no scheduled roster row is still shown as a gap.
+
+The normal Realisations command produces one workbook for every active service
+profile. Queue/service scopes and their matching roster LOBs are explicit
+configuration, so service and staffing are never joined by a guessed name.
 
 ## Configurable logic
 
@@ -149,14 +173,14 @@ work. The `HELP` sheet gives the exact operating steps.
 | `config\metric_catalog.toml` | Effective-dated KPI formulas, targets, units, and aggregation |
 | `config\analytics_rules.toml` | Period-analysis thresholds |
 | `config\queue_mapping.csv` | Queue-to-LOB and forecast comparison mapping |
-| `config\service_profiles.toml` | Flash/service scope and queue groups |
+| `config\service_profiles.toml` | Flash/service scope, roster-LOB links, and queue groups |
 
 Percentages are stored as decimals: `0.80` means 80%. Aggregated percentages
 use ratios of summed components; WFMHub never averages agent percentages.
 
 ## Analysis and clean exports
 
-**Analyze a period** creates an evidence-backed workbook for PCS, service,
+**Analyze a period** creates a visible workbook under `Reports\Analysis` for PCS, service,
 forecast, staffing, attendance, final absence, or bonus. Every finding includes
 its metric, comparison, and evidence filter.
 

@@ -470,6 +470,124 @@ def _add_pcs_dashboard(
     ws.set_column("K:R", 13)
 
 
+def _add_pcs_team_view(book: DecisionWorkbook, minimum_sample: int) -> None:
+    """Create the novice-facing PCS view driven by the Dashboard selectors."""
+
+    wb = book.report.workbook
+    ws = wb.add_worksheet("TEAM_VIEW")
+    ws.hide_gridlines(2)
+    ws.set_tab_color(COLORS["gold"])
+    ws.set_zoom(85)
+    ws.freeze_panes(10, 0)
+    ws.merge_range("A1:AA1", "PCS  /  TEAM REALISATIONS & COACHING", book.report.title)
+    ws.merge_range(
+        "A2:AA2",
+        "Select period, LOB, Team Leader and Agent on DASHBOARD. This page follows the same selection automatically.",
+        book.report.subtitle,
+    )
+    selector_label = wb.add_format({
+        "font_name": "Aptos", "font_size": 8, "bold": True,
+        "font_color": COLORS["muted"], "bg_color": COLORS["canvas"],
+        "align": "left", "valign": "vcenter", "indent": 1,
+    })
+    selector_value = wb.add_format({
+        "font_name": "Aptos Display", "font_size": 11, "bold": True,
+        "font_color": COLORS["dark"], "bg_color": COLORS["white"],
+        "border": 1, "border_color": COLORS["teal"], "align": "left",
+        "valign": "vcenter", "indent": 1,
+    })
+    selectors = (
+        ("PERIOD", "A4:C4", "A5:C6", "=DASHBOARD!$A$6"),
+        ("LOB", "E4:G4", "E5:G6", "=DASHBOARD!$K$6"),
+        ("TEAM LEADER", "I4:L4", "I5:L6", "=DASHBOARD!$N$6"),
+        ("AGENT", "N4:R4", "N5:R6", "=DASHBOARD!$Q$6"),
+    )
+    for label, label_range, value_range, formula in selectors:
+        ws.merge_range(label_range, label, selector_label)
+        ws.merge_range(value_range, "", selector_value)
+        first = value_range.split(":", 1)[0]
+        ws.write_formula(first, formula, selector_value, "All")
+    ws.write_url(
+        "T5", "internal:'DASHBOARD'!A1", book.report.editable,
+        string="CHANGE FILTERS ON DASHBOARD",
+    )
+    ws.merge_range(
+        "A8:L8", "AGENT REALISATIONS", book.report.section,
+    )
+    agent_headers = [
+        "LOB", "Team Leader", "Agent Selector", "Agent ID", "Language",
+        "PCS Average", "Participation %", "Valid Q1", "PCS Status 1",
+        "Score <= 3", "Prior MTD PCS", "Priority",
+    ]
+    for column, header in enumerate(agent_headers):
+        ws.write(9, column, header, book.report.header)
+    agent_formula = (
+        '=LET(d,tblPcsData,'
+        'm,(d[Date]>=PCS_From)*(d[Date]<=PCS_To)*'
+        'IF(DASHBOARD!$K$6="All",1,--(d[LOB]=DASHBOARD!$K$6))*'
+        'IF(DASHBOARD!$N$6="All",1,--(d[Team Leader]=DASHBOARD!$N$6))*'
+        'IF(DASHBOARD!$Q$6="All",1,--(d[Agent Selector]=DASHBOARD!$Q$6)),'
+        'pm,(d[Date]>=PCS_Prior_From)*(d[Date]<=PCS_Prior_To)*'
+        'IF(DASHBOARD!$K$6="All",1,--(d[LOB]=DASHBOARD!$K$6))*'
+        'IF(DASHBOARD!$N$6="All",1,--(d[Team Leader]=DASHBOARD!$N$6))*'
+        'IF(DASHBOARD!$Q$6="All",1,--(d[Agent Selector]=DASHBOARD!$Q$6)),'
+        'a,SORT(UNIQUE(FILTER(d[Agent Selector],m,""))),'
+        'v,MAP(a,LAMBDA(x,SUMPRODUCT(m*(d[Agent Selector]=x)*N(d[Valid Q1])))),'
+        's,MAP(a,LAMBDA(x,SUMPRODUCT(m*(d[Agent Selector]=x)*N(d[Q1 Score Sum])))),'
+        'e,MAP(a,LAMBDA(x,SUMPRODUCT(m*(d[Agent Selector]=x)*N(d[PCS Status 1])))),'
+        'p,MAP(a,LAMBDA(x,SUMPRODUCT(m*(d[Agent Selector]=x)*N(d[Q1 Nonblank])))),'
+        'lo,MAP(a,LAMBDA(x,SUMPRODUCT(m*(d[Agent Selector]=x)*N(d[Score <= 3])))),'
+        'pv,MAP(a,LAMBDA(x,SUMPRODUCT(pm*(d[Agent Selector]=x)*N(d[Valid Q1])))),'
+        'ps,MAP(a,LAMBDA(x,SUMPRODUCT(pm*(d[Agent Selector]=x)*N(d[Q1 Score Sum])))),'
+        'IFERROR(HSTACK('
+        'XLOOKUP(a,d[Agent Selector],d[LOB],""),'
+        'XLOOKUP(a,d[Agent Selector],d[Team Leader],""),a,'
+        'XLOOKUP(a,d[Agent Selector],d[Agent ID],""),'
+        'XLOOKUP(a,d[Agent Selector],d[Language],""),'
+        'IFERROR(s/v,""),IFERROR(p/e,""),v,e,lo,IFERROR(ps/pv,""),'
+        f'IF(v=0,"NO RESPONSE",IF(v<{minimum_sample},"LOW SAMPLE",IF(lo>0,"COACH","ON TRACK")))),'
+        '"No matching agent data"))'
+    )
+    ws.write_dynamic_array_formula("A11", agent_formula, book.report.body, "Open in desktop Excel")
+    ws.conditional_format(
+        "L11:L1048576",
+        {"type": "text", "criteria": "containing", "value": "COACH", "format": book.report.error},
+    )
+    ws.merge_range("N8:AA8", "COACHING OPPORTUNITIES", book.report.section)
+    coaching_headers = [
+        "LOB", "Team Leader", "Agent Selector", "Agent ID", "Priority", "Date",
+        "Call Start", "Q1 Score", "Customer Comment", "Call Reference Number",
+        "Coaching Key", "Action Status",
+    ]
+    for column, header in enumerate(coaching_headers, 13):
+        ws.write(9, column, header, book.report.header)
+    coaching_formula = (
+        '=LET(q,tblCoachingQueue,'
+        'm,(q[Date]>=PCS_From)*(q[Date]<=PCS_To)*'
+        'IF(DASHBOARD!$K$6="All",1,--(q[LOB]=DASHBOARD!$K$6))*'
+        'IF(DASHBOARD!$N$6="All",1,--(q[Team Leader]=DASHBOARD!$N$6))*'
+        'IF(DASHBOARD!$Q$6="All",1,--(q[Agent Selector]=DASHBOARD!$Q$6)),'
+        'IFERROR(FILTER(CHOOSECOLS(q,1,2,3,5,6,7,8,9,10,11,13,14),m),'
+        '"No coaching opportunities in this selection"))'
+    )
+    ws.write_dynamic_array_formula("N11", coaching_formula, book.report.body, "Open in desktop Excel")
+    ws.write_url(
+        "T7", "internal:'COACHING'!A1", book.report.editable,
+        string="OPEN PERMANENT COACHING LOG",
+    )
+    ws.set_column("A:A", 18)
+    ws.set_column("B:B", 22)
+    ws.set_column("C:C", 30)
+    ws.set_column("D:E", 15)
+    ws.set_column("F:K", 15)
+    ws.set_column("L:L", 16)
+    ws.set_column("M:M", 3)
+    ws.set_column("N:AA", 18)
+    ws.set_column("V:V", 34)
+    ws.set_landscape()
+    ws.fit_to_pages(1, 0)
+
+
 def _previous_coaching_values(path: Path) -> dict[str, dict[str, Any]]:
     """Carry the team's editable cells forward without importing them to SQLite."""
     if not path.exists():
@@ -706,6 +824,7 @@ def build_pcs_performance_workbook(
         book, status, status_text, start, end, lobs, team_leaders, agents,
         data_start, latest, len(trend_dates), minimum_sample, default_values,
     )
+    _add_pcs_team_view(book, minimum_sample)
 
     agent_headers, agent_raw = _query(
         conn,
@@ -1168,103 +1287,125 @@ def build_realisations_workbook(
     output: Path | None = None,
     profile_id: str | None = None,
 ) -> Path:
-    """Build actual-versus-plan performance for one mapped service LOB."""
+    """Build one management view across every configured service LOB.
+
+    Supplying ``profile_id`` keeps the focused single-LOB route available for
+    command-line use.  The normal menu intentionally includes all active
+    profiles so Operations does not need to build four separate workbooks.
+    """
 
     profiles = load_service_profiles(config.home, config.service_profiles)
-    profile = profiles.select(profile_id, end)
+    selected_profiles = (
+        (profiles.select(profile_id, end),)
+        if profile_id
+        else tuple(profile for profile in profiles.profiles if profile.active_on(end))
+    )
     metrics_catalog = load_metric_catalog(config.home, config.metric_catalog)
-    title = f"REALISATIONS  /  {profile.label.upper()}"
+    title = (
+        f"REALISATIONS  /  {selected_profiles[0].label.upper()}"
+        if len(selected_profiles) == 1
+        else "REALISATIONS  /  ALL MAPPED LOBS"
+    )
     book, partial, target = _atomic_book(
         config, "realisations", title, start, end, output,
     )
-    source_rows = _service_rows(conn, profile, start, end)
-    forecast_marks = ",".join("?" for _ in profile.service_scopes)
-    forecasts = conn.execute(
-        f"""SELECT business_date, sum(volume_forecast), sum(fte_forecast),
-                   sum(fte_required), avg(sl_forecast), avg(sl_required),
-                   CASE WHEN sum(volume_forecast)>0
-                        THEN sum(aht_forecast_seconds*volume_forecast)/sum(volume_forecast) END
-            FROM mart.forecast_hour
-            WHERE business_date BETWEEN ? AND ?
-              AND service_scope IN ({forecast_marks})
-            GROUP BY business_date ORDER BY business_date""",
-        [start, end, *profile.service_scopes],
-    ).fetchall()
-    forecast_by_day = {
-        str(row[0])[:10]: row[1:] for row in forecasts
-    }
-    scope_marks = ",".join("?" for _ in profile.service_scopes)
-    staffing_rows = conn.execute(
-        f"""SELECT business_date, avg(scheduled_fte), avg(observed_fte),
-                   avg(productive_fte), max(staffing_gap_fte)
-            FROM (
-                SELECT business_date, interval_start,
-                       sum(scheduled_fte) AS scheduled_fte,
-                       sum(observed_fte) AS observed_fte,
-                       sum(productive_fte) AS productive_fte,
-                       sum(staffing_gap_fte) AS staffing_gap_fte
-                FROM mart.staffing_interval
-                WHERE business_date BETWEEN ? AND ? AND lob IN ({scope_marks})
-                GROUP BY business_date, interval_start
-            ) x GROUP BY business_date""",
-        [start, end, *profile.service_scopes],
-    ).fetchall()
-    staffing_by_day = {str(row[0])[:10]: row[1:] for row in staffing_rows}
-    absence_rows = conn.execute(
-        f"""SELECT business_date, sum(planned_net_minutes)/60.0,
-                   sum(final_absence_minutes)/60.0,
-                   sum(final_vacation_minutes)/60.0,
-                   sum(final_shrinkage_minutes)/60.0,
-                   sum(CASE WHEN final_ledger_status NOT IN ('CLEAR','ABSENCE_RECORDED')
-                            THEN 1 ELSE 0 END)
-            FROM mart.verint_final_absence_agent_day
-            WHERE business_date BETWEEN ? AND ? AND lob IN ({scope_marks})
-            GROUP BY business_date""",
-        [start, end, *profile.service_scopes],
-    ).fetchall()
-    absence_by_day = {str(row[0])[:10]: row[1:] for row in absence_rows}
-    rows_by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in source_rows:
-        rows_by_day[str(row["business_date"])[:10]].append(row)
-
     daily_rows: list[tuple[Any, ...]] = []
-    cursor = start
-    while cursor <= end:
-        key = cursor.isoformat()
-        actual = _service_aggregate(
-            rows_by_day.get(key, []), profile, metrics_catalog, cursor,
-        )
-        forecast = forecast_by_day.get(key, (None, None, None, None, None, None))
-        staffing = staffing_by_day.get(key, (None, None, None, None))
-        absence = absence_by_day.get(key, (None, None, None, None, 0))
-        forecast_volume = forecast[0]
-        planned_hours, absence_hours, vacation_hours, shrinkage_hours, review_cases = absence
-        data_state = (
-            "Provisional" if cursor >= date.today()
-            else "Review" if review_cases
-            else "Final"
-        )
-        daily_rows.append((
-            cursor, cursor.strftime("%Y-%m"), cursor.isocalendar().week,
-            f"Q{((cursor.month - 1) // 3) + 1}", profile.label,
-            ", ".join(profile.service_scopes), actual["offered"],
-            forecast_volume,
-            float(actual["offered"] or 0) - float(forecast_volume)
-            if forecast_volume is not None else None,
-            _ratio(actual["offered"], forecast_volume), actual["answered"],
-            actual["within_target"], actual["short_abandoned"],
-            actual["service_level"], actual["availability"],
-            actual["aht_seconds"],
-            _ratio(
-                float(actual["aht_seconds"] or 0) * float(actual["answered"] or 0),
-                3600,
-            ),
-            staffing[0], staffing[1], staffing[2], staffing[3],
-            planned_hours, absence_hours, _ratio(absence_hours, planned_hours),
-            vacation_hours, shrinkage_hours, _ratio(shrinkage_hours, planned_hours),
-            review_cases, data_state,
-        ))
-        cursor += timedelta(days=1)
+    all_source_rows: list[dict[str, Any]] = []
+    profile_by_label = {profile.label: profile for profile in selected_profiles}
+
+    for profile in selected_profiles:
+        source_rows = _service_rows(conn, profile, start, end)
+        for row in source_rows:
+            all_source_rows.append({**row, "reporting_lob": profile.label})
+        forecast_marks = ",".join("?" for _ in profile.service_scopes)
+        forecasts = conn.execute(
+            f"""SELECT business_date, sum(volume_forecast), sum(fte_forecast),
+                       sum(fte_required), avg(sl_forecast), avg(sl_required),
+                       CASE WHEN sum(volume_forecast)>0
+                            THEN sum(aht_forecast_seconds*volume_forecast)/sum(volume_forecast) END
+                FROM mart.forecast_hour
+                WHERE business_date BETWEEN ? AND ?
+                  AND service_scope IN ({forecast_marks})
+                GROUP BY business_date ORDER BY business_date""",
+            [start, end, *profile.service_scopes],
+        ).fetchall()
+        forecast_by_day = {str(row[0])[:10]: row[1:] for row in forecasts}
+        staffing_marks = ",".join("?" for _ in profile.staffing_lobs)
+        staffing_rows = conn.execute(
+            f"""SELECT business_date, avg(scheduled_fte), avg(observed_fte),
+                       avg(productive_fte), max(staffing_gap_fte)
+                FROM (
+                    SELECT business_date, interval_start,
+                           sum(scheduled_fte) AS scheduled_fte,
+                           sum(observed_fte) AS observed_fte,
+                           sum(productive_fte) AS productive_fte,
+                           sum(staffing_gap_fte) AS staffing_gap_fte
+                    FROM mart.staffing_interval
+                    WHERE business_date BETWEEN ? AND ? AND lob IN ({staffing_marks})
+                    GROUP BY business_date, interval_start
+                ) x GROUP BY business_date""",
+            [start, end, *profile.staffing_lobs],
+        ).fetchall()
+        staffing_by_day = {str(row[0])[:10]: row[1:] for row in staffing_rows}
+        absence_rows = conn.execute(
+            f"""SELECT business_date, sum(planned_net_minutes)/60.0,
+                       sum(final_absence_minutes)/60.0,
+                       sum(final_vacation_minutes)/60.0,
+                       sum(final_shrinkage_minutes)/60.0,
+                       sum(CASE WHEN final_ledger_status NOT IN ('CLEAR','ABSENCE_RECORDED')
+                                THEN 1 ELSE 0 END)
+                FROM mart.verint_final_absence_agent_day
+                WHERE business_date BETWEEN ? AND ? AND lob IN ({staffing_marks})
+                GROUP BY business_date""",
+            [start, end, *profile.staffing_lobs],
+        ).fetchall()
+        absence_by_day = {str(row[0])[:10]: row[1:] for row in absence_rows}
+        rows_by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in source_rows:
+            rows_by_day[str(row["business_date"])[:10]].append(row)
+
+        cursor = start
+        while cursor <= end:
+            key = cursor.isoformat()
+            actual = _service_aggregate(
+                rows_by_day.get(key, []), profile, metrics_catalog, cursor,
+            )
+            forecast = forecast_by_day.get(key, (None, None, None, None, None, None))
+            staffing = staffing_by_day.get(key, (None, None, None, None))
+            absence_values = absence_by_day.get(key, (None, None, None, None, 0))
+            forecast_volume = forecast[0]
+            planned_hours, absence_hours, vacation_hours, shrinkage_hours, review_cases = absence_values
+            has_actual = bool(rows_by_day.get(key))
+            has_forecast = forecast_volume is not None
+            data_state = (
+                "Provisional" if cursor >= date.today()
+                else "Review" if review_cases
+                else "No actual" if not has_actual
+                else "No forecast" if not has_forecast
+                else "Final"
+            )
+            daily_rows.append((
+                cursor, cursor.strftime("%Y-%m"), cursor.isocalendar().week,
+                f"Q{((cursor.month - 1) // 3) + 1}", profile.label,
+                ", ".join(profile.service_scopes), actual["offered"],
+                forecast_volume,
+                float(actual["offered"] or 0) - float(forecast_volume)
+                if forecast_volume is not None else None,
+                _ratio(actual["offered"], forecast_volume), actual["answered"],
+                actual["within_target"], actual["short_abandoned"],
+                actual["service_level"], actual["availability"],
+                actual["aht_seconds"],
+                _ratio(
+                    float(actual["aht_seconds"] or 0) * float(actual["answered"] or 0),
+                    3600,
+                ),
+                staffing[0], staffing[1], staffing[2], staffing[3],
+                planned_hours, absence_hours, _ratio(absence_hours, planned_hours),
+                vacation_hours, shrinkage_hours, _ratio(shrinkage_hours, planned_hours),
+                review_cases, data_state, profile.profile_id,
+                ", ".join(profile.staffing_lobs),
+            ))
+            cursor += timedelta(days=1)
     daily_headers = [
         "business_date", "month", "iso_week", "quarter", "lob",
         "service_scopes", "actual_volume", "forecast_volume",
@@ -1274,6 +1415,7 @@ def build_realisations_workbook(
         "scheduled_fte", "observed_fte", "productive_fte", "peak_gap_fte",
         "planned_hours", "absence_hours", "absence_rate", "vacation_hours",
         "shrinkage_hours", "shrinkage_rate", "review_cases", "data_state",
+        "profile_id", "staffing_lobs",
     ]
 
     total_actual = sum(float(row[6] or 0) for row in daily_rows)
@@ -1288,30 +1430,61 @@ def build_realisations_workbook(
     total_planned = sum(float(row[21] or 0) for row in daily_rows)
     total_absence = sum(float(row[22] or 0) for row in daily_rows)
     total_shrinkage = sum(float(row[25] or 0) for row in daily_rows)
-    components = {
-        "offered": total_actual, "answered": total_answered,
-        "short_abandoned": total_short,
-        "answered_within_target": total_within,
-        "handled_seconds": total_handled_seconds,
-    }
-    sl = evaluate_metric(
-        _profile_metric(metrics_catalog, profile, profile.service_level_metric, end),
-        components,
-    )
-    availability = evaluate_metric(
-        _profile_metric(metrics_catalog, profile, profile.availability_metric, end),
-        components,
-    )
-    aht = evaluate_metric(
-        _profile_metric(metrics_catalog, profile, profile.aht_metric, end),
-        components,
-    )
+    availability_value = _ratio(total_answered, total_actual)
+    aht_value = _ratio(total_handled_seconds, total_answered)
+    profile_summary: list[tuple[Any, ...]] = []
+    for profile in selected_profiles:
+        rows = [row for row in daily_rows if row[4] == profile.label]
+        offered = sum(float(row[6] or 0) for row in rows)
+        forecast = sum(float(row[7] or 0) for row in rows if row[7] is not None)
+        answered = sum(float(row[10] or 0) for row in rows)
+        within = sum(float(row[11] or 0) for row in rows)
+        short = sum(float(row[12] or 0) for row in rows)
+        handled = sum(float(row[15] or 0) * float(row[10] or 0) for row in rows)
+        planned_hours = sum(float(row[21] or 0) for row in rows)
+        absence_hours = sum(float(row[22] or 0) for row in rows)
+        shrinkage_hours = sum(float(row[25] or 0) for row in rows)
+        profile_components = {
+            "offered": offered, "answered": answered,
+            "short_abandoned": short, "answered_within_target": within,
+            "handled_seconds": handled,
+        }
+        sl_result = evaluate_metric(
+            _profile_metric(metrics_catalog, profile, profile.service_level_metric, end),
+            profile_components,
+        )
+        availability_result = evaluate_metric(
+            _profile_metric(metrics_catalog, profile, profile.availability_metric, end),
+            profile_components,
+        )
+        aht_result = evaluate_metric(
+            _profile_metric(metrics_catalog, profile, profile.aht_metric, end),
+            profile_components,
+        )
+        state = (
+            "NO ACTUAL" if not any(float(row[6] or 0) for row in rows)
+            else "NO FORECAST" if not any(row[7] is not None for row in rows)
+            else "REVIEW" if any(row[-4] for row in rows)
+            else "READY"
+        )
+        profile_summary.append((
+            profile.label, offered,
+            forecast if any(row[7] is not None for row in rows) else None,
+            _ratio(offered, forecast), sl_result.value, sl_result.method.target,
+            availability_result.value, aht_result.value,
+            _ratio(absence_hours, planned_hours),
+            _ratio(shrinkage_hours, planned_hours), state,
+        ))
     status, status_text = _source_state(
         conn,
-        tuple(system.lower() for system in profile.source_systems) + ("forecast",),
+        tuple(sorted({
+            system.lower()
+            for profile in selected_profiles
+            for system in profile.source_systems
+        })) + ("forecast",),
         end,
     )
-    review_days = sum(1 for row in daily_rows if row[-2])
+    review_days = sum(1 for row in daily_rows if row[-4])
     if review_days:
         status, status_text = "INCOMPLETE", f"{review_days:,} day(s) include absence review cases"
     book.dashboard(
@@ -1319,43 +1492,41 @@ def build_realisations_workbook(
             KpiCard("Actual volume", total_actual, "integer"),
             KpiCard("Forecast volume", total_forecast if forecast_present else None, "integer"),
             KpiCard("Forecast attainment", _ratio(total_actual, total_forecast) if forecast_present else None, "percent"),
-            KpiCard("Service level", sl.value, "percent", f"Target {sl.method.target:.0%}" if sl.method.target is not None else None),
-            KpiCard("Service availability", availability.value, "percent"),
-            KpiCard("Weighted AHT", aht.value, "decimal"),
+            KpiCard("Mapped LOBs", len(selected_profiles), "integer"),
+            KpiCard("Service availability", availability_value, "percent"),
+            KpiCard("Weighted AHT", aht_value, "decimal"),
             KpiCard("Absence rate", _ratio(total_absence, total_planned), "percent"),
             KpiCard("Shrinkage rate", _ratio(total_shrinkage, total_planned), "percent"),
         ],
         status,
         status_text,
         [
-            "Date", "Actual", "Forecast", "Attainment %", "Service Level %",
-            "Availability %", "AHT Seconds", "Absence Rate %",
+            "LOB", "Actual", "Forecast", "Attainment %", "Service Level %",
+            "SL Target %", "Availability %", "AHT Seconds", "Absence Rate %",
+            "Shrinkage Rate %", "State",
         ],
+        profile_summary,
         [
-            (row[0], row[6], row[7], row[9], row[13], row[14], row[15], row[23])
-            for row in daily_rows
-        ],
-        [
-            "Queue membership is maintained in Queue Mapping and the selected service profile.",
+            "Queue membership is maintained in Queue Mapping; service and roster LOB links are maintained in Service Profiles.",
             "Forecast comes from Verint. Actual volume, service level and AHT come from the mapped Storm performance sources.",
             "Service availability means answered contacts divided by offered contacts. It is not agent availability.",
             "Absence uses final Verint results for completed days; provisional or review cases remain visible.",
             "Adherence is intentionally excluded.",
         ],
-        (("Service Level", 4), ("Availability", 5)),
+        (("Service Level", 4), ("Availability", 6)),
     )
     book.table(
-        "LOB_RESULTS", f"{profile.label} daily results",
-        "One normalized LOB row per day. Use this sheet for pivots, charts and management checks.",
+        "LOB_RESULTS", "Daily LOB results",
+        "One normalized row per mapped management LOB and day. Use this sheet for pivots, charts and management checks.",
         daily_headers, daily_rows,
     )
 
     trend_rows: list[tuple[Any, ...]] = []
     for grain, index in (("Month", 1), ("ISO Week", 2), ("Quarter", 3)):
-        grouped: dict[Any, list[tuple[Any, ...]]] = defaultdict(list)
+        grouped: dict[tuple[str, Any], list[tuple[Any, ...]]] = defaultdict(list)
         for row in daily_rows:
-            grouped[row[index]].append(row)
-        for label, group in sorted(grouped.items(), key=lambda item: str(item[0])):
+            grouped[(str(row[4]), row[index])].append(row)
+        for (lob_label, label), group in sorted(grouped.items(), key=lambda item: (item[0][0], str(item[0][1]))):
             offered = sum(float(row[6] or 0) for row in group)
             forecast = sum(float(row[7] or 0) for row in group if row[7] is not None)
             answered = sum(float(row[10] or 0) for row in group)
@@ -1365,11 +1536,21 @@ def build_realisations_workbook(
             planned_hours = sum(float(row[21] or 0) for row in group)
             absence_hours = sum(float(row[22] or 0) for row in group)
             shrinkage_hours = sum(float(row[25] or 0) for row in group)
+            trend_components = {
+                "offered": offered, "answered": answered,
+                "short_abandoned": short, "answered_within_target": within,
+                "handled_seconds": handled,
+            }
+            trend_profile = profile_by_label[lob_label]
+            trend_sl = evaluate_metric(
+                _profile_metric(metrics_catalog, trend_profile, trend_profile.service_level_metric, end),
+                trend_components,
+            ).value
             trend_rows.append((
-                grain, label, min(row[0] for row in group), max(row[0] for row in group),
+                lob_label, grain, label, min(row[0] for row in group), max(row[0] for row in group),
                 offered, forecast if any(row[7] is not None for row in group) else None,
                 _ratio(offered, forecast) if forecast else None,
-                _ratio(within, offered - short), _ratio(answered, offered),
+                trend_sl, _ratio(answered, offered),
                 _ratio(handled, answered), planned_hours, absence_hours,
                 _ratio(absence_hours, planned_hours), shrinkage_hours,
                 _ratio(shrinkage_hours, planned_hours),
@@ -1378,7 +1559,7 @@ def build_realisations_workbook(
         "TREND", "Period trend",
         "Month, ISO week and quarter summaries calculated from additive daily counters.",
         [
-            "grain", "period", "start", "end", "actual_volume",
+            "lob", "grain", "period", "start", "end", "actual_volume",
             "forecast_volume", "forecast_attainment", "service_level",
             "service_availability", "aht_seconds", "planned_hours",
             "absence_hours", "absence_rate", "shrinkage_hours", "shrinkage_rate",
@@ -1386,12 +1567,12 @@ def build_realisations_workbook(
         trend_rows,
     )
     detail_headers = [
-        "business_date", "interval_start", "source_system", "queue",
+        "reporting_lob", "business_date", "interval_start", "source_system", "queue",
         "service_scope", "designation", "mapping_status", "offered", "answered",
         "abandoned", "short_abandoned", "answered_within_target",
         "handled_seconds", "source_file",
     ]
-    detail_rows = [tuple(row.get(header) for header in detail_headers) for row in source_rows]
+    detail_rows = [tuple(row.get(header) for header in detail_headers) for row in all_source_rows]
     book.table(
         "DATA", "Mapped service data",
         "Filterable queue and interval evidence behind the LOB results.",
@@ -1399,14 +1580,21 @@ def build_realisations_workbook(
     )
     book.definitions([
         ("Actual / forecast", "Actual offered contacts / forecast contacts", "Demand realisation", "Use summed volumes"),
-        ("Service level", f"{sl.method.numerator} / {sl.method.denominator}", "Service performance", "Calculated from summed counters"),
+        ("Service level", "Configured numerator / denominator for each service profile", "Service performance", "Calculated from summed counters; never average LOB percentages"),
         ("Service availability", "Answered / offered", "Ability of the service to answer demand", "Not agent availability"),
         ("Weighted AHT", "Handled seconds / answered contacts", "Workload", "Never average daily AHT values"),
         ("Absence rate", "Final absence hours / planned hours", "Capacity impact", "Completed-day Verint result"),
     ])
     book.audit(_audit_rows(conn, config, "realisations", start, end, [
-        ("Service profile", profile.profile_id, profile.label),
-        ("Included LOBs", ", ".join(profile.service_scopes), ", ".join(profile.source_systems)),
+        ("Service profiles", ", ".join(profile.profile_id for profile in selected_profiles), profiles.version),
+        ("Included service scopes", "; ".join(
+            f"{profile.label}: {', '.join(profile.service_scopes)}"
+            for profile in selected_profiles
+        ), "Queue Mapping"),
+        ("Included staffing LOBs", "; ".join(
+            f"{profile.label}: {', '.join(profile.staffing_lobs)}"
+            for profile in selected_profiles
+        ), "Service Profiles"),
     ]))
     return _finish(book, partial, target)
 
@@ -1516,63 +1704,277 @@ def build_staffing_coverage_workbook(
     end: date,
     output: Path | None = None,
 ) -> Path:
-    """Build the standalone LOB/language staffing decision product."""
+    """Build actual staffing control and future required-versus-scheduled plan."""
 
-    report_day = end
-    book, partial, target = _atomic_book(config, "staffing", "STAFFING & COVERAGE", report_day, report_day, output)
-    totals = conn.execute(
-        """SELECT max(staffing_gap_fte),
-                  coalesce(sum(CASE WHEN staffing_state IN ('GAP','PARTIAL_GAP') THEN 1 ELSE 0 END),0),
-                  coalesce(sum(CASE WHEN staffing_state='DATA_MISSING' THEN 1 ELSE 0 END),0),
-                  avg(scheduled_fte), avg(observed_fte), avg(productive_fte)
-           FROM mart.staffing_interval WHERE business_date=?""",
-        [report_day],
-    ).fetchone()
-    peak_gap, gap_intervals, missing_intervals, avg_scheduled, avg_observed, avg_productive = totals
-    status, status_text = _source_state(conn, ("fte", "start_end", "lilo", "agent_status"), report_day)
-    if missing_intervals:
-        status, status_text = "INCOMPLETE", f"{missing_intervals:,} interval(s) have missing attendance evidence"
+    book, partial, target = _atomic_book(
+        config, "staffing", "STAFFING & CAPACITY PLAN", start, end, output,
+    )
+    profiles = load_service_profiles(config.home, config.service_profiles)
+    active_profiles = tuple(profile for profile in profiles.profiles if profile.active_on(end))
+    staffing_profile: dict[str, ServiceProfile] = {}
+    for profile in active_profiles:
+        for lob in profile.staffing_lobs:
+            staffing_profile.setdefault(lob.casefold(), profile)
+
+    forecast_by_lob_hour: dict[tuple[str, str, datetime], tuple[Any, ...]] = {}
+    for profile in active_profiles:
+        for service_scope, staffing_lob in profile.staffing_pairs():
+            forecast_rows = conn.execute(
+                """SELECT business_date, hour_start, sum(volume_forecast),
+                          sum(fte_forecast), sum(fte_required), avg(sl_required)
+                   FROM mart.forecast_hour
+                   WHERE business_date BETWEEN ? AND ? AND service_scope=?
+                   GROUP BY business_date, hour_start""",
+                [start, end, service_scope],
+            ).fetchall()
+            for business_date, hour_start, volume, fte_forecast, fte_required, sl_required in forecast_rows:
+                stamp = hour_start
+                if isinstance(stamp, str):
+                    stamp = datetime.fromisoformat(stamp)
+                key = (
+                    staffing_lob.casefold(), str(business_date)[:10],
+                    stamp.replace(minute=0, second=0, microsecond=0),
+                )
+                previous = forecast_by_lob_hour.get(key)
+                if previous:
+                    volume = float(previous[1] or 0) + float(volume or 0)
+                    fte_forecast = float(previous[2] or 0) + float(fte_forecast or 0)
+                    fte_required = float(previous[3] or 0) + float(fte_required or 0)
+                forecast_by_lob_hour[key] = (
+                    profile, volume, fte_forecast, fte_required, sl_required,
+                )
+
+    raw_headers, raw_rows = _query(
+        conn,
+        """SELECT business_date, interval_start, interval_end, lob, language,
+                  scheduled_agents, observed_agents, productive_agents,
+                  gross_scheduled_fte, planned_time_off_fte, scheduled_fte,
+                  elapsed_scheduled_fte, observed_fte, productive_fte,
+                  staffing_variance_fte, staffing_gap_fte, staffing_state,
+                  evidence_basis, evaluation_as_of
+           FROM mart.staffing_interval
+           WHERE business_date BETWEEN ? AND ?
+           ORDER BY business_date, interval_start, lob, language""",
+        [start, end],
+    )
+    source_indexes = {header: index for index, header in enumerate(raw_headers)}
+    known_languages: dict[str, set[str]] = defaultdict(set)
+    evaluation_values: list[datetime] = []
+    for raw in raw_rows:
+        lob = str(raw[source_indexes["lob"]] or "")
+        language = str(raw[source_indexes["language"]] or "Unspecified")
+        known_languages[lob.casefold()].add(language)
+        evaluation = raw[source_indexes["evaluation_as_of"]]
+        if isinstance(evaluation, str):
+            evaluation = datetime.fromisoformat(evaluation)
+        if evaluation is not None:
+            evaluation_values.append(evaluation)
+    evaluation_default = max(evaluation_values, default=datetime.now())
+    plan_headers = [
+        "business_date", "iso_week", "interval_start", "interval_end",
+        "reporting_lob", "roster_lob", "language", "mode",
+        "forecast_volume_hour", "fte_forecast", "fte_required",
+        "gross_scheduled_fte", "planned_time_off_fte", "net_scheduled_fte",
+        "capacity_variance_fte", "capacity_gap_fte", "observed_fte",
+        "productive_fte", "actual_gap_fte", "decision_state",
+        "evidence_basis", "evaluation_as_of",
+    ]
+    plan_rows: list[tuple[Any, ...]] = []
+    covered_intervals: set[tuple[str, str, datetime]] = set()
+    for raw in raw_rows:
+        values = {header: raw[index] for header, index in source_indexes.items()}
+        business_date = values["business_date"]
+        if isinstance(business_date, str):
+            business_date = date.fromisoformat(business_date[:10])
+        interval_start = values["interval_start"]
+        if isinstance(interval_start, str):
+            interval_start = datetime.fromisoformat(interval_start)
+        interval_end = values["interval_end"]
+        if isinstance(interval_end, str):
+            interval_end = datetime.fromisoformat(interval_end)
+        evaluation_as_of = values["evaluation_as_of"]
+        if isinstance(evaluation_as_of, str):
+            evaluation_as_of = datetime.fromisoformat(evaluation_as_of)
+        roster_lob = str(values["lob"] or "")
+        profile = staffing_profile.get(roster_lob.casefold())
+        forecast = forecast_by_lob_hour.get((
+            roster_lob.casefold(), business_date.isoformat(),
+            interval_start.replace(minute=0, second=0, microsecond=0),
+        ))
+        if forecast:
+            profile = forecast[0]
+        _forecast_profile, volume, fte_forecast, fte_required, _sl_required = forecast or (None, None, None, None, None)
+        net_scheduled = float(values["scheduled_fte"] or 0)
+        capacity_variance = net_scheduled - float(fte_required) if fte_required is not None else None
+        capacity_gap = max(0.0, -capacity_variance) if capacity_variance is not None else None
+        future = interval_start > evaluation_as_of
+        mode = "FUTURE PLAN" if future else "ACTUAL CONTROL"
+        actual_gap = values["staffing_gap_fte"]
+        if profile is None:
+            state = "UNMAPPED LOB"
+        elif fte_required is None:
+            state = "NO FORECAST"
+        elif future:
+            state = "FUTURE GAP" if capacity_gap and capacity_gap > 0.001 else "FUTURE OK"
+        else:
+            state = str(values["staffing_state"] or "DATA MISSING").replace("_", " ")
+        plan_rows.append((
+            business_date, f"{business_date.isocalendar().year}-W{business_date.isocalendar().week:02d}",
+            interval_start, interval_end, profile.label if profile else "Unmapped",
+            roster_lob, values["language"], mode, volume, fte_forecast,
+            fte_required, values["gross_scheduled_fte"],
+            values["planned_time_off_fte"], net_scheduled, capacity_variance,
+            capacity_gap, values["observed_fte"], values["productive_fte"],
+            actual_gap, state, values["evidence_basis"], evaluation_as_of,
+        ))
+        covered_intervals.add((roster_lob.casefold(), business_date.isoformat(), interval_start))
+
+    # A demand interval with zero scheduled agents does not exist in the
+    # staffing mart. Add it here so an empty roster can never hide a shortage.
+    for (lob_key, business_date_text, hour_start), forecast in forecast_by_lob_hour.items():
+        profile, volume, fte_forecast, fte_required, _sl_required = forecast
+        roster_lob = next(
+            (lob for lob in profile.staffing_lobs if lob.casefold() == lob_key), lob_key,
+        )
+        business_date = date.fromisoformat(business_date_text)
+        language = " / ".join(sorted(known_languages.get(lob_key, {"Unspecified"})))
+        for offset in range(4):
+            interval_start = hour_start + timedelta(minutes=15 * offset)
+            key = (lob_key, business_date_text, interval_start)
+            if key in covered_intervals:
+                continue
+            interval_end = interval_start + timedelta(minutes=15)
+            required = float(fte_required or 0)
+            future = interval_start > evaluation_default
+            mode = "FUTURE PLAN" if future else "ACTUAL CONTROL"
+            state = "FUTURE GAP" if future and required > 0 else "NO SCHEDULE"
+            plan_rows.append((
+                business_date,
+                f"{business_date.isocalendar().year}-W{business_date.isocalendar().week:02d}",
+                interval_start, interval_end, profile.label, roster_lob, language,
+                mode, volume, fte_forecast, fte_required, 0.0, 0.0, 0.0,
+                -required, required, None, None, required if not future else None,
+                state, "Forecast demand with no scheduled roster interval",
+                evaluation_default,
+            ))
+
+    plan_rows.sort(key=lambda row: (row[0], row[2], str(row[5]), str(row[6])))
+
+    decision_state = plan_headers.index("decision_state")
+    capacity_gap_column = plan_headers.index("capacity_gap_fte")
+    actual_gap_column = plan_headers.index("actual_gap_fte")
+    action_states = {"FUTURE GAP", "NO FORECAST", "UNMAPPED LOB", "NO SCHEDULE", "GAP", "PARTIAL GAP", "DATA MISSING"}
+    actions = [row for row in plan_rows if str(row[decision_state]).upper() in action_states]
+    future_rows = [row for row in plan_rows if row[plan_headers.index("mode")] == "FUTURE PLAN"]
+    required_hours = sum(float(row[plan_headers.index("fte_required")] or 0) * 0.25 for row in future_rows)
+    net_hours = sum(float(row[plan_headers.index("net_scheduled_fte")] or 0) * 0.25 for row in future_rows)
+    pto_hours = sum(float(row[plan_headers.index("planned_time_off_fte")] or 0) * 0.25 for row in future_rows)
+    gap_hours = sum(float(row[capacity_gap_column] or 0) * 0.25 for row in future_rows)
+    future_gap_intervals = sum(1 for row in future_rows if row[decision_state] == "FUTURE GAP")
+    no_forecast_intervals = sum(1 for row in future_rows if row[decision_state] == "NO FORECAST")
+    actual_action_rows = [row for row in plan_rows if row[plan_headers.index("mode")] == "ACTUAL CONTROL"]
+    actual_gap_intervals = sum(
+        1 for row in actual_action_rows
+        if str(row[decision_state]).upper() in {"GAP", "PARTIAL GAP"}
+    )
+    peak_gap = max(
+        [float(row[capacity_gap_column] or 0) for row in future_rows]
+        + [float(row[actual_gap_column] or 0) for row in actual_action_rows]
+        + [0.0]
+    )
+    status, status_text = _source_state(conn, ("fte", "start_end", "forecast"), end)
+    if no_forecast_intervals:
+        status, status_text = "INCOMPLETE", f"{no_forecast_intervals:,} future interval(s) have no mapped forecast"
     book.dashboard(
         [
             KpiCard("Peak gap FTE", peak_gap, "decimal", "Largest 15-minute deficit"),
-            KpiCard("Gap intervals", gap_intervals, "integer", "LOB/language intervals"),
-            KpiCard("Average scheduled FTE", avg_scheduled, "decimal"),
-            KpiCard("Average observed FTE", avg_observed, "decimal"),
-            KpiCard("Average productive FTE", avg_productive, "decimal"),
-            KpiCard("Missing intervals", missing_intervals, "integer", "Unknown, not zero"),
+            KpiCard("Future gap intervals", future_gap_intervals, "integer"),
+            KpiCard("Future required hours", required_hours, "decimal", "FTE-hours from Verint"),
+            KpiCard("Future net scheduled", net_hours, "decimal", "After PTO and Away"),
+            KpiCard("Future gap hours", gap_hours, "decimal"),
+            KpiCard("PTO / Away impact", pto_hours, "decimal", "Capacity hours removed"),
+            KpiCard("Actual gap intervals", actual_gap_intervals, "integer"),
+            KpiCard("Forecast coverage", _ratio(required_hours - gap_hours, required_hours), "percent"),
         ],
         status,
         status_text,
         ["Measure", "Value"],
-        [("Peak gap FTE", peak_gap), ("Gap intervals", gap_intervals), ("Average scheduled FTE", avg_scheduled), ("Average observed FTE", avg_observed), ("Average productive FTE", avg_productive)],
         [
-            "Staffing is grouped by roster LOB and language; it is not mixed with service or attendance calling.",
-            "Observed FTE is calculated from agent-seconds inside each 15-minute interval.",
-            "Future and missing-evidence intervals stay unknown rather than becoming false staffing deficits.",
+            ("Required future FTE-hours", required_hours),
+            ("Net scheduled future FTE-hours", net_hours),
+            ("Future shortage FTE-hours", gap_hours),
+            ("PTO / Away FTE-hours", pto_hours),
+            ("Future gap intervals", future_gap_intervals),
+            ("Actual gap intervals", actual_gap_intervals),
         ],
-        (("Scheduled FTE", 3), ("Observed FTE", 4), ("Productive FTE", 5)),
+        [
+            "Future plan compares Verint required FTE with net scheduled FTE after approved PTO and effective Away.",
+            "Service-to-roster LOB links are editable in Service Profiles; no text guess is made in the report.",
+            "Observed FTE is calculated from agent-seconds inside each 15-minute interval.",
+            "Missing forecast remains NO FORECAST. It is never converted to zero demand.",
+        ],
+        (("Value", 1),),
+        "column",
     )
-    headers, rows = _query(
-        conn,
-        """SELECT business_date, interval_start, interval_end, lob, language,
-                  scheduled_agents, observed_agents, productive_agents,
-                  scheduled_fte, elapsed_scheduled_fte, observed_fte,
-                  productive_fte, staffing_variance_fte, staffing_gap_fte,
-                  staffing_state, evidence_basis, evaluation_as_of
-           FROM mart.staffing_interval WHERE business_date=?
-           ORDER BY interval_start, lob, language""",
-        [report_day],
+
+    weekly: dict[tuple[str, str, str, str], list[tuple[Any, ...]]] = defaultdict(list)
+    for row in plan_rows:
+        weekly[(str(row[1]), str(row[4]), str(row[5]), str(row[6]))].append(row)
+    weekly_rows = []
+    for (iso_week, reporting_lob, roster_lob, language), rows in sorted(weekly.items()):
+        required = sum(float(row[10] or 0) * 0.25 for row in rows)
+        gross = sum(float(row[11] or 0) * 0.25 for row in rows)
+        time_off = sum(float(row[12] or 0) * 0.25 for row in rows)
+        net = sum(float(row[13] or 0) * 0.25 for row in rows)
+        gap = sum(float(row[15] or 0) * 0.25 for row in rows)
+        weekly_rows.append((
+            iso_week, min(row[0] for row in rows), max(row[0] for row in rows),
+            reporting_lob, roster_lob, language, required, gross, time_off, net,
+            net - required if required else None, gap,
+            _ratio(net, required),
+            sum(1 for row in rows if row[19] == "FUTURE GAP"),
+            sum(1 for row in rows if row[19] == "NO FORECAST"),
+        ))
+    book.table(
+        "WEEKLY_PLAN", "Weekly capacity plan",
+        "Required, gross scheduled, PTO/Away and net scheduled FTE-hours by ISO week, LOB and language.",
+        [
+            "iso_week", "start_date", "end_date", "reporting_lob", "roster_lob",
+            "language", "required_fte_hours", "gross_scheduled_fte_hours",
+            "planned_time_off_fte_hours", "net_scheduled_fte_hours",
+            "capacity_variance_fte_hours", "capacity_gap_fte_hours",
+            "forecast_coverage", "gap_intervals", "no_forecast_intervals",
+        ],
+        weekly_rows,
     )
-    book.table("INTRADAY", "15-minute staffing coverage", "Complete daily evidence at LOB/language grain.", headers, rows)
-    actions = [row for row in rows if row[headers.index("staffing_state")] in {"GAP", "PARTIAL_GAP", "DATA_MISSING"}]
-    book.table("ACTIONS", "Staffing exceptions", "Intervals requiring redeployment, investigation or evidence repair.", headers, actions)
+    intraday = book.table(
+        "INTRADAY", "15-minute staffing control and plan",
+        "All selected dates. FUTURE PLAN uses forecast demand; ACTUAL CONTROL uses observed attendance evidence.",
+        plan_headers, plan_rows,
+    )
+    if plan_rows:
+        intraday.conditional_format(
+            4, decision_state, 3 + len(plan_rows), decision_state,
+            {"type": "text", "criteria": "containing", "value": "GAP", "format": book.report.error},
+        )
+    book.table(
+        "ACTIONS", "Staffing exceptions",
+        "Future shortages, missing forecasts, unmapped LOBs and actual gaps requiring action.",
+        plan_headers, actions,
+    )
     book.definitions([
-        ("Scheduled FTE", "Scheduled agent-seconds / 900", "Expected interval capacity", "Roster LOB/language"),
+        ("Required FTE", "Verint required FTE repeated across its four 15-minute intervals", "Demand requirement", "Forecast only; missing stays blank"),
+        ("Gross scheduled FTE", "Scheduled agent-seconds / 900 before time off", "Roster capacity", "FTE roster LOB/language"),
+        ("Net scheduled FTE", "Gross scheduled FTE - approved PTO/effective Away FTE", "Usable planned capacity", "Planned Away affects future only"),
+        ("Future capacity gap", "MAX(0, required FTE - net scheduled FTE)", "Hiring, OT or redeployment action", "15-minute interval"),
         ("Observed FTE", "Observed agent-seconds / 900", "Actual presence", "LILO + Agent Status evidence"),
         ("Productive FTE", "Productive-status seconds / 900", "Available handling capacity", "Not adherence"),
-        ("Staffing gap", "MAX(0, elapsed scheduled FTE - observed FTE)", "Immediate staffing deficit", "Blank for future/missing evidence"),
+        ("Actual staffing gap", "MAX(0, elapsed net scheduled FTE - observed FTE)", "Same-day staffing deficit", "Blank for future/missing evidence"),
     ])
-    book.audit(_audit_rows(conn, config, "staffing", report_day, report_day))
+    book.audit(_audit_rows(conn, config, "staffing", start, end, [
+        ("Service profile mapping", profiles.version, profiles.sha256),
+        ("Planning grain", "15 minutes", "Weekly summary uses FTE-hours"),
+    ]))
     return _finish(book, partial, target)
 
 
@@ -1794,6 +2196,256 @@ def _legacy_build_final_absence_product_workbook(
     return _finish(book, partial, target)
 
 
+def _add_absence_team_view(
+    book: DecisionWorkbook,
+    start: date,
+    end: date,
+    data_start: date,
+    latest: date,
+) -> None:
+    """Add one selector-driven view for Operations and Payroll reviewers."""
+
+    wb = book.report.workbook
+    wb.set_calc_mode("auto")
+    ws = wb.add_worksheet("TEAM_VIEW")
+    ws.hide_gridlines(2)
+    ws.set_tab_color(COLORS["gold"])
+    ws.set_zoom(85)
+    ws.freeze_panes(16, 0)
+    ws.merge_range("A1:AA1", "ABSENTEEISM & SHRINKAGE  /  TEAM REVIEW", book.report.title)
+    ws.merge_range(
+        "A2:AA2",
+        f"Latest final-ledger date {latest:%Y-%m-%d}  |  select a period and team below  |  prepared by Anass ASSRI",
+        book.report.subtitle,
+    )
+    selector_label = wb.add_format({
+        "font_name": "Aptos", "font_size": 8, "bold": True,
+        "font_color": COLORS["muted"], "bg_color": COLORS["canvas"],
+        "align": "left", "valign": "vcenter", "indent": 1,
+    })
+    selector = wb.add_format({
+        "font_name": "Aptos Display", "font_size": 11, "bold": True,
+        "font_color": COLORS["dark"], "bg_color": COLORS["white"],
+        "border": 1, "border_color": COLORS["teal"], "align": "left",
+        "valign": "vcenter", "indent": 1, "num_format": "yyyy-mm-dd",
+    })
+    for label, label_range, value_range, value in (
+        ("PERIOD VIEW", "A4:C4", "A5:C6", "Current MTD"),
+        ("CUSTOM FROM", "E4:F4", "E5:F6", start),
+        ("CUSTOM TO", "H4:I4", "H5:I6", end),
+        ("LOB", "K4:L4", "K5:L6", "All"),
+        ("TEAM LEADER", "N4:O4", "N5:O6", "All"),
+        ("AGENT", "Q4:R4", "Q5:R6", "All"),
+    ):
+        ws.merge_range(label_range, label, selector_label)
+        ws.merge_range(value_range, value, selector)
+    ws.data_validation("A5", {
+        "validate": "list",
+        "source": [
+            "Latest day", "Current week", "Previous week", "Current MTD",
+            "Previous-month same days", "Previous full month", "Custom period",
+        ],
+    })
+    ws.data_validation("E5", {
+        "validate": "date", "criteria": "between", "minimum": data_start,
+        "maximum": latest,
+    })
+    ws.data_validation("H5", {
+        "validate": "date", "criteria": "between", "minimum": data_start,
+        "maximum": latest,
+    })
+    ws.data_validation("K5", {"validate": "list", "source": "=ABS_LOB_LIST"})
+    ws.data_validation("N5", {"validate": "list", "source": "=ABS_TL_LIST"})
+    ws.data_validation("Q5", {"validate": "list", "source": "=ABS_AGENT_LIST"})
+    wb.define_name("ABS_Latest", "=MAX(tblAbsenceData[Date])")
+    wb.define_name(
+        "ABS_From",
+        '=IF(TEAM_VIEW!$A$5="Latest day",ABS_Latest,'
+        'IF(TEAM_VIEW!$A$5="Current week",ABS_Latest-WEEKDAY(ABS_Latest,2)+1,'
+        'IF(TEAM_VIEW!$A$5="Previous week",ABS_Latest-WEEKDAY(ABS_Latest,2)-6,'
+        'IF(TEAM_VIEW!$A$5="Current MTD",EOMONTH(ABS_Latest,-1)+1,'
+        'IF(TEAM_VIEW!$A$5="Previous-month same days",EOMONTH(ABS_Latest,-2)+1,'
+        'IF(TEAM_VIEW!$A$5="Previous full month",EOMONTH(ABS_Latest,-2)+1,TEAM_VIEW!$E$5))))))',
+    )
+    wb.define_name(
+        "ABS_To",
+        '=IF(TEAM_VIEW!$A$5="Latest day",ABS_Latest,'
+        'IF(TEAM_VIEW!$A$5="Current week",ABS_Latest,'
+        'IF(TEAM_VIEW!$A$5="Previous week",ABS_Latest-WEEKDAY(ABS_Latest,2),'
+        'IF(TEAM_VIEW!$A$5="Current MTD",ABS_Latest,'
+        'IF(TEAM_VIEW!$A$5="Previous-month same days",EDATE(ABS_Latest,-1),'
+        'IF(TEAM_VIEW!$A$5="Previous full month",EOMONTH(ABS_Latest,-1),TEAM_VIEW!$H$5))))))',
+    )
+    scope = (
+        '(tblAbsenceData[Date]>=ABS_From)*(tblAbsenceData[Date]<=ABS_To)*'
+        'IF(TEAM_VIEW!$K$5="All",1,--(tblAbsenceData[LOB]=TEAM_VIEW!$K$5))*'
+        'IF(TEAM_VIEW!$N$5="All",1,--(tblAbsenceData[Team Leader]=TEAM_VIEW!$N$5))*'
+        'IF(TEAM_VIEW!$Q$5="All",1,--(tblAbsenceData[Agent Selector]=TEAM_VIEW!$Q$5))'
+    )
+    final = '((tblAbsenceData[Final Ledger Status]="CLEAR")+(tblAbsenceData[Final Ledger Status]="ABSENCE_RECORDED"))'
+    planned = f"SUMPRODUCT({scope}*{final}*N(tblAbsenceData[Planned Net Hours]))"
+    absence = f"SUMPRODUCT({scope}*{final}*N(tblAbsenceData[Absence Hours]))"
+    shrinkage = f"SUMPRODUCT({scope}*{final}*N(tblAbsenceData[Shrinkage Hours]))"
+    review = (
+        f'SUMPRODUCT({scope}*--(tblAbsenceData[Final Ledger Status]<>"CLEAR")*'
+        '--(tblAbsenceData[Final Ledger Status]<>"ABSENCE_RECORDED"))'
+    )
+    ws.merge_range("A8:AA8", "SELECTED TEAM POSITION", book.report.section)
+    cards = (
+        ("ABSENCE RATE", f'=IFERROR({absence}/{planned},"")', book.card_percent),
+        ("SHRINKAGE RATE", f'=IFERROR({shrinkage}/{planned},"")', book.card_percent),
+        ("ABSENCE HOURS", f"={absence}", book.card_decimal),
+        ("REVIEW CASES", f"={review}", book.card_integer),
+    )
+    for index, (label, formula, fmt) in enumerate(cards):
+        column = index * 4
+        ws.merge_range(9, column, 9, column + 2, label, book.report.kpi_label)
+        ws.merge_range(10, column, 11, column + 2, "", fmt)
+        ws.write_formula(10, column, formula, fmt, "")
+    ws.merge_range("A14:L14", "AGENT RESULTS", book.report.section)
+    agent_headers = [
+        "LOB", "Team Leader", "Agent Selector", "Agent ID", "Planned Hours",
+        "Absence Hours", "Absence Rate", "Shrinkage Hours", "Shrinkage Rate",
+        "Vacation Hours", "Unpaid Hours", "Review Cases",
+    ]
+    for column, header in enumerate(agent_headers):
+        ws.write(15, column, header, book.report.header)
+    agent_formula = (
+        '=LET(d,tblAbsenceData,'
+        'm,(d[Date]>=ABS_From)*(d[Date]<=ABS_To)*'
+        'IF(TEAM_VIEW!$K$5="All",1,--(d[LOB]=TEAM_VIEW!$K$5))*'
+        'IF(TEAM_VIEW!$N$5="All",1,--(d[Team Leader]=TEAM_VIEW!$N$5))*'
+        'IF(TEAM_VIEW!$Q$5="All",1,--(d[Agent Selector]=TEAM_VIEW!$Q$5)),'
+        'f,((d[Final Ledger Status]="CLEAR")+(d[Final Ledger Status]="ABSENCE_RECORDED")),'
+        'a,SORT(UNIQUE(FILTER(d[Agent Selector],m,""))),'
+        'ph,MAP(a,LAMBDA(x,SUMPRODUCT(m*f*(d[Agent Selector]=x)*N(d[Planned Net Hours])))),'
+        'ah,MAP(a,LAMBDA(x,SUMPRODUCT(m*f*(d[Agent Selector]=x)*N(d[Absence Hours])))),'
+        'sh,MAP(a,LAMBDA(x,SUMPRODUCT(m*f*(d[Agent Selector]=x)*N(d[Shrinkage Hours])))),'
+        'vh,MAP(a,LAMBDA(x,SUMPRODUCT(m*f*(d[Agent Selector]=x)*N(d[Vacation Hours])))),'
+        'uh,MAP(a,LAMBDA(x,SUMPRODUCT(m*f*(d[Agent Selector]=x)*N(d[Unpaid Hours])))),'
+        'rv,MAP(a,LAMBDA(x,SUMPRODUCT(m*(d[Agent Selector]=x)*--(d[Final Ledger Status]<>"CLEAR")*--(d[Final Ledger Status]<>"ABSENCE_RECORDED")))),'
+        'IFERROR(HSTACK('
+        'XLOOKUP(a,d[Agent Selector],d[LOB],""),'
+        'XLOOKUP(a,d[Agent Selector],d[Team Leader],""),a,'
+        'XLOOKUP(a,d[Agent Selector],d[Agent ID],""),ph,ah,IFERROR(ah/ph,""),'
+        'sh,IFERROR(sh/ph,""),vh,uh,rv),"No matching agent data"))'
+    )
+    ws.write_dynamic_array_formula("A17", agent_formula, book.report.body, "Open in desktop Excel")
+    ws.merge_range("N14:AA14", "CASES TO REVIEW", book.report.section)
+    queue_headers = [
+        "Case ID", "Date", "Agent ID", "Agent", "Team Leader", "LOB",
+        "Result Status", "Absence Hours", "Shrinkage Hours", "Unmapped Hours",
+        "Action Status",
+    ]
+    for column, header in enumerate(queue_headers, 13):
+        ws.write(15, column, header, book.report.header)
+    queue_formula = (
+        '=LET(q,tblActionQueue,'
+        'm,(q[Date]>=ABS_From)*(q[Date]<=ABS_To)*'
+        'IF(TEAM_VIEW!$K$5="All",1,--(q[LOB]=TEAM_VIEW!$K$5))*'
+        'IF(TEAM_VIEW!$N$5="All",1,--(q[Team Leader]=TEAM_VIEW!$N$5))*'
+        'IF(TEAM_VIEW!$Q$5="All",1,--(q[Agent Selector]=TEAM_VIEW!$Q$5)),'
+        'IFERROR(FILTER(CHOOSECOLS(q,1,2,3,4,6,8,10,12,13,14,15),m),'
+        '"No cases in this selection"))'
+    )
+    ws.write_dynamic_array_formula("N17", queue_formula, book.report.body, "Open in desktop Excel")
+    ws.write_url(
+        "T10", "internal:'ACTIONS'!A1", book.report.editable,
+        string="OPEN PERMANENT ACTION LOG",
+    )
+    ws.set_column("A:A", 18)
+    ws.set_column("B:B", 22)
+    ws.set_column("C:C", 30)
+    ws.set_column("D:L", 15)
+    ws.set_column("M:M", 3)
+    ws.set_column("N:AA", 18)
+    ws.set_landscape()
+    ws.fit_to_pages(1, 0)
+
+
+def _add_absence_component_view(book: DecisionWorkbook) -> None:
+    """Show filtered absence and shrinkage components from exact intervals."""
+
+    wb = book.report.workbook
+    ws = wb.add_worksheet("COMPONENT_VIEW")
+    ws.hide_gridlines(2)
+    ws.set_tab_color(COLORS["gold"])
+    ws.set_zoom(90)
+    ws.merge_range("A1:N1", "ABSENCE & SHRINKAGE  /  COMPONENT VIEW", book.report.title)
+    ws.merge_range(
+        "A2:N2", "This view follows TEAM_VIEW period, LOB, Team Leader and Agent selectors.",
+        book.report.subtitle,
+    )
+    ws.merge_range("A4:F4", "ABSENCE COMPONENTS", book.report.section)
+    ws.merge_range("H4:N4", "SHRINKAGE COMPONENTS", book.report.section)
+    headers = ("Component", "Hours", "Intervals")
+    for column, header in enumerate(headers):
+        ws.write(5, column, header, book.report.header)
+        ws.write(5, column + 7, header, book.report.header)
+    base_scope = (
+        '(t[Date]>=ABS_From)*(t[Date]<=ABS_To)*'
+        'IF(TEAM_VIEW!$K$5="All",1,--(t[LOB]=TEAM_VIEW!$K$5))*'
+        'IF(TEAM_VIEW!$N$5="All",1,--(t[Team Leader]=TEAM_VIEW!$N$5))*'
+        'IF(TEAM_VIEW!$Q$5="All",1,--(t[Agent Selector]=TEAM_VIEW!$Q$5))'
+    )
+    for cell, flag, empty_text in (
+        ("A7", "Counts As Absence", "No absence components in this selection"),
+        ("H7", "Counts As Shrinkage", "No shrinkage components in this selection"),
+    ):
+        formula = (
+            '=LET(t,tblActivityDetail,'
+            f'm,{base_scope}*--(t[{flag}]=TRUE),'
+            'c,SORT(UNIQUE(FILTER(t[Category],m,""))),'
+            'h,MAP(c,LAMBDA(x,SUMPRODUCT(m*(t[Category]=x)*N(t[Hours])))),'
+            'n,MAP(c,LAMBDA(x,SUMPRODUCT(m*(t[Category]=x)))),'
+            f'IFERROR(HSTACK(c,h,n),"{empty_text}"))'
+        )
+        ws.write_dynamic_array_formula(cell, formula, book.report.body, "Open in desktop Excel")
+    ws.merge_range(
+        "A22:N22", "Exact start/end evidence remains on ACTIVITY_DETAIL. Component hours are exclusive inside each KPI view; never add Absence Rate and Shrinkage Rate together.",
+        book.report.note,
+    )
+    ws.write_url(
+        "A24", "internal:'ACTIVITY_DETAIL'!A1", book.report.editable,
+        string="OPEN EXACT VERINT ACTIVITY DETAIL",
+    )
+    ws.set_column("A:A", 28)
+    ws.set_column("B:C", 15)
+    ws.set_column("D:G", 4)
+    ws.set_column("H:H", 28)
+    ws.set_column("I:J", 15)
+
+
+def _add_absence_lookups(book: DecisionWorkbook) -> None:
+    """Create cascading LOB, Team Leader and Agent lists for Absenteeism."""
+
+    wb = book.report.workbook
+    ws = wb.add_worksheet("_LOOKUPS")
+    ws.write("A1", "All")
+    ws.write_dynamic_array_formula(
+        "A2", '=SORT(UNIQUE(FILTER(tblAbsenceData[LOB],tblAbsenceData[LOB]<>"","")))',
+    )
+    ws.write("B1", "All")
+    ws.write_dynamic_array_formula(
+        "B2",
+        '=SORT(UNIQUE(FILTER(tblAbsenceData[Team Leader],'
+        '(tblAbsenceData[Team Leader]<>"")*IF(TEAM_VIEW!$K$5="All",1,'
+        'tblAbsenceData[LOB]=TEAM_VIEW!$K$5),"")))',
+    )
+    ws.write("C1", "All")
+    ws.write_dynamic_array_formula(
+        "C2",
+        '=SORT(UNIQUE(FILTER(tblAbsenceData[Agent Selector],'
+        '(tblAbsenceData[Agent Selector]<>"")*IF(TEAM_VIEW!$K$5="All",1,'
+        'tblAbsenceData[LOB]=TEAM_VIEW!$K$5)*IF(TEAM_VIEW!$N$5="All",1,'
+        'tblAbsenceData[Team Leader]=TEAM_VIEW!$N$5),"")))',
+    )
+    wb.define_name("ABS_LOB_LIST", "=_LOOKUPS!$A$1:INDEX(_LOOKUPS!$A:$A,COUNTA(_LOOKUPS!$A:$A))")
+    wb.define_name("ABS_TL_LIST", "=_LOOKUPS!$B$1:INDEX(_LOOKUPS!$B:$B,COUNTA(_LOOKUPS!$B:$B))")
+    wb.define_name("ABS_AGENT_LIST", "=_LOOKUPS!$C$1:INDEX(_LOOKUPS!$C:$C,COUNTA(_LOOKUPS!$C:$C))")
+    ws.hide()
+
+
 def build_final_absence_product_workbook(
     conn: DatabaseConnection,
     config: Config,
@@ -1809,6 +2461,17 @@ def build_final_absence_product_workbook(
     rulebook = load_rulebook(config.home, config.business_rules)
     book, partial, target = _atomic_book(
         config, "absence", "ABSENTEEISM & SHRINKAGE", start, end, output,
+    )
+    available_start, available_end = conn.execute(
+        "SELECT min(business_date), max(business_date) FROM mart.verint_final_absence_agent_day"
+    ).fetchone()
+    data_start = (
+        available_start if isinstance(available_start, date)
+        else date.fromisoformat(str(available_start)[:10]) if available_start else start
+    )
+    latest = (
+        available_end if isinstance(available_end, date)
+        else date.fromisoformat(str(available_end)[:10]) if available_end else end
     )
     totals = conn.execute(
         """SELECT coalesce(sum(planned_net_minutes),0),
@@ -1897,13 +2560,14 @@ def build_final_absence_product_workbook(
         ],
         period_rows,
         [
-            "Final results use Verint Activities inside the scheduled StartEndTimes shift.",
+            "Final results use Verint Activities inside the preferred StartEndTimes boundary or its reviewed Shift Assignment fallback.",
             "Agent Status and LILO are used to find missing or unsupported corrections; they do not assign payroll categories.",
             "Absence and shrinkage are parallel views. Do not add their percentages together.",
             "Open ACTIONS for unresolved cases and use ACTIVITY_DETAIL when an exact interval needs investigation.",
         ],
         (("Absence rate", 5), ("Shrinkage rate", 8)),
     )
+    _add_absence_team_view(book, start, end, data_start, latest)
 
     team_headers, team_rows = _query(
         conn,
@@ -2007,6 +2671,41 @@ def build_final_absence_product_workbook(
             {"validate": "list", "source": ["Pending", "Needs review", "In progress", "Resolved", "No action"]},
         )
 
+    queue_headers, queue_source = _query(
+        conn,
+        """SELECT agent_day_key AS case_id, business_date,
+                  agent_id, agent_name,
+                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']' AS agent_selector,
+                  team_leader, ops_manager, lob, language,
+                  final_ledger_status AS result_status,
+                  planned_net_minutes/60.0 AS planned_net_hours,
+                  final_absence_minutes/60.0 AS absence_hours,
+                  final_shrinkage_minutes/60.0 AS shrinkage_hours,
+                  final_unmapped_minutes/60.0 AS unmapped_hours
+           FROM mart.verint_final_absence_agent_day
+           WHERE business_date BETWEEN ? AND ?
+             AND (final_absence_day=true
+                  OR final_ledger_status NOT IN ('CLEAR','ABSENCE_RECORDED'))
+           ORDER BY business_date DESC, lob, team_leader, agent_name""",
+        [data_start, latest],
+    )
+    queue_headers.append("action_status")
+    queue_rows = [
+        (*row, '=IFERROR(XLOOKUP([@[Case ID]],tblActions[Case ID],tblActions[Review Status]),"Not started")')
+        for row in queue_source
+    ]
+    queue_sheet = book.table(
+        "ACTION_QUEUE", "Absence action queue",
+        "Refreshable cases and recorded absence days. Action Status reads the permanent ACTIONS log by Case ID.",
+        queue_headers, queue_rows or [tuple(None for _ in queue_headers)],
+    )
+    if queue_rows:
+        action_status_column = queue_headers.index("action_status")
+        queue_sheet.conditional_format(
+            4, action_status_column, 3 + len(queue_rows), action_status_column,
+            {"type": "text", "criteria": "containing", "value": "Not started", "format": book.report.error},
+        )
+
     absence_headers, absence_components = _exclusive_final_components(
         conn, rulebook, start, end, "absence",
     )
@@ -2023,6 +2722,7 @@ def build_final_absence_product_workbook(
         "Overlapping Activities are counted once inside the shrinkage view. Do not add this table to Absence Components.",
         shrinkage_headers, shrinkage_components,
     )
+    _add_absence_component_view(book)
 
     activity_headers, activity_rows = _query(
         conn,
@@ -2035,7 +2735,7 @@ def build_final_absence_product_workbook(
            FROM mart.verint_final_absence_event
            WHERE business_date BETWEEN ? AND ?
            ORDER BY business_date, lob, team_leader, agent_name, event_start""",
-        [start, end],
+        [data_start, latest],
     )
     book.table(
         "ACTIVITY_DETAIL", "Final Verint activity detail",
@@ -2060,7 +2760,7 @@ def build_final_absence_product_workbook(
            FROM mart.verint_final_absence_agent_day
            WHERE business_date BETWEEN ? AND ?
            ORDER BY business_date, lob, team_leader, agent_name""",
-        [start, end],
+        [data_start, latest],
     )
     book.table(
         "ABSENCE_DATA", "Absence clean data",
@@ -2072,10 +2772,11 @@ def build_final_absence_product_workbook(
         ["Step", "What to do", "Why"],
         [
             (1, "Run WFM Hub refresh and confirm the latest source date.", "Updates the clean Absenteeism feeds."),
-            (2, "Review Finalized coverage and ACTIONS before sharing totals.", "Incomplete rows must not dilute the rate."),
-            (3, "Use a personal Sheet View before filtering a shared table.", "Your filters will not disturb another reviewer."),
-            (4, "Fill only blue fields in ACTIONS.", "The Case ID preserves follow-up against the right day."),
-            (5, "Use ACTIVITY_DETAIL only for exact interval investigation.", "Event rows may overlap; component summaries do not."),
+            (2, "Use TEAM_VIEW for period, LOB, Team Leader and Agent selection.", "Agent results, cases and components follow one selection."),
+            (3, "For a permanent shared file, connect ABSENCE_DATA, ACTION_QUEUE and ACTIVITY_DETAIL once to the three fixed CSV feeds.", "Data > Refresh All updates facts without replacing the workbook."),
+            (4, "Copy new Case IDs from ACTION_QUEUE into ACTIONS and fill only the blue fields.", "The permanent action log remains safe while facts refresh."),
+            (5, "Review Finalized coverage and unresolved cases before sharing totals.", "Incomplete rows must not dilute the rate."),
+            (6, "Use COMPONENT_VIEW for totals and ACTIVITY_DETAIL for exact intervals.", "Raw intervals may overlap; KPI components remain separate."),
         ],
     )
     book.definitions([
@@ -2085,11 +2786,12 @@ def build_final_absence_product_workbook(
         ("Uncoded empty shift", "Completed scheduled shift with no final code and no reliable login evidence", "Correction completeness", "Never treated as zero absence"),
         ("Component", "One exclusive activity classification inside its KPI view", "Management breakdown", "Raw overlapping intervals are counted once"),
     ])
+    _add_absence_lookups(book)
     book.audit(_audit_rows(
         conn, config, "absence", start, end,
         (
             ("Shared feed", str(config.feed / "Absenteeism"), "Updated with this report"),
-            ("Template version", "absence-2026.09.1", "Collaboration report contract"),
+            ("Template version", "absence-2026.09.2", "Collaboration report contract"),
             ("All planned hours", all_planned / 60, f"{agent_days:,} agent-day row(s)"),
             ("All absence hours", all_absence / 60, "Includes review rows"),
             ("All shrinkage hours", all_shrinkage / 60, "Includes review rows"),

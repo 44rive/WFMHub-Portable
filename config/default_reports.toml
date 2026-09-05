@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.9"
+version = "2026.09.10"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
@@ -9,7 +9,7 @@ key = "pcs"
 title = "PCS PERFORMANCE"
 purpose = "Interactive daily, MTD and previous-month PCS score, participation, and coaching."
 finding_domains = ["pcs", "data_quality"]
-sheets = ["DASHBOARD", "AGENT_RESULTS", "COACHING", "COACHING_QUEUE", "PCS_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
+sheets = ["DASHBOARD", "TEAM_VIEW", "AGENT_RESULTS", "COACHING", "COACHING_QUEUE", "PCS_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
 
 [[packs]]
 key = "bonus"
@@ -28,16 +28,16 @@ sheets = ["FLASH", "HOURLY", "QUEUES", "EXCEPTIONS", "DATA_STATUS", "DEFINITIONS
 [[packs]]
 key = "realisations"
 title = "REALISATIONS"
-purpose = "Actual versus forecast, service, staffing and final capacity results for a mapped LOB."
+purpose = "Actual versus forecast, service, staffing and final capacity results across every mapped LOB."
 finding_domains = ["service", "forecast", "absence", "staffing", "data_quality"]
 sheets = ["DASHBOARD", "LOB_RESULTS", "TREND", "DATA", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "staffing"
 title = "STAFFING & COVERAGE"
-purpose = "LOB/language scheduled, observed and productive staffing intervals."
+purpose = "Past staffing control and future required-versus-net capacity by LOB, language and interval."
 finding_domains = ["staffing", "data_quality"]
-sheets = ["DASHBOARD", "INTRADAY", "ACTIONS", "DEFINITIONS", "_AUDIT"]
+sheets = ["DASHBOARD", "WEEKLY_PLAN", "INTRADAY", "ACTIONS", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "attendance"
@@ -58,7 +58,7 @@ key = "absence"
 title = "FINAL ABSENCE & SHRINKAGE"
 purpose = "Corrected Verint final absence and shrinkage ledger."
 finding_domains = ["absence", "data_quality"]
-sheets = ["DASHBOARD", "TEAM_SUMMARY", "AGENT_RESULTS", "ACTIONS", "ABSENCE_COMPONENTS", "SHRINKAGE_COMPONENTS", "ACTIVITY_DETAIL", "ABSENCE_DATA", "HELP", "DEFINITIONS", "_AUDIT"]
+sheets = ["DASHBOARD", "TEAM_VIEW", "TEAM_SUMMARY", "AGENT_RESULTS", "ACTIONS", "ACTION_QUEUE", "ABSENCE_COMPONENTS", "SHRINKAGE_COMPONENTS", "COMPONENT_VIEW", "ACTIVITY_DETAIL", "ABSENCE_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
 
 
 [[packs]]

@@ -281,7 +281,8 @@ def publish_absence_feeds(
                   final_unmapped_minutes/60.0 AS Unmapped_Hours
            FROM mart.verint_final_absence_agent_day
            WHERE business_date BETWEEN ? AND ?
-             AND final_ledger_status NOT IN ('CLEAR','ABSENCE_RECORDED')
+             AND (final_absence_day=true
+                  OR final_ledger_status NOT IN ('CLEAR','ABSENCE_RECORDED'))
            ORDER BY business_date, lob, team_leader, agent_name""",
         (start, end),
     )

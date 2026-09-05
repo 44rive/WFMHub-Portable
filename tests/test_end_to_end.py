@@ -17,6 +17,7 @@ from wfmhub.config import ensure_user_config, load_config, write_source_root
 from wfmhub.database import write_session
 from wfmhub.ingestion import ingest_all
 from wfmhub.models import _evaluation_time, refresh_models, resolve_period
+from wfmhub.on_demand_analysis import build_analysis_workbook
 from wfmhub.exports import export_dataset
 from wfmhub.report_packs import build_report_pack
 from wfmhub.reports import build_report
@@ -650,8 +651,18 @@ class EndToEndTests(unittest.TestCase):
                     "realisations", conn, config, model.start, model.end,
                     service_profile="ford_oem_fr",
                 )
+                all_realisations_report = build_report_pack(
+                    "realisations", conn, config, model.start, model.end,
+                    home / "output" / "all-realisations.xlsx",
+                )
+                staffing_report = build_report_pack(
+                    "staffing", conn, config, model.start, model.end,
+                )
                 attendance_report = build_report_pack("attendance", conn, config, model.start, model.end)
                 absence_report = build_report_pack("absence", conn, config, model.start, model.end)
+                analysis_report = build_analysis_workbook(
+                    conn, config, "pcs", model.start, model.end,
+                )
                 export_progress = []
                 clean_calls = export_dataset(
                     conn, config, "calls", model.start, model.end,
@@ -762,14 +773,17 @@ class EndToEndTests(unittest.TestCase):
             focused_pcs_book = load_workbook(focused_pcs_report, read_only=False, data_only=False)
             try:
                 self.assertEqual(focused_pcs_book.sheetnames, [
-                    "DASHBOARD", "AGENT_RESULTS", "COACHING", "COACHING_QUEUE",
-                    "PCS_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT",
+                    "DASHBOARD", "TEAM_VIEW", "AGENT_RESULTS", "COACHING",
+                    "COACHING_QUEUE", "PCS_DATA", "HELP", "DEFINITIONS",
+                    "_LOOKUPS", "_AUDIT",
                 ])
                 self.assertIn("SUMPRODUCT", focused_pcs_book["DASHBOARD"]["A11"].value)
                 self.assertIn("tblPcsData", focused_pcs_book["PCS_DATA"].tables)
                 self.assertIn("tblCoaching", focused_pcs_book["COACHING"].tables)
                 self.assertIn("tblCoachingQueue", focused_pcs_book["COACHING_QUEUE"].tables)
                 self.assertIn("tblPcsData", focused_pcs_book["AGENT_RESULTS"]["I5"].value)
+                team_formula = focused_pcs_book["TEAM_VIEW"]["A11"].value
+                self.assertIn("tblPcsData", getattr(team_formula, "text", ""))
                 self.assertEqual(focused_pcs_book["_LOOKUPS"].sheet_state, "hidden")
                 pcs_table_headers = [cell.value for cell in focused_pcs_book["PCS_DATA"][4]]
                 defined = {
@@ -789,15 +803,22 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(service_book["FLASH"]["A1"].value, "OEM FLASH  /  FORD OEM FRANCE")
             finally:
                 service_book.close()
-            absence_book = load_workbook(absence_report, read_only=False, data_only=True)
+            absence_book = load_workbook(absence_report, read_only=False, data_only=False)
             try:
                 self.assertEqual(absence_book.sheetnames, [
-                    "DASHBOARD", "TEAM_SUMMARY", "AGENT_RESULTS", "ACTIONS",
-                    "ABSENCE_COMPONENTS", "SHRINKAGE_COMPONENTS", "ACTIVITY_DETAIL",
-                    "ABSENCE_DATA", "HELP", "DEFINITIONS", "_AUDIT",
+                    "DASHBOARD", "TEAM_VIEW", "TEAM_SUMMARY", "AGENT_RESULTS",
+                    "ACTIONS", "ACTION_QUEUE", "ABSENCE_COMPONENTS",
+                    "SHRINKAGE_COMPONENTS", "COMPONENT_VIEW", "ACTIVITY_DETAIL",
+                    "ABSENCE_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT",
                 ])
                 self.assertIn("tblAbsenceData", absence_book["ABSENCE_DATA"].tables)
                 self.assertIn("tblActions", absence_book["ACTIONS"].tables)
+                self.assertIn("tblActionQueue", absence_book["ACTION_QUEUE"].tables)
+                absence_team_formula = absence_book["TEAM_VIEW"]["A17"].value
+                self.assertIn("tblAbsenceData", getattr(absence_team_formula, "text", ""))
+                component_formula = absence_book["COMPONENT_VIEW"]["A7"].value
+                self.assertIn("tblActivityDetail", getattr(component_formula, "text", ""))
+                self.assertEqual(absence_book["_LOOKUPS"].sheet_state, "hidden")
                 self.assertEqual(absence_book["_AUDIT"].sheet_state, "hidden")
                 absence_table_headers = [cell.value for cell in absence_book["ABSENCE_DATA"][4]]
             finally:
@@ -826,9 +847,42 @@ class EndToEndTests(unittest.TestCase):
                 self.assertGreaterEqual(len(realisations_book["DASHBOARD"]._charts), 1)
             finally:
                 realisations_book.close()
+            all_realisations_book = load_workbook(
+                all_realisations_report, read_only=True, data_only=True,
+            )
+            try:
+                reporting_lobs = {
+                    row[4]
+                    for row in all_realisations_book["LOB_RESULTS"].iter_rows(
+                        min_row=5, values_only=True,
+                    )
+                    if row[1]
+                }
+                self.assertEqual(reporting_lobs, {
+                    "Ford OEM France", "Ford Netherlands", "RSA Belgium",
+                    "RSA Netherlands",
+                })
+            finally:
+                all_realisations_book.close()
+            staffing_book = load_workbook(staffing_report, read_only=True, data_only=True)
+            try:
+                self.assertIn("WEEKLY_PLAN", staffing_book.sheetnames)
+                staffing_dates = {
+                    row[0].date() if isinstance(row[0], datetime) else row[0]
+                    for row in staffing_book["INTRADAY"].iter_rows(
+                        min_row=5, values_only=True,
+                    )
+                    if row[0] is not None
+                }
+                self.assertEqual(staffing_dates, {date(2026, 8, 1), date(2026, 8, 2)})
+            finally:
+                staffing_book.close()
+            self.assertEqual(analysis_report.parent, home / "Reports" / "Analysis")
+            self.assertTrue(analysis_report.is_file())
             for generated_report in (
                 report, corrections_report, pcs_report, focused_pcs_report,
-                service_report, realisations_report, attendance_report, absence_report,
+                service_report, realisations_report, all_realisations_report,
+                staffing_report, attendance_report, absence_report, analysis_report,
             ):
                 with zipfile.ZipFile(generated_report) as archive:
                     self.assertFalse(any("externalLinks" in name for name in archive.namelist()))

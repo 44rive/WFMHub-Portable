@@ -82,6 +82,7 @@ def _logging(config) -> Path:
         handlers=[logging.FileHandler(path, encoding="utf-8"), logging.StreamHandler(sys.stdout)],
         force=True,
     )
+    logging.info("WFMHub %s log opened", __version__)
     return path
 
 
@@ -102,6 +103,7 @@ def setup(home: Path, source_root: Path | None, non_interactive: bool) -> int:
         migrations = migrate(config)
         bar.finish("Setup ready")
     except Exception as exc:
+        logging.exception("Setup failed")
         bar.fail(str(exc))
         raise
     print("\nSetup complete.")
@@ -119,6 +121,10 @@ def setup(home: Path, source_root: Path | None, non_interactive: bool) -> int:
     if migrations:
         print(f"Database migrations applied: {', '.join(migrations)}")
     print("Run WFMHub.cmd, refresh source data once, then choose the report you need.")
+    logging.info(
+        "Setup complete source_root=%s database=%s migrations=%s",
+        config.source_root, config.database, len(migrations),
+    )
     return 0
 
 
@@ -133,6 +139,10 @@ def refresh(
 ) -> int:
     config = load_config(home)
     _logging(config)
+    logging.info(
+        "Refresh requested group=%s start=%s end=%s packs=%s",
+        source_group, start, end, ",".join(packs) or "none",
+    )
     run_id = uuid.uuid4().hex
     bar = ProgressBar()
     bar.update(0.01, "Opening hub database")
@@ -169,9 +179,11 @@ def refresh(
                 )
             except Exception as exc:
                 conn.execute("UPDATE meta.refresh_run SET finished_at=?, status='ERROR', details=? WHERE run_id=?", [datetime.now(), str(exc)[:4000], run_id])
+                logging.exception("Refresh run %s failed", run_id)
                 raise
         bar.finish("Refresh complete")
     except Exception as exc:
+        logging.exception("Refresh workflow failed")
         bar.fail(str(exc))
         raise
     print("\nRefresh complete.")
@@ -197,6 +209,11 @@ def refresh(
             print(f"- {error}")
     for pack, report_path in zip(packs, report_paths):
         print(f"Report      : {report_path}")
+    logging.info(
+        "Refresh complete run=%s loaded=%s skipped=%s failed=%s period=%s..%s",
+        run_id, ingested.loaded, ingested.skipped, ingested.failed,
+        model.start, model.end,
+    )
     return 2 if ingested.failed else 0
 
 
@@ -225,6 +242,7 @@ def build_reports(
 ) -> list[Path]:
     config = load_config(home)
     _logging(config)
+    logging.info("Report build requested packs=%s start=%s end=%s", ",".join(packs), start, end)
     if output is not None and len(packs) != 1:
         raise ValueError("An explicit output path can be used with only one report pack")
     bar = ProgressBar()
@@ -248,8 +266,13 @@ def build_reports(
                 ))
                 bar.update(report_end, f"Created {pack} report")
         bar.finish("Reports complete")
+        logging.info(
+            "Report build complete outputs=%s",
+            ", ".join(str(path) for path in paths),
+        )
         return paths
     except Exception as exc:
+        logging.exception("Report build failed")
         bar.fail(str(exc))
         raise
 
@@ -265,6 +288,7 @@ def export_clean(
 ) -> int:
     config = load_config(home)
     _logging(config)
+    logging.info("Clean export requested dataset=%s format=%s start=%s end=%s", dataset, file_format, start, end)
     bar = ProgressBar()
     bar.update(0.02, "Opening hub database")
     try:
@@ -280,11 +304,16 @@ def export_clean(
             )
         bar.finish("Export complete")
     except Exception as exc:
+        logging.exception("Clean export failed")
         bar.fail(str(exc))
         raise
     print(f"Clean export : {result.path}")
     print(f"Rows         : {result.rows:,}")
     print(f"Manifest     : {result.manifest}")
+    logging.info(
+        "Clean export complete dataset=%s rows=%s output=%s",
+        dataset, result.rows, result.path,
+    )
     return 0
 
 
@@ -298,6 +327,7 @@ def run_custom(
 ) -> int:
     config = load_config(home)
     _logging(config)
+    logging.info("Custom job requested kind=%s job=%s start=%s end=%s", kind, job, start, end)
     bar = ProgressBar()
     bar.update(0.02, "Opening hub database")
     try:
@@ -318,12 +348,17 @@ def run_custom(
             conn.close()
         bar.finish("Custom job complete")
     except Exception as exc:
+        logging.exception("Custom job failed")
         bar.fail(str(exc))
         raise
     print(f"Custom job  : {result.job}")
     print(f"Output      : {result.output_dir}")
     if result.result is not None:
         print(f"Result      : {result.result}")
+    logging.info(
+        "Custom job complete kind=%s job=%s output=%s",
+        kind, result.job, result.output_dir,
+    )
     return 0
 
 
@@ -479,6 +514,7 @@ def import_bonus_tool(
 
     config = load_config(home)
     _logging(config)
+    logging.info("Bonus import requested source=%s", source)
     bar = ProgressBar()
     try:
         bar.update(0.1, "Reading Bonus Matrix v1.2")
@@ -486,6 +522,7 @@ def import_bonus_tool(
             result = import_bonus_matrix(conn, source)
         bar.finish("Bonus period imported")
     except Exception as exc:
+        logging.exception("Bonus import failed")
         bar.fail(str(exc))
         raise
     print(f"Period       : {result.period}")
@@ -495,6 +532,10 @@ def import_bonus_tool(
     print(f"Source hash  : {result.import_id}")
     print(f"Status       : {'unchanged' if result.unchanged else 'new active version'}")
     print("Source file  : unchanged")
+    logging.info(
+        "Bonus import complete period=%s agents=%s unchanged=%s",
+        result.period, result.agents, result.unchanged,
+    )
     return 0
 
 
@@ -509,6 +550,7 @@ def analyze_period(
 ) -> int:
     config = load_config(home)
     _logging(config)
+    logging.info("Analysis requested domain=%s comparison=%s start=%s end=%s", domain, comparison, start, end)
     bar = ProgressBar()
     try:
         bar.update(0.02, "Opening hub database")
@@ -523,12 +565,14 @@ def analyze_period(
             )
         bar.finish("Analysis complete")
     except Exception as exc:
+        logging.exception("Analysis failed")
         bar.fail(str(exc))
         raise
     print(f"Analysis     : {path}")
     print(f"Domain       : {domain}")
     print(f"Period       : {model.start} to {model.end}")
     print(f"Comparison   : {comparison}")
+    logging.info("Analysis complete output=%s", path)
     return 0
 
 
@@ -694,9 +738,9 @@ def menu(home: Path) -> int:
         print("    [1] Refresh source data once")
         print("\n  TODAY")
         print("    [2] Attendance Callout")
-        print("    [3] Staffing Gaps")
+        print("    [3] Staffing & Capacity Plan")
         print("    [4] OEM Flash")
-        print("    [5] Realisations (Flash OEM pilot)")
+        print("    [5] Realisations (all mapped LOBs)")
         print("    [6] Attendance Review")
         print("\n  MONTH")
         print("    [7] Final Absenteeism")

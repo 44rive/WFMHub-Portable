@@ -120,8 +120,8 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `pcs` | `Reports/PCS Performance.xlsx` | Selector-driven PCS performance and coaching workbook |
 | `bonus` | `Reports/Bonus Management.xlsx` | Imported Bonus Matrix result and release controls |
 | `service` | `Reports/OEM Flash.xlsx` | Ford OEM queue, forecast, service and staffing control |
-| `realisations` | `Reports/Realisations.xlsx` | Flash OEM actual/forecast and capacity results by period |
-| `staffing` | `Reports/Staffing Gaps.xlsx` | Selected-day roster LOB/language coverage |
+| `realisations` | `Reports/Realisations.xlsx` | All mapped LOB actual/forecast, service, staffing, absence and shrinkage results |
+| `staffing` | `Reports/Staffing Gaps.xlsx` | Full-period actual staffing control and future capacity planning |
 | `attendance` | `Reports/Attendance Callout.xlsx` | No-show/late/not-seen contact queue |
 | `corrections` | `Reports/Attendance Review.xlsx` | Selected-period completed-day residual gaps and shift visualization |
 | `absence` | `Reports/Final Absenteeism.xlsx` | Activities-only final absence/shrinkage ledger |
@@ -134,10 +134,17 @@ absent from the menu.
 
 PCS is generated directly from SQLite. `PCS_DATA`, `COACHING_QUEUE` and
 `COACHING` are ordinary visible Excel Tables. Dashboard selectors use Excel
-`SUMPRODUCT`; users may add Table slicers manually. A first build needs no
-Excel connection. For one long-lived shared file, the user may optionally link
-the two replaceable PCS tables to the fixed CSV feeds with Power Query. No Data
-Model or ODBC driver is required.
+`SUMPRODUCT`; `TEAM_VIEW` uses Microsoft 365 dynamic formulas so a TL can see
+the filtered realization list and coaching queue without editing a PivotTable.
+Users may still add Table slicers manually. A first build needs no Excel
+connection. For one long-lived shared file, the user may link the two
+replaceable PCS tables to fixed CSV feeds with Power Query. `COACHING` remains
+the permanent editable log. No Data Model or ODBC driver is required.
+
+Final Absenteeism uses the same collaboration boundary. Power Query may replace
+`tblAbsenceData`, `tblActionQueue`, and `tblActivityDetail` from stable CSVs;
+it must never load into permanent `tblActions`. `TEAM_VIEW` and
+`COMPONENT_VIEW` read the refreshed tables directly.
 
 ## Agent scope and identity
 
@@ -229,7 +236,7 @@ no model server, paid API, GPU, prompt execution, or database upload path.
 `on_demand_analysis.py` exposes that same boundary for a user-selected period,
 domain and comparison. Its workbook contains `FINDINGS`, `METRICS`, and curated
 `EVIDENCE`; a period change is descriptive and never presented as proof of
-causality.
+causality. Default outputs are visible under `Reports/Analysis`.
 
 `_system/prompts/COPILOT_WFM_ANALYST.md` is a static manual aid. A user may attach a
 chosen finished workbook to an approved Copilot account. The runtime never
@@ -310,8 +317,11 @@ spell grouping remain tested engine primitives rather than editable formulas.
 Activities and wide StartEndTimes both normalize into `raw.schedule_shift`, but
 `meta.source_file.source_variant` keeps them strictly separated. Activities
 also produces `raw.schedule_event`. Data Source IDs is the primary operational
-Agent ID. StartEndTimes is the only plan boundary. LILO and Agent Status are the
-actual evidence. Activities is the final correction ledger.
+Agent ID. StartEndTimes is the preferred plan boundary. LILO and Agent Status
+are the actual evidence. Activities is the final correction ledger. When the
+dedicated StartEndTimes export is absent for an agent/day, a successfully
+parsed Activities Shift Assignment is the explicit plan-boundary fallback and
+raises a visible review finding.
 
 The absence engine:
 
@@ -373,6 +383,21 @@ fields are discarded. APBE/APFR/APDE contributes actual performance. Both remain
 joined only through the reviewed `config/queue_mapping.csv`. The raw source
 queue/LOB and the mapped detailed/comparison scopes are all retained. Volume-only
 forecast exports are valid; absent forecast measures remain NULL.
+
+## Capacity planning
+
+Service profiles own explicit parallel mappings from `service_scopes` to
+`staffing_lobs`. Staffing expands the complete selected period at 15-minute
+grain. Completed intervals preserve observed and productive FTE; future
+intervals compare Verint required FTE with net scheduled FTE after approved PTO
+and effective Away. If forecast demand exists but no staffing row exists, four
+zero-schedule quarter-hours are created for that hour so an empty roster cannot
+hide a shortage. `WEEKLY_PLAN` rolls additive FTE-hours up by ISO week,
+management LOB, roster LOB, and language.
+
+Realisations iterates every active service profile by default. Each profile
+uses its configured SLA method and target. The dashboard never blends different
+LOB service-level contracts into one synthetic overall SL.
 
 ## Upgrades
 
