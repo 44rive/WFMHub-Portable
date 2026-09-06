@@ -12,7 +12,7 @@ from .database import DatabaseConnection
 from .rules import Rulebook
 
 
-DECISION_SHEET = "DECISIONS"
+DECISION_SHEETS = ("REVIEW BOARD", "DECISIONS")
 REQUIRED_HEADERS = {
     "Gap ID", "Decision Category", "Decision Status", "Reviewed By",
     "Comment", "Reviewed Date",
@@ -56,14 +56,21 @@ def import_attendance_decisions(
         raise FileNotFoundError(path)
     workbook = load_workbook(path, read_only=True, data_only=True, keep_links=False)
     try:
-        if DECISION_SHEET not in workbook.sheetnames:
-            raise ValueError(f"The workbook has no {DECISION_SHEET} sheet")
-        sheet = workbook[DECISION_SHEET]
+        decision_sheet = next(
+            (name for name in DECISION_SHEETS if name in workbook.sheetnames),
+            None,
+        )
+        if decision_sheet is None:
+            raise ValueError(
+                "The workbook has no REVIEW BOARD sheet "
+                "(legacy DECISIONS is also accepted)"
+            )
+        sheet = workbook[decision_sheet]
         headers = [str(cell.value or "").strip() for cell in sheet[4]]
         missing = sorted(REQUIRED_HEADERS - set(headers))
         if missing:
             raise ValueError(
-                f"{DECISION_SHEET} is missing decision columns: {', '.join(missing)}"
+                f"{decision_sheet} is missing decision columns: {', '.join(missing)}"
             )
         index = {header: headers.index(header) for header in headers if header}
         pending: list[tuple[str, str | None, str, str | None, str | None, date | None]] = []
@@ -74,7 +81,7 @@ def import_attendance_decisions(
             if not gap_id or gap_id == "No rows for this period.":
                 continue
             if gap_id in seen:
-                raise ValueError(f"Duplicate Gap ID in {DECISION_SHEET}: {gap_id}")
+                raise ValueError(f"Duplicate Gap ID in {decision_sheet}: {gap_id}")
             seen.add(gap_id)
             authoritative = conn.execute(
                 "SELECT business_date FROM mart.correction_candidate WHERE correction_id=?",

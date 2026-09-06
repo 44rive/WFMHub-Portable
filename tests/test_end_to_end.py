@@ -668,7 +668,7 @@ class EndToEndTests(unittest.TestCase):
                     empty_corrections_report, read_only=True, data_only=True,
                 )
                 try:
-                    self.assertIn("DECISIONS", empty_corrections_book.sheetnames)
+                    self.assertIn("REVIEW BOARD", empty_corrections_book.sheetnames)
                     audit_values = {
                         str(cell.value)
                         for row in empty_corrections_book["_AUDIT"].iter_rows()
@@ -678,7 +678,7 @@ class EndToEndTests(unittest.TestCase):
                 finally:
                     empty_corrections_book.close()
                 decisions_book = load_workbook(corrections_report)
-                decisions = decisions_book["DECISIONS"]
+                decisions = decisions_book["REVIEW BOARD"]
                 decision_headers = {
                     cell.value: cell.column for cell in decisions[4]
                 }
@@ -847,20 +847,21 @@ class EndToEndTests(unittest.TestCase):
             corrections_book = load_workbook(corrections_report, read_only=True, data_only=True)
             try:
                 self.assertEqual(corrections_book.sheetnames, [
-                    "DASHBOARD", "DECISIONS", "SHIFT_VIEW", "DEFINITIONS",
-                    "_LOOKUPS", "_AUDIT",
+                    "CONTROL", "REVIEW BOARD", "DECISION LEDGER", "EVIDENCE",
+                    "DEFINITIONS", "_LOOKUPS", "_AUDIT",
                 ])
-                self.assertIn("2026-08-01 to 2026-08-02", corrections_book["DASHBOARD"]["A2"].value)
-                injection = corrections_book["DECISIONS"]
-                injection_headers = [cell.value for cell in injection[4]]
-                self.assertIn("Exact Start", injection_headers)
-                self.assertIn("Exact End", injection_headers)
-                self.assertIn("Decision Status", injection_headers)
-                start_column = injection_headers.index("Exact Start")
-                end_column = injection_headers.index("Exact End")
+                self.assertIn("2026-08-01 to 2026-08-02", corrections_book["CONTROL"]["A2"].value)
+                review = corrections_book["REVIEW BOARD"]
+                review_headers = [cell.value for cell in review[4]]
+                self.assertIn("Exact Start", review_headers)
+                self.assertIn("Exact End", review_headers)
+                self.assertIn("Decision Status", review_headers)
+                self.assertIn("08:00", review_headers)
+                start_column = review_headers.index("Exact Start")
+                end_column = review_headers.index("Exact End")
                 exact_intervals = {
                     (row[start_column], row[end_column])
-                    for row in injection.iter_rows(min_row=5, values_only=True)
+                    for row in review.iter_rows(min_row=5, values_only=True)
                     if row[start_column] is not None
                 }
                 self.assertIn(
@@ -922,19 +923,26 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(service_report, home / "Reports" / "Service Flashes.xlsx")
                 self.assertEqual(service_book.sheetnames, [
                     "CONTROL", "Flash RSA NL", "Flash RSA BE", "Flash Ford NL",
-                    "Flash OEM", "FLASH_DATA", "QUEUE_MAP", "EXCEPTIONS",
-                    "DEFINITIONS", "_AUDIT",
+                    "Flash OEM", "FLASH_DATA", "ATTENDANCE PULSE",
+                    "QUEUE DIAGNOSIS", "QUEUE_MAP", "EXCEPTIONS", "DEFINITIONS",
+                    "_AUDIT",
                 ])
                 self.assertEqual(service_book["CONTROL"]["A1"].value, "SERVICE FLASH CONTROL")
                 self.assertEqual(
-                    [cell.value for cell in service_book["Flash OEM"][11]][:12],
+                    [cell.value for cell in service_book["Flash OEM"][11]][:14],
                     [
-                        "Hour", "Volume Forecasted", "Volume Ford",
+                        "Hour", "Volume Forecasted", "Volume Variance", "Volume Ford",
                         "Volume Chery", "Volume Toyota", "SL Ford", "SL Chery",
                         "SL Toyota", "Routed Rate Ford", "Routed Rate Chery",
-                        "Routed Rate Toyota", "AHT",
+                        "Routed Rate Toyota", "AHT", "ABS HC",
                     ],
                 )
+                self.assertNotIn(
+                    "Short Sickness",
+                    [cell.value for cell in service_book["Flash OEM"][11]],
+                )
+                self.assertIn("Diagnosis", [cell.value for cell in service_book["QUEUE DIAGNOSIS"][4]])
+                self.assertIn("Call Now", [cell.value for cell in service_book["ATTENDANCE PULSE"][4]])
                 self.assertEqual(service_book.properties.creator, "Anass ASSRI")
                 self.assertEqual(len(service_book._external_links), 0)
                 self.assertGreaterEqual(len(service_book["CONTROL"]._charts), 1)

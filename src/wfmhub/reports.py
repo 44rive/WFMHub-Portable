@@ -81,6 +81,10 @@ def _display_header(name: str) -> str:
         "tier_1_target": "Tier 1 Target", "tier_2_target": "Tier 2 Target",
         "pcs_participation": "PCS % Participation",
         "absence_percent": "Abs%", "count_value": "Count / Value",
+        "abs_hc": "ABS HC", "tsl": "TSL",
+        "connected_in_sla": "Connected in SLA",
+        "lost_5_to_sla": "Lost 5s to SLA",
+        "sla_denominator": "SLA Denominator",
     }
     if name in custom:
         return custom[name]
@@ -92,7 +96,7 @@ def _display_header(name: str) -> str:
         "Id": "ID", "Lob": "LOB", "Aht": "AHT", "Pcs": "PCS",
         "Kpi": "KPI", "Qm": "QM", "Voc": "VOC", "Fte": "FTE",
         "Pto": "PTO", "Mtd": "MTD", "Rta": "RTA", "Asa": "ASA",
-        "Sl": "SL", "Iso": "ISO",
+        "Sl": "SL", "Tsl": "TSL", "Hc": "HC", "Iso": "ISO",
     }
     return " ".join(acronyms.get(word, word) for word in title.split())
 

@@ -2796,121 +2796,6 @@ def build_final_absence_product_workbook(
     return _finish(book, partial, target)
 
 
-def _legacy_build_attendance_corrections_workbook(
-    conn: DatabaseConnection,
-    config: Config,
-    start: date,
-    end: date,
-    output: Path | None = None,
-) -> Path:
-    """Build the selected period's completed-day correction queue and timeline."""
-
-    from .shift_view import add_shift_view
-
-    today = date.today()
-    completed_through = min(end, today - timedelta(days=1))
-    book, partial, target = _atomic_book(
-        config, "corrections", "ATTENDANCE REVIEW", start, end, output,
-    )
-    gap_count, gap_minutes, agents = conn.execute(
-        """SELECT count(*), coalesce(sum(residual_minutes),0), count(DISTINCT agent_id)
-           FROM mart.correction_residual_segment
-           WHERE business_date BETWEEN ? AND ? AND business_date<?""",
-        [start, end, today],
-    ).fetchone()
-    missing = conn.execute(
-        """SELECT count(*) FROM mart.attendance_agent_day
-           WHERE business_date BETWEEN ? AND ? AND business_date<?
-             AND assignment_type NOT IN ('Off','Planned absence')
-             AND attendance_result IN
-               ('Schedule parse error','Data not loaded','Missing actual evidence',
-                'Incomplete actual evidence','No schedule overlap')""",
-        [start, end, today],
-    ).fetchone()[0]
-    status, status_text = _source_state(
-        conn, ("fte", "start_end", "lilo", "agent_status", "activities"), completed_through, final=True,
-    )
-    if missing:
-        status, status_text = "INCOMPLETE", f"{missing:,} scheduled row(s) lack complete observed evidence"
-    book.dashboard(
-        [
-            KpiCard("Residual segments", gap_count, "integer"),
-            KpiCard("Residual gap hours", gap_minutes / 60 if gap_minutes else 0, "decimal"),
-            KpiCard("Agents to review", agents, "integer"),
-            KpiCard("Missing evidence", missing, "integer"),
-        ],
-        status,
-        status_text,
-        ["Measure", "Value"],
-        [("Residual segments", gap_count), ("Residual gap hours", gap_minutes / 60 if gap_minutes else 0), ("Agents to review", agents), ("Missing evidence", missing)],
-        [
-            f"The selected range is {start:%Y-%m-%d} to {end:%Y-%m-%d}; every completed date through {completed_through:%Y-%m-%d} is included, not only yesterday.",
-            "Today is excluded from correction review, so an unfinished shift can never become an early-leave correction.",
-            "VERINT_INJECTION contains one row per exact continuous residual interval; Start to inject and End to inject are never rounded to a 15-minute grid.",
-            "After injection, export Activities again and refresh. Corrected coverage disappears automatically; no decision workbook is imported back into the Hub.",
-            "SHIFT_VIEW is supporting evidence for the listed agents: schedule versus Agent Status/LILO over the full shift.",
-            "Verint Activities verify whether an observed gap is corrected; they never create the original gap.",
-        ],
-    )
-    headers, rows = _query(
-        conn,
-        """SELECT r.business_date, r.agent_id, c.agent_name, c.team_leader,
-                  c.ops_manager, c.lob, d.language,
-                  c.detected_issue AS incoherence,
-                  r.residual_start AS start_to_inject,
-                  r.residual_end AS end_to_inject,
-                  r.residual_minutes AS minutes,
-                  r.suggested_activity, c.confidence,
-                  r.verint_reconciliation, r.observed_source,
-                  c.scheduled_start, c.scheduled_end,
-                  r.source_file, r.correction_id, r.residual_id AS segment_id
-           FROM mart.correction_residual_segment r
-           JOIN mart.correction_candidate c ON c.correction_id=r.correction_id
-           LEFT JOIN core.dim_agent d ON d.agent_id=r.agent_id
-           WHERE r.business_date BETWEEN ? AND ? AND r.business_date<?
-           ORDER BY r.business_date, c.priority, r.residual_minutes DESC, r.agent_id, r.residual_start""",
-        [start, end, today],
-    )
-    book.table(
-        "VERINT_INJECTION", "Exact residual intervals ready for Verint",
-        "One row is one continuous interval still uncovered in the latest Activities export. Use the exact timestamps shown; do not round or combine separate rows.",
-        headers, rows,
-    )
-
-    timeline_headers, timeline_rows = _query(
-        conn,
-        """SELECT business_date, agent_id, agent_name, team_leader,
-                  ops_manager, lob, language, scheduled_start, scheduled_end,
-                  segment_start, segment_end, segment_minutes, planned_state,
-                  actual_status, actual_category, mismatch_type, is_gap,
-                  observed_source, source_file, evaluation_as_of
-           FROM mart.shift_timeline_segment t
-           WHERE business_date BETWEEN ? AND ? AND business_date<?
-             AND EXISTS (
-                 SELECT 1 FROM mart.correction_residual_segment r
-                 WHERE r.business_date=t.business_date AND r.agent_id=t.agent_id
-             )
-           ORDER BY business_date, agent_id, segment_start""",
-        [start, end, today],
-    )
-    timeline_dicts = [dict(zip(timeline_headers, row)) for row in timeline_rows]
-    add_shift_view(book.report, timeline_dicts, start, completed_through)
-    book.tables.append(ModelTable("TIMELINE", timeline_headers, timeline_rows))
-    book.definitions([
-        ("Observed gap", "Scheduled time minus unioned LILO/Agent Status evidence", "Correction candidate", "Activities cannot create the gap"),
-        ("Residual gap", "Observed gap minus unioned corrected Verint Activities", "Minutes still requiring review", "Overlap-safe"),
-        ("Start/End to inject", "Exact physical boundaries of one continuous residual interval", "Manual Verint entry", "Never rounded and never bridges a real return to service"),
-        ("Current-day tail", "Future portion of an unfinished shift", "No action", "Never early leave"),
-        ("Correction ID", "Stable detected-gap lineage key", "Audit and reconciliation", "One correction may have several residual segments"),
-        ("Segment ID", "Stable exact residual-interval key", "Trace one injection row", "Changes only when its physical residual interval changes"),
-    ])
-    book.audit(_audit_rows(
-        conn, config, "corrections", start, end,
-        (("Completed-date cutoff", completed_through, "Today is excluded from correction review"),),
-    ))
-    return _finish(book, partial, target)
-
-
 def build_attendance_corrections_workbook(
     conn: DatabaseConnection,
     config: Config,
@@ -2920,7 +2805,7 @@ def build_attendance_corrections_workbook(
 ) -> Path:
     """Build the editable, exact-gap Attendance Review decision ledger."""
 
-    from .shift_view import add_shift_view
+    from .shift_view import add_review_board
 
     today = date.today()
     completed_through = min(end, today - timedelta(days=1))
@@ -2980,64 +2865,31 @@ def build_attendance_corrections_workbook(
         [
             f"Every completed date from {start:%Y-%m-%d} through {completed_through:%Y-%m-%d} is included; today is excluded.",
             "Agent Status is the primary evidence. LILO fills missing coverage and acts as a control; extracts are never edited.",
-            "Each Gap ID owns one exact start/end interval. Edit only the five blue decision columns in DECISIONS.",
+            "Each Gap ID owns one exact start/end interval. Edit only the five blue decision columns in REVIEW BOARD.",
             "Approved uses the selected rulebook category; Dismissed counts as no loss; Open remains unverified.",
             "Import this same workbook from the Attendance Review menu to recalculate absence and shrinkage.",
-            "SHIFT_VIEW is a readable visual of the evidence; DECISIONS holds the exact auditable timestamps.",
+            "The colored full-shift timeline sits on the same row as its exact gap and decision; it is visual support, never a replacement for the timestamps.",
         ],
+        sheet_name="CONTROL",
     )
     headers, rows = _query(
         conn,
         """SELECT c.correction_id AS gap_id, c.business_date, c.agent_id,
-                  c.agent_name, c.team_leader, c.ops_manager, c.lob,
+                  c.agent_name, c.team_leader, c.lob,
                   c.detected_issue, c.gap_start AS exact_start,
                   c.gap_end AS exact_end, c.gap_minutes AS minutes,
-                  a.actual_evidence, c.observed_source, c.source_file,
                   c.suggested_activity,
                   c.confirmed_activity AS decision_category,
                   c.validation_status AS decision_status,
                   c.owner AS reviewed_by, c.comment,
                   c.injected_date AS reviewed_date
            FROM mart.correction_candidate c
-           LEFT JOIN mart.attendance_agent_day a
-             ON a.business_date=c.business_date AND a.agent_id=c.agent_id
            WHERE c.business_date BETWEEN ? AND ? AND c.business_date<?
              AND c.gap_start IS NOT NULL AND c.gap_end IS NOT NULL
            ORDER BY c.business_date, c.priority, c.gap_minutes DESC,
                     c.agent_id, c.gap_start""",
         [start, end, today],
     )
-    editable = {
-        "Decision Category", "Decision Status", "Reviewed By", "Comment",
-        "Reviewed Date",
-    }
-    decision_sheet = book.table(
-        "DECISIONS", "Exact attendance-gap decisions",
-        "Immutable evidence is white. Complete only the blue columns, save, then import this workbook in WFM Hub.",
-        headers, rows, editable_headers=editable,
-    )
-    if rows:
-        decision_column = headers.index("decision_category")
-        status_column = headers.index("decision_status")
-        reviewed_date_column = headers.index("reviewed_date")
-        choices = list(dict.fromkeys(
-            rule.patterns[0] for rule in rulebook.activity_rules
-            if rule.category not in {"OFF"}
-        ))
-        decision_sheet.data_validation(
-            4, decision_column, 3 + len(rows), decision_column,
-            {"validate": "list", "source": choices},
-        )
-        decision_sheet.data_validation(
-            4, status_column, 3 + len(rows), status_column,
-            {"validate": "list", "source": ["Open", "Approved", "Dismissed"]},
-        )
-        decision_sheet.data_validation(
-            4, reviewed_date_column, 3 + len(rows), reviewed_date_column,
-            {"validate": "date", "criteria": "between",
-             "minimum": date(2020, 1, 1), "maximum": date(2100, 12, 31)},
-        )
-
     timeline_headers, timeline_rows = _query(
         conn,
         """SELECT business_date, agent_id, agent_name, team_leader,
@@ -3055,17 +2907,52 @@ def build_attendance_corrections_workbook(
            ORDER BY business_date, agent_id, segment_start""",
         [start, end, today],
     )
-    add_shift_view(
-        book.report, [dict(zip(timeline_headers, row)) for row in timeline_rows],
-        start, completed_through,
+    choices = list(dict.fromkeys(
+        rule.patterns[0] for rule in rulebook.activity_rules
+        if rule.category not in {"OFF"}
+    ))
+    add_review_board(
+        book.report, headers, rows,
+        [dict(zip(timeline_headers, row)) for row in timeline_rows],
+        start, completed_through, choices,
     )
-    book.tables.append(ModelTable("TIMELINE", timeline_headers, timeline_rows))
+    book.tables.append(ModelTable("REVIEW BOARD", headers, rows))
+    ledger_headers, ledger_rows = _query(
+        conn,
+        """SELECT c.correction_id AS gap_id, c.business_date, c.agent_id,
+                  c.agent_name, c.detected_issue, c.gap_start AS exact_start,
+                  c.gap_end AS exact_end, c.gap_minutes AS minutes,
+                  coalesce(a.validation_status, 'Open') AS decision_status,
+                  a.confirmed_activity AS decision_category,
+                  a.owner AS reviewed_by, a.comment,
+                  a.injected_date AS reviewed_date, a.updated_at,
+                  a.imported_from
+           FROM mart.correction_candidate c
+           LEFT JOIN core.correction_action a
+             ON a.correction_id=c.correction_id
+           WHERE c.business_date BETWEEN ? AND ? AND c.business_date<?
+             AND c.gap_start IS NOT NULL AND c.gap_end IS NOT NULL
+           ORDER BY c.business_date, c.agent_id, c.gap_start""",
+        [start, end, today],
+    )
+    book.table(
+        "DECISION LEDGER", "Internal decision ledger snapshot",
+        "Read-only decisions already stored in WFM Hub. Make new edits only in REVIEW BOARD, then import that same workbook.",
+        ledger_headers, ledger_rows,
+    )
+    book.table(
+        "EVIDENCE", "Exact attendance evidence",
+        "Exact schedule and observed segments behind every colored REVIEW BOARD cell. The 15-minute visual never changes these boundaries.",
+        timeline_headers, timeline_rows,
+    )
     book.definitions([
         ("Exact gap", "One continuous scheduled interval without accepted working evidence", "Human review unit", "Never rounded or merged across a return"),
         ("Gap ID", "Stable date/agent/start/end/issue key", "Safe import key", "Edited timestamps are never trusted on import"),
         ("Approved", "The reviewer accepts the gap and assigns a rulebook category", "Calculates absence/shrinkage flags", "Category is mandatory"),
         ("Dismissed", "The detected gap should not count as loss", "Removes it from absence/shrinkage", "Comment recommended"),
         ("Open", "No final human decision exists", "Unverified minutes", "Never silently treated as absence or zero"),
+        ("Logged", "Observed working, auxiliary, break or lunch evidence according to its separate color", "Visual shift context", "Exact raw state remains in EVIDENCE"),
+        ("Gap", "Scheduled interval without accepted working evidence", "Review candidate", "The exact start/end at the left remain authoritative"),
         ("Current-day tail", "Unfinished part of today's shift", "No review row", "Never classified as early leave"),
     ])
     lookup = book.report.workbook.add_worksheet("_LOOKUPS")

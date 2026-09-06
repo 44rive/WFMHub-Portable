@@ -17,6 +17,7 @@ from wfmhub.models import (
 )
 from wfmhub.rules import load_rulebook
 from wfmhub.service_flash import (
+    _attendance_pulse,
     _flash_cards,
     _flash_columns,
     _hourly_model,
@@ -31,6 +32,68 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class CallServiceModelTests(unittest.TestCase):
+    def test_attendance_pulse_counts_only_reliable_current_gaps(self):
+        raw = sqlite3.connect(
+            ":memory:",
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+        )
+        conn = DatabaseConnection(raw)
+        conn.execute(
+            """CREATE TABLE mart.attendance_agent_day (
+                   business_date DATE, agent_id VARCHAR, agent_name VARCHAR,
+                   team_leader VARCHAR, ops_manager VARCHAR, lob VARCHAR,
+                   language VARCHAR, scheduled_start TIMESTAMP,
+                   scheduled_end TIMESTAMP, assignment_type VARCHAR,
+                   attendance_result VARCHAR, call_action VARCHAR,
+                   requires_call BOOLEAN, actual_first_seen TIMESTAMP,
+                   actual_last_seen TIMESTAMP, uncoded_late_minutes INTEGER,
+                   actual_evidence VARCHAR, source_loaded BOOLEAN,
+                   is_provisional BOOLEAN, evaluation_as_of TIMESTAMP
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE mart.shift_timeline_segment (
+                   business_date DATE, agent_id VARCHAR, lob VARCHAR,
+                   segment_start TIMESTAMP, segment_end TIMESTAMP,
+                   planned_state VARCHAR, actual_category VARCHAR,
+                   mismatch_type VARCHAR, is_gap BOOLEAN,
+                   observed_source VARCHAR
+               )"""
+        )
+        report_day = date(2026, 9, 6)
+        start, end = datetime(2026, 9, 6, 8), datetime(2026, 9, 6, 16)
+        checkpoint = datetime(2026, 9, 6, 12)
+        conn.executemany(
+            "INSERT INTO mart.attendance_agent_day VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (report_day, "present", "Present Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Late - shift in progress", "CALL_LATE", True, start, checkpoint, 10, "AGENT_STATUS", True, True, checkpoint),
+                (report_day, "absent", "Absent Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Shift in progress", "NONE", False, start, checkpoint, 0, "AGENT_STATUS", True, True, checkpoint),
+                (report_day, "unknown", "Unknown Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Data not loaded", "NONE", False, None, None, 0, "NONE", False, True, checkpoint),
+                (report_day, "pto", "PTO Agent", "TL", "OM", "RSA NL", "NL", start, end, "Planned absence", "Planned absence", "NONE", False, None, None, 0, "PTO", True, False, checkpoint),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO mart.shift_timeline_segment VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [
+                (report_day, "present", "RSA NL", start, checkpoint, "WORK", "Productive", "MATCH", False, "AGENT_STATUS"),
+                (report_day, "absent", "RSA NL", datetime(2026, 9, 6, 11), checkpoint, "WORK", "Logged Off", "GAP", True, "AGENT_STATUS"),
+            ],
+        )
+        profile = load_service_profiles(
+            REPO, REPO / "config" / "default_service_profiles.toml",
+        ).select("rsa_nl", report_day)
+        rows, summary = _attendance_pulse(conn, profile, report_day, 11)
+        by_agent = {row["agent_id"]: row for row in rows}
+        self.assertNotIn("pto", by_agent)
+        self.assertEqual(summary["scheduled_now"], 3)
+        self.assertEqual(summary["present_now"], 1)
+        self.assertEqual(summary["absence_hc"], 1)
+        self.assertEqual(summary["unknown_now"], 1)
+        self.assertEqual(summary["late_today"], 1)
+        self.assertEqual(summary["call_now"], 2)
+        self.assertEqual(by_agent["absent"]["pulse_action"], "CHECK_CURRENT_GAP")
+        conn.close()
+
     def test_storm_screenshot_arithmetic_is_reproduced(self):
         catalog = load_metric_catalog(
             REPO, REPO / "config" / "default_metrics.toml",
@@ -185,22 +248,21 @@ class CallServiceModelTests(unittest.TestCase):
         }
         headers, _, _, _, _ = _flash_columns(profile, [blank])
         self.assertEqual(headers, [
-            "Hour", "Volume Forecasted", "Volume Ford", "Volume Chery",
-            "Volume Toyota", "SL Ford", "SL Chery", "SL Toyota",
+            "Hour", "Volume Forecasted", "Volume Variance", "Volume Ford",
+            "Volume Chery", "Volume Toyota", "SL Ford", "SL Chery", "SL Toyota",
             "Routed Rate Ford", "Routed Rate Chery", "Routed Rate Toyota", "AHT",
-            "Planned HC", "Short Sickness", "Long Sickness",
-            "Late/Early Leave", "Absence HC", "Absence Rate",
+            "ABS HC",
         ])
         cards = _flash_cards(
             profile,
             {"availability": 0.8, "service_level": 0.6,
              "service_method": "gross_30", "forecast_attainment": 0.5},
             blank["groups"],
-            [blank],
+            {"absence_hc": 1},
         )
         self.assertEqual([card[0] for card in cards], [
             "Routed Rate OEM", "SLA OEM", "SLA Ford", "SLA Chery",
-            "SLA Toyota", "Deviation", "AHT", "LOB Absence Rate",
+            "SLA Toyota", "Deviation", "Volume Variance", "AHT", "ABS HC",
         ])
         ford_cards = _flash_cards(
             ford_nl,
@@ -209,11 +271,11 @@ class CallServiceModelTests(unittest.TestCase):
              "availability": 8 / 9, "service_level": 7 / 9,
              "service_method": "storm_custom_30", "aht_seconds": 200},
             {},
-            [blank],
+            {"absence_hc": 1},
         )
         self.assertEqual([card[0] for card in ford_cards], [
             "Forecast", "Actual", "Handled", "Handled in SL", "Deviation",
-            "Routed Rate", "TSL", "AHT", "LOB Absence Rate",
+            "Volume Variance", "Routed Rate", "TSL", "AHT", "ABS HC",
         ])
 
     def test_forecast_only_hour_has_no_attainment_instead_of_crashing(self):
@@ -246,6 +308,13 @@ class CallServiceModelTests(unittest.TestCase):
                    business_date DATE, lob VARCHAR, agent_id VARCHAR,
                    category VARCHAR, event_start TIMESTAMP,
                    event_end TIMESTAMP, counts_as_absence BOOLEAN
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE mart.shift_timeline_segment (
+                   business_date DATE, lob VARCHAR, agent_id VARCHAR,
+                   segment_start TIMESTAMP, segment_end TIMESTAMP,
+                   is_gap BOOLEAN
                )"""
         )
         report_day = date(2026, 9, 5)

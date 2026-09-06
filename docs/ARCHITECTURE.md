@@ -127,9 +127,11 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `corrections` | `Reports/Attendance Review.xlsx` | Selected-period completed-day exact gaps, human decisions, and shift visualization |
 | `absence` | `Reports/Final Absenteeism.xlsx` | Reviewed attendance-decision absence/shrinkage ledger |
 
-Products share the same visual identity but use purpose-specific layouts. The
-Service Flashes begins with `CONTROL` and four purpose-built Flash sheets;
-Attendance Review uses editable `DECISIONS` and visual `SHIFT_VIEW`; Attendance Callout remains an action list. Legacy `operations` and
+Products share the same visual identity but use purpose-specific layouts.
+Service Flashes begins with `CONTROL` and four purpose-built Flash sheets, then
+adds one reconcilable `ATTENDANCE PULSE` and exact `QUEUE DIAGNOSIS`.
+Attendance Review uses one editable visual `REVIEW BOARD`, a read-only internal
+`DECISION LEDGER`, and exact `EVIDENCE`. Attendance Callout remains an action list. Legacy `operations` and
 `quality_pcs` builders remain callable under `_system/legacy_reports` but are
 absent from the menu.
 

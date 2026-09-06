@@ -97,8 +97,8 @@ Power Query setup used by shared PCS and Absenteeism files.
 `Reports\Service Flashes.xlsx` reconstructs the four visual references in
 `TOLEARN\Book1.xlsx` as safe native Excel sheets: RSA NL, RSA BE, Ford NL, and
 Ford OEM France. One control page links to every Flash; `FLASH_DATA`,
-`QUEUE_MAP`, `EXCEPTIONS`, `DEFINITIONS`, and the hidden audit sheet provide the
-evidence behind the presentation.
+`ATTENDANCE PULSE`, `QUEUE DIAGNOSIS`, `QUEUE_MAP`, `EXCEPTIONS`, `DEFINITIONS`,
+and the hidden audit sheet provide the evidence behind the presentation.
 
 Actual demand comes from exact queues in `queue_mapping.csv`. WFMHub counts each
 mapped inbound queue entry, matching Storm `Total Entered`; outbound companion
@@ -117,8 +117,11 @@ entered - lost calls from 5 to 30 seconds)`; AHT is weighted handled seconds per
 routed queue entry. The threshold clock is total queue wait plus ringing.
 
 Every Flash displays the full 00:00-23:00 day and the same service-summary
-controls. Hourly absence context comes from the profile's configured staffing
-LOB; it is never fabricated at individual queue level.
+controls. `Volume Variance` is actual minus forecast. `ABS HC` is the only
+attendance measure on the Flash; Scheduled Now, Present Now, Call Now and Late
+Today reconcile in `ATTENDANCE PULSE`. Hourly absence context comes from the
+profile's configured staffing LOB and is never fabricated at queue level.
+`QUEUE DIAGNOSIS` shows which exact configured queues drive a target miss.
 
 Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in
@@ -158,11 +161,13 @@ the exact operating steps.
 ## Attendance decisions and shared absenteeism
 
 `Reports\Attendance Review.xlsx` is the auditable decision input. Build it for
-the required completed dates, edit only the five blue columns on `DECISIONS`,
+the required completed dates, edit only the five blue columns on `REVIEW BOARD`,
 save it, then choose **Attendance Review > Import completed decisions**. Gap ID
 anchors the exact immutable start/end interval in SQLite; edited evidence is
 never trusted. Approved rows use the selected rulebook category, Dismissed rows
-count as no loss, and Open rows stay unverified.
+count as no loss, and Open rows stay unverified. The full-shift 15-minute visual
+is on that same row. `EVIDENCE` retains the exact source segments and `DECISION
+LEDGER` shows what is already stored inside the Hub.
 
 `Reports\Final Absenteeism.xlsx` follows the same long-lived-file principle.
 `TEAM_VIEW` filters agent results and review cases; `COMPONENT_VIEW` explains

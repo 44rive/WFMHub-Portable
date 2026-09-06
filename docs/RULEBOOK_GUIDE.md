@@ -57,7 +57,7 @@ minute is not counted twice inside one category metric.
 
 ## Add a decision category
 
-1. Decide the plain-language value reviewers should choose in `DECISIONS`.
+1. Decide the plain-language value reviewers should choose in `REVIEW BOARD`.
 2. Use that exact wording as the first pattern.
 3. Add a specific rule above broad Production rules.
 4. Choose the flags with the payroll/process owner.

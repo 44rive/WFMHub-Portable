@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.19.0 — 2026-09-06
+
+- Turned Service Flashes into a combined same-day service and lightweight
+  attendance control without changing the validated Storm queue allowlists or
+  `C / (A + B - D)` calculation.
+- Reduced Flash attendance to one operational `ABS HC` measure and added a
+  reconcilable `ATTENDANCE PULSE` with Scheduled Now, Present Now, Call Now,
+  Late Today and the agent call list from the same governed attendance mart.
+- Added absolute Volume Variance (`actual - forecast`) and `QUEUE DIAGNOSIS`
+  with exact per-queue A/B/C/D counters, target gap, delay/loss driver and
+  approximate contacts required to target.
+- Replaced separate Attendance Review decisions and Shift View sheets with one
+  editable visual `REVIEW BOARD`: every exact Gap ID, immutable start/end,
+  whole-shift color timeline and human decision now sit on the same row.
+- Added read-only `DECISION LEDGER` and exact `EVIDENCE` sheets. The reviewed
+  workbook imports back into WFM Hub; no Verint correction output is generated.
+- Kept legacy `DECISIONS` workbooks import-compatible while making `REVIEW
+  BOARD` the current contract, and expanded regression coverage for both new
+  workbooks.
+
 ## 0.18.5 — 2026-09-06
 
 - Expanded every Flash hourly table to the complete 00:00-23:00 day while

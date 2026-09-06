@@ -17,13 +17,19 @@ become an early leave.
 1. Refresh Attendance sources.
 2. Open **Operational > Attendance Review > Build or rebuild**.
 3. Open `Reports\Attendance Review.xlsx`.
-4. On `DECISIONS`, edit only Decision Category, Decision Status, Reviewed By,
+4. On `REVIEW BOARD`, edit only Decision Category, Decision Status, Reviewed By,
    Comment, and Reviewed Date.
 5. Use `Approved` when the interval and category are correct.
 6. Use `Dismissed` when the detected interval must count as no loss.
 7. Leave it `Open` when it is not decided.
 8. Save and close Excel.
 9. Choose **Attendance Review > Import completed decisions**.
+
+The same row shows the agent's whole shift in a simple visual: Logged, Break,
+Lunch, Gap, PTO/Away, or Unknown. The colored cells are a 15-minute reading aid;
+the Exact Start and Exact End fields remain the decision boundary. `EVIDENCE`
+keeps every exact source segment, while `DECISION LEDGER` is the read-only
+snapshot already persisted in WFM Hub.
 
 The import is atomic: one invalid or stale row rejects the whole file. Gap ID
 retrieves the authoritative date, agent, start and end from SQLite. Changing a

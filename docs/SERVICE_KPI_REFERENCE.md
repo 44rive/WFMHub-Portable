@@ -32,6 +32,7 @@ The reports use the Storm dashboard business reference:
   within SLA, and D is lost from 5 seconds to the SLA target
 - Routed Rate = answered / total entered
 - Deviation = total entered / forecast
+- Volume Variance = total entered - forecast
 - AHT = handled seconds / answered
 
 Because `total entered = A + B`, the implemented TSL denominator is
@@ -66,7 +67,16 @@ No queue is admitted by substring, suffix, designation or inferred LOB. A
 mapped Call-by-Call queue that is absent from the exact profile allowlist stays
 out of that Flash.
 
-Every Flash also shows hourly planned HC, short sickness, long sickness,
-late/early-leave HC, absence HC and absence rate for its configured staffing
-LOB. Absence is not attributed to individual service queues because the source
-evidence does not provide that relationship.
+Every Flash shows only `ABS HC` as lightweight attendance context. It is the
+distinct scheduled HC in a reliable attendance gap at the shown checkpoint or
+hour. PTO/Away and missing evidence are not counted as absent. `ATTENDANCE
+PULSE` uses the same governed agent/day rows as Attendance Callouts and lists
+Scheduled Now, Present Now, Call Now and Late Today so the numbers reconcile.
+Exact correction and final absence treatment remain in Attendance Review.
+
+`QUEUE DIAGNOSIS` exposes the exact A/B/C/D counters per configured queue. It
+shows the queue's target gap, late connected calls, lost calls remaining in the
+denominator, and the minimum additional within-SLA contacts needed to reach
+target if every new contact is good. This is a
+diagnostic view only; it cannot change Flash membership or the validated Storm
+formula.

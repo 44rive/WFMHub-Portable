@@ -131,16 +131,18 @@ Ford Netherlands, and Ford OEM France. Choose the end date you want to send;
 that date is the visible Flash day. The selected start date remains in the
 audit boundary but does not turn a daily Flash into a multi-day total.
 
-Call-by-Call supplies the actual service figures. The queue map decides which
-calls belong to each Flash. WFMHub counts one customer interaction once even
-when it has transfer legs. An abandoned call is still demand even though it has
-no Agent ID. Verint supplies forecast only.
+Call-by-Call supplies the actual service figures. The exact Flash queue list
+decides which queue entries belong to each Flash. A transfer entering another
+displayed queue is a second queue entry, matching Storm Total Entered. An
+abandoned call is still demand even though it has no Agent ID. Verint supplies
+forecast only.
 
 Open `CONTROL`, then click a Flash name. Each Flash shows hourly forecast,
-actual, handled, handled in target, service level, availability, and weighted
-AHT through the latest actual hour. Blank evidence stays blank. Use
-`EXCEPTIONS` to review missing forecast, missing mapped demand, or below-target
-hours; use `QUEUE_MAP` to see the exact included queues.
+actual, absolute volume variance, handled, handled in target, service level,
+availability, weighted AHT and `ABS HC` through the latest actual hour. Blank
+evidence stays blank. Use `ATTENDANCE PULSE` for the matching present/call/late
+list, `QUEUE DIAGNOSIS` for the queues driving TSL, `EXCEPTIONS` for missing or
+below-target hours, and `QUEUE_MAP` for exact membership.
 
 Service availability is `handled / offered`. It is not agent availability.
 The `Deviation` label follows Book1 and means `actual offered / forecast`.
@@ -171,11 +173,12 @@ excluded so an unfinished shift can never become an early-leave correction.
 WFMHub compares schedule with Agent Status first and uses LILO as fallback and
 control evidence.
 
-1. Open `DECISIONS`.
+1. Open `REVIEW BOARD`.
 2. Each row is one exact continuous interval. White evidence cells are not
    imported; edit only the five blue decision cells.
 3. Choose `Approved` plus a category, `Dismissed`, or leave `Open`.
-4. Use `SHIFT_VIEW` when you need to verify the full-shift visual.
+4. Read the colored full-shift timeline on that same row: green is Logged,
+   amber is Break/Lunch, and red is Gap. Use `EVIDENCE` for exact raw segments.
 5. Save and close the workbook.
 6. In WFMHub choose **Attendance Review > Import completed decisions**.
 

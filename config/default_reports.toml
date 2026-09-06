@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.12"
+version = "2026.09.13"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
@@ -23,7 +23,7 @@ key = "service"
 title = "SERVICE FLASHES"
 purpose = "Email-ready RSA and OEM daily service control from mapped Call-by-Call interactions and Verint forecast."
 finding_domains = ["service", "forecast", "data_quality"]
-sheets = ["CONTROL", "Flash RSA NL", "Flash RSA BE", "Flash Ford NL", "Flash OEM", "FLASH_DATA", "QUEUE_MAP", "EXCEPTIONS", "DEFINITIONS", "_AUDIT"]
+sheets = ["CONTROL", "Flash RSA NL", "Flash RSA BE", "Flash Ford NL", "Flash OEM", "FLASH_DATA", "ATTENDANCE PULSE", "QUEUE DIAGNOSIS", "QUEUE_MAP", "EXCEPTIONS", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "realisations"
@@ -51,7 +51,7 @@ key = "corrections"
 title = "ATTENDANCE REVIEW"
 purpose = "Completed-day exact gaps, editable human decisions and full-shift evidence."
 finding_domains = ["attendance", "data_quality"]
-sheets = ["DASHBOARD", "DECISIONS", "SHIFT_VIEW", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
+sheets = ["CONTROL", "REVIEW BOARD", "DECISION LEDGER", "EVIDENCE", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
 
 [[packs]]
 key = "absence"
