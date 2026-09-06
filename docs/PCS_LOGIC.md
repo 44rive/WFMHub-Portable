@@ -37,13 +37,16 @@ external link:
 
 - every valid inbound Q1 `<=3` creates one coaching opportunity;
 - each opportunity is identified by the stable deduplicated call-leg key;
-- `Actions Rate = completed coaching opportunities / all coaching opportunities`;
+- `Actions Rate = unique completed Coaching Keys / all coaching opportunities`;
 - the TL fills Status, Coach, Coaching Date, Due Date and Comment in Excel;
-- when the current PCS report is regenerated, those editable values are read
-  from the previous workbook and carried forward by Coaching Key;
+- the shared tracker is created once and its coaching table is never regenerated
+  during normal PCS refreshes;
+- Power Query refreshes the separate opportunity queue; a new case is copied
+  into the permanent coaching table by Coaching Key;
 - coaching decisions are never imported into SQLite.
 
 `Not required` remains in the denominator and is not counted as completed.
+Duplicate Coaching Keys are highlighted and cannot increase the completed count.
 Low sample is an interpretation warning, not a coaching opportunity by itself.
 
 At team and month level, counters are summed first and the ratios are then

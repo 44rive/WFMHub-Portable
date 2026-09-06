@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import unittest
 import tempfile
+import shutil
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 from wfmhub.cli import SOURCE_GROUPS
+from wfmhub.config import ConfigError, load_config
 from wfmhub.report_packs import (
     IMPLEMENTED_REPORT_PACK_KEYS,
     REPORT_PACKS,
@@ -18,6 +20,30 @@ from wfmhub.report_packs import (
 
 
 class ReportPackTests(unittest.TestCase):
+    def test_pcs_tracker_window_is_configured_and_validated(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "config").mkdir()
+            for name in (
+                "default.toml", "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml",
+            ):
+                shutil.copy2(repo / "config" / name, root / "config" / name)
+            default = root / "config" / "default.toml"
+            config = load_config(root, default)
+            self.assertEqual(config.pcs_tracker.history_months, 13)
+            self.assertEqual(config.pcs_tracker.trend_days, 90)
+            invalid = root / "invalid.toml"
+            invalid.write_text(
+                default.read_text(encoding="utf-8").replace(
+                    "history_months = 13", "history_months = 1",
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ConfigError):
+                load_config(root, invalid)
+
     def test_service_refresh_group_includes_flash_actual_and_forecast_sources(self):
         self.assertEqual(
             SOURCE_GROUPS["service"],
@@ -35,6 +61,7 @@ class ReportPackTests(unittest.TestCase):
         self.assertTrue(all(REPORT_PACKS[key].implemented for key in IMPLEMENTED_REPORT_PACK_KEYS))
         self.assertFalse(REPORT_PACKS["intraday"].implemented)
         self.assertEqual(REPORT_PACKS["pcs"].default_folder, "pcs")
+        self.assertEqual(REPORT_PACKS["pcs"].current_filename, "PCS Operational Tracker.xlsx")
         self.assertEqual(REPORT_PACKS["service"].default_folder, "service")
         self.assertEqual(REPORT_PACKS["realisations"].default_folder, "realisations")
         self.assertEqual(REPORT_PACKS["attendance"].default_folder, "attendance")

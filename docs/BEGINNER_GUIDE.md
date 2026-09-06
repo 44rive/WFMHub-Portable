@@ -74,12 +74,13 @@ Reports\Realisations.xlsx
 Reports\Attendance Review.xlsx
 Reports\Final Absenteeism.xlsx
 Reports\Bonus Management.xlsx
-Reports\PCS Performance.xlsx
+Reports\PCS Operational Tracker.xlsx
 Reports\Analysis\...xlsx
 ```
 
-When a report is replaced, WFMHub first saves its previous version in
-`Reports\Archive`. You do not need to rename or move daily reports yourself.
+When a normal report is replaced, WFMHub first saves its previous version in
+`Reports\Archive`. PCS is different: its operational tracker is created once
+and preserved while only its feeds update.
 
 `Feed` is separate from `Reports`: each successful refresh updates the fixed
 PCS and Absenteeism CSV feeds there. Any other clean CSV/XLSX export appears
@@ -232,22 +233,21 @@ WFMHub hashes and reads the source without changing it. Scenario Payout remains
 separate from Released Payout. Absence must have one financial consequence—not
 an absence KPI plus a second hidden penalty.
 
-## PCS Performance
+## PCS Operational Tracker
 
-Choose **PCS Performance**, select the dates, and open the workbook. The first
-build gives you a complete working file. A one-time Power Query link to the
-fixed PCS feed is optional when the workbook will stay shared for a long time.
+Choose **PCS Operational Tracker**. The first run creates one complete workbook
+and the fixed clean feeds. Put that workbook in the agreed SharePoint/Teams
+location. Later PCS runs update only the feeds; they do not erase coaching.
 
 On `DASHBOARD`, choose Latest day, Current/Previous week, Current MTD,
 Previous-month same days, Previous full month, or Custom period. Then choose
 LOB, Team Leader, or Agent. The KPI cards, benchmark, and chart all recalculate
 from the included `PCS_DATA` table.
 
-Open `TEAM_VIEW` for the easiest TL workflow. Filter its normal Excel Table by
-LOB, Team Leader, or Agent. Latest day, current week, current MTD, previous MTD,
-movement, participation, sample, and coaching priority are already calculated.
-It does not use fragile spill formulas. `AGENT_RESULTS` remains the custom-period
-formula view.
+Open `TEAM_VIEW` for the easiest TL workflow. Select LOB, Team Leader, and Agent
+from left to right on `DASHBOARD`; the two result views follow automatically.
+The selector lists and result rows expand after Refresh All, including new
+agents. This requires Microsoft 365 desktop Excel.
 
 PCS formulas:
 
@@ -258,16 +258,16 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-For coaching, use `COACHING_QUEUE` to see all low-score opportunities. Work in
-`COACHING` and fill the five blue columns: status, coach, coaching date, due
-date, and comment. Save the workbook normally. When the Hub rebuilds the same
-closed workbook, those cells carry forward by Coaching Key.
+For coaching, use `TEAM_VIEW` or `COACHING_QUEUE` to see low-score
+opportunities. Copy a new case A:M to the next empty row in `COACHING`, then fill
+the five blue columns: status, coach, coaching date, due date, and comment. Save
+normally. WFMHub never rebuilds this permanent action log.
 
-The stable input is `Feed\PCS\PCS_AGENT_DAY_CURRENT.csv`. Agent ID is the real
-matching key; Agent Selector is only the friendly `Name [ID]` label. To keep one
-shared workbook permanently, connect that CSV once to `tblPcsData` with Power
-Query and use **Data > Refresh All** after each Hub refresh. Do not regenerate
-the PCS workbook while colleagues are editing it.
+The stable inputs are `PCS_AGENT_DAY_CURRENT.csv` and
+`PCS_COACHING_OPPORTUNITY_CURRENT.csv`. Agent ID is the employee key; Agent
+Selector is only `Name [ID]`; Coaching Key identifies the exact call. One owner
+uses the scripts shown on `SETUP` to connect both feeds once. Everybody else
+uses **Data > Refresh All** and works in the permanent workbook.
 
 Follow [EXCEL_REFRESH_GUIDE.md](EXCEL_REFRESH_GUIDE.md) for every click in the
 one-time PCS and Absenteeism setup.

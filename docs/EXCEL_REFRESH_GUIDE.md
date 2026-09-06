@@ -1,7 +1,7 @@
 # Excel refresh guide for shared PCS and Absenteeism files
 
-This setup is optional. Use it when one workbook must stay in Teams, SharePoint,
-or OneDrive while people add coaching or review notes.
+Use this setup when one workbook must stay in Teams, SharePoint, or OneDrive
+while people add coaching or review notes.
 
 The idea is simple:
 
@@ -11,50 +11,60 @@ The idea is simple:
 
 Do this once per shared workbook. Make a backup copy before starting.
 
-## PCS: connect the clean data
+## PCS: decide who refreshes
+
+The simplest production method is one named owner:
+
+1. Keep `PCS Operational Tracker.xlsx` in SharePoint or Teams for everybody.
+2. The owner opens it in desktop Excel on the WFM work machine.
+3. The owner uses the `LOCAL` scripts, clicks **Refresh All**, saves, and closes.
+4. Team leaders and Quality open the same shared file and update `COACHING`.
+
+They do not need WFMHub, Python, a database driver, or the source extracts.
+
+Use `SHAREPOINT` mode only when the two fixed CSV feeds are also copied or
+synced into one SharePoint folder after every Hub refresh. In that case, fill in
+the SharePoint URL and unique folder fragment on `SETUP`.
+
+## PCS: connect the clean data once
 
 1. Run **WFMHub > Refresh source data once > Agent PCS**.
-2. Confirm this file exists:
-   `Feed\PCS\PCS_AGENT_DAY_CURRENT.csv`.
-3. Open `Reports\PCS Performance.xlsx`.
-4. Open `PCS_DATA`, click inside the table, and note its name in **Table
-   Design > Table Name**: `tblPcsData`.
-5. Choose **Table Design > Convert to Range**, then confirm **Yes**.
-6. Delete the old data area from row 4 downward on `PCS_DATA`. Do not delete
-   the sheet.
-7. Choose **Data > Get Data > From File > From Text/CSV**.
-8. Select `PCS_AGENT_DAY_CURRENT.csv`, then choose **Transform Data**.
-9. In Power Query, click the `Date` column. Choose **Data Type > Date**.
-10. Choose **Home > Close & Load > Close & Load To...**.
-11. Choose **Table**, then **Existing worksheet** and select
-    `PCS_DATA!$A$4`.
-12. Click in the new table. In **Table Design > Table Name**, rename it exactly
-    to `tblPcsData`.
-13. Choose **Data > Queries & Connections**, right-click the query, choose
-    **Properties**, and clear **Enable background refresh**. This makes the
-    dashboard wait until the full file is loaded.
-14. Save the workbook.
+2. Open `Reports\PCS Operational Tracker.xlsx` in desktop Excel.
+3. Open `SETUP`. Leave **Connection Mode** as `LOCAL` for the simple owner
+   workflow. Confirm **Local Feed Folder** points to `Feed\PCS`.
+4. Open the file shown in **Local Data Script** using Notepad. Select all and
+   copy it.
+5. In Excel choose **Data > Get Data > From Other Sources > Blank Query**.
+6. In Power Query choose **Home > Advanced Editor**. Delete everything, paste
+   the script, and choose **Done**.
+7. Rename the query exactly `PCS_DATA`.
+8. Back in Excel open `PCS_DATA`, click inside the starter table, choose **Table
+   Design > Convert to Range**, and confirm **Yes**.
+9. Clear the old area from `A4` through `Z` downward. Keep the sheet itself.
+10. In **Queries & Connections**, right-click `PCS_DATA`, choose **Load To...**,
+    select **Table** and **Existing worksheet**, then choose `PCS_DATA!$A$4`.
+11. Click inside the new query table. Under **Table Design > Table Name** rename
+    it exactly `tblPcsData`.
+12. Right-click the query, choose **Properties**, and clear **Enable background
+    refresh**. Do not select **Add this data to the Data Model**.
 
 The Dashboard now follows the newest `Date` in `tblPcsData`. `Current week`
 means Monday through that newest date. LOB, Team Leader and Agent are combined
 as filters. If a combination has no data, set one or more boxes back to `All`.
 
-## PCS: connect new coaching opportunities
+## PCS: connect new coaching opportunities once
 
-1. Confirm this file exists:
-   `Feed\PCS\PCS_COACHING_OPPORTUNITY_CURRENT.csv`.
-2. Repeat the Power Query steps above on `COACHING_QUEUE`, loading at
-   `COACHING_QUEUE!$A$4`.
-3. Rename the query table exactly to `tblCoachingQueue`.
-4. Add one table column at the right named `Action Status`.
-5. In its first data row, enter:
-
-   ```excel
-   =IFERROR(XLOOKUP([@[Coaching Key]],tblCoaching[Coaching Key],tblCoaching[Coaching Status]),"Not started")
-   ```
-
-   Excel fills the formula down the column.
-6. For a new case, copy columns A:M from `COACHING_QUEUE` into the next empty
+1. Open the file shown in `SETUP` under **Local Coaching Script**.
+2. Repeat the Blank Query and Advanced Editor steps above.
+3. Rename this query exactly `COACHING_QUEUE`.
+4. On the worksheet `COACHING_QUEUE`, convert the starter table to a range and
+   clear `A4:M` downward.
+5. Load the query as a Table to existing cell `COACHING_QUEUE!$A$4`.
+6. Rename the new query table exactly `tblCoachingQueue`.
+7. Clear **Enable background refresh** and do not add it to the Data Model.
+8. Click **Refresh All**. If both queries succeed, set **Power Query Installed**
+   to `YES` on `SETUP`, save, and close the workbook.
+9. For a new case, copy columns A:M from `COACHING_QUEUE` into the next empty
    row of `COACHING`. Fill only the five blue columns there.
 
 `COACHING` is the team’s permanent action log. Power Query must never load into
@@ -128,5 +138,7 @@ correct agent and day.
   choose them again from left to right.
 - **Someone is editing:** do not replace the workbook. Refresh only the query,
   and use a personal Sheet View before applying table filters.
-- **A new agent is missing from PCS TEAM_VIEW:** build PCS once while the shared
-  workbook is closed. Existing coaching fields carry forward by Coaching Key.
+- **A new agent is missing from PCS TEAM_VIEW:** reset LOB, Team Leader, and
+  Agent to `All`, then choose **Data > Refresh All**. Do not rebuild the tracker.
+- **Formula shows `_xlfn` or `#NAME?`:** open the file in current Microsoft 365
+  desktop Excel; the selector views use LET, FILTER, MAP, and dynamic arrays.

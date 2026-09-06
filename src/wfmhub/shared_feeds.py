@@ -17,6 +17,24 @@ from typing import Any, Iterable, Sequence
 from .config import Config
 from .database import DatabaseConnection
 from .metrics import load_metric_catalog
+from .rules import load_rulebook
+
+
+PCS_FEED_SCHEMA_VERSION = "2"
+PCS_AGENT_DAY_HEADERS = (
+    "LOB", "Team Leader", "Agent Selector", "Agent ID", "Agent", "Date",
+    "Ops Manager", "Language", "Inbound Call Legs", "PCS Status 1",
+    "Q1 Nonblank", "Valid Q1", "Q1 Score Sum", "PCS Average",
+    "Participation Rate", "Score <= 3", "Score > 3", "Invalid Q1",
+    "Sample State", "Agent Day Key", "Data Through", "Feed Refreshed At",
+    "PCS Rule Version", "PCS Rule SHA-256", "Metric Catalog Version",
+    "Metric Catalog SHA-256",
+)
+PCS_COACHING_HEADERS = (
+    "LOB", "Team Leader", "Agent Selector", "Agent", "Agent ID",
+    "Priority", "Date", "Call Start", "Q1 Score", "Customer Comment",
+    "Call Reference Number", "Language", "Coaching Key",
+)
 
 
 @dataclass(frozen=True)
@@ -67,6 +85,19 @@ def _atomic_csv(path: Path, headers: Sequence[str], rows: Iterable[Sequence[Any]
     return count
 
 
+def _atomic_text(path: Path, content: str) -> None:
+    """Replace a small instruction asset without exposing a partial file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(f".{path.name}.partial")
+    try:
+        partial.write_text(content.rstrip() + "\n", encoding="utf-8")
+        partial.replace(path)
+    except Exception:
+        partial.unlink(missing_ok=True)
+        raise
+
+
 def _available_period(
     conn: DatabaseConnection,
     table: str,
@@ -94,19 +125,108 @@ def _manifest(
     start: date,
     end: date,
     counts: Sequence[tuple[str, int]],
+    *,
+    schema_version: str = "1",
+    extra: Sequence[tuple[Any, Any, Any]] = (),
 ) -> Path:
     path = folder / f"{family.upper()}_MANIFEST_CURRENT.csv"
     now = datetime.now()
     rows: list[tuple[Any, ...]] = [
         ("Feed family", family.upper(), "Business report feed"),
-        ("Schema version", "1", "Workbook compatibility"),
+        ("Schema version", schema_version, "Workbook compatibility"),
         ("Data from", start, "Earliest included business date"),
         ("Data through", end, "Latest included business date"),
         ("Last refreshed", now, "Local work-machine time"),
     ]
+    rows.extend(extra)
     rows.extend(("Rows", count, name) for name, count in counts)
     _atomic_csv(path, ("Item", "Value", "Details"), rows)
     return path
+
+
+def _power_query_script(
+    *,
+    filename: str,
+    headers: Sequence[str],
+    types: Sequence[tuple[str, str]],
+    sharepoint: bool,
+) -> str:
+    """Return copy-ready M for the two deliberately simple PCS queries."""
+
+    required = ", ".join(f'"{value}"' for value in headers)
+    type_rows = ",\n            ".join(f'{{"{name}", {kind}}}' for name, kind in types)
+    if sharepoint:
+        source = f'''    SiteUrl = Setting("SharePoint Site URL"),
+    FeedFolder = Text.Lower(Text.Replace(Setting("SharePoint Feed Folder"), "\\", "/")),
+    Files = SharePoint.Files(SiteUrl, [ApiVersion = 15]),
+    Matches = Table.SelectRows(Files, each [Name] = "{filename}" and Text.Contains(Text.Lower(Text.Replace([Folder Path], "\\", "/")), FeedFolder)),
+    Checked = if Table.RowCount(Matches) = 1 then Matches{{0}}[Content] else error Error.Record("PCS feed", "Expected exactly one {filename} in the configured SharePoint folder", [Matches = Table.RowCount(Matches)]),
+    Csv = Csv.Document(Checked, [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),'''
+    else:
+        source = f'''    FeedFolder = Setting("Local Feed Folder"),
+    FilePath = FeedFolder & (if Text.EndsWith(FeedFolder, "\\") then "" else "\\") & "{filename}",
+    Csv = Csv.Document(File.Contents(FilePath), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),'''
+    return f'''// WFMHub PCS schema {PCS_FEED_SCHEMA_VERSION}
+// Excel: Data > Get Data > Blank Query > Advanced Editor. Replace everything with this script.
+let
+    Setup = Excel.CurrentWorkbook(){{[Name="tblSetup"]}}[Content],
+    Setting = (Name as text) as text =>
+        let
+            Matches = Table.SelectRows(Setup, each Text.From([Setting]) = Name),
+            Result = if Table.RowCount(Matches) = 1 then Text.Trim(Text.From(Matches{{0}}[Value])) else error Error.Record("PCS setup", "Missing or duplicate SETUP row", [Setting = Name])
+        in
+            Result,
+{source}
+    Promoted = Table.PromoteHeaders(Csv, [PromoteAllScalars = true]),
+    Required = {{{required}}},
+    Missing = List.Difference(Required, Table.ColumnNames(Promoted)),
+    CheckedColumns = if List.IsEmpty(Missing) then Promoted else error Error.Record("PCS feed schema", "Missing required columns", [Missing = Text.Combine(Missing, ", ")]),
+    Typed = Table.TransformColumnTypes(CheckedColumns, {{
+            {type_rows}
+        }}, "en-US")
+in
+    Typed'''
+
+
+def _publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
+    data_types = (
+        ("LOB", "type text"), ("Team Leader", "type text"),
+        ("Agent Selector", "type text"), ("Agent ID", "type text"),
+        ("Agent", "type text"), ("Date", "type date"),
+        ("Ops Manager", "type text"), ("Language", "type text"),
+        ("Inbound Call Legs", "Int64.Type"), ("PCS Status 1", "Int64.Type"),
+        ("Q1 Nonblank", "Int64.Type"), ("Valid Q1", "Int64.Type"),
+        ("Q1 Score Sum", "type number"), ("PCS Average", "type number"),
+        ("Participation Rate", "type number"), ("Score <= 3", "Int64.Type"),
+        ("Score > 3", "Int64.Type"), ("Invalid Q1", "Int64.Type"),
+        ("Sample State", "type text"), ("Agent Day Key", "type text"),
+        ("Data Through", "type date"), ("Feed Refreshed At", "type datetime"),
+        ("PCS Rule Version", "type text"), ("PCS Rule SHA-256", "type text"),
+        ("Metric Catalog Version", "type text"), ("Metric Catalog SHA-256", "type text"),
+    )
+    queue_types = (
+        ("LOB", "type text"), ("Team Leader", "type text"),
+        ("Agent Selector", "type text"), ("Agent", "type text"),
+        ("Agent ID", "type text"), ("Priority", "type text"),
+        ("Date", "type date"), ("Call Start", "type datetime"),
+        ("Q1 Score", "type number"), ("Customer Comment", "type text"),
+        ("Call Reference Number", "type text"), ("Language", "type text"),
+        ("Coaching Key", "type text"),
+    )
+    specifications = (
+        ("POWER_QUERY_PCS_DATA_SHAREPOINT.txt", "PCS_AGENT_DAY_CURRENT.csv", PCS_AGENT_DAY_HEADERS, data_types, True),
+        ("POWER_QUERY_COACHING_QUEUE_SHAREPOINT.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types, True),
+        ("POWER_QUERY_PCS_DATA_LOCAL.txt", "PCS_AGENT_DAY_CURRENT.csv", PCS_AGENT_DAY_HEADERS, data_types, False),
+        ("POWER_QUERY_COACHING_QUEUE_LOCAL.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types, False),
+    )
+    paths = []
+    for script_name, filename, headers, types, sharepoint in specifications:
+        path = folder / script_name
+        _atomic_text(path, _power_query_script(
+            filename=filename, headers=headers, types=types, sharepoint=sharepoint,
+        ))
+        paths.append(path)
+    return tuple(paths)
 
 
 def publish_pcs_feeds(
@@ -125,8 +245,10 @@ def publish_pcs_feeds(
     counts: list[tuple[str, int]] = []
 
     metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
+    rulebook = load_rulebook(config.home, config.business_rules)
     method = metric_catalog.method_for("pcs_average", end, {})
     minimum_sample = int(method.minimum_sample) if method is not None else 1
+    refreshed = datetime.now()
     _query_headers, rows = _rows(
         conn,
         """SELECT lob, team_leader,
@@ -136,21 +258,18 @@ def publish_pcs_feeds(
                   survey_responses, pcs_score_sum, pcs_average,
                   pcs_participation_rate, low_score_responses,
                   top_box_responses, pcs_invalid_responses,
-                  CASE WHEN survey_responses<? THEN 'LOW_SAMPLE' ELSE 'OK' END
+                  CASE WHEN survey_responses<? THEN 'LOW_SAMPLE' ELSE 'OK' END,
+                  agent_id || '|' || business_date, ?, ?, ?, ?, ?, ?
            FROM mart.agent_pcs_day
            WHERE business_date BETWEEN ? AND ?
            ORDER BY business_date, lob, team_leader, agent_name, agent_id""",
-        (minimum_sample, start, end),
+        (
+            minimum_sample, end, refreshed, rulebook.version, rulebook.sha256,
+            metric_catalog.version, metric_catalog.sha256, start, end,
+        ),
     )
-    headers = [
-        "LOB", "Team Leader", "Agent Selector", "Agent ID", "Agent", "Date",
-        "Ops Manager", "Language", "Inbound Call Legs", "PCS Status 1",
-        "Q1 Nonblank", "Valid Q1", "Q1 Score Sum", "PCS Average",
-        "Participation Rate", "Score <= 3", "Score > 3", "Invalid Q1",
-        "Sample State",
-    ]
     path = folder / "PCS_AGENT_DAY_CURRENT.csv"
-    counts.append((path.name, _atomic_csv(path, headers, rows)))
+    counts.append((path.name, _atomic_csv(path, PCS_AGENT_DAY_HEADERS, rows)))
     files.append(path)
 
     primary = config.pcs.primary_score_question
@@ -175,13 +294,8 @@ def publish_pcs_feeds(
                      coalesce(d.canonical_name,c.agent_name), c.call_start""",
         (start, end, config.pcs.negative_score_maximum),
     )
-    headers = [
-        "LOB", "Team Leader", "Agent Selector", "Agent", "Agent ID",
-        "Priority", "Date", "Call Start", "Q1 Score", "Customer Comment",
-        "Call Reference Number", "Language", "Coaching Key",
-    ]
     path = folder / "PCS_COACHING_OPPORTUNITY_CURRENT.csv"
-    counts.append((path.name, _atomic_csv(path, headers, rows)))
+    counts.append((path.name, _atomic_csv(path, PCS_COACHING_HEADERS, rows)))
     files.append(path)
 
     _query_headers, rows = _rows(
@@ -198,7 +312,15 @@ def publish_pcs_feeds(
     path = folder / "PCS_SCOPE_CURRENT.csv"
     counts.append((path.name, _atomic_csv(path, headers, rows)))
     files.append(path)
-    files.append(_manifest(folder, "PCS", start, end, counts))
+    files.extend(_publish_pcs_power_query_scripts(folder))
+    files.append(_manifest(
+        folder, "PCS", start, end, counts,
+        schema_version=PCS_FEED_SCHEMA_VERSION,
+        extra=(
+            ("PCS rule version", rulebook.version, rulebook.sha256),
+            ("Metric catalog version", metric_catalog.version, metric_catalog.sha256),
+        ),
+    ))
     return SharedFeedResult("PCS", tuple(files), sum(count for _, count in counts))
 
 

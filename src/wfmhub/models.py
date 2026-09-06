@@ -3283,11 +3283,13 @@ def refresh_models(
         stage(13, "Building intraday actual and forecast")
         forecast, actual = _build_intraday(conn, start, end, mapping, metric_catalog)
         stage(14, "Building exact PCS counters")
-        # PCS management always needs current MTD and the previous full month,
-        # even when the user asks for Today or Current Week. Other operational
-        # marts retain the exact selected boundary.
-        previous_month_end = end.replace(day=1) - timedelta(days=1)
-        pcs_start = min(start, previous_month_end.replace(day=1))
+        # The permanent PCS tracker needs a stable rolling history even when
+        # the operator refreshes Today or Current Week.  Keep the boundary in
+        # configuration so the workbook never owns business-data retention.
+        month_index = end.year * 12 + end.month - 1
+        first_index = month_index - (config.pcs_tracker.history_months - 1)
+        history_start = date(first_index // 12, first_index % 12 + 1, 1)
+        pcs_start = min(start, history_start)
         pcs = _build_pcs(conn, config, metric_catalog, pcs_start, end)
         stage(15, "Building observed absence and shrinkage")
         absence, absence_events = _build_absence(

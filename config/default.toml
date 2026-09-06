@@ -60,6 +60,14 @@ forecast = true
 pcs = true
 absence = true
 
+[pcs_tracker]
+# The permanent shared tracker keeps this many complete calendar months in its
+# refreshable agent/day feed. Two months is the minimum for MTD comparison.
+history_months = 13
+# Dashboard trend length. This limits Excel formula work without limiting the
+# selectable history retained in PCS_DATA.
+trend_days = 90
+
 [report]
 max_attendance_rows = 100000
 max_gap_rows = 100000

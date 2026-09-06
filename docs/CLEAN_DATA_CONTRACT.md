@@ -39,6 +39,13 @@ when StartEndTimes is missing.
 | `mart.forecast_hour` | Date/hour/mapped scope | Flash and Realisations comparison |
 | `mart.agent_pcs_day` | Agent/day | PCS result and participation |
 
+The stable PCS sharing contract is `Feed\PCS\PCS_AGENT_DAY_CURRENT.csv` at one
+row per Agent ID/day plus `PCS_COACHING_OPPORTUNITY_CURRENT.csv` at one row per
+low-score call. Feed schema 2 includes Agent Day Key, data-through and refresh
+timestamps, and rule/metric-catalog version plus SHA-256 lineage. Files are
+written to a partial path and renamed only when complete. Power Query may move
+these rows into Excel; it does not calculate the KPI.
+
 Legacy-named exports remain callable so existing jobs do not break.
 `yesterday_gap_actions` covers the entire selected completed period, not only
 yesterday. `mart.verint_final_absence_*` is currently a compatibility projection

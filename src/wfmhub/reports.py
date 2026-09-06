@@ -97,6 +97,7 @@ def _display_header(name: str) -> str:
         "Kpi": "KPI", "Qm": "QM", "Voc": "VOC", "Fte": "FTE",
         "Pto": "PTO", "Mtd": "MTD", "Rta": "RTA", "Asa": "ASA",
         "Sl": "SL", "Tsl": "TSL", "Hc": "HC", "Iso": "ISO",
+        "Sha-256": "SHA-256",
     }
     return " ".join(acronyms.get(word, word) for word in title.split())
 

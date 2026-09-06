@@ -118,7 +118,7 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 
 | Pack | Current file | Scope |
 |---|---|---|
-| `pcs` | `Reports/PCS Performance.xlsx` | Selector-driven PCS performance and coaching workbook |
+| `pcs` | `Reports/PCS Operational Tracker.xlsx` | Permanent refreshable PCS performance and coaching workbook |
 | `bonus` | `Reports/Bonus Management.xlsx` | Imported Bonus Matrix result and release controls |
 | `service` | `Reports/RTM Daily Control.xlsx` | Same-day service, attendance call actions, and queue drivers for RSA NL/BE and Ford NL/OEM |
 | `realisations` | `Reports/Realisations.xlsx` | All mapped LOB actual/forecast, service, staffing, absence and shrinkage results |
@@ -142,15 +142,19 @@ spells and never revives adherence. Standalone Attendance Callout, legacy
 `operations`, and legacy `quality_pcs` remain callable under
 `_system/legacy_reports` but are absent from the menu.
 
-PCS is generated directly from SQLite. `PCS_DATA`, `COACHING_QUEUE` and
-`COACHING` are ordinary visible Excel Tables. Dashboard selectors use Excel
-`SUMPRODUCT`; `TEAM_VIEW` is a conventional, filterable Excel Table with
-Python-calculated latest-day, current-week, current-MTD and previous-MTD
-results. It deliberately uses no spill arrays or `_xlfn` functions. Users may
-still add Table slicers manually. A first build needs no Excel
-connection. For one long-lived shared file, the user may link the two
-replaceable PCS tables to fixed CSV feeds with Power Query. `COACHING` remains
-the permanent editable log. No Data Model or ODBC driver is required.
+PCS has a deliberate split lifecycle. SQLite and Python calculate a configurable
+rolling month history and atomically publish the versioned agent/day and
+coaching-opportunity feeds. WFMHub creates `PCS Operational Tracker.xlsx` only
+when it does not exist; later PCS runs preserve it byte-for-byte. Power Query is
+transport only and replaces `tblPcsData` and `tblCoachingQueue`. `tblCoaching`
+is the permanent editable record under SharePoint version history and is never
+a query target.
+
+Dashboard ratios use additive counters in `SUMPRODUCT`. Microsoft 365 dynamic
+arrays drive cascading selectors, `TEAM_VIEW`, `AGENT_RESULTS`, and rolling
+trends, so new dates and agents appear without rebuilding. The shipped workbook
+works as an initial snapshot before connection setup. No Data Model or ODBC
+driver is required.
 
 Final Absenteeism uses the same collaboration boundary. Power Query may replace
 `tblAbsenceData`, `tblActionQueue`, and `tblActivityDetail` from stable CSVs;

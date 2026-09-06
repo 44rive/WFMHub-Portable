@@ -63,7 +63,7 @@ def ensure_report_catalog(home: Path, target: Path | None = None) -> Path:
             current_meta, default_meta = {}, {}
         current_version = str(current_meta.get("version", ""))
         default_version = str(default_meta.get("version", ""))
-        if (current_version, default_version) in {
+        known_migrations = {
             ("2026.09.3", "2026.09.4"),
             ("2026.09.4", "2026.09.5"),
             ("2026.09.5", "2026.09.6"),
@@ -148,7 +148,12 @@ def ensure_report_catalog(home: Path, target: Path | None = None) -> Path:
             ("2026.09.5", "2026.09.17"),
             ("2026.09.4", "2026.09.17"),
             ("2026.09.3", "2026.09.17"),
-        }:
+        }
+        known_migrations.update(
+            (f"2026.09.{version}", "2026.09.18")
+            for version in range(3, 18)
+        )
+        if (current_version, default_version) in known_migrations:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             safe_version = default_version.replace(".", "_")
             shutil.copy2(target, target.with_name(f"{target.stem}_pre_{safe_version}_{stamp}{target.suffix}"))

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.21.0 — 2026-09-06
+
+- Promoted PCS to Operational as one permanent SharePoint-ready tracker. After
+  the first build, WFMHub refreshes its feeds and preserves the workbook and
+  coaching log byte-for-byte.
+- Added a configurable 13-month PCS history, 90-day rolling trend, cascading
+  LOB/Team Leader/Agent selectors, and refresh-aware team and agent views.
+- Added feed schema 2 with Agent Day Key, freshness, rule and metric-catalog
+  lineage, plus exact copy-ready SharePoint and local Power Query scripts.
+- Added beginner `SETUP` and `HELP` workflows. Power Query transports only
+  `PCS_DATA` and `COACHING_QUEUE`; no Data Model or ODBC driver is required.
+
 ## 0.20.3 — 2026-09-06
 
 - Added a short blank separator between every Schedule/Actual case on the

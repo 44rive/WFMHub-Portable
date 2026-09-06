@@ -65,9 +65,9 @@ REPORT_PACKS = {
     "pcs": ReportPack(
         key="pcs",
         default_folder="pcs",
-        filename_prefix="WFMHub_PCS_Performance",
-        current_filename="PCS Performance.xlsx",
-        purpose="Daily, MTD and prior-month PCS performance and participation.",
+        filename_prefix="WFMHub_PCS_Operational_Tracker",
+        current_filename="PCS Operational Tracker.xlsx",
+        purpose="Permanent refreshable PCS performance, participation and coaching tracker.",
     ),
     "bonus": ReportPack(
         key="bonus",

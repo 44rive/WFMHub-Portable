@@ -34,7 +34,7 @@ Technical files live under `_system`. You normally do not open that folder.
 | Attendance Review | Which exact completed-day gaps need an Approved or Dismissed human decision? |
 | Final Absenteeism | What do the reviewed decisions and PTO/Away registers produce for absence and shrinkage? |
 | Bonus Management | What did Bonus Matrix v1.2 calculate, and is it safe to release? |
-| PCS Performance | How are PCS, participation, low scores, and coaching moving by date, month, LOB, team, and agent? |
+| PCS Operational Tracker | How are PCS, participation, low scores, and coaching moving by date, month, LOB, team, and agent? |
 
 The products use one visual identity but not one generic layout. RTM combines
 service and its matching LOB attendance list, Attendance Review is an exact-gap
@@ -140,35 +140,33 @@ Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in
 `config\metric_catalog.toml`.
 
-## PCS Performance
+## PCS Operational Tracker
 
-PCS is a normal Excel workbook with a clean `PCS_DATA` table, selector formulas,
-and a shared coaching action table. Refreshing source data also replaces three
-stable CSV feeds under `Feed\PCS`; the file names never change.
+PCS is one permanent shared Excel workbook. WFMHub creates it once and then
+updates fixed clean CSV feeds under `Feed\PCS`; it never overwrites the tracker
+or its coaching history on a normal PCS run.
 
-`Reports\PCS Performance.xlsx` contains:
+`Reports\PCS Operational Tracker.xlsx` contains:
 
 - selector boxes for latest day, current/previous week, current/previous month,
   custom dates, LOB, team leader, and Agent ID;
-- KPI cards that recalculate in desktop Excel from the included clean table;
-- an Excel-safe `TEAM_VIEW` with ready-calculated latest-day, current-week,
-  current-MTD and previous-MTD agent realizations;
-- a selector-driven trend and a ready-made `AGENT_RESULTS` realization list;
+- KPI cards that recalculate in Microsoft 365 from the refreshed clean table;
+- cascading LOB, Team Leader, and Agent lists;
+- dynamic `TEAM_VIEW` and `AGENT_RESULTS` realization lists that include new
+  agents after refresh without rebuilding the workbook;
 - a collaborative `COACHING` action plan and separate `COACHING_QUEUE`;
-- a visible `PCS_DATA` Excel Table at agent/day grain.
+- visible `PCS_DATA` at agent/day grain and a beginner `SETUP` sheet.
 
 Choose values in the boxes on `DASHBOARD`. To add native slicers manually,
 click inside `PCS_DATA`, `COACHING_QUEUE`, or `COACHING`, then choose **Table
 Design > Insert Slicer**. The team fills the five blue coaching columns and
-saves the shared workbook. Use a personal Sheet View before filtering. When the
-report is rebuilt while closed, action fields carry forward by Coaching Key.
+saves the shared workbook. Use a personal Sheet View before filtering.
 
-For a long-lived team file, make a one-time Power Query from
-`Feed\PCS\PCS_AGENT_DAY_CURRENT.csv` into the existing `tblPcsData` table. After
-that, **Data > Refresh All** updates the dashboard without replacing coaching
-work. The Dashboard and existing `AGENT_RESULTS` rows recalculate from the
-refreshed table. Regenerate the workbook when the roster gains new agents;
-saved coaching fields carry forward by Coaching Key. The `HELP` sheet gives
+One owner completes the one-time Power Query connection using the exact Local
+or SharePoint scripts generated beside the feeds. After that, the team uses
+**Data > Refresh All**. Power Query replaces only `PCS_DATA` and
+`COACHING_QUEUE`; it must never load into `COACHING`. No Data Model, ODBC driver,
+or daily workbook generation is involved. The `SETUP` and `HELP` sheets give
 the exact operating steps.
 
 ## Attendance decisions and shared absenteeism

@@ -915,6 +915,12 @@ class EndToEndTests(unittest.TestCase):
                 pcs_edit.save(focused_pcs_report)
                 pcs_edit.close()
                 self.assertEqual(conn.execute("SELECT count(*) FROM core.pcs_coaching_action").fetchone()[0], 0)
+                preserved_tracker = focused_pcs_report.read_bytes()
+                self.assertEqual(
+                    build_report_pack("pcs", conn, config, model.start, model.end),
+                    focused_pcs_report,
+                )
+                self.assertEqual(focused_pcs_report.read_bytes(), preserved_tracker)
 
             self.assertTrue(report.exists())
             workbook = load_workbook(report, read_only=True, data_only=True)
@@ -993,23 +999,21 @@ class EndToEndTests(unittest.TestCase):
                 attendance_book.close()
             focused_pcs_book = load_workbook(focused_pcs_report, read_only=False, data_only=False)
             try:
+                self.assertEqual(focused_pcs_report.name, "PCS Operational Tracker.xlsx")
                 self.assertEqual(focused_pcs_book.sheetnames, [
                     "DASHBOARD", "TEAM_VIEW", "AGENT_RESULTS", "COACHING",
-                    "COACHING_QUEUE", "PCS_DATA", "HELP", "DEFINITIONS",
+                    "COACHING_QUEUE", "PCS_DATA", "SETUP", "HELP", "DEFINITIONS",
                     "_LOOKUPS", "_AUDIT",
                 ])
                 self.assertIn("SUMPRODUCT", focused_pcs_book["DASHBOARD"]["A11"].value)
                 self.assertIn("tblPcsData", focused_pcs_book["PCS_DATA"].tables)
                 self.assertIn("tblCoaching", focused_pcs_book["COACHING"].tables)
                 self.assertIn("tblCoachingQueue", focused_pcs_book["COACHING_QUEUE"].tables)
-                self.assertIn("tblPcsData", focused_pcs_book["AGENT_RESULTS"]["I5"].value)
-                self.assertIn("tblTeamView", focused_pcs_book["TEAM_VIEW"].tables)
-                self.assertFalse(any(
-                    hasattr(cell.value, "text")
-                    for sheet in focused_pcs_book.worksheets
-                    for row in sheet.iter_rows()
-                    for cell in row
-                ))
+                self.assertIn("tblSetup", focused_pcs_book["SETUP"].tables)
+                agent_formula = focused_pcs_book["AGENT_RESULTS"]["A5"].value
+                self.assertIn("tblPcsData", getattr(agent_formula, "text", str(agent_formula)))
+                team_formula = focused_pcs_book["TEAM_VIEW"]["A11"].value
+                self.assertIn("tblPcsData", getattr(team_formula, "text", str(team_formula)))
                 self.assertEqual(focused_pcs_book["_LOOKUPS"].sheet_state, "hidden")
                 pcs_table_headers = [cell.value for cell in focused_pcs_book["PCS_DATA"][4]]
                 defined = {
@@ -1017,6 +1021,16 @@ class EndToEndTests(unittest.TestCase):
                     for item in focused_pcs_book.defined_names.values()
                 }
                 self.assertIn("Current week", defined["PCS_From"])
+                self.assertIn("#", defined["PCS_LOB_LIST"])
+                setup_values = {
+                    row[0]: row[1]
+                    for row in focused_pcs_book["SETUP"].iter_rows(min_row=5, values_only=True)
+                    if row[0]
+                }
+                self.assertEqual(setup_values["Power Query Installed"], "NO")
+                self.assertIn("Agent Day Key", pcs_table_headers)
+                self.assertIn("Feed Refreshed At", pcs_table_headers)
+                self.assertIn("PCS Rule SHA-256", pcs_table_headers)
             finally:
                 focused_pcs_book.close()
             service_book = load_workbook(service_report, read_only=False, data_only=False)
@@ -1098,6 +1112,19 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(
                     next(csv.reader(handle)),
                     pcs_table_headers,
+                )
+            for script in (
+                "POWER_QUERY_PCS_DATA_SHAREPOINT.txt",
+                "POWER_QUERY_COACHING_QUEUE_SHAREPOINT.txt",
+                "POWER_QUERY_PCS_DATA_LOCAL.txt",
+                "POWER_QUERY_COACHING_QUEUE_LOCAL.txt",
+            ):
+                text = (home / "Feed" / "PCS" / script).read_text(encoding="utf-8")
+                self.assertIn("tblSetup", text)
+                self.assertIn("Table.TransformColumnTypes", text)
+                self.assertIn(
+                    "SharePoint.Files" if "SHAREPOINT" in script else "File.Contents",
+                    text,
                 )
             with absence_feed.open("r", encoding="utf-8-sig", newline="") as handle:
                 self.assertEqual(

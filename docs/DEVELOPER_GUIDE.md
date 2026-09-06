@@ -123,12 +123,17 @@ builder must create the exact ordered sheets declared in
 `default_reports.toml` and keep `_AUDIT` hidden. Do not add raw extract tables
 to workbooks.
 
-PCS is a normal generated report. Keep its `PCS_DATA` and `COACHING` sheets as
-real Excel Tables because the dashboard formulas and optional native Table
-slicers depend on their stable column names. The generated workbook must work
-without a connection. A user may optionally connect `PCS_DATA` and
-`COACHING_QUEUE` to the fixed CSV feeds with Power Query for a long-lived team
-file; do not require a Data Model or ODBC driver.
+PCS is a build-once operational tracker. The default builder must always publish
+the fixed feeds first, then return an existing `PCS Operational Tracker.xlsx`
+without changing a byte. An explicit output path remains a diagnostic snapshot.
+Keep `PCS_DATA`, `COACHING_QUEUE`, `COACHING`, and `SETUP` as real Excel Tables:
+Power Query may replace only the first two, while the third is the permanent
+collaborative record. Do not require a Data Model or ODBC driver.
+
+The PCS agent/day feed schema and copy-ready M scripts are centralized in
+`shared_feeds.py`. Schema changes require a feed-schema increment, workbook
+contract migration, documentation, and a preservation test. Dashboard formulas
+must calculate ratios from summed counters, not from averaged daily ratios.
 
 Call-by-call uses a stable deterministic leg key. Full-history extracts may
 overlap, so `core.clean_call_leg` chooses the newest active row at that key.

@@ -40,6 +40,12 @@ class PCSSettings:
 
 
 @dataclass(frozen=True)
+class PCSTrackerSettings:
+    history_months: int
+    trend_days: int
+
+
+@dataclass(frozen=True)
 class Config:
     home: Path
     file: Path
@@ -65,6 +71,7 @@ class Config:
     period_end: date | None
     rules: Rules
     pcs: PCSSettings
+    pcs_tracker: PCSTrackerSettings
     modules: dict[str, bool]
     report_limits: dict[str, int]
     report_packs: dict[str, str]
@@ -291,6 +298,10 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
             top_box_minimum=float(raw.get("pcs", {}).get("top_box_minimum", 4)),
             low_score_maximum=float(raw.get("pcs", {}).get("low_score_maximum", 2)),
         ),
+        pcs_tracker=PCSTrackerSettings(
+            history_months=int(raw.get("pcs_tracker", {}).get("history_months", 13)),
+            trend_days=int(raw.get("pcs_tracker", {}).get("trend_days", 90)),
+        ),
         modules={"pcs": True, "absence": True, **{str(k): bool(v) for k, v in raw.get("modules", {}).items()}},
         report_limits={str(k): int(v) for k, v in raw.get("report", {}).items()},
         report_packs={
@@ -335,6 +346,10 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         raise ConfigError("pcs.allowed_scores must stay inside the configured score range")
     if not cfg.pcs.minimum_score <= cfg.pcs.negative_score_maximum < cfg.pcs.maximum_score:
         raise ConfigError("pcs.negative_score_maximum must be inside the configured score range")
+    if not 2 <= cfg.pcs_tracker.history_months <= 60:
+        raise ConfigError("pcs_tracker.history_months must be between 2 and 60")
+    if not 14 <= cfg.pcs_tracker.trend_days <= 366:
+        raise ConfigError("pcs_tracker.trend_days must be between 14 and 366")
     if cfg.database.suffix.lower() == ".duckdb":
         raise ConfigError(
             "This corporate-compatible release uses SQLite. Change paths.database "
