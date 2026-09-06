@@ -38,7 +38,7 @@ from .ui import clear_screen, render_dashboard
 SOURCE_GROUPS = {
     "all": None,
     "operations": {"fte", "schedule", "lilo", "agent_status"},
-    "service": {"fte", "calls", "forecast"},
+    "service": {"fte", "schedule", "lilo", "agent_status", "calls", "forecast"},
     # Command-line compatibility for older shortcuts.  No AP source is loaded.
     "intraday": {"fte", "calls", "forecast"},
     "pcs": {"fte", "calls"},
@@ -135,7 +135,7 @@ def refresh(
     home: Path,
     start: date | None,
     end: date | None,
-    packs: tuple[str, ...] = ("attendance",),
+    packs: tuple[str, ...] = ("service",),
     source_group: str = "all",
     use_config_period: bool = True,
     service_profile: str | None = None,
@@ -659,7 +659,7 @@ def _choose_source_group() -> str:
     print("\nDATA TO REFRESH")
     print("1. All sources")
     print("2. Attendance/absence: FTE, Verint schedule, LILO and Agent Status")
-    print("3. Service flashes: Call by Call, queue mapping and Verint Forecast")
+    print("3. RTM Daily Control: attendance, Call by Call and Verint Forecast")
     print("4. Agent PCS: FTE and Call by Call")
     choice = input("Choose 1-4: ").strip()
     try:
@@ -796,49 +796,46 @@ def menu(home: Path) -> int:
         print("\n  UPDATE")
         print("    [1] Refresh source data once")
         print("\n  OPERATIONAL")
-        print("    [2] Attendance Callout")
-        print("    [3] Service Flashes")
-        print("    [4] Attendance Review")
+        print("    [2] RTM Daily Control")
+        print("    [3] Attendance Review")
         print("\n  ANALYZE")
-        print("    [5] Analyze a period")
-        print("    [6] Export clean data")
+        print("    [4] Analyze a period")
+        print("    [5] Export clean data")
         print("\n  IN DEVELOPMENT")
-        print("    [7] Staffing")
-        print("    [8] Realisations")
-        print("    [9] Final Absenteeism")
-        print("   [10] Bonus")
-        print("   [11] PCS")
+        print("    [6] Staffing")
+        print("    [7] Realisations")
+        print("    [8] Final Absenteeism")
+        print("    [9] Bonus")
+        print("   [10] PCS")
         print("\n  SETTINGS")
-        print("   [12] System and advanced tools")
-        print("   [13] Exit")
-        choice = input("\n  Choose 1-13: ").strip()
+        print("   [11] System and advanced tools")
+        print("   [12] Exit")
+        choice = input("\n  Choose 1-12: ").strip()
         try:
             if choice == "1":
                 group = _choose_source_group()
                 start, end, use_config = _choose_period()
                 refresh(home, start, end, (), group, use_config)
             elif choice == "2":
-                _build_menu_product(home, "attendance")
-            elif choice == "3":
                 _build_menu_product(home, "service")
-            elif choice == "4":
+            elif choice == "3":
                 _attendance_review_menu(home)
-            elif choice == "5":
+            elif choice == "4":
                 domain, comparison = _choose_analysis()
                 start, end, use_config = _choose_period()
                 analyze_period(home, domain, start, end, comparison, use_config_period=use_config)
-            elif choice == "6":
+            elif choice == "5":
                 dataset = _choose_dataset()
                 start, end, use_config = _choose_period()
                 file_format = input("Format CSV or XLSX [CSV]: ").strip().lower() or "csv"
                 export_clean(home, dataset, start, end, file_format, use_config_period=use_config)
-            elif choice == "7":
+            elif choice == "6":
                 _build_menu_product(home, "staffing")
-            elif choice == "8":
+            elif choice == "7":
                 _build_menu_product(home, "realisations")
-            elif choice == "9":
+            elif choice == "8":
                 _build_menu_product(home, "absence")
-            elif choice == "10":
+            elif choice == "9":
                 print("\nBONUS MANAGEMENT")
                 print("1. Import Bonus Matrix v1.2, then build")
                 print("2. Build from the already imported matrix")
@@ -849,14 +846,14 @@ def menu(home: Path) -> int:
                 elif bonus_choice != "2":
                     raise ValueError("Please choose 1 or 2")
                 _build_menu_product(home, "bonus")
-            elif choice == "11":
+            elif choice == "10":
                 _build_menu_product(home, "pcs")
-            elif choice == "12":
+            elif choice == "11":
                 _advanced_menu(home)
-            elif choice == "13":
+            elif choice == "12":
                 return 0
             else:
-                print("Please choose a number from 1 to 13.")
+                print("Please choose a number from 1 to 12.")
         except Exception as exc:
             print(f"\nERROR: {exc}")
             print("Nothing was changed in your extract files. Check the latest file in logs.")
@@ -931,7 +928,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "setup":
             return setup(home, args.source_root, args.non_interactive)
         if args.command == "refresh":
-            packs = () if args.no_report else IMPLEMENTED_REPORT_PACK_KEYS if args.all_packs else tuple(args.pack or ["attendance"])
+            packs = () if args.no_report else IMPLEMENTED_REPORT_PACK_KEYS if args.all_packs else tuple(args.pack or ["service"])
             return refresh(home, args.start, args.end, packs, args.source_group, service_profile=args.service_profile)
         if args.command == "report":
             return report_only(home, args.start, args.end, args.output, args.pack, service_profile=args.service_profile)

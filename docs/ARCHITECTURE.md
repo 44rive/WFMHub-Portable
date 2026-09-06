@@ -120,19 +120,21 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 |---|---|---|
 | `pcs` | `Reports/PCS Performance.xlsx` | Selector-driven PCS performance and coaching workbook |
 | `bonus` | `Reports/Bonus Management.xlsx` | Imported Bonus Matrix result and release controls |
-| `service` | `Reports/Service Flashes.xlsx` | RSA NL/BE and Ford NL/OEM daily mapped-call service control |
+| `service` | `Reports/RTM Daily Control.xlsx` | Same-day service, attendance call actions, and queue drivers for RSA NL/BE and Ford NL/OEM |
 | `realisations` | `Reports/Realisations.xlsx` | All mapped LOB actual/forecast, service, staffing, absence and shrinkage results |
 | `staffing` | `Reports/Staffing Gaps.xlsx` | Full-period actual staffing control and future capacity planning |
-| `attendance` | `Reports/Attendance Callout.xlsx` | No-show/late/not-seen contact queue |
+| `attendance` | `_system/legacy_reports/Legacy Attendance Callout.xlsx` | Compatibility-only callout builder; absent from the normal menu |
 | `corrections` | `Reports/Attendance Review.xlsx` | Selected-period completed-day exact gaps, human decisions, and shift visualization |
 | `absence` | `Reports/Final Absenteeism.xlsx` | Reviewed attendance-decision absence/shrinkage ledger |
 
 Products share the same visual identity but use purpose-specific layouts.
-Service Flashes begins with `CONTROL` and four purpose-built Flash sheets, then
-adds one reconcilable `ATTENDANCE PULSE` and exact `QUEUE DIAGNOSIS`.
-Attendance Review uses one editable visual `REVIEW BOARD`, a read-only internal
-`DECISION LEDGER`, and exact `EVIDENCE`. Attendance Callout remains an action list. Legacy `operations` and
-`quality_pcs` builders remain callable under `_system/legacy_reports` but are
+RTM Daily Control begins with `CONTROL`, then provides four purpose-built LOB
+sheets. Each LOB combines the validated hourly service view with its own
+reconciling attendance/call list. `ISSUES & DRIVERS` replaces the separate
+exceptions and queue-diagnosis surfaces. Attendance Review uses one editable
+visual `REVIEW BOARD`; its stored `DECISION LEDGER` and exact `EVIDENCE` are
+hidden audit support. Standalone Attendance Callout, legacy `operations`, and
+legacy `quality_pcs` remain callable under `_system/legacy_reports` but are
 absent from the menu.
 
 PCS is generated directly from SQLite. `PCS_DATA`, `COACHING_QUEUE` and

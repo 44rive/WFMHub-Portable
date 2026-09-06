@@ -248,10 +248,10 @@ class CallServiceModelTests(unittest.TestCase):
         }
         headers, _, _, _, _ = _flash_columns(profile, [blank])
         self.assertEqual(headers, [
-            "Hour", "Volume Forecasted", "Volume Variance", "Volume Ford",
-            "Volume Chery", "Volume Toyota", "SL Ford", "SL Chery", "SL Toyota",
-            "Routed Rate Ford", "Routed Rate Chery", "Routed Rate Toyota", "AHT",
-            "ABS HC",
+            "Hour", "Forecast", "Actual", "Variance", "Ford Volume",
+            "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
+            "TSL Chery", "TSL Toyota", "Routed Rate", "AHT", "ABS HC",
+            "Data State",
         ])
         cards = _flash_cards(
             profile,
@@ -261,8 +261,7 @@ class CallServiceModelTests(unittest.TestCase):
             {"absence_hc": 1},
         )
         self.assertEqual([card[0] for card in cards], [
-            "Routed Rate OEM", "SLA OEM", "SLA Ford", "SLA Chery",
-            "SLA Toyota", "Deviation", "Volume Variance", "AHT", "ABS HC",
+            "TSL", "Routed Rate", "Actual", "Forecast", "ABS HC", "Call Now",
         ])
         ford_cards = _flash_cards(
             ford_nl,
@@ -274,8 +273,7 @@ class CallServiceModelTests(unittest.TestCase):
             {"absence_hc": 1},
         )
         self.assertEqual([card[0] for card in ford_cards], [
-            "Forecast", "Actual", "Handled", "Handled in SL", "Deviation",
-            "Volume Variance", "Routed Rate", "TSL", "AHT", "ABS HC",
+            "TSL", "Routed Rate", "Actual", "Forecast", "ABS HC", "Call Now",
         ])
 
     def test_forecast_only_hour_has_no_attainment_instead_of_crashing(self):

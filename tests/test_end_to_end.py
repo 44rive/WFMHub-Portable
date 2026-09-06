@@ -868,6 +868,10 @@ class EndToEndTests(unittest.TestCase):
                     (datetime(2026, 8, 1, 12, 0), datetime(2026, 8, 1, 13, 0)),
                     exact_intervals,
                 )
+                self.assertEqual(
+                    corrections_book["DECISION LEDGER"].sheet_state, "hidden",
+                )
+                self.assertEqual(corrections_book["EVIDENCE"].sheet_state, "hidden")
                 self.assertEqual(corrections_book["_AUDIT"].sheet_state, "hidden")
             finally:
                 corrections_book.close()
@@ -920,35 +924,46 @@ class EndToEndTests(unittest.TestCase):
                 focused_pcs_book.close()
             service_book = load_workbook(service_report, read_only=False, data_only=False)
             try:
-                self.assertEqual(service_report, home / "Reports" / "Service Flashes.xlsx")
+                self.assertEqual(service_report, home / "Reports" / "RTM Daily Control.xlsx")
                 self.assertEqual(service_book.sheetnames, [
-                    "CONTROL", "Flash RSA NL", "Flash RSA BE", "Flash Ford NL",
-                    "Flash OEM", "FLASH_DATA", "ATTENDANCE PULSE",
-                    "QUEUE DIAGNOSIS", "QUEUE_MAP", "EXCEPTIONS", "DEFINITIONS",
-                    "_AUDIT",
+                    "CONTROL", "RSA NL", "RSA BE", "FORD NL", "OEM",
+                    "ISSUES & DRIVERS", "DEFINITIONS", "_AUDIT",
                 ])
-                self.assertEqual(service_book["CONTROL"]["A1"].value, "SERVICE FLASH CONTROL")
+                self.assertEqual(service_book["CONTROL"]["A1"].value, "RTM DAILY CONTROL")
                 self.assertEqual(
-                    [cell.value for cell in service_book["Flash OEM"][11]][:14],
+                    [cell.value for cell in service_book["OEM"][11]][:15],
                     [
-                        "Hour", "Volume Forecasted", "Volume Variance", "Volume Ford",
-                        "Volume Chery", "Volume Toyota", "SL Ford", "SL Chery",
-                        "SL Toyota", "Routed Rate Ford", "Routed Rate Chery",
-                        "Routed Rate Toyota", "AHT", "ABS HC",
+                        "Hour", "Forecast", "Actual", "Variance", "Ford Volume",
+                        "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
+                        "TSL Chery", "TSL Toyota", "Routed Rate", "AHT",
+                        "ABS HC", "Data State",
                     ],
                 )
                 self.assertNotIn(
                     "Short Sickness",
-                    [cell.value for cell in service_book["Flash OEM"][11]],
+                    [cell.value for cell in service_book["OEM"][11]],
                 )
-                self.assertIn("Diagnosis", [cell.value for cell in service_book["QUEUE DIAGNOSIS"][4]])
-                self.assertIn("Call Now", [cell.value for cell in service_book["ATTENDANCE PULSE"][4]])
+                self.assertIn(
+                    "Issue Or Driver",
+                    [cell.value for cell in service_book["ISSUES & DRIVERS"][4]],
+                )
                 self.assertEqual(service_book.properties.creator, "Anass ASSRI")
                 self.assertEqual(len(service_book._external_links), 0)
                 self.assertGreaterEqual(len(service_book["CONTROL"]._charts), 1)
-                for sheet_name in ("Flash RSA NL", "Flash RSA BE", "Flash Ford NL", "Flash OEM"):
+                for sheet_name in ("RSA NL", "RSA BE", "FORD NL", "OEM"):
                     self.assertGreaterEqual(len(service_book[sheet_name]._charts), 1)
-                    self.assertTrue(service_book[sheet_name].tables)
+                    table_names = set(service_book[sheet_name].tables)
+                    self.assertTrue(any(name.startswith("tblRtm") for name in table_names))
+                    visible_values = {
+                        cell.value
+                        for row in service_book[sheet_name].iter_rows()
+                        for cell in row
+                        if cell.value is not None
+                    }
+                    self.assertIn("ATTENDANCE  /  SAME-DAY OPERATIONAL LIST", visible_values)
+                    self.assertIn("Agent ID", visible_values)
+                self.assertEqual(service_book["DEFINITIONS"].sheet_state, "hidden")
+                self.assertEqual(service_book["_AUDIT"].sheet_state, "hidden")
                 self.assertFalse(any(
                     isinstance(cell.value, str) and cell.value.startswith("=")
                     for sheet in service_book.worksheets

@@ -1,9 +1,7 @@
-"""Configuration-driven daily service flashes reconstructed from Book1."""
+"""Configuration-driven real-time management control workbook."""
 
 from __future__ import annotations
 
-import csv
-import math
 import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -14,7 +12,11 @@ from .config import Config
 from .database import DatabaseConnection
 from .mapping import QueueMapping, load_queue_mapping
 from .metrics import MetricCatalog, evaluate_metric, load_metric_catalog
-from .report_packs import publish_report, report_current_path
+from .report_packs import (
+    archive_superseded_reports,
+    publish_report,
+    report_current_path,
+)
 from .reports import COLORS
 from .rules import Rulebook, load_rulebook
 from .service_profiles import ServiceProfile, load_service_profiles
@@ -40,6 +42,17 @@ def _ratio(numerator: float | int | None, denominator: float | int | None) -> fl
     if numerator is None or denominator is None or float(denominator) == 0:
         return None
     return float(numerator) / float(denominator)
+
+
+def _rtm_sheet(profile: ServiceProfile) -> str:
+    """Keep the four operational tabs short without changing profile config."""
+
+    return {
+        "rsa_nl": "RSA NL",
+        "rsa_be": "RSA BE",
+        "ford_nl": "FORD NL",
+        "ford_oem_fr": "OEM",
+    }.get(profile.profile_id, profile.flash_sheet.replace("Flash ", "")[:31])
 
 
 def _profile_comparison_scopes(
@@ -258,9 +271,9 @@ def _attendance_pulse(
     report_day: date,
     cutoff: int | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Build one reconcilable same-day attendance pulse for a Flash.
+    """Build one reconcilable same-day attendance pulse for an RTM LOB.
 
-    The pulse uses the same mart as Attendance Callouts.  The full-shift
+    The pulse uses the governed attendance agent/day mart.  The full-shift
     timeline only supplies the agent's state at the checkpoint, so a temporary
     mid-shift gap is visible even when the agent logged back in later.
     """
@@ -321,7 +334,11 @@ def _attendance_pulse(
             if (_as_datetime(item.get("segment_start")) or state_checkpoint) <= state_checkpoint
             < (_as_datetime(item.get("segment_end")) or state_checkpoint)
         ), None)
-        state = "NOT SCHEDULED NOW"
+        state = (
+            "UPCOMING" if start and checkpoint < start
+            else "SHIFT COMPLETE" if end and checkpoint >= end
+            else "NOT SCHEDULED NOW"
+        )
         if scheduled_now:
             if current_segment is not None and bool(current_segment.get("is_gap")):
                 state = "ABSENT NOW"
@@ -357,6 +374,7 @@ def _attendance_pulse(
         })
     summary = {
         "checkpoint": checkpoint,
+        "agent_rows": len(pulse),
         "scheduled_now": sum(bool(row["scheduled_now"]) for row in pulse),
         "present_now": sum(bool(row["present_now"]) for row in pulse),
         "absence_hc": sum(bool(row["absence_now"]) for row in pulse),
@@ -567,10 +585,10 @@ def _flash_columns(
 ) -> tuple[list[str], list[list[Any]], int, int, int]:
     if profile.flash_layout == "oem_split":
         headers = [
-            "Hour", "Volume Forecasted", "Volume Variance", "Volume Ford",
-            "Volume Chery", "Volume Toyota", "SL Ford", "SL Chery", "SL Toyota",
-            "Routed Rate Ford", "Routed Rate Chery", "Routed Rate Toyota", "AHT",
-            "ABS HC",
+            "Hour", "Forecast", "Actual", "Variance", "Ford Volume",
+            "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
+            "TSL Chery", "TSL Toyota", "Routed Rate", "AHT", "ABS HC",
+            "Data State",
         ]
         rows = []
         for row in hourly:
@@ -578,26 +596,24 @@ def _flash_columns(
             chery = row["groups"].get("Chery") or {}
             toyota = row["groups"].get("Toyota") or {}
             rows.append([
-                row["hour_label"], row["forecast"], row.get("volume_variance"), ford.get("offered"),
-                chery.get("offered"), toyota.get("offered"),
+                row["hour_label"], row["forecast"], row["offered"],
+                row.get("volume_variance"), ford.get("offered"),
+                chery.get("offered"), toyota.get("offered"), row["service_level"],
                 ford.get("service_level"), chery.get("service_level"),
-                toyota.get("service_level"), ford.get("availability"),
-                chery.get("availability"), toyota.get("availability"),
-                row["aht_seconds"], row.get("absence_hc"),
+                toyota.get("service_level"), row["availability"],
+                row["aht_seconds"], row.get("absence_hc"), row["data_state"],
             ])
-        return headers, rows, 1, 3, 6
+        return headers, rows, 1, 2, 7
     headers = [
-        "Hour", "Volume Forecasted", "Volume Actual", "Volume Variance",
-        "Volume Handled", "Volume Handled in SL", "Deviation", "Routed Rate",
-        "TSL", "AHT", "ABS HC", "Data State",
+        "Hour", "Forecast", "Actual", "Variance", "TSL", "Routed Rate",
+        "AHT", "ABS HC", "Data State",
     ]
     rows = [[
         row["hour_label"], row["forecast"], row["offered"], row.get("volume_variance"),
-        row["answered"], row["answered_within_target"], row["forecast_attainment"],
-        row["availability"], row["service_level"], row["aht_seconds"],
+        row["service_level"], row["availability"], row["aht_seconds"],
         row.get("absence_hc"), row["data_state"],
     ] for row in hourly]
-    return headers, rows, 1, 2, 8
+    return headers, rows, 1, 2, 4
 
 
 def _flash_cards(
@@ -607,32 +623,22 @@ def _flash_cards(
     pulse: dict[str, Any],
 ) -> list[tuple[str, Any, str, str]]:
     value = total or {}
-    if profile.flash_layout == "oem_split":
-        ford = groups.get("Ford") or {}
-        chery = groups.get("Chery") or {}
-        toyota = groups.get("Toyota") or {}
-        return [
-            ("Routed Rate OEM", value.get("availability"), "percent", "Total routed / total entered"),
-            ("SLA OEM", value.get("service_level"), "percent", value.get("service_method") or "Configured method"),
-            ("SLA Ford", ford.get("service_level"), "percent", "APFR Ford"),
-            ("SLA Chery", chery.get("service_level"), "percent", "APFR Chery"),
-            ("SLA Toyota", toyota.get("service_level"), "percent", "APFR Toyota and Lexus"),
-            ("Deviation", value.get("forecast_attainment"), "percent", "Actual / forecast through cutoff"),
-            ("Volume Variance", value.get("volume_variance"), "integer", "Actual - forecast through cutoff"),
-            ("AHT", value.get("aht_seconds"), "seconds", "Weighted handled seconds"),
-            ("ABS HC", pulse.get("absence_hc"), "integer", "Scheduled but absent at attendance checkpoint"),
-        ]
+    del profile, groups
+    forecast = value.get("forecast")
+    variance = value.get("volume_variance")
+    actual_note = (
+        f"Forecast {forecast:,.0f} | variance {variance:+,.0f}"
+        if forecast is not None and variance is not None
+        else "Forecast or actual unavailable"
+    )
+    target = value.get("service_target")
     return [
-        ("Forecast", value.get("forecast"), "integer", "Through latest actual hour"),
-        ("Actual", value.get("offered"), "integer", "Inbound queue entries"),
-        ("Handled", value.get("answered"), "integer", "Routed queue entries"),
-        ("Handled in SL", value.get("answered_within_target"), "integer", "Answered inside threshold"),
-        ("Deviation", value.get("forecast_attainment"), "percent", "Actual / forecast through cutoff"),
-        ("Volume Variance", value.get("volume_variance"), "integer", "Actual - forecast through cutoff"),
+        ("TSL", value.get("service_level"), "percent", f"Target {target:.0%}" if target is not None else "Target unavailable"),
         ("Routed Rate", value.get("availability"), "percent", "Routed / entered"),
-        ("TSL", value.get("service_level"), "percent", value.get("service_method") or "Configured method"),
-        ("AHT", value.get("aht_seconds"), "seconds", "Weighted handled seconds"),
-        ("ABS HC", pulse.get("absence_hc"), "integer", "Scheduled but absent at attendance checkpoint"),
+        ("Actual", value.get("offered"), "integer", actual_note),
+        ("Forecast", forecast, "integer", "Through latest call hour"),
+        ("ABS HC", pulse.get("absence_hc"), "integer", "Reliable absence now"),
+        ("Call Now", pulse.get("call_now"), "integer", "Attendance list below"),
     ]
 
 
@@ -643,18 +649,20 @@ def _add_flash_sheet(
     hourly: Sequence[dict[str, Any]],
     total: dict[str, Any] | None,
     group_totals: dict[str, dict[str, Any] | None],
+    attendance: Sequence[dict[str, Any]],
     pulse: dict[str, Any],
     cutoff: int | None,
 ) -> None:
-    ws = book.report.workbook.add_worksheet(profile.flash_sheet)
+    sheet_name = _rtm_sheet(profile)
+    ws = book.report.workbook.add_worksheet(sheet_name)
     ws.hide_gridlines(2)
     ws.set_tab_color(COLORS["gold"])
     ws.set_zoom(85)
-    ws.merge_range("A1:T1", f"FLASH  /  {profile.label.upper()}", book.report.title)
+    ws.merge_range("A1:O1", f"RTM  /  {profile.label.upper()}", book.report.title)
     cutoff_text = f"through {cutoff:02d}:59" if cutoff is not None else "no mapped queue entries"
     ws.merge_range(
-        "A2:T2",
-        f"{report_day:%Y-%m-%d}  |  Call-by-Call actuals {cutoff_text}  |  generated {book.generated:%Y-%m-%d %H:%M}",
+        "A2:O2",
+        f"{report_day:%Y-%m-%d}  |  calls {cutoff_text}  |  attendance checkpoint {pulse['checkpoint']:%H:%M}  |  generated {book.generated:%H:%M}",
         book.report.subtitle,
     )
     ws.set_row(0, 34)
@@ -674,7 +682,7 @@ def _add_flash_sheet(
             else:
                 ws.write(row_index, column, value, fmt)
     if display_rows:
-        table_name = "tbl" + re.sub(r"[^A-Za-z0-9]", "", profile.flash_sheet)
+        table_name = "tblRtm" + re.sub(r"[^A-Za-z0-9]", "", sheet_name)
         ws.add_table(table_row, 0, table_row + len(display_rows), len(headers) - 1, {
             "name": table_name,
             "style": "Table Style Light 9",
@@ -689,21 +697,19 @@ def _add_flash_sheet(
         chery = group_totals.get("Chery") or {}
         toyota = group_totals.get("Toyota") or {}
         values = [
-            total_values.get("forecast"), total_values.get("volume_variance"),
-            ford.get("offered"), chery.get("offered"),
-            toyota.get("offered"), ford.get("service_level"),
+            total_values.get("forecast"), total_values.get("offered"),
+            total_values.get("volume_variance"), ford.get("offered"),
+            chery.get("offered"), toyota.get("offered"),
+            total_values.get("service_level"), ford.get("service_level"),
             chery.get("service_level"), toyota.get("service_level"),
-            ford.get("availability"), chery.get("availability"),
-            toyota.get("availability"), total_values.get("aht_seconds"),
-            total_values.get("absence_hc"),
+            total_values.get("availability"), total_values.get("aht_seconds"),
+            total_values.get("absence_hc"), "READY" if total else "INCOMPLETE",
         ]
     else:
         values = [
             total_values.get("forecast"), total_values.get("offered"),
-            total_values.get("volume_variance"), total_values.get("answered"),
-            total_values.get("answered_within_target"),
-            total_values.get("forecast_attainment"), total_values.get("availability"),
-            total_values.get("service_level"), total_values.get("aht_seconds"),
+            total_values.get("volume_variance"), total_values.get("service_level"),
+            total_values.get("availability"), total_values.get("aht_seconds"),
             total_values.get("absence_hc"),
             "READY" if total else "INCOMPLETE",
         ]
@@ -728,30 +734,21 @@ def _add_flash_sheet(
     if display_rows:
         chart = book.report.workbook.add_chart({"type": "column"})
         volume_series = (
-            (
-                ("Forecast", forecast_col, COLORS["muted"]),
-                ("Ford", 3, COLORS["teal"]),
-                ("Chery", 4, COLORS["red"]),
-                ("Toyota", 5, COLORS["gold"]),
-            )
-            if profile.flash_layout == "oem_split"
-            else (
-                ("Forecast", forecast_col, COLORS["muted"]),
-                ("Actual", actual_col, COLORS["teal"]),
-            )
+            ("Forecast", forecast_col, COLORS["muted"]),
+            ("Actual", actual_col, COLORS["teal"]),
         )
         for label_text, column, color in volume_series:
             chart.add_series({
                 "name": label_text,
-                "categories": [profile.flash_sheet, table_row + 1, 0, data_last_row, 0],
-                "values": [profile.flash_sheet, table_row + 1, column, data_last_row, column],
+                "categories": [sheet_name, table_row + 1, 0, data_last_row, 0],
+                "values": [sheet_name, table_row + 1, column, data_last_row, column],
                 "fill": {"color": color}, "border": {"none": True},
             })
         line = book.report.workbook.add_chart({"type": "line"})
         line.add_series({
             "name": "TSL",
-            "categories": [profile.flash_sheet, table_row + 1, 0, data_last_row, 0],
-            "values": [profile.flash_sheet, table_row + 1, sl_col, data_last_row, sl_col],
+            "categories": [sheet_name, table_row + 1, 0, data_last_row, 0],
+            "values": [sheet_name, table_row + 1, sl_col, data_last_row, sl_col],
             "y2_axis": True, "line": {"color": COLORS["gold"], "width": 2.25},
         })
         chart.combine(line)
@@ -768,6 +765,118 @@ def _add_flash_sheet(
             "type": "cell", "criteria": "<", "value": target,
             "format": book.report.error,
         })
+
+    attendance_section = total_row + 3
+    ws.merge_range(
+        attendance_section, 0, attendance_section, 14,
+        "ATTENDANCE  /  SAME-DAY OPERATIONAL LIST", book.report.section,
+    )
+    attendance_summary_headers = [
+        "Checkpoint", "Scheduled Now", "Present Now", "ABS HC", "Call Now",
+        "Late Today", "Unknown Data",
+    ]
+    attendance_summary_values = [
+        pulse.get("checkpoint"), pulse.get("scheduled_now"),
+        pulse.get("present_now"), pulse.get("absence_hc"),
+        pulse.get("call_now"), pulse.get("late_today"),
+        pulse.get("unknown_now"),
+    ]
+    for column, header in enumerate(attendance_summary_headers):
+        ws.write(attendance_section + 2, column, header, book.report.header)
+        value = attendance_summary_values[column]
+        fmt = book.report.datetime if isinstance(value, datetime) else book.report.integer
+        if value is None:
+            ws.write_blank(attendance_section + 3, column, None, fmt)
+        else:
+            ws.write(attendance_section + 3, column, value, fmt)
+
+    action_labels = {
+        "CALL_NO_SHOW": "CALL NOW — NO SHOW",
+        "CALL_NOT_SEEN_NOW": "CALL NOW — NOT SEEN",
+        "CALL_LATE": "CALL / FOLLOW UP — LATE",
+        "CHECK_CURRENT_GAP": "CHECK CURRENT GAP",
+        "NONE": "—",
+    }
+    attendance_headers = [
+        "Agent", "Agent ID", "Team Leader", "Shift", "First Seen", "State",
+        "Late Min", "Action", "Evidence",
+    ]
+    sorted_attendance = sorted(
+        attendance,
+        key=lambda row: (
+            0 if row.get("call_now") else
+            1 if row.get("late_today") else
+            2 if row.get("attendance_state") == "UNKNOWN" else
+            3 if row.get("attendance_state") == "PRESENT NOW" else 4,
+            str(row.get("team_leader") or ""),
+            str(row.get("agent_name") or ""),
+        ),
+    )
+    attendance_rows = []
+    for row in sorted_attendance:
+        start = _as_datetime(row.get("scheduled_start"))
+        end = _as_datetime(row.get("scheduled_end"))
+        shift = (
+            f"{start:%H:%M}–{end:%H:%M}" if start is not None and end is not None
+            else "—"
+        )
+        attendance_rows.append((
+            row.get("agent_name"), row.get("agent_id"), row.get("team_leader"),
+            shift, row.get("actual_first_seen"), row.get("attendance_state"),
+            row.get("uncoded_late_minutes"),
+            action_labels.get(str(row.get("pulse_action") or "NONE"), str(row.get("pulse_action") or "—")),
+            row.get("current_evidence"),
+        ))
+    attendance_header_row = attendance_section + 6
+    for column, header in enumerate(attendance_headers):
+        ws.write(attendance_header_row, column, header, book.report.header)
+    for row_index, values in enumerate(attendance_rows, attendance_header_row + 1):
+        for column, value in enumerate(values):
+            fmt = (
+                book.report.datetime if isinstance(value, datetime)
+                else book.report.integer if column == 6
+                else book.report.body
+            )
+            if value is None:
+                ws.write_blank(row_index, column, None, fmt)
+            else:
+                ws.write(row_index, column, value, fmt)
+    if attendance_rows:
+        ws.add_table(
+            attendance_header_row, 0,
+            attendance_header_row + len(attendance_rows), len(attendance_headers) - 1,
+            {
+                "name": "tblAttendance" + re.sub(r"[^A-Za-z0-9]", "", sheet_name),
+                "style": "Table Style Light 9",
+                "columns": [
+                    {"header": header, "header_format": book.report.header}
+                    for header in attendance_headers
+                ],
+            },
+        )
+        state_col = attendance_headers.index("State")
+        action_col = attendance_headers.index("Action")
+        ws.conditional_format(
+            attendance_header_row + 1, state_col,
+            attendance_header_row + len(attendance_rows), state_col,
+            {"type": "text", "criteria": "containing", "value": "ABSENT", "format": book.report.error},
+        )
+        ws.conditional_format(
+            attendance_header_row + 1, state_col,
+            attendance_header_row + len(attendance_rows), state_col,
+            {"type": "text", "criteria": "containing", "value": "UNKNOWN", "format": book.report.error},
+        )
+        ws.conditional_format(
+            attendance_header_row + 1, action_col,
+            attendance_header_row + len(attendance_rows), action_col,
+            {"type": "text", "criteria": "containing", "value": "CALL", "format": book.report.error},
+        )
+    else:
+        ws.write(
+            attendance_header_row + 1, 0,
+            "No scheduled working agents were found for this LOB/date.",
+            book.report.note,
+        )
     for column, header in enumerate(headers):
         width = 13
         if header == "Hour":
@@ -777,11 +886,17 @@ def _add_flash_sheet(
         elif len(header) > 17:
             width = 18
         ws.set_column(column, column, width)
+    ws.set_column(0, 0, 22)
+    ws.set_column(1, 2, 16)
+    ws.set_column(3, 4, 18)
+    ws.set_column(5, 5, 18)
+    ws.set_column(6, 6, 12)
+    ws.set_column(7, 7, 25)
+    ws.set_column(8, 14, 17)
     ws.set_column(len(headers) + 1, len(headers) + 10, 11)
     ws.freeze_panes(table_row + 1, 1)
     ws.set_landscape()
-    ws.fit_to_pages(1, 1)
-    ws.repeat_rows(0, table_row)
+    ws.fit_to_pages(1, 0)
 
 
 def _add_control_sheet(
@@ -795,16 +910,15 @@ def _add_control_sheet(
     ws = book.report.workbook.add_worksheet("CONTROL")
     ws.hide_gridlines(2)
     ws.set_tab_color(COLORS["gold"])
-    ws.merge_range("A1:P1", "SERVICE FLASH CONTROL", book.report.title)
+    ws.merge_range("A1:K1", "RTM DAILY CONTROL", book.report.title)
     ws.merge_range(
-        "A2:P2",
-        f"Daily control for {report_day:%Y-%m-%d}  |  actuals: mapped inbound Call-by-Call queue entries  |  forecast: Verint",
+        "A2:K2",
+        f"{report_day:%Y-%m-%d}  |  service, attendance and call actions by operational LOB",
         book.report.subtitle,
     )
     headers = [
-        "Flash", "Cutoff", "Forecast", "Actual", "Volume Variance", "Handled",
-        "Deviation", "Routed Rate", "TSL", "AHT", "Scheduled Now",
-        "Present Now", "ABS HC", "Call Now", "Late Today", "Status",
+        "LOB", "Last Call Hour", "TSL", "Target", "Actual", "Forecast",
+        "Variance", "Routed Rate", "ABS HC", "Call Now", "Status",
     ]
     for col, header in enumerate(headers):
         ws.write(4, col, header, book.report.header)
@@ -817,38 +931,34 @@ def _add_control_sheet(
         )
         row = [
             profile.label, f"{cutoff:02d}:59" if cutoff is not None else None,
-            value.get("forecast"), value.get("offered"),
-            value.get("volume_variance"), value.get("answered"),
-            value.get("forecast_attainment"),
-            value.get("availability"), value.get("service_level"),
-            value.get("aht_seconds"), pulse.get("scheduled_now"),
-            pulse.get("present_now"), pulse.get("absence_hc"),
-            pulse.get("call_now"), pulse.get("late_today"), status,
+            value.get("service_level"), value.get("service_target"),
+            value.get("offered"), value.get("forecast"),
+            value.get("volume_variance"), value.get("availability"),
+            pulse.get("absence_hc"), pulse.get("call_now"), status,
         ]
         for col, item in enumerate(row):
             fmt = (
-                book.report.percent if col in {6, 7, 8}
-                else book.report.decimal if col == 9
-                else book.report.integer if col in {2, 3, 4, 5, 10, 11, 12, 13, 14}
+                book.report.percent if col in {2, 3, 7}
+                else book.report.integer if col in {4, 5, 6, 8, 9}
                 else book.report.body
             )
             if item is None:
                 ws.write_blank(offset, col, None, fmt)
             else:
                 ws.write(offset, col, item, fmt)
-        ws.write_url(offset, 0, f"internal:'{profile.flash_sheet}'!A1", book.report.body, profile.label)
+        ws.write_url(offset, 0, f"internal:'{_rtm_sheet(profile)}'!A1", book.report.body, profile.label)
     if summaries:
         ws.add_table(4, 0, 4 + len(summaries), len(headers) - 1, {
             "name": "tblFlashControl", "style": "Table Style Light 9",
             "columns": [{"header": header, "header_format": book.report.header} for header in headers],
         })
-        ws.conditional_format(5, 15, 4 + len(summaries), 15, {
+        ws.conditional_format(5, 10, 4 + len(summaries), 10, {
             "type": "text", "criteria": "containing", "value": "MISSING",
             "format": book.report.error,
         })
         chart = book.report.workbook.add_chart({"type": "column"})
         for label, column, color in (
-                ("Forecast", 2, COLORS["muted"]), ("Actual", 3, COLORS["teal"]),
+                ("Forecast", 5, COLORS["muted"]), ("Actual", 4, COLORS["teal"]),
         ):
             chart.add_series({
                 "name": label,
@@ -859,94 +969,76 @@ def _add_control_sheet(
         chart.set_title({"name": "Forecast versus actual through cutoff"})
         chart.set_legend({"position": "bottom"})
         chart.set_chartarea({"border": {"none": True}})
-        ws.insert_chart("A18", chart, {"x_scale": 1.25, "y_scale": 1.1})
+        ws.insert_chart("A16", chart, {"x_scale": 1.25, "y_scale": 1.1})
     notes = [
-        "Open a Flash name to jump to its hourly sheet.",
-        "Deviation follows the reference workbook: actual offered / forecast through the latest actual hour.",
+        "Open a LOB name to see its hourly service and attendance list together.",
+        "Variance = actual queue entries minus forecast through the latest call hour.",
         f"Storm SLA = C / (A + B - D): connected within {rulebook.target_seconds}s / "
         f"(lost + connected - lost from {rulebook.short_abandon_seconds}s to {rulebook.target_seconds}s).",
-        "Every Flash shows 00:00-23:00; headline totals reset at midnight.",
-        "Routed Rate = total routed / total entered; it does not remove any lost calls.",
-        "Scheduled Now, Present Now, ABS HC, Call Now and Late Today reconcile to ATTENDANCE PULSE at its stated checkpoint.",
-        "No mapped calls and missing forecasts remain blank; the workbook never turns missing evidence into zero.",
+        "ABS HC and Call Now reconcile to the attendance summary and agent list on that LOB sheet.",
+        "Missing calls, forecasts or attendance evidence stay explicit; they are never converted to zero.",
     ]
     ws.write("A10", "OPERATING NOTES", book.report.section)
     for index, note in enumerate(notes, 10):
-        ws.merge_range(index, 0, index, 15, note, book.report.note)
+        ws.merge_range(index, 0, index, 10, note, book.report.note)
     ws.set_column("A:A", 23)
-    ws.set_column("B:P", 15)
+    ws.set_column("B:K", 15)
     ws.freeze_panes(5, 0)
     ws.set_landscape()
     ws.fit_to_pages(1, 1)
 
 
-def _flat_hour_rows(
-    profiles: Sequence[ServiceProfile],
-    hourly_by_profile: dict[str, Sequence[dict[str, Any]]],
-) -> tuple[list[str], list[tuple[Any, ...]]]:
-    headers = [
-        "profile_id", "flash", "business_date", "hour", "forecast", "offered",
-        "volume_variance",
-        "business_offered", "answered", "abandoned", "short_abandoned",
-        "abandoned_within_target", "answered_within_target",
-        "storm_a_lost", "storm_b_connected", "storm_c_connected_within_sla",
-        "storm_d_lost_within_sla", "storm_sl_denominator",
-        "forecast_attainment", "availability", "service_level", "service_target",
-        "service_method", "abandon_rate", "aht_seconds", "absence_hc",
-        "ford_offered", "ford_answered",
-        "ford_service_level", "chery_offered", "chery_answered",
-        "chery_service_level", "toyota_offered", "toyota_answered",
-        "toyota_service_level", "data_state",
-    ]
-    rows: list[tuple[Any, ...]] = []
-    for profile in profiles:
-        for row in hourly_by_profile[profile.profile_id]:
-            ford = row["groups"].get("Ford") or {}
-            chery = row["groups"].get("Chery") or {}
-            toyota = row["groups"].get("Toyota") or {}
-            rows.append(tuple([
-                row.get("profile_id"), row.get("flash"), row.get("business_date"),
-                row.get("hour"), row.get("forecast"), row.get("offered"),
-                row.get("volume_variance"),
-                row.get("business_offered"), row.get("answered"),
-                row.get("abandoned"), row.get("short_abandoned"),
-                row.get("abandoned_within_target"),
-                row.get("answered_within_target"), row.get("storm_a_lost"),
-                row.get("storm_b_connected"),
-                row.get("storm_c_connected_within_sla"),
-                row.get("storm_d_lost_within_sla"),
-                row.get("storm_sl_denominator"), row.get("forecast_attainment"),
-                row.get("availability"), row.get("service_level"),
-                row.get("service_target"), row.get("service_method"),
-                row.get("abandon_rate"), row.get("aht_seconds"),
-                row.get("absence_hc"),
-                ford.get("offered"), ford.get("answered"), ford.get("service_level"),
-                chery.get("offered"), chery.get("answered"), chery.get("service_level"),
-                toyota.get("offered"), toyota.get("answered"), toyota.get("service_level"),
-                row.get("data_state"),
-            ]))
-    return headers, rows
-
-
-def _queue_diagnosis_rows(
+def _issues_and_drivers_rows(
     profiles: Sequence[ServiceProfile],
     source_by_profile: dict[str, Sequence[dict[str, Any]]],
+    hourly_by_profile: dict[str, Sequence[dict[str, Any]]],
     metrics: MetricCatalog,
     report_day: date,
     cutoff_by_profile: dict[str, int | None],
+    pulse_summary_by_profile: dict[str, dict[str, Any]],
 ) -> tuple[list[str], list[tuple[Any, ...]]]:
-    """Explain which exact configured queues are helping or hurting SLA."""
+    """Return only actionable source issues and below-target queues with volume."""
 
     headers = [
-        "flash", "queue", "flash_group", "data_state", "total_entered",
-        "total_routed", "lost", "connected_in_sla", "lost_5_to_sla",
-        "sla_denominator", "tsl", "target", "gap_to_target",
-        "late_connected", "lost_in_denominator", "contacts_to_target",
-        "routed_rate", "diagnosis", "source_files",
+        "item_type", "lob", "hour_or_queue", "volume", "tsl", "target",
+        "gap_to_target", "late_routed", "lost_contacts",
+        "issue_or_driver", "action",
     ]
     output: list[tuple[Any, ...]] = []
     for profile in profiles:
         cutoff = cutoff_by_profile.get(profile.profile_id)
+        for row in hourly_by_profile.get(profile.profile_id, ()):
+            if row.get("data_state") == "FORECAST MISSING":
+                output.append((
+                    "DATA ISSUE", profile.label, row.get("hour_label"),
+                    row.get("offered"), row.get("service_level"),
+                    row.get("service_target"), None, None, None,
+                    "FORECAST MISSING", "Load or map the forecast extract",
+                ))
+            elif (
+                row.get("data_state") == "NO MAPPED CALLS"
+                and cutoff is not None and int(row.get("hour") or 0) <= cutoff
+            ):
+                output.append((
+                    "DATA ISSUE", profile.label, row.get("hour_label"),
+                    None, None, row.get("service_target"), None, None, None,
+                    "NO MAPPED CALLS", "Confirm zero demand or review source mapping",
+                ))
+
+        pulse = pulse_summary_by_profile.get(profile.profile_id, {})
+        if not pulse.get("agent_rows"):
+            output.append((
+                "DATA ISSUE", profile.label, f"{pulse.get('checkpoint'):%H:%M}",
+                None, None, None, None, None, None,
+                "NO SCHEDULED AGENT ROWS", "Check schedule and active FTE coverage",
+            ))
+        elif pulse.get("unknown_now"):
+            output.append((
+                "DATA ISSUE", profile.label, f"{pulse.get('checkpoint'):%H:%M}",
+                pulse.get("unknown_now"), None, None, None, None, None,
+                "ATTENDANCE DATA UNKNOWN", "Check Agent Status before calling",
+            ))
+
         day_rows = [
             row for row in source_by_profile.get(profile.profile_id, ())
             if str(row.get("business_date"))[:10] == report_day.isoformat()
@@ -968,108 +1060,45 @@ def _queue_diagnosis_rows(
         for queue in configured:
             rows = by_queue.get(str(queue).strip().upper(), [])
             aggregate = _aggregate(rows, profile, metrics, report_day)
-            if aggregate is None:
-                values: dict[str, Any] = {}
-                diagnosis = "NO DATA — confirm zero demand or source coverage"
-                state = "NO DATA"
+            if aggregate is None or not aggregate.get("offered"):
+                continue
+            service_level = aggregate.get("service_level")
+            if service_level is not None and (
+                target is None or service_level >= target
+            ):
+                continue
+            late_connected = max(
+                0.0, aggregate["answered"] - aggregate["answered_within_target"],
+            )
+            lost_in_denominator = max(
+                0.0, aggregate["abandoned"] - aggregate["abandoned_within_target"],
+            )
+            if service_level is None:
+                diagnosis = "NO SLA SAMPLE"
+                action = "Review queue counters and source coverage"
+            elif late_connected > lost_in_denominator * 1.5:
+                diagnosis = "LATE ROUTED CONTACTS"
+                action = "Review answer delay and staffing"
+            elif lost_in_denominator > late_connected * 1.5:
+                diagnosis = "LOST CONTACTS"
+                action = "Review abandonment and coverage"
             else:
-                values = aggregate
-                state = "READY"
-                late_connected = max(
-                    0.0, values["answered"] - values["answered_within_target"],
-                )
-                lost_in_denominator = max(
-                    0.0, values["abandoned"] - values["abandoned_within_target"],
-                )
-                if values["service_level"] is None:
-                    diagnosis = "NO SLA SAMPLE"
-                elif target is not None and values["service_level"] >= target:
-                    diagnosis = "AT / ABOVE TARGET"
-                elif late_connected > lost_in_denominator * 1.5:
-                    diagnosis = "BELOW TARGET — late routed contacts dominate"
-                elif lost_in_denominator > late_connected * 1.5:
-                    diagnosis = "BELOW TARGET — lost contacts dominate"
-                else:
-                    diagnosis = "BELOW TARGET — mixed delay and loss"
-            late_connected = (
-                max(0.0, values["answered"] - values["answered_within_target"])
-                if aggregate is not None else None
-            )
-            lost_in_denominator = (
-                max(0.0, values["abandoned"] - values["abandoned_within_target"])
-                if aggregate is not None else None
-            )
-            contacts_to_target = None
-            if aggregate is not None and target is not None:
-                deficit = (
-                    target * values["storm_sl_denominator"]
-                    - values["answered_within_target"]
-                )
-                if deficit <= 0:
-                    contacts_to_target = 0
-                elif target < 1:
-                    # Each additional good contact increases both C and the
-                    # denominator: (C+x)/(denominator+x) >= target.
-                    contacts_to_target = math.ceil(deficit / (1 - target))
-            sources = "; ".join(sorted({
-                value.strip()
-                for row in rows
-                for value in str(row.get("source_files") or "").split(";")
-                if value.strip()
-            })) or None
+                diagnosis = "MIXED DELAY AND LOSS"
+                action = "Review demand, delay and coverage"
             output.append((
-                profile.label, queue, profile.group_for(queue), state,
-                values.get("offered"), values.get("answered"),
-                values.get("abandoned"), values.get("answered_within_target"),
-                values.get("abandoned_within_target"),
-                values.get("storm_sl_denominator"), values.get("service_level"),
-                target, (
-                    values["service_level"] - target
-                    if values.get("service_level") is not None and target is not None
+                "QUEUE DRIVER", profile.label, queue, aggregate.get("offered"),
+                service_level, target, (
+                    service_level - target
+                    if service_level is not None and target is not None
                     else None
-                ), late_connected, lost_in_denominator, contacts_to_target,
-                values.get("availability"), diagnosis, sources,
+                ), late_connected, lost_in_denominator, diagnosis, action,
             ))
-    return headers, output
-
-
-def _attendance_pulse_rows(
-    profiles: Sequence[ServiceProfile],
-    pulse_by_profile: dict[str, Sequence[dict[str, Any]]],
-) -> tuple[list[str], list[tuple[Any, ...]]]:
-    headers = [
-        "flash", "checkpoint", "business_date", "lob", "agent_id",
-        "agent_name", "team_leader", "scheduled_start", "scheduled_end",
-        "attendance_state", "scheduled_now", "present_now", "abs_hc",
-        "call_now", "late_today", "pulse_action", "attendance_result",
-        "uncoded_late_minutes", "current_evidence", "source_loaded",
-    ]
-    output: list[tuple[Any, ...]] = []
-    for profile in profiles:
-        rows = sorted(
-            pulse_by_profile.get(profile.profile_id, ()),
-            key=lambda row: (
-                not bool(row.get("call_now")),
-                not bool(row.get("absence_now")),
-                str(row.get("team_leader") or ""),
-                str(row.get("agent_name") or ""),
-            ),
-        )
-        for row in rows:
-            output.append((
-                profile.label, row.get("checkpoint"), row.get("business_date"),
-                row.get("lob"), row.get("agent_id"), row.get("agent_name"),
-                row.get("team_leader"), row.get("scheduled_start"),
-                row.get("scheduled_end"), row.get("attendance_state"),
-                "YES" if row.get("scheduled_now") else "NO",
-                "YES" if row.get("present_now") else "NO",
-                1 if row.get("absence_now") else 0,
-                "YES" if row.get("call_now") else "NO",
-                "YES" if row.get("late_today") else "NO",
-                row.get("pulse_action"), row.get("attendance_result"),
-                row.get("uncoded_late_minutes"), row.get("current_evidence"),
-                "YES" if row.get("source_loaded") else "NO",
-            ))
+    output.sort(key=lambda row: (
+        0 if row[0] == "DATA ISSUE" else 1,
+        str(row[1] or ""),
+        float(row[6]) if isinstance(row[6], (int, float)) else 0.0,
+        -float(row[3]) if isinstance(row[3], (int, float)) else 0.0,
+    ))
     return headers, output
 
 
@@ -1081,7 +1110,7 @@ def build_service_flashes_workbook(
     output: Path | None = None,
     profile_id: str | None = None,
 ) -> Path:
-    """Build all Storm Flash layouts from mapped Call-by-Call queue entries."""
+    """Build the daily RTM service and attendance control."""
 
     catalog = load_service_profiles(config.home, config.service_profiles)
     profiles = [profile for profile in catalog.profiles if profile.active_on(end)]
@@ -1097,11 +1126,12 @@ def build_service_flashes_workbook(
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(f"{target.stem}.partial{target.suffix}")
     book = DecisionWorkbook(
-        partial, config, "service", "SERVICE FLASHES", start, end, generated,
+        partial, config, "service", "RTM DAILY CONTROL", start, end, generated,
     )
     hourly_by_profile: dict[str, Sequence[dict[str, Any]]] = {}
     source_by_profile: dict[str, Sequence[dict[str, Any]]] = {}
     pulse_by_profile: dict[str, Sequence[dict[str, Any]]] = {}
+    pulse_summary_by_profile: dict[str, dict[str, Any]] = {}
     summaries: list[
         tuple[ServiceProfile, dict[str, Any] | None, int | None, dict[str, Any]]
     ] = []
@@ -1118,111 +1148,35 @@ def build_service_flashes_workbook(
             )
             hourly_by_profile[profile.profile_id] = hourly
             pulse_by_profile[profile.profile_id] = pulse_rows
+            pulse_summary_by_profile[profile.profile_id] = pulse_summary
             group_totals_by_profile[profile.profile_id] = group_totals
             summaries.append((profile, total, cutoff, pulse_summary))
         _add_control_sheet(book, summaries, end, rulebook)
         for profile, total, cutoff, pulse_summary in summaries:
             _add_flash_sheet(
                 book, profile, end, hourly_by_profile[profile.profile_id], total,
-                group_totals_by_profile[profile.profile_id], pulse_summary, cutoff,
+                group_totals_by_profile[profile.profile_id],
+                pulse_by_profile[profile.profile_id], pulse_summary, cutoff,
             )
-        headers, rows = _flat_hour_rows(profiles, hourly_by_profile)
-        book.table(
-            "FLASH_DATA", "Flash clean hourly data",
-            "One profile/hour for the report day. Actual demand counts mapped inbound queue entries like Storm Total Entered.",
-            headers, rows,
-        )
-        pulse_headers, pulse_rows = _attendance_pulse_rows(
-            profiles, pulse_by_profile,
-        )
-        pulse_sheet = book.table(
-            "ATTENDANCE PULSE", "Attendance pulse and call list",
-            "Same governed attendance rows as Attendance Callouts. Filter Call Now=YES for action; ABS HC is only the reliable scheduled-and-absent checkpoint count.",
-            pulse_headers, pulse_rows,
-        )
-        if pulse_rows:
-            state_col = pulse_headers.index("attendance_state")
-            pulse_sheet.conditional_format(4, state_col, 3 + len(pulse_rows), state_col, {
-                "type": "text", "criteria": "containing", "value": "ABSENT",
-                "format": book.report.error,
-            })
         cutoff_by_profile = {
             profile.profile_id: cutoff
             for profile, _total, cutoff, _pulse in summaries
         }
-        diagnosis_headers, diagnosis_rows = _queue_diagnosis_rows(
-            profiles, source_by_profile, metrics, end, cutoff_by_profile,
+        issue_headers, issue_rows = _issues_and_drivers_rows(
+            profiles, source_by_profile, hourly_by_profile, metrics, end,
+            cutoff_by_profile, pulse_summary_by_profile,
         )
-        diagnosis_sheet = book.table(
-            "QUEUE DIAGNOSIS", "Queue-level service diagnosis",
-            "Exact configured Flash queues through each Flash cutoff. Sort Contacts to Target or filter Diagnosis to locate the service-level drivers.",
-            diagnosis_headers, diagnosis_rows,
+        issue_sheet = book.table(
+            "ISSUES & DRIVERS", "RTM issues and service drivers",
+            "Only actionable missing evidence and below-target queues with real demand. Empty or healthy queues are intentionally omitted.",
+            issue_headers, issue_rows,
         )
-        if diagnosis_rows:
-            diagnosis_col = diagnosis_headers.index("diagnosis")
-            diagnosis_sheet.conditional_format(
-                4, diagnosis_col, 3 + len(diagnosis_rows), diagnosis_col,
-                {"type": "text", "criteria": "containing", "value": "BELOW TARGET", "format": book.report.error},
+        if issue_rows:
+            issue_column = issue_headers.index("issue_or_driver")
+            issue_sheet.conditional_format(
+                4, issue_column, 3 + len(issue_rows), issue_column,
+                {"type": "no_errors", "format": book.report.error},
             )
-        with mapping.file.open("r", encoding="utf-8-sig", newline="") as handle:
-            source_mapping = list(csv.DictReader(handle))
-        mapping_headers = [
-            "mapping_type", "source_system", "source_value", "service_scope",
-            "comparison_scope", "designation", "flash_group", "used_by_flash",
-        ]
-        mapping_rows = []
-        for row in source_mapping:
-            if str(row.get("mapping_type") or "").strip().lower() != "queue":
-                continue
-            mapped = mapping.map_actual(
-                row.get("source_system"), row.get("source_value"), None, None,
-            )
-            memberships = [
-                profile for profile in profiles
-                if profile.includes_flash_queue(row.get("source_value"))
-            ]
-            flash_group = " | ".join(
-                f"{profile.label}: {profile.group_for(row.get('source_value'))}"
-                for profile in memberships
-            ) or None
-            used = " | ".join(profile.label for profile in memberships)
-            mapping_rows.append((
-                row.get("mapping_type"), row.get("source_system"),
-                row.get("source_value"), mapped.service_scope,
-                mapped.comparison_scope, mapped.designation, flash_group,
-                used or "NO",
-            ))
-        book.table(
-            "QUEUE_MAP", "Queue-to-Flash control",
-            "Source mapping plus exact screenshot-derived Flash membership. Edit flash_queues in service_profiles.toml; queue_mapping.csv controls source-to-scope mapping.",
-            mapping_headers, mapping_rows,
-        )
-        exception_headers = [
-            "flash", "business_date", "hour", "issue", "actual", "forecast",
-            "service_level", "target", "action",
-        ]
-        exception_rows = []
-        for profile in profiles:
-            for row in hourly_by_profile[profile.profile_id]:
-                issue = None
-                action = None
-                if row["data_state"] == "FORECAST MISSING":
-                    issue, action = "FORECAST MISSING", "Load or map the Verint forecast extract"
-                elif row["data_state"] == "NO MAPPED CALLS" and row["hour"] <= (max((item["hour"] for item in hourly_by_profile[profile.profile_id] if item["offered"] is not None), default=-1)):
-                    issue, action = "NO MAPPED CALLS", "Confirm zero demand or review queue mapping"
-                elif row.get("service_level") is not None and row.get("service_target") is not None and row["service_level"] < row["service_target"]:
-                    issue, action = "BELOW TSL TARGET", "Review demand, staffing and long waits"
-                if issue:
-                    exception_rows.append((
-                        profile.label, row["business_date"], row["hour_label"], issue,
-                        row["offered"], row["forecast"], row["service_level"],
-                        row["service_target"], action,
-                    ))
-        book.table(
-            "EXCEPTIONS", "Flash exceptions",
-            "Only missing evidence and below-target service intervals requiring review.",
-            exception_headers, exception_rows,
-        )
         oem_groups = next(
             (
                 profile.flash_total_groups for profile in profiles
@@ -1238,15 +1192,15 @@ def build_service_flashes_workbook(
             ("Volume Handled in SL", f"Routed queue entry with response time < {rulebook.target_seconds} seconds", "SLA numerator", "Threshold is editable in wfm_rules.toml"),
             ("Short Abandon", f"Unanswered queue entry with response time < {rulebook.short_abandon_seconds} seconds", "Retained in the Storm SLA denominator", "Storm excludes only lost calls from 5 seconds to the SLA target"),
             ("Abandoned in SL", f"Unanswered queue entry with response time from {rulebook.short_abandon_seconds} to < {rulebook.target_seconds} seconds", "Storm variable D", "Subtracted from lost plus connected calls"),
-            ("Deviation", "Total entered / forecast through the latest actual hour", "Demand tracking", "Uses the visible Storm volume"),
             ("Volume Variance", "Total entered minus forecast through the latest actual hour", "Absolute demand gap", "Positive means demand is above forecast"),
             ("Routed Rate", "Total routed / total entered", "Service availability", "Matches the Storm screenshot; not agent availability or adherence"),
             ("TSL", "Connected within target / (lost + connected - lost from 5 seconds to target)", "Storm C/(A+B-D)", "The supplied Storm custom-equation screen is the business authority"),
             ("AHT", "Sum of inbound talk + hold + wrap / routed queue entries", "Workload", "Weighted; never an average of hourly averages"),
             ("ABS HC", "Distinct scheduled agents in a reliable attendance gap at the checkpoint/hour", "Rough same-day capacity signal", "PTO/Away and missing evidence are not counted; exact treatment stays in Attendance Review"),
-            ("Attendance Pulse", "The same attendance-agent-day mart used by Attendance Callouts plus checkpoint timeline state", "Call and late action list", "It is operational context, not a final absence decision"),
-            ("Queue Diagnosis", "The exact configured queue counters behind each Flash", "Find queues pulling TSL below target", "It does not change the validated Flash queue membership or Storm formula"),
+            ("LOB attendance list", "Scheduled working agents from the governed attendance mart plus checkpoint timeline state", "Call and late action list", "It is operational context, not a final absence decision"),
+            ("Issues & Drivers", "Missing source evidence plus below-target configured queues with real demand", "One operational exception list", "Healthy and empty queues are omitted"),
         ])
+        book.report.workbook.get_worksheet_by_name("DEFINITIONS").hide()
         clean_calls, unique_interactions = conn.execute(
             """SELECT count(*), count(DISTINCT interaction_key)
                FROM core.clean_call_leg WHERE business_date BETWEEN ? AND ?""",
@@ -1258,12 +1212,12 @@ def build_service_flashes_workbook(
             [start, end],
         ).fetchone()[0]
         book.audit([
-            ("Report", "service", "All Book1 Flash profiles"),
-            ("Report day", end, "Visible Flash sheets use the selected end date"),
+            ("Report", "service", "RTM Daily Control"),
+            ("Report day", end, "Visible RTM sheets use the selected end date"),
             ("Selected data period", f"{start} to {end}", "Model boundary"),
             ("Clean Call-by-Call legs", clean_calls, "After stable call-leg deduplication"),
             ("Unique clean interactions", unique_interactions, "Before queue mapping"),
-            ("Mapped Flash offered", mapped_offered, "Inbound queue-entry count"),
+            ("Mapped RTM offered", mapped_offered, "Inbound queue-entry count"),
             ("Queue mapping", mapping.file.name, mapping.sha256),
             ("Service profiles", catalog.version, catalog.sha256),
             ("OEM visible groups", " | ".join(oem_groups) or "ALL", "Configured in service_profiles.toml"),
@@ -1278,6 +1232,16 @@ def build_service_flashes_workbook(
         ])
         book.close()
         publish_report(config, "service", partial, target, generated)
+        if target == report_current_path(config, "service"):
+            archive_superseded_reports(
+                config,
+                (
+                    "Attendance Callout.xlsx",
+                    "Service Flashes.xlsx",
+                    "OEM Flash.xlsx",
+                ),
+                generated,
+            )
     except Exception:
         try:
             book.report.close()

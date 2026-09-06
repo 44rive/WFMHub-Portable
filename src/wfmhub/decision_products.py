@@ -2935,16 +2935,18 @@ def build_attendance_corrections_workbook(
            ORDER BY c.business_date, c.agent_id, c.gap_start""",
         [start, end, today],
     )
-    book.table(
+    ledger_sheet = book.table(
         "DECISION LEDGER", "Internal decision ledger snapshot",
         "Read-only decisions already stored in WFM Hub. Make new edits only in REVIEW BOARD, then import that same workbook.",
         ledger_headers, ledger_rows,
     )
-    book.table(
+    ledger_sheet.hide()
+    evidence_sheet = book.table(
         "EVIDENCE", "Exact attendance evidence",
         "Exact schedule and observed segments behind every colored REVIEW BOARD cell. The 15-minute visual never changes these boundaries.",
         timeline_headers, timeline_rows,
     )
+    evidence_sheet.hide()
     book.definitions([
         ("Exact gap", "One continuous scheduled interval without accepted working evidence", "Human review unit", "Never rounded or merged across a return"),
         ("Gap ID", "Stable date/agent/start/end/issue key", "Safe import key", "Edited timestamps are never trusted on import"),

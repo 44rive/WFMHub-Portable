@@ -28,18 +28,17 @@ Technical files live under `_system`. You normally do not open that folder.
 
 | Product | Operational decision |
 |---|---|
-| Attendance Callout | Who must be contacted for absence, lateness, or not-seen status? |
+| RTM Daily Control | What is the live service state, and who needs attendance follow-up in each LOB? |
 | Staffing & Capacity Plan | Where is capacity missing now, and where will forecast demand exceed net schedules in future weeks? |
-| Service Flashes | What is the hourly RSA NL, RSA BE, Ford NL, and Ford OEM service state? |
 | Realisations | How did actual volume, service, forecast, staffing, absence, and shrinkage perform across every mapped LOB and period? |
 | Attendance Review | Which exact completed-day gaps need an Approved or Dismissed human decision? |
 | Final Absenteeism | What do the reviewed decisions and PTO/Away registers produce for absence and shrinkage? |
 | Bonus Management | What did Bonus Matrix v1.2 calculate, and is it safe to release? |
 | PCS Performance | How are PCS, participation, low scores, and coaching moving by date, month, LOB, team, and agent? |
 
-The products use one visual identity but not one generic layout. The Flash is an
-intraday control page, Attendance is a call list, Corrections is a shift
-timeline, and Final Absenteeism is a ledger.
+The products use one visual identity but not one generic layout. RTM combines
+service and its matching LOB attendance list, Attendance Review is an exact-gap
+decision board, and Final Absenteeism is a ledger.
 
 Adherence is not calculated. Reported Routed Rate means **total routed / total
 entered**. Reported TSL means **connected within 30 seconds / (lost + connected
@@ -92,13 +91,15 @@ See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
 [Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the optional one-time
 Power Query setup used by shared PCS and Absenteeism files.
 
-## Service Flashes
+## RTM Daily Control
 
-`Reports\Service Flashes.xlsx` reconstructs the four visual references in
-`TOLEARN\Book1.xlsx` as safe native Excel sheets: RSA NL, RSA BE, Ford NL, and
-Ford OEM France. One control page links to every Flash; `FLASH_DATA`,
-`ATTENDANCE PULSE`, `QUEUE DIAGNOSIS`, `QUEUE_MAP`, `EXCEPTIONS`, `DEFINITIONS`,
-and the hidden audit sheet provide the evidence behind the presentation.
+`Reports\RTM Daily Control.xlsx` is the single same-day operating file. It
+reconstructs the four visual references in `TOLEARN\Book1.xlsx` as native Excel
+sheets for RSA NL, RSA BE, Ford NL, and Ford OEM France. `CONTROL` gives the
+cross-LOB state. Each LOB sheet contains its hourly service table and its own
+reconciling attendance/call list. `ISSUES & DRIVERS` contains only actionable
+source issues and below-target queues with real demand. Definitions and audit
+evidence remain in hidden support sheets.
 
 Actual demand comes from exact queues in `queue_mapping.csv`. WFMHub counts each
 mapped inbound queue entry, matching Storm `Total Entered`; outbound companion
@@ -108,20 +109,19 @@ supplied Storm screenshot: RSA NL 30 queues, RSA BE 36 queues, Ford NL six
 queues, and OEM six queues. PCS stays limited to the effective-dated FTE roster.
 
 Verint Forecast supplies forecast only. New 15-minute exports stay at their
-native grain for Staffing and are rolled into hours for the Flashes. Hourly
+native grain for Staffing and are rolled into hours for RTM. Hourly
 volume is the sum of the four quarters; FTE is an average level; forecast SL
-and AHT are weighted by volume. `Deviation`, following the Book1 label, means
-`total entered / forecast through the latest actual hour`. Routed Rate is
+and AHT are weighted by volume. Routed Rate is
 `total routed / total entered`; TSL is `connected within 30 seconds / (total
 entered - lost calls from 5 to 30 seconds)`; AHT is weighted handled seconds per
 routed queue entry. The threshold clock is total queue wait plus ringing.
 
-Every Flash displays the full 00:00-23:00 day and the same service-summary
-controls. `Volume Variance` is actual minus forecast. `ABS HC` is the only
-attendance measure on the Flash; Scheduled Now, Present Now, Call Now and Late
-Today reconcile in `ATTENDANCE PULSE`. Hourly absence context comes from the
-profile's configured staffing LOB and is never fabricated at queue level.
-`QUEUE DIAGNOSIS` shows which exact configured queues drive a target miss.
+Every LOB displays the full 00:00-23:00 day. The six headline controls are TSL,
+Routed Rate, Actual, Forecast, ABS HC, and Call Now. `Volume Variance` is actual
+minus forecast. The attendance summary and named agent list below the hourly
+table reconcile Scheduled Now, Present Now, Call Now, Late Today, and unknown
+evidence for that exact LOB. Hourly absence context comes from the profile's
+configured staffing LOB and is never fabricated at queue level.
 
 Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in
@@ -166,8 +166,8 @@ save it, then choose **Attendance Review > Import completed decisions**. Gap ID
 anchors the exact immutable start/end interval in SQLite; edited evidence is
 never trusted. Approved rows use the selected rulebook category, Dismissed rows
 count as no loss, and Open rows stay unverified. The full-shift 15-minute visual
-is on that same row. `EVIDENCE` retains the exact source segments and `DECISION
-LEDGER` shows what is already stored inside the Hub.
+is on that same row. The stored decision ledger and exact source evidence remain
+hidden by default because normal reviewers do not need to operate those sheets.
 
 `Reports\Final Absenteeism.xlsx` follows the same long-lived-file principle.
 `TEAM_VIEW` filters agent results and review cases; `COMPONENT_VIEW` explains

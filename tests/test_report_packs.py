@@ -10,6 +10,7 @@ from wfmhub.cli import SOURCE_GROUPS
 from wfmhub.report_packs import (
     IMPLEMENTED_REPORT_PACK_KEYS,
     REPORT_PACKS,
+    archive_superseded_reports,
     build_report_pack,
     publish_report,
     report_current_path,
@@ -18,14 +19,18 @@ from wfmhub.report_packs import (
 
 class ReportPackTests(unittest.TestCase):
     def test_service_refresh_group_includes_flash_actual_and_forecast_sources(self):
-        self.assertEqual(SOURCE_GROUPS["service"], {"fte", "calls", "forecast"})
+        self.assertEqual(
+            SOURCE_GROUPS["service"],
+            {"fte", "schedule", "lilo", "agent_status", "calls", "forecast"},
+        )
         self.assertFalse(
             {"apbe", "apfr", "apde"} & set(SOURCE_GROUPS["intraday"] or ())
         )
 
     def test_independent_report_packs_are_registered(self):
         self.assertEqual(IMPLEMENTED_REPORT_PACK_KEYS, (
-            "pcs", "bonus", "service", "realisations", "staffing", "attendance", "corrections", "absence",
+            "pcs", "bonus", "service", "realisations", "staffing",
+            "corrections", "absence",
         ))
         self.assertTrue(all(REPORT_PACKS[key].implemented for key in IMPLEMENTED_REPORT_PACK_KEYS))
         self.assertFalse(REPORT_PACKS["intraday"].implemented)
@@ -48,22 +53,46 @@ class ReportPackTests(unittest.TestCase):
                 reports=root / "Reports",
                 system=root / "_system",
             )
-            current = report_current_path(config, "attendance")
+            current = report_current_path(config, "service")
             current.parent.mkdir(parents=True)
             current.write_bytes(b"old")
-            partial = current.with_name("Attendance Callout.partial.xlsx")
+            partial = current.with_name("RTM Daily Control.partial.xlsx")
             partial.write_bytes(b"new")
             publish_report(
-                config, "attendance", partial, current,
+                config, "service", partial, current,
                 datetime(2026, 9, 4, 10, 30),
             )
             self.assertEqual(current.read_bytes(), b"new")
             archives = list((root / "Reports" / "Archive" / "2026-09-04").glob("*.xlsx"))
             self.assertEqual(len(archives), 1)
             self.assertEqual(archives[0].read_bytes(), b"old")
-            self.assertEqual(current.name, "Attendance Callout.xlsx")
-            self.assertEqual(report_current_path(config, "service").name, "Service Flashes.xlsx")
+            self.assertEqual(current.name, "RTM Daily Control.xlsx")
+            self.assertEqual(
+                report_current_path(config, "attendance").name,
+                "Legacy Attendance Callout.xlsx",
+            )
             self.assertEqual(report_current_path(config, "corrections").name, "Attendance Review.xlsx")
+
+    def test_replaced_operational_files_are_archived_not_deleted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = SimpleNamespace(
+                reports=root / "Reports",
+                system=root / "_system",
+            )
+            config.reports.mkdir(parents=True)
+            for filename in (
+                "Attendance Callout.xlsx", "Service Flashes.xlsx", "OEM Flash.xlsx",
+            ):
+                (config.reports / filename).write_bytes(filename.encode())
+            archived = archive_superseded_reports(
+                config,
+                ("Attendance Callout.xlsx", "Service Flashes.xlsx", "OEM Flash.xlsx"),
+                datetime(2026, 9, 6, 16, 0),
+            )
+            self.assertEqual(len(archived), 3)
+            self.assertFalse((config.reports / "Attendance Callout.xlsx").exists())
+            self.assertTrue(all(path.is_file() for path in archived))
 
 
 if __name__ == "__main__":

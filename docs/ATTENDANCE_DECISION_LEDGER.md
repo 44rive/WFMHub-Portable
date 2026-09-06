@@ -27,9 +27,10 @@ become an early leave.
 
 The same row shows the agent's whole shift in a simple visual: Logged, Break,
 Lunch, Gap, PTO/Away, or Unknown. The colored cells are a 15-minute reading aid;
-the Exact Start and Exact End fields remain the decision boundary. `EVIDENCE`
-keeps every exact source segment, while `DECISION LEDGER` is the read-only
-snapshot already persisted in WFM Hub.
+the Exact Start and Exact End fields remain the decision boundary. Hidden
+`EVIDENCE` keeps every exact source segment, while hidden `DECISION LEDGER` is
+the read-only snapshot already persisted in WFM Hub. They are audit and
+troubleshooting sheets, not places to type decisions.
 
 The import is atomic: one invalid or stale row rejects the whole file. Gap ID
 retrieves the authoritative date, agent, start and end from SQLite. Changing a

@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.13"
+version = "2026.09.14"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
@@ -20,10 +20,10 @@ sheets = ["Policy_Decisions", "Control_Checks", "KPI_Config", "Raw_Data", "Resul
 
 [[packs]]
 key = "service"
-title = "SERVICE FLASHES"
-purpose = "Email-ready RSA and OEM daily service control from mapped Call-by-Call interactions and Verint forecast."
+title = "RTM DAILY CONTROL"
+purpose = "Daily service, attendance call actions and queue drivers for RSA and OEM operational LOBs."
 finding_domains = ["service", "forecast", "data_quality"]
-sheets = ["CONTROL", "Flash RSA NL", "Flash RSA BE", "Flash Ford NL", "Flash OEM", "FLASH_DATA", "ATTENDANCE PULSE", "QUEUE DIAGNOSIS", "QUEUE_MAP", "EXCEPTIONS", "DEFINITIONS", "_AUDIT"]
+sheets = ["CONTROL", "RSA NL", "RSA BE", "FORD NL", "OEM", "ISSUES & DRIVERS", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "realisations"
@@ -41,8 +41,8 @@ sheets = ["DASHBOARD", "WEEKLY_PLAN", "INTRADAY", "ACTIONS", "DEFINITIONS", "_AU
 
 [[packs]]
 key = "attendance"
-title = "ATTENDANCE CALLOUTS"
-purpose = "Selected-period calling and follow-up queue for no-show, late and not-seen agents."
+title = "LEGACY ATTENDANCE CALLOUTS"
+purpose = "Compatibility-only attendance callout; same-day actions now live inside RTM Daily Control."
 finding_domains = ["attendance", "data_quality"]
 sheets = ["DASHBOARD", "ACTIONS", "TREND", "DEFINITIONS", "_AUDIT"]
 

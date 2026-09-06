@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.20.0 — 2026-09-06
+
+- Replaced the separate Service Flashes and Attendance Callout operating
+  surfaces with one `RTM Daily Control.xlsx` workbook; the compatibility
+  callout builder remains outside the normal menu under `_system`.
+- When RTM is first built, stale `Attendance Callout.xlsx`, `Service
+  Flashes.xlsx`, and `OEM Flash.xlsx` files are moved into the dated report
+  archive so obsolete products do not remain on the operational surface.
+- Reduced each LOB headline to TSL, Routed Rate, Actual, Forecast, ABS HC, and
+  Call Now while preserving the validated Storm queue allowlists and
+  `C / (A + B - D)` service calculation.
+- Added one reconciling attendance summary and named call/late list directly
+  below the hourly table on every RSA NL, RSA BE, Ford NL, and OEM sheet.
+- Replaced `FLASH_DATA`, `ATTENDANCE PULSE`, `QUEUE DIAGNOSIS`, `QUEUE_MAP`, and
+  `EXCEPTIONS` with one concise `ISSUES & DRIVERS` surface containing only
+  actionable source failures and below-target queues with real demand.
+- Hid Attendance Review's stored decision ledger and exact evidence sheets by
+  default. Reviewers now operate only `REVIEW BOARD`; the hidden sheets remain
+  available for audit and troubleshooting.
+- Updated refresh defaults, presentation contracts, Windows menu labels,
+  documentation, and end-to-end workbook tests for the unified RTM workflow.
+
 ## 0.19.0 — 2026-09-06
 
 - Turned Service Flashes into a combined same-day service and lightweight

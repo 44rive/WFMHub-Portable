@@ -79,9 +79,9 @@ REPORT_PACKS = {
     "service": ReportPack(
         key="service",
         default_folder="service",
-        filename_prefix="WFMHub_Service_Flashes",
-        current_filename="Service Flashes.xlsx",
-        purpose="RSA and OEM daily flashes from mapped Call-by-Call interactions and Verint forecast.",
+        filename_prefix="WFMHub_RTM_Daily_Control",
+        current_filename="RTM Daily Control.xlsx",
+        purpose="Daily service, attendance call actions and queue drivers by operational LOB.",
     ),
     "realisations": ReportPack(
         key="realisations",
@@ -101,8 +101,8 @@ REPORT_PACKS = {
         key="attendance",
         default_folder="attendance",
         filename_prefix="WFMHub_Attendance_Callouts",
-        current_filename="Attendance Callout.xlsx",
-        purpose="Selected-period attendance callout queue without adherence.",
+        current_filename="Legacy Attendance Callout.xlsx",
+        purpose="Compatibility-only callout; same-day actions now live in RTM Daily Control.",
     ),
     "scorecard": ReportPack(
         key="scorecard",
@@ -115,8 +115,8 @@ REPORT_PACKS = {
 }
 
 IMPLEMENTED_REPORT_PACK_KEYS = (
-    "pcs", "bonus", "service", "realisations", "staffing", "attendance",
-    "corrections", "absence",
+    "pcs", "bonus", "service", "realisations", "staffing", "corrections",
+    "absence",
 )
 
 
@@ -166,6 +166,28 @@ def publish_report(
         shutil.copy2(target, archived)
     partial.replace(target)
     return target
+
+
+def archive_superseded_reports(
+    config: Config,
+    filenames: tuple[str, ...],
+    generated: datetime,
+) -> tuple[Path, ...]:
+    """Move retired fixed-name products out of the normal Reports surface."""
+
+    archive_dir = config.reports / "Archive" / generated.strftime("%Y-%m-%d")
+    archived: list[Path] = []
+    for filename in filenames:
+        source = (config.reports / filename).resolve()
+        if source.parent != config.reports.resolve() or not source.is_file():
+            continue
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        target = archive_dir / (
+            f"{source.stem}_retired_{generated:%Y%m%d_%H%M%S_%f}{source.suffix}"
+        )
+        source.replace(target)
+        archived.append(target)
+    return tuple(archived)
 
 
 def build_report_pack(

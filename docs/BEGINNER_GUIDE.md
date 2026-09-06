@@ -68,9 +68,8 @@ refresh, the reports use the same prepared database.
 Current workbooks always have the same names:
 
 ```text
-Reports\Attendance Callout.xlsx
 Reports\Staffing Gaps.xlsx
-Reports\Service Flashes.xlsx
+Reports\RTM Daily Control.xlsx
 Reports\Realisations.xlsx
 Reports\Attendance Review.xlsx
 Reports\Final Absenteeism.xlsx
@@ -95,9 +94,11 @@ The selected dates affect only the calculation and report. They do not affect
 the extracts. A multi-day extract is valid because WFMHub reads dates from its
 rows instead of assuming the filename contains one day.
 
-## Attendance Callout
+## RTM attendance call list
 
-This is the list used to call or follow up agents.
+Open `Reports\RTM Daily Control.xlsx`, choose the LOB sheet, and scroll below
+the hourly service table. This is the list used to call or follow up agents for
+that LOB.
 
 - **Call no-show** requires a completed working shift and positive evidence:
   either a loaded blank LILO row or enough Agent Status coverage showing the
@@ -113,8 +114,8 @@ interval becomes an internal gap. If the agent returns later, that return is
 kept and the case is not labelled early leave. LILO is used only to complete
 the outer login/logout boundaries when Agent Status coverage is too sparse.
 
-Choose Current Week to receive every actionable case in the week, not only
-yesterday.
+RTM is intentionally a same-day control. Use Attendance Review for completed
+historical days or a whole current-week review.
 
 ## Staffing and Capacity Plan
 
@@ -124,7 +125,7 @@ net scheduled FTE after approved PTO and Away. `WEEKLY_PLAN` summarizes the
 same capacity as FTE-hours by week, LOB, and language. Missing forecast remains
 `NO FORECAST`; forecast demand with nobody scheduled remains a visible gap.
 
-## Service Flashes
+## RTM Daily Control
 
 This one workbook contains four daily sheets: RSA Netherlands, RSA Belgium,
 Ford Netherlands, and Ford OEM France. Choose the end date you want to send;
@@ -137,15 +138,15 @@ displayed queue is a second queue entry, matching Storm Total Entered. An
 abandoned call is still demand even though it has no Agent ID. Verint supplies
 forecast only.
 
-Open `CONTROL`, then click a Flash name. Each Flash shows hourly forecast,
-actual, absolute volume variance, handled, handled in target, service level,
-availability, weighted AHT and `ABS HC` through the latest actual hour. Blank
-evidence stays blank. Use `ATTENDANCE PULSE` for the matching present/call/late
-list, `QUEUE DIAGNOSIS` for the queues driving TSL, `EXCEPTIONS` for missing or
-below-target hours, and `QUEUE_MAP` for exact membership.
+Open `CONTROL`, then click a LOB name. Each LOB shows hourly forecast, actual,
+absolute volume variance, TSL, Routed Rate, weighted AHT, and `ABS HC` through
+the latest actual hour. The attendance summary and named call/late list are
+directly below that hourly table, so there is no second callout workbook to
+reconcile. Open `ISSUES & DRIVERS` only when you need actionable missing data
+or the real-volume queues pulling TSL below target.
 
 Service availability is `handled / offered`. It is not agent availability.
-The `Deviation` label follows Book1 and means `actual offered / forecast`.
+The visible `Variance` is `actual offered - forecast`.
 
 From September 2026 onward, export Verint Forecast at 15-minute grain. Put the
 files in the same configured `Verint\Forecast` folder; do not edit them. Names
@@ -178,7 +179,8 @@ control evidence.
    imported; edit only the five blue decision cells.
 3. Choose `Approved` plus a category, `Dismissed`, or leave `Open`.
 4. Read the colored full-shift timeline on that same row: green is Logged,
-   amber is Break/Lunch, and red is Gap. Use `EVIDENCE` for exact raw segments.
+   amber is Break/Lunch, and red is Gap. Exact support evidence is retained in
+   hidden sheets for audit but is not part of the normal workflow.
 5. Save and close the workbook.
 6. In WFMHub choose **Attendance Review > Import completed decisions**.
 
