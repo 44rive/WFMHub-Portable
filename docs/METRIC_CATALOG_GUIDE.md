@@ -32,16 +32,16 @@ factory default to the user file you own.
 ```toml
 [[metrics]]
 id = "service_level"
-method = "storm_20"
-label = "Storm service level 20s"
+method = "storm_custom_30"
+label = "Storm service level 30s"
 domain = "service"
 source_model = "service_interval"
 grain = "queue interval"
 unit = "percent"
 aggregation = "ratio_of_sums"
 numerator = "answered_within_target"
-denominator = "offered - short_abandoned"
-sample = "offered - short_abandoned"
+denominator = "offered - abandoned_within_target"
+sample = "offered - abandoned_within_target"
 target = 0.80
 direction = "higher_is_better"
 minimum_sample = 1
@@ -66,9 +66,10 @@ finding_dimensions = ["source_system", "lob", "language"]
 
 Percentages are decimals: `0.80` means 80%.
 
-For service reporting, `service_level` removes both short abandons and
-non-short abandons inside the target from its denominator.
-`service_availability_business` excludes short abandons from offered.
+For service reporting, `service_level` follows Storm `C/(A+B-D)`: it removes
+only lost calls from 5 seconds up to the 30-second target. Calls lost below 5
+seconds remain in the denominator. `service_availability_business` is routed
+calls divided by all entered calls.
 `service_level_gross` and
 `service_availability` retain the technical raw-offered alternatives for audit.
 See `SERVICE_KPI_REFERENCE.md` before changing a service profile.

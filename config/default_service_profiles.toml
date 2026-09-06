@@ -1,6 +1,8 @@
 # Service reporting scopes. Queue membership remains in queue_mapping.csv.
 # This catalog defines how mapped queues are presented and which SLA contract
 # applies. Formulas and targets remain centralized in metric_catalog.toml.
+# Operating hours control the visible hourly rows. Flash headline totals follow
+# Storm and always reset at midnight.
 
 [catalog]
 version = "2026.09.7"

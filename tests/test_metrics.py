@@ -27,13 +27,13 @@ class MetricCatalogTests(unittest.TestCase):
             "short_abandoned": 5,
             "abandoned_within_target": 4,
         })
-        self.assertAlmostEqual(result.value, 70 / 95)
+        self.assertAlmostEqual(result.value, 70 / 96)
         self.assertEqual(result.state, "BELOW_TARGET")
         zero = evaluate_metric(method, {
             "answered_within_target": 0,
             "offered": 5,
-            "short_abandoned": 5,
-            "abandoned_within_target": 0,
+            "short_abandoned": 0,
+            "abandoned_within_target": 5,
         })
         self.assertIsNone(zero.value)
         self.assertEqual(zero.state, "NO_DATA")
@@ -125,7 +125,7 @@ scope = { lob_contains = ["RSA"] }
             text = (REPO / "config" / "default_metrics.toml").read_text(encoding="utf-8")
             path.write_text(text.replace("target = 0.80", "target = 0.85", 1), encoding="utf-8")
             changed = load_metric_catalog(REPO, path)
-        self.assertTrue(any(line.startswith("CHANGED service_level.storm_20")
+        self.assertTrue(any(line.startswith("CHANGED service_level.storm_custom_30")
                             for line in diff_metric_catalogs(current, changed)))
 
 

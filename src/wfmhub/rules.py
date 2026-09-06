@@ -8,7 +8,7 @@ import math
 import shutil
 import tomllib
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
@@ -228,6 +228,33 @@ def ensure_rulebook(home: Path) -> Path:
     if not target.exists():
         config_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(default, target)
+    else:
+        try:
+            current = tomllib.loads(target.read_text(encoding="utf-8"))
+            shipped = tomllib.loads(default.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            current, shipped = {}, {}
+        current_meta = current.get("rulebook", {})
+        shipped_meta = shipped.get("rulebook", {})
+        if (
+            str(current_meta.get("version", "")) in {"2026.08.2", "2026.08.3"}
+            and str(shipped_meta.get("version", "")) == "2026.09.1"
+        ):
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            backup = target.with_name(
+                f"{target.stem}_pre_storm_service_{stamp}{target.suffix}"
+            )
+            shutil.copy2(target, backup)
+            # Keep local activity and PCS changes. Only migrate the two shipped
+            # business values required by the supplied Storm equation.
+            content = target.read_text(encoding="utf-8")
+            current_version = str(current_meta.get("version", ""))
+            content = content.replace(
+                f'version = "{current_version}"', 'version = "2026.09.1"', 1,
+            )
+            if int(current.get("service", {}).get("target_seconds", 20)) == 20:
+                content = content.replace("target_seconds = 20", "target_seconds = 30", 1)
+            target.write_text(content, encoding="utf-8")
     return target
 
 

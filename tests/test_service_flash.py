@@ -15,7 +15,13 @@ from wfmhub.models import (
     _map_forecast_interval_rows,
 )
 from wfmhub.rules import load_rulebook
-from wfmhub.service_flash import _flash_cards, _flash_columns, _included_in_flash_total, _ratio
+from wfmhub.service_flash import (
+    _flash_cards,
+    _flash_columns,
+    _hourly_model,
+    _included_in_flash_total,
+    _ratio,
+)
 from wfmhub.service_profiles import load_service_profiles
 
 
@@ -33,7 +39,7 @@ class CallServiceModelTests(unittest.TestCase):
             "answered": 266,
             "abandoned": 12,
             "short_abandoned": 2,
-            "abandoned_within_target": 0,
+            "abandoned_within_target": 2,
             "answered_within_target": 249,
             "handled_seconds": 0,
         }
@@ -53,7 +59,8 @@ class CallServiceModelTests(unittest.TestCase):
         ford_components = dict(components)
         ford_components.update({
             "offered": 74, "answered": 73, "abandoned": 1,
-            "short_abandoned": 0, "answered_within_target": 72,
+            "short_abandoned": 0, "abandoned_within_target": 0,
+            "answered_within_target": 72,
         })
         ford_service = evaluate_metric(
             catalog.method_for("service_level", date(2026, 9, 5), dimensions),
@@ -152,7 +159,7 @@ class CallServiceModelTests(unittest.TestCase):
         cards = _flash_cards(
             profile,
             {"availability": 0.8, "service_level": 0.6,
-             "service_method": "gross_20", "forecast_attainment": 0.5},
+             "service_method": "gross_30", "forecast_attainment": 0.5},
             blank["groups"],
             [blank],
         )
@@ -166,6 +173,60 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertIsNone(_ratio(10, None))
         self.assertIsNone(_ratio(10, 0))
         self.assertEqual(_ratio(8, 10), 0.8)
+
+    def test_flash_headline_resets_at_midnight_while_hourly_view_uses_operating_hours(self):
+        raw = sqlite3.connect(
+            ":memory:",
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+        )
+        conn = DatabaseConnection(raw)
+        conn.execute(
+            """CREATE TABLE mart.forecast_hour (
+                   business_date DATE, comparison_scope VARCHAR,
+                   hour_start TIMESTAMP, volume_forecast DOUBLE
+               )"""
+        )
+        report_day = date(2026, 9, 5)
+        conn.executemany(
+            "INSERT INTO mart.forecast_hour VALUES (?,?,?,?)",
+            [
+                (report_day, "RSA NL", datetime(2026, 9, 5, 1), 10),
+                (report_day, "RSA NL", datetime(2026, 9, 5, 7), 20),
+            ],
+        )
+        rows = [
+            {
+                "business_date": report_day, "hour_start": datetime(2026, 9, 5, 1),
+                "queue": "APBN_AMS_RSA_INSURAN_All_NL", "offered": 8,
+                "answered": 7, "abandoned": 1, "short_abandoned": 0,
+                "abandoned_within_target": 1, "answered_within_target": 6,
+                "handled_seconds": 700,
+            },
+            {
+                "business_date": report_day, "hour_start": datetime(2026, 9, 5, 7),
+                "queue": "APBN_AMS_RSA_INSURAN_All_NL", "offered": 12,
+                "answered": 10, "abandoned": 2, "short_abandoned": 1,
+                "abandoned_within_target": 1, "answered_within_target": 9,
+                "handled_seconds": 1_000,
+            },
+        ]
+        profiles = load_service_profiles(
+            REPO, REPO / "config" / "default_service_profiles.toml",
+        )
+        profile = profiles.select("rsa_nl", report_day)
+        mapping = load_queue_mapping(REPO / "config" / "default_queue_mapping.csv")
+        metrics = load_metric_catalog(REPO, REPO / "config" / "default_metrics.toml")
+        hourly, total, groups, cutoff = _hourly_model(
+            conn, profile, mapping, metrics, report_day, rows,
+        )
+        self.assertEqual(hourly[0]["hour"], 7)
+        self.assertEqual(len(hourly), 16)
+        self.assertEqual(cutoff, 7)
+        self.assertEqual(total["offered"], 20)
+        self.assertEqual(total["forecast"], 30)
+        self.assertAlmostEqual(total["service_level"], 15 / 18)
+        self.assertEqual(groups["RSA"]["offered"], 20)
+        conn.close()
 
     def test_inbound_queue_entries_drive_storm_flash_volume(self):
         raw = sqlite3.connect(
@@ -204,7 +265,7 @@ class CallServiceModelTests(unittest.TestCase):
             (date(2026, 8, 1), "short", "leg-3", datetime(2026, 8, 1, 9, 10), "I", "MAPPED_QUEUE", 3, 0, None, 0, 0, 0, False, "NL", None, "calls.csv"),
             (date(2026, 8, 1), "in-target", "leg-4", datetime(2026, 8, 1, 9, 15), "I", "MAPPED_QUEUE", 10, 0, None, 0, 0, 0, False, "NL", None, "calls.csv"),
             (date(2026, 8, 1), "long", "leg-5", datetime(2026, 8, 1, 9, 20), "I", "MAPPED_QUEUE", 30, 0, None, 0, 0, 0, False, "NL", None, "calls.csv"),
-            # Wait is below 20, but wait + ringing is not: outside target.
+            # Wait plus ringing stays inside the configured 30-second target.
             (date(2026, 8, 1), "ring", "leg-6", datetime(2026, 8, 1, 9, 25), "I", "MAPPED_QUEUE", 18, 3, "999", 50, 0, 0, False, "NL", None, "calls.csv"),
             # Mapped outbound traffic does not enter inbound service demand.
             (date(2026, 8, 1), "outbound", "leg-7", datetime(2026, 8, 1, 9, 30), "O", "MAPPED_QUEUE", 0, 0, "999", 50, 0, 0, False, "NL", None, "calls.csv"),
@@ -238,8 +299,8 @@ class CallServiceModelTests(unittest.TestCase):
                       abandon_rate, aht_seconds
                FROM mart.call_service_hour"""
         ).fetchone()
-        self.assertEqual(result[:9], (6, 2, 4, 1, 2, 1, 170.0, 6, 1))
-        self.assertAlmostEqual(result[9], 1 / 5)
+        self.assertEqual(result[:9], (6, 2, 4, 1, 2, 2, 170.0, 6, 1))
+        self.assertAlmostEqual(result[9], 2 / 4)
         # The Storm screenshot's routed rate uses every entered queue entry.
         self.assertAlmostEqual(result[10], 2 / 6)
         self.assertAlmostEqual(result[11], 4 / 6)

@@ -5,7 +5,13 @@ import unittest
 from pathlib import Path
 
 from wfmhub.metrics import MetricCatalogError, load_metric_catalog
-from wfmhub.rules import RulebookError, evaluate_formula, load_rulebook, validate_rulebook
+from wfmhub.rules import (
+    RulebookError,
+    ensure_rulebook,
+    evaluate_formula,
+    load_rulebook,
+    validate_rulebook,
+)
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -26,6 +32,28 @@ class RulebookTests(unittest.TestCase):
         self.assertEqual(evaluate_formula("ifelse(offered > 0, answered / offered, 0)", {"answered": 9, "offered": 10}), 0.9)
         with self.assertRaises(RulebookError):
             evaluate_formula("__import__('os').system('whoami')", {})
+
+    def test_rulebook_upgrade_changes_shipped_sla_target_without_losing_local_rules(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            config = home / "config"
+            config.mkdir()
+            default = (REPO / "config" / "default_rules.toml").read_text(
+                encoding="utf-8",
+            )
+            (config / "default_rules.toml").write_text(default, encoding="utf-8")
+            current = default.replace('version = "2026.09.1"', 'version = "2026.08.3"', 1)
+            current = current.replace("target_seconds = 30", "target_seconds = 20", 1)
+            current = current.replace(
+                "Canonical WFM rules learned", "Locally reviewed WFM rules learned", 1,
+            )
+            (config / "wfm_rules.toml").write_text(current, encoding="utf-8")
+            target = ensure_rulebook(home)
+            migrated = target.read_text(encoding="utf-8")
+            self.assertIn('version = "2026.09.1"', migrated)
+            self.assertIn("target_seconds = 30", migrated)
+            self.assertIn("Locally reviewed WFM rules learned", migrated)
+            self.assertEqual(len(list(config.glob("wfm_rules_pre_storm_service_*.toml"))), 1)
 
     def test_invalid_metric_formula_is_rejected_before_refresh(self):
         with tempfile.TemporaryDirectory() as folder:

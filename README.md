@@ -42,8 +42,8 @@ intraday control page, Attendance is a call list, Corrections is a shift
 timeline, and Final Absenteeism is a ledger.
 
 Adherence is not calculated. Reported Routed Rate means **total routed / total
-entered**. Reported TSL means **answered inside target / (total entered - short
-abandons under 5 seconds)**. Both follow the supplied Storm screenshots; Routed
+entered**. Reported TSL means **connected within 30 seconds / (lost + connected
+- lost from 5 to 30 seconds)**. Both follow the supplied Storm configuration; Routed
 Rate never means agent availability.
 
 ## Source authority
@@ -112,8 +112,8 @@ native grain for Staffing and are rolled into hours for the Flashes. Hourly
 volume is the sum of the four quarters; FTE is an average level; forecast SL
 and AHT are weighted by volume. `Deviation`, following the Book1 label, means
 `total entered / forecast through the latest actual hour`. Routed Rate is
-`total routed / total entered`; TSL is `handled within 20 seconds / (total
-entered - short abandons under 5 seconds)`; AHT is weighted handled seconds per
+`total routed / total entered`; TSL is `connected within 30 seconds / (total
+entered - lost calls from 5 to 30 seconds)`; AHT is weighted handled seconds per
 routed queue entry. The threshold clock is total queue wait plus ringing.
 
 Ford NL's Dispatch, Follow-up, and Mailbox BNL cards remain `N/C` because Book1

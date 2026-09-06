@@ -358,10 +358,14 @@ no loss.
 
 ```text
 answered_within_target /
-(offered - short_abandoned)
+(offered - abandoned_within_target)
 ```
 
 The threshold clock is Call-by-Call total queue wait plus ringing duration.
+The default target is 30 seconds. `abandoned_within_target` means lost from 5
+seconds up to that target; losses below 5 seconds remain in the denominator.
+Daily headline counters reset at midnight, independently of visible operating
+hours.
 Storm Routed Rate is answered divided by every entered queue entry. Queue
 scopes and profile display groups choose the reported queues; Provider and
 regional Ford rows remain auditable without contaminating the four Flashes.

@@ -14,33 +14,33 @@ second mapped queue, Storm and WFMHub both count another queue entry.
 - `total entered` = mapped inbound queue entries
 - `response time` = Total Queue Wait Time + Ringing Duration
 - `short abandon` = unanswered queue entry with response time below 5 seconds
-- `SLA offered` = total entered - short abandons
-- `abandoned within target` = non-short unanswered queue entry with response
-  time below 20 seconds
-- `answered within target` = routed queue entry with response time below 20
-  seconds
+- `lost within SLA` = unanswered queue entry with response time from 5 seconds
+  up to, but not including, 30 seconds (Storm variable D)
+- `SLA denominator` = total entered - lost within SLA
+- `answered within target` = routed queue entry with response time below 30
+  seconds (Storm variable C)
 - `handled seconds` = inbound talk + hold + wrap seconds on routed queue entries
 
-The 5-second and 20-second boundaries are configured in
+The 5-second and 30-second boundaries are configured in
 `config\wfm_rules.toml`.
 
 ## Reported formulas
 
 The reports use the Storm dashboard business reference:
 
-- TSL = answered within target / SLA offered
+- TSL = C / (A + B - D), where A is lost, B is connected, C is connected
+  within SLA, and D is lost from 5 seconds to the SLA target
 - Routed Rate = answered / total entered
 - Deviation = total entered / forecast
 - AHT = handled seconds / answered
 
-All higher-grain percentages are ratios of summed counters. Hourly percentages
-are never averaged. The separate `abandoned_within_target` counter remains in
-the clean model for diagnosis, but the screenshots prove it is not removed
-from the SLA denominator.
+Because `total entered = A + B`, the implemented TSL denominator is
+`total entered - lost within SLA`. Lost calls below 5 seconds remain included.
+All higher-grain percentages are ratios of summed counters; hourly percentages
+are never averaged. Daily headline counters reset at midnight even when a
+Flash hides pre-opening hourly rows.
 
-The OEM screenshot is a reproducible example: Ford contributes 85 in SLA from
-91 SLA-offered calls, Chery 5/5, and Toyota/Lexus 159/180. The aggregate is
-`249/276 = 90.22%`, exactly the displayed Storm value. The explicit
+The supplied Storm equation screen is the formula authority. The explicit
 Call-by-Call reference in `Conso CBC FLASH - VA.xlsx` confirms that ringing is
 part of the threshold clock.
 

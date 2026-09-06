@@ -69,9 +69,11 @@ mapped inbound queue entry, matching Storm `Total Entered`, and ignores outbound
 companion legs. Reports use the Storm business reference:
 
 - total entered = mapped inbound queue entries;
-- SLA offered = total entered - short abandons below 5 seconds;
+- Storm A = lost calls; B = connected calls; C = connected within 30 seconds;
+- Storm D = lost calls from 5 seconds up to, but not including, 30 seconds;
+- SLA denominator = A + B - D = total entered - lost within SLA;
 - response time = total queue wait + ringing duration;
-- TSL = answered within 20 seconds / SLA offered;
+- TSL = C / (A + B - D);
 - routed rate = answered / total entered;
 - deviation = total entered / forecast;
 - AHT = total talk + hold + wrap seconds / answered.

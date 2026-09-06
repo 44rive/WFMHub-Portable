@@ -5,22 +5,22 @@
 # Higher grains always follow the declared aggregation; never average ratios.
 
 [catalog]
-version = "2026.09.4"
+version = "2026.09.5"
 description = "Canonical WFM metric methods, scopes, targets and aggregation contracts."
 
 [[metrics]]
 id = "service_level"
-method = "storm_20"
-label = "Storm service level 20s"
-description = "Answered within target divided by entered calls less short abandons under five seconds."
+method = "storm_custom_30"
+label = "Storm service level 30s"
+description = "Calls connected within 30 seconds divided by connected plus lost calls, excluding only calls lost from 5 to 30 seconds."
 domain = "service"
 source_model = "service_interval"
 grain = "queue interval"
 unit = "percent"
 aggregation = "ratio_of_sums"
 numerator = "answered_within_target"
-denominator = "offered - short_abandoned"
-sample = "offered - short_abandoned"
+denominator = "offered - abandoned_within_target"
+sample = "offered - abandoned_within_target"
 target = 0.80
 direction = "higher_is_better"
 minimum_sample = 1
@@ -30,8 +30,8 @@ finding_dimensions = ["source_system", "lob", "language"]
 
 [[metrics]]
 id = "service_level_gross"
-method = "gross_20"
-label = "Gross service level 20s"
+method = "gross_30"
+label = "Gross service level 30s"
 description = "Answered within target divided by every offered contact."
 domain = "service"
 source_model = "service_interval"

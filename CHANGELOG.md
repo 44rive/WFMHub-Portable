@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.18.3 — 2026-09-06
+
+- Implemented the supplied Storm custom equation exactly as configured:
+  `C / (A + B - D)`, where C is connected within 30 seconds and D is calls
+  lost from 5 seconds up to the 30-second target. Lost calls below 5 seconds
+  remain in the denominator.
+- Made Flash headline totals reset at midnight like Storm while retaining each
+  profile's configured operating hours for the visible hourly table.
+- Added explicit Storm A/B/C/D and calculated-denominator columns to
+  `FLASH_DATA`, plus the equation, threshold and day boundary to the workbook
+  audit and definitions.
+- Added safe upgrades for existing metric catalogs and rulebooks. Local
+  activity/PCS rule edits are preserved when the shipped SLA target moves from
+  20 to 30 seconds.
+- Added regression coverage for the equation, exact call classification,
+  midnight cumulative totals and configuration migration.
+
 ## 0.18.2 — 2026-09-05
 
 - Corrected the Storm SLA after validating the four supplied dashboard

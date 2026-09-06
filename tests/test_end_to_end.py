@@ -520,7 +520,7 @@ class EndToEndTests(unittest.TestCase):
                 ).fetchone()
                 service_components = conn.execute(
                     """SELECT sum(answered_within_target),
-                              sum(offered-short_abandoned)
+                              sum(offered-abandoned_within_target)
                        FROM mart.service_interval"""
                 ).fetchone()
                 self.assertAlmostEqual(

@@ -110,12 +110,21 @@ def _aggregate(
     return {
         **components,
         "raw_offered": components["offered"],
-        # Storm displays every inbound queue entry as Total Entered. Only the
-        # SLA denominator removes short abandons; Routed Rate and volume retain
-        # the raw entered count.
+        # Storm displays every inbound queue entry as Total Entered. Its custom
+        # C/(A+B-D) SLA removes lost calls from 5 seconds up to the configured
+        # target. Lost calls below 5 seconds remain in the denominator.
         "offered": components["offered"],
         "business_offered": max(
-            0.0, components["offered"] - components["short_abandoned"],
+            0.0,
+            components["offered"] - components["abandoned_within_target"],
+        ),
+        "storm_a_lost": components["abandoned"],
+        "storm_b_connected": components["answered"],
+        "storm_c_connected_within_sla": components["answered_within_target"],
+        "storm_d_lost_within_sla": components["abandoned_within_target"],
+        "storm_sl_denominator": max(
+            0.0,
+            components["offered"] - components["abandoned_within_target"],
         ),
         "service_level": service.value,
         "service_target": service.method.target,
@@ -257,10 +266,7 @@ def _hourly_model(
     by_hour: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         hour = _as_datetime(row.get("hour_start"))
-        if (
-            hour is not None
-            and profile.operating_start_hour <= hour.hour <= profile.operating_end_hour
-        ):
+        if hour is not None and 0 <= hour.hour <= 23:
             by_hour[hour.hour].append(row)
     forecast = _forecast_by_hour(conn, profile, mapping, report_day)
     workforce = _workforce_by_hour(conn, profile, report_day) if profile.flash_layout == "workforce" else {}
@@ -307,13 +313,17 @@ def _hourly_model(
             "groups": group_values,
             **workforce.get(hour, {}),
         })
-    through_hours = [row for row in hourly if cutoff is not None and row["hour"] <= cutoff]
     total_source = [row for hour in by_hour if cutoff is not None and hour <= cutoff for row in by_hour[hour]]
     total = _aggregate(total_source, profile, metrics, report_day)
     if total is not None:
-        total["forecast"] = sum(
-            float(row["forecast"] or 0) for row in through_hours if row["forecast"] is not None
-        ) if any(row["forecast"] is not None for row in through_hours) else None
+        forecast_hours = [
+            value for hour, value in forecast.items()
+            if cutoff is not None and hour <= cutoff
+        ]
+        total["forecast"] = (
+            sum(float(value) for value in forecast_hours)
+            if forecast_hours else None
+        )
         total["forecast_attainment"] = _ratio(total["offered"], total["forecast"])
     group_totals = {
         group.label: _aggregate(
@@ -680,6 +690,7 @@ def _add_control_sheet(
     book: DecisionWorkbook,
     summaries: Sequence[tuple[ServiceProfile, dict[str, Any] | None, int | None]],
     report_day: date,
+    rulebook: Rulebook,
 ) -> None:
     ws = book.report.workbook.add_worksheet("CONTROL")
     ws.hide_gridlines(2)
@@ -747,8 +758,10 @@ def _add_control_sheet(
     notes = [
         "Open a Flash name to jump to its hourly sheet.",
         "Deviation follows the reference workbook: actual offered / forecast through the latest actual hour.",
-        "Storm SLA = answered within 20s / (total entered - abandons under 5s).",
-        "Routed Rate = total routed / total entered; it does not remove short abandons.",
+        f"Storm SLA = C / (A + B - D): connected within {rulebook.target_seconds}s / "
+        f"(lost + connected - lost from {rulebook.short_abandon_seconds}s to {rulebook.target_seconds}s).",
+        "Headline totals reset at midnight; operating hours control only the visible hourly rows.",
+        "Routed Rate = total routed / total entered; it does not remove any lost calls.",
         "No mapped calls and missing forecasts remain blank; the workbook never turns missing evidence into zero.",
     ]
     ws.write("A10", "OPERATING NOTES", book.report.section)
@@ -769,6 +782,8 @@ def _flat_hour_rows(
         "profile_id", "flash", "business_date", "hour", "forecast", "offered",
         "business_offered", "answered", "abandoned", "short_abandoned",
         "abandoned_within_target", "answered_within_target",
+        "storm_a_lost", "storm_b_connected", "storm_c_connected_within_sla",
+        "storm_d_lost_within_sla", "storm_sl_denominator",
         "forecast_attainment", "availability", "service_level", "service_target",
         "service_method", "abandon_rate", "aht_seconds", "planned_hc",
         "short_sickness_hc", "long_sickness_hc", "late_early_hc",
@@ -789,7 +804,11 @@ def _flat_hour_rows(
                 row.get("business_offered"), row.get("answered"),
                 row.get("abandoned"), row.get("short_abandoned"),
                 row.get("abandoned_within_target"),
-                row.get("answered_within_target"), row.get("forecast_attainment"),
+                row.get("answered_within_target"), row.get("storm_a_lost"),
+                row.get("storm_b_connected"),
+                row.get("storm_c_connected_within_sla"),
+                row.get("storm_d_lost_within_sla"),
+                row.get("storm_sl_denominator"), row.get("forecast_attainment"),
                 row.get("availability"), row.get("service_level"),
                 row.get("service_target"), row.get("service_method"),
                 row.get("abandon_rate"), row.get("aht_seconds"),
@@ -842,7 +861,7 @@ def build_service_flashes_workbook(
             hourly_by_profile[profile.profile_id] = hourly
             group_totals_by_profile[profile.profile_id] = group_totals
             summaries.append((profile, total, cutoff))
-        _add_control_sheet(book, summaries, end)
+        _add_control_sheet(book, summaries, end, rulebook)
         for profile, total, cutoff in summaries:
             _add_flash_sheet(
                 book, profile, end, hourly_by_profile[profile.profile_id], total,
@@ -935,11 +954,11 @@ def build_service_flashes_workbook(
             ("Volume Handled", "Inbound queue entry routed to an agent", "Storm Total Routed", "Agent may be outside the FTE roster; the queue is the service boundary"),
             ("Response time", "Total Queue Wait Time + Ringing Duration", "Storm threshold clock", "Reproduced from the Call-by-Call business reference"),
             ("Volume Handled in SL", f"Routed queue entry with response time < {rulebook.target_seconds} seconds", "SLA numerator", "Threshold is editable in wfm_rules.toml"),
-            ("Short Abandon", f"Unanswered queue entry with response time < {rulebook.short_abandon_seconds} seconds", "Removed only from the SLA denominator", "Configured centrally"),
-            ("Abandoned in SL", f"Non-short unanswered queue entry with response time < {rulebook.target_seconds} seconds", "Diagnostic only", "It remains in the Storm SLA denominator"),
+            ("Short Abandon", f"Unanswered queue entry with response time < {rulebook.short_abandon_seconds} seconds", "Retained in the Storm SLA denominator", "Storm excludes only lost calls from 5 seconds to the SLA target"),
+            ("Abandoned in SL", f"Unanswered queue entry with response time from {rulebook.short_abandon_seconds} to < {rulebook.target_seconds} seconds", "Storm variable D", "Subtracted from lost plus connected calls"),
             ("Deviation", "Total entered / forecast through the latest actual hour", "Demand tracking", "Uses the visible Storm volume"),
             ("Routed Rate", "Total routed / total entered", "Service availability", "Matches the Storm screenshot; not agent availability or adherence"),
-            ("TSL", "Handled within target / (total entered - short abandons)", "Service-level control", "Proven against the supplied Storm queue screenshots"),
+            ("TSL", "Connected within target / (lost + connected - lost from 5 seconds to target)", "Storm C/(A+B-D)", "The supplied Storm custom-equation screen is the business authority"),
             ("AHT", "Sum of inbound talk + hold + wrap / routed queue entries", "Workload", "Weighted; never an average of hourly averages"),
             ("Ford NL workload cards", "Dispatch, Follow-up and Mailbox BNL remain N/C", "Data integrity", "Book1 provides labels but no governed source or formula; values are not invented"),
         ])
@@ -965,6 +984,9 @@ def build_service_flashes_workbook(
             ("OEM visible groups", " | ".join(oem_groups) or "ALL", "Configured in service_profiles.toml"),
             ("Metric catalog", metrics.version, metrics.sha256),
             ("Rulebook", rulebook.version, rulebook.sha256),
+            ("Storm SLA equation", "C / (A + B - D)", "A=lost; B=connected; C=connected within SLA; D=lost from 5 seconds to SLA target"),
+            ("Storm SLA target", f"{rulebook.target_seconds} seconds", f"Lost-call exclusion band: {rulebook.short_abandon_seconds} to < {rulebook.target_seconds} seconds"),
+            ("Cumulative boundary", "00:00 through latest mapped call hour", "Operating profile hours affect displayed hourly rows only"),
             ("Design reference", "TOLEARN/Book1.xlsx", "Four pasted Flash references reconstructed as native Excel"),
             ("Prepared by", "Anass ASSRI", "WFM"),
         ])

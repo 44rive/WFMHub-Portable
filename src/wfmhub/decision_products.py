@@ -1184,7 +1184,7 @@ def _service_aggregate(
     return {
         "raw_offered": offered,
         "offered": offered,
-        "business_offered": max(0.0, offered - short),
+        "business_offered": max(0.0, offered - abandoned_in_target),
         "answered": answered,
         "short_abandoned": short,
         "abandoned_within_target": abandoned_in_target,
