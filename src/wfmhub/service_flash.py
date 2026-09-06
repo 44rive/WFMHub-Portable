@@ -275,7 +275,7 @@ def _hourly_model(
         if hour is not None and 0 <= hour.hour <= 23:
             by_hour[hour.hour].append(row)
     forecast = _forecast_by_hour(conn, profile, mapping, report_day)
-    workforce = _workforce_by_hour(conn, profile, report_day) if profile.flash_layout == "workforce" else {}
+    workforce = _workforce_by_hour(conn, profile, report_day)
     cutoff = max(by_hour) if by_hour else None
     hourly: list[dict[str, Any]] = []
     for hour in range(profile.operating_start_hour, profile.operating_end_hour + 1):
@@ -331,6 +331,15 @@ def _hourly_model(
             if forecast_hours else None
         )
         total["forecast_attainment"] = _ratio(total["offered"], total["forecast"])
+        for field in (
+            "planned_hc", "short_sickness_hc", "long_sickness_hc",
+            "late_early_hc", "absence_hc",
+        ):
+            values = [row.get(field) for row in hourly if row.get(field) is not None]
+            total[field] = max(values) if values else None
+        total["absence_rate"] = _ratio(
+            total.get("absence_hc"), total.get("planned_hc"),
+        )
     group_totals = {
         group.label: _aggregate(
             [row for row in total_source if profile.group_for(row.get("queue")) == group.label],
@@ -445,6 +454,8 @@ def _flash_columns(
             "Hour", "Volume Forecasted", "Volume Ford", "Volume Chery",
             "Volume Toyota", "SL Ford", "SL Chery", "SL Toyota",
             "Routed Rate Ford", "Routed Rate Chery", "Routed Rate Toyota", "AHT",
+            "Planned HC", "Short Sickness", "Long Sickness",
+            "Late/Early Leave", "Absence HC", "Absence Rate",
         ]
         rows = []
         for row in hourly:
@@ -457,35 +468,25 @@ def _flash_columns(
                 ford.get("service_level"), chery.get("service_level"),
                 toyota.get("service_level"), ford.get("availability"),
                 chery.get("availability"), toyota.get("availability"),
-                row["aht_seconds"],
+                row["aht_seconds"], row.get("planned_hc"),
+                row.get("short_sickness_hc"), row.get("long_sickness_hc"),
+                row.get("late_early_hc"), row.get("absence_hc"),
+                row.get("absence_rate"),
             ])
         return headers, rows, 1, 2, 5
-    if profile.flash_layout == "workforce":
-        headers = [
-            "Hour", "Volume Forecasted", "Volume Actual", "Volume Handled",
-            "Volume Handled in SL", "Deviation", "Routed Rate", "TSL",
-            "AHT", "Planned HC", "Short Sickness", "Long Sickness",
-            "Late/Early Leave", "Absence HC", "Absence Rate", "Data State",
-        ]
-        rows = [[
-            row["hour_label"], row["forecast"], row["offered"], row["answered"],
-            row["answered_within_target"], row["forecast_attainment"],
-            row["availability"], row["service_level"], row["aht_seconds"],
-            row.get("planned_hc"), row.get("short_sickness_hc"),
-            row.get("long_sickness_hc"), row.get("late_early_hc"),
-            row.get("absence_hc"), row.get("absence_rate"), row["data_state"],
-        ] for row in hourly]
-        return headers, rows, 1, 2, 7
     headers = [
         "Hour", "Volume Forecasted", "Volume Actual", "Volume Handled",
         "Volume Handled in SL", "Deviation", "Routed Rate", "TSL", "AHT",
-        "Data State",
+        "Planned HC", "Short Sickness", "Long Sickness",
+        "Late/Early Leave", "Absence HC", "Absence Rate", "Data State",
     ]
     rows = [[
         row["hour_label"], row["forecast"], row["offered"], row["answered"],
         row["answered_within_target"], row["forecast_attainment"],
         row["availability"], row["service_level"], row["aht_seconds"],
-        row["data_state"],
+        row.get("planned_hc"), row.get("short_sickness_hc"),
+        row.get("long_sickness_hc"), row.get("late_early_hc"),
+        row.get("absence_hc"), row.get("absence_rate"), row["data_state"],
     ] for row in hourly]
     return headers, rows, 1, 2, 7
 
@@ -497,6 +498,11 @@ def _flash_cards(
     hourly: Sequence[dict[str, Any]],
 ) -> list[tuple[str, Any, str, str]]:
     value = total or {}
+    peak_planned = max((row.get("planned_hc") or 0 for row in hourly), default=0)
+    peak_absent = max((row.get("absence_hc") or 0 for row in hourly), default=0)
+    absence_rate = value.get("absence_rate")
+    if absence_rate is None:
+        absence_rate = _ratio(peak_absent, peak_planned)
     if profile.flash_layout == "oem_split":
         ford = groups.get("Ford") or {}
         chery = groups.get("Chery") or {}
@@ -509,19 +515,7 @@ def _flash_cards(
             ("SLA Toyota", toyota.get("service_level"), "percent", "APFR Toyota and Lexus"),
             ("Deviation", value.get("forecast_attainment"), "percent", "Actual / forecast through cutoff"),
             ("AHT", value.get("aht_seconds"), "seconds", "Weighted handled seconds"),
-        ]
-    if profile.flash_layout == "workforce":
-        planned = max((row.get("planned_hc") or 0 for row in hourly), default=0)
-        absent = max((row.get("absence_hc") or 0 for row in hourly), default=0)
-        return [
-            ("Dispatch", "N/C", "value", "Source not configured"),
-            ("Follow-up", "N/C", "value", "Source not configured"),
-            ("Mailbox BNL", "N/C", "value", "Source not configured"),
-            ("Absence Rate HC", _ratio(absent, planned), "percent", "Peak absent HC / peak planned HC"),
-            ("Deviation", value.get("forecast_attainment"), "percent", "Actual / forecast through cutoff"),
-            ("Routed Rate", value.get("availability"), "percent", "Routed / entered"),
-            ("TSL", value.get("service_level"), "percent", value.get("service_method") or "Configured method"),
-            ("AHT", value.get("aht_seconds"), "seconds", "Weighted handled seconds"),
+            ("LOB Absence Rate", absence_rate, "percent", "Peak absent HC / peak planned HC"),
         ]
     return [
         ("Forecast", value.get("forecast"), "integer", "Through latest actual hour"),
@@ -532,6 +526,7 @@ def _flash_cards(
         ("Routed Rate", value.get("availability"), "percent", "Routed / entered"),
         ("TSL", value.get("service_level"), "percent", value.get("service_method") or "Configured method"),
         ("AHT", value.get("aht_seconds"), "seconds", "Weighted handled seconds"),
+        ("LOB Absence Rate", absence_rate, "percent", "Peak absent HC / peak planned HC"),
     ]
 
 
@@ -548,10 +543,10 @@ def _add_flash_sheet(
     ws.hide_gridlines(2)
     ws.set_tab_color(COLORS["gold"])
     ws.set_zoom(85)
-    ws.merge_range("A1:Q1", f"FLASH  /  {profile.label.upper()}", book.report.title)
+    ws.merge_range("A1:R1", f"FLASH  /  {profile.label.upper()}", book.report.title)
     cutoff_text = f"through {cutoff:02d}:59" if cutoff is not None else "no mapped queue entries"
     ws.merge_range(
-        "A2:Q2",
+        "A2:R2",
         f"{report_day:%Y-%m-%d}  |  Call-by-Call actuals {cutoff_text}  |  generated {book.generated:%Y-%m-%d %H:%M}",
         book.report.subtitle,
     )
@@ -592,20 +587,11 @@ def _add_flash_sheet(
             chery.get("service_level"), toyota.get("service_level"),
             ford.get("availability"), chery.get("availability"),
             toyota.get("availability"), total_values.get("aht_seconds"),
-        ]
-    elif profile.flash_layout == "workforce":
-        values = [
-            total_values.get("forecast"), total_values.get("offered"),
-            total_values.get("answered"), total_values.get("answered_within_target"),
-            total_values.get("forecast_attainment"), total_values.get("availability"),
-            total_values.get("service_level"), total_values.get("aht_seconds"),
-            max((row.get("planned_hc") or 0 for row in hourly), default=0),
-            max((row.get("short_sickness_hc") or 0 for row in hourly), default=0),
-            max((row.get("long_sickness_hc") or 0 for row in hourly), default=0),
-            max((row.get("late_early_hc") or 0 for row in hourly), default=0),
-            max((row.get("absence_hc") or 0 for row in hourly), default=0),
-            max((row.get("absence_rate") or 0 for row in hourly), default=0),
-            "READY" if total else "INCOMPLETE",
+            total_values.get("planned_hc"),
+            total_values.get("short_sickness_hc"),
+            total_values.get("long_sickness_hc"),
+            total_values.get("late_early_hc"),
+            total_values.get("absence_hc"), total_values.get("absence_rate"),
         ]
     else:
         values = [
@@ -613,6 +599,11 @@ def _add_flash_sheet(
             total_values.get("answered"), total_values.get("answered_within_target"),
             total_values.get("forecast_attainment"), total_values.get("availability"),
             total_values.get("service_level"), total_values.get("aht_seconds"),
+            total_values.get("planned_hc"),
+            total_values.get("short_sickness_hc"),
+            total_values.get("long_sickness_hc"),
+            total_values.get("late_early_hc"),
+            total_values.get("absence_hc"), total_values.get("absence_rate"),
             "READY" if total else "INCOMPLETE",
         ]
     for column, value in enumerate(values, 1):
@@ -766,7 +757,7 @@ def _add_control_sheet(
         "Deviation follows the reference workbook: actual offered / forecast through the latest actual hour.",
         f"Storm SLA = C / (A + B - D): connected within {rulebook.target_seconds}s / "
         f"(lost + connected - lost from {rulebook.short_abandon_seconds}s to {rulebook.target_seconds}s).",
-        "Headline totals reset at midnight; operating hours control only the visible hourly rows.",
+        "Every Flash shows 00:00-23:00; headline totals reset at midnight.",
         "Routed Rate = total routed / total entered; it does not remove any lost calls.",
         "No mapped calls and missing forecasts remain blank; the workbook never turns missing evidence into zero.",
     ]
@@ -957,7 +948,8 @@ def build_service_flashes_workbook(
             ("Routed Rate", "Total routed / total entered", "Service availability", "Matches the Storm screenshot; not agent availability or adherence"),
             ("TSL", "Connected within target / (lost + connected - lost from 5 seconds to target)", "Storm C/(A+B-D)", "The supplied Storm custom-equation screen is the business authority"),
             ("AHT", "Sum of inbound talk + hold + wrap / routed queue entries", "Workload", "Weighted; never an average of hourly averages"),
-            ("Ford NL workload cards", "Dispatch, Follow-up and Mailbox BNL remain N/C", "Data integrity", "Book1 provides labels but no governed source or formula; values are not invented"),
+            ("Common Flash summary", "Forecast, actual, handled, handled in SL, deviation, routed rate, TSL, AHT and LOB absence", "Consistent decision controls", "Applied to RSA NL, RSA BE and Ford NL; OEM retains its validated brand split and adds LOB absence"),
+            ("LOB Absence", "Peak absent HC / peak planned HC for the profile's staffing LOB", "Capacity context", "Not attributed to individual service queues because the source does not provide queue-level absence"),
         ])
         clean_calls, unique_interactions = conn.execute(
             """SELECT count(*), count(DISTINCT interaction_key)
@@ -983,7 +975,7 @@ def build_service_flashes_workbook(
             ("Rulebook", rulebook.version, rulebook.sha256),
             ("Storm SLA equation", "C / (A + B - D)", "A=lost; B=connected; C=connected within SLA; D=lost from 5 seconds to SLA target"),
             ("Storm SLA target", f"{rulebook.target_seconds} seconds", f"Lost-call exclusion band: {rulebook.short_abandon_seconds} to < {rulebook.target_seconds} seconds"),
-            ("Cumulative boundary", "00:00 through latest mapped call hour", "Operating profile hours affect displayed hourly rows only"),
+            ("Day view", "00:00-23:00", "Actual headline totals run from midnight through the latest mapped call hour"),
             ("Design reference", "TOLEARN/Book1.xlsx", "Four pasted Flash references reconstructed as native Excel"),
             ("Prepared by", "Anass ASSRI", "WFM"),
         ])

@@ -37,8 +37,8 @@ The reports use the Storm dashboard business reference:
 Because `total entered = A + B`, the implemented TSL denominator is
 `total entered - lost within SLA`. Lost calls below 5 seconds remain included.
 All higher-grain percentages are ratios of summed counters; hourly percentages
-are never averaged. Daily headline counters reset at midnight even when a
-Flash hides pre-opening hourly rows.
+are never averaged. Every Flash displays 00:00 through 23:00 and daily headline
+counters reset at midnight.
 
 The supplied Storm equation screen is the formula authority. The explicit
 Call-by-Call reference in `Conso CBC FLASH - VA.xlsx` confirms that ringing is
@@ -65,3 +65,8 @@ allowlists live under `flash_queues` in `config\service_profiles.toml`:
 No queue is admitted by substring, suffix, designation or inferred LOB. A
 mapped Call-by-Call queue that is absent from the exact profile allowlist stays
 out of that Flash.
+
+Every Flash also shows hourly planned HC, short sickness, long sickness,
+late/early-leave HC, absence HC and absence rate for its configured staffing
+LOB. Absence is not attributed to individual service queues because the source
+evidence does not provide that relationship.

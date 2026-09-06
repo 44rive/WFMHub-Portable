@@ -176,7 +176,7 @@ class ExcelTemplateTests(unittest.TestCase):
                 default_text, encoding="utf-8",
             )
             previous_text = default_text.replace(
-                'version = "2026.09.8"', 'version = "2026.09.7"', 1,
+                'version = "2026.09.9"', 'version = "2026.09.8"', 1,
             ).replace(
                 'flash_total_groups = ["Ford", "Chery", "Toyota"]\n', "", 1,
             )
@@ -185,7 +185,7 @@ class ExcelTemplateTests(unittest.TestCase):
 
             catalog = load_service_profiles(home, target)
 
-            self.assertEqual(catalog.version, "2026.09.8")
+            self.assertEqual(catalog.version, "2026.09.9")
             self.assertEqual(
                 catalog.select("ford_oem_fr", date(2026, 9, 1)).flash_total_groups,
                 ("Ford", "Chery", "Toyota"),

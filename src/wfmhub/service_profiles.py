@@ -124,9 +124,9 @@ def ensure_service_profiles(home: Path, target: Path | None = None) -> Path:
         if (
             str(current.get("version", "")) in {
                 "2026.09.3", "2026.09.4", "2026.09.5", "2026.09.6",
-                "2026.09.7",
+                "2026.09.7", "2026.09.8",
             }
-            and str(default.get("version", "")) == "2026.09.8"
+            and str(default.get("version", "")) == "2026.09.9"
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(

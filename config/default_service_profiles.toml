@@ -1,11 +1,11 @@
 # Service reporting scopes. queue_mapping.csv maps source queues into the data
 # model; the exact screenshot-derived Flash allowlists live in this catalog.
 # Formulas and targets remain centralized in metric_catalog.toml.
-# Operating hours control the visible hourly rows. Flash headline totals follow
-# Storm and always reset at midnight.
+# Every shipped Flash displays the complete 00:00-23:00 day. Headline totals
+# follow Storm and reset at midnight.
 
 [catalog]
-version = "2026.09.8"
+version = "2026.09.9"
 default_profile = "ford_oem_fr"
 description = "Effective-dated service and Book1 Flash profiles for RSA Netherlands, RSA Belgium, Ford Netherlands, and Ford OEM France."
 
@@ -86,8 +86,8 @@ source_systems = ["CALL_BY_CALL"]
 flash_source_systems = ["CALL_BY_CALL"]
 flash_sheet = "Flash RSA BE"
 flash_layout = "standard"
-operating_start_hour = 7
-operating_end_hour = 21
+operating_start_hour = 0
+operating_end_hour = 23
 display_order = 2
 flash_total_groups = ["RSA", "Provider"]
 flash_queues = [
@@ -150,8 +150,8 @@ source_systems = ["CALL_BY_CALL"]
 flash_source_systems = ["CALL_BY_CALL"]
 flash_sheet = "Flash RSA NL"
 flash_layout = "standard"
-operating_start_hour = 7
-operating_end_hour = 22
+operating_start_hour = 0
+operating_end_hour = 23
 display_order = 1
 flash_total_groups = ["RSA", "Provider"]
 flash_queues = [

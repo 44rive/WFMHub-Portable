@@ -369,6 +369,8 @@ hours.
 Storm Routed Rate is answered divided by every entered queue entry. Queue
 profiles use exact screenshot-derived queue allowlists for the four Flashes.
 Provider, language and regional labels never add or remove a queue implicitly.
+All Flash tables display 00:00-23:00. Staffing and absence columns use the
+profile's configured staffing LOB rather than inventing queue-level ownership.
 AHT is weighted from handled seconds divided by answered contacts. Higher-grain
 reports use ratios of summed components, never averages of interval percentages.
 

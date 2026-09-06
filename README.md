@@ -116,9 +116,9 @@ and AHT are weighted by volume. `Deviation`, following the Book1 label, means
 entered - lost calls from 5 to 30 seconds)`; AHT is weighted handled seconds per
 routed queue entry. The threshold clock is total queue wait plus ringing.
 
-Ford NL's Dispatch, Follow-up, and Mailbox BNL cards remain `N/C` because Book1
-contains the labels but no governed source or formula. WFMHub does not invent
-those figures.
+Every Flash displays the full 00:00-23:00 day and the same service-summary
+controls. Hourly absence context comes from the profile's configured staffing
+LOB; it is never fabricated at individual queue level.
 
 Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in

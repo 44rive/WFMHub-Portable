@@ -188,6 +188,8 @@ class CallServiceModelTests(unittest.TestCase):
             "Hour", "Volume Forecasted", "Volume Ford", "Volume Chery",
             "Volume Toyota", "SL Ford", "SL Chery", "SL Toyota",
             "Routed Rate Ford", "Routed Rate Chery", "Routed Rate Toyota", "AHT",
+            "Planned HC", "Short Sickness", "Long Sickness",
+            "Late/Early Leave", "Absence HC", "Absence Rate",
         ])
         cards = _flash_cards(
             profile,
@@ -198,7 +200,20 @@ class CallServiceModelTests(unittest.TestCase):
         )
         self.assertEqual([card[0] for card in cards], [
             "Routed Rate OEM", "SLA OEM", "SLA Ford", "SLA Chery",
-            "SLA Toyota", "Deviation", "AHT",
+            "SLA Toyota", "Deviation", "AHT", "LOB Absence Rate",
+        ])
+        ford_cards = _flash_cards(
+            ford_nl,
+            {"forecast": 10, "offered": 9, "answered": 8,
+             "answered_within_target": 7, "forecast_attainment": 0.9,
+             "availability": 8 / 9, "service_level": 7 / 9,
+             "service_method": "storm_custom_30", "aht_seconds": 200},
+            {},
+            [blank],
+        )
+        self.assertEqual([card[0] for card in ford_cards], [
+            "Forecast", "Actual", "Handled", "Handled in SL", "Deviation",
+            "Routed Rate", "TSL", "AHT", "LOB Absence Rate",
         ])
 
     def test_forecast_only_hour_has_no_attainment_instead_of_crashing(self):
@@ -207,7 +222,7 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertIsNone(_ratio(10, 0))
         self.assertEqual(_ratio(8, 10), 0.8)
 
-    def test_flash_headline_resets_at_midnight_while_hourly_view_uses_operating_hours(self):
+    def test_flash_headline_and_hourly_view_cover_the_whole_day(self):
         raw = sqlite3.connect(
             ":memory:",
             detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
@@ -217,6 +232,20 @@ class CallServiceModelTests(unittest.TestCase):
             """CREATE TABLE mart.forecast_hour (
                    business_date DATE, comparison_scope VARCHAR,
                    hour_start TIMESTAMP, volume_forecast DOUBLE
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE mart.attendance_agent_day (
+                   business_date DATE, lob VARCHAR, agent_id VARCHAR,
+                   scheduled_start TIMESTAMP, scheduled_end TIMESTAMP,
+                   assignment_type VARCHAR, planned_work_minutes DOUBLE
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE mart.absence_event (
+                   business_date DATE, lob VARCHAR, agent_id VARCHAR,
+                   category VARCHAR, event_start TIMESTAMP,
+                   event_end TIMESTAMP, counts_as_absence BOOLEAN
                )"""
         )
         report_day = date(2026, 9, 5)
@@ -252,8 +281,9 @@ class CallServiceModelTests(unittest.TestCase):
         hourly, total, groups, cutoff = _hourly_model(
             conn, profile, mapping, metrics, report_day, rows,
         )
-        self.assertEqual(hourly[0]["hour"], 7)
-        self.assertEqual(len(hourly), 16)
+        self.assertEqual(hourly[0]["hour"], 0)
+        self.assertEqual(hourly[-1]["hour"], 23)
+        self.assertEqual(len(hourly), 24)
         self.assertEqual(cutoff, 7)
         self.assertEqual(total["offered"], 20)
         self.assertEqual(total["forecast"], 30)

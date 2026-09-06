@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.18.5 — 2026-09-06
+
+- Expanded every Flash hourly table to the complete 00:00-23:00 day while
+  preserving blank, future and missing-evidence states instead of converting
+  them to zero.
+- Standardized the RSA NL, RSA BE and Ford NL top summary to Forecast, Actual,
+  Handled, Handled in SL, Deviation, Routed Rate, TSL, AHT and LOB Absence.
+- Preserved the validated OEM brand split and added the same LOB absence
+  context without changing its six-queue service membership.
+- Added planned HC, short/long sickness, late/early-leave HC, absence HC and
+  absence rate to every Flash's hourly table and clean Flash data.
+- Kept absence governed at configured staffing-LOB level; WFMHub does not
+  fabricate absence ownership for individual service queues.
+
 ## 0.18.4 — 2026-09-06
 
 - Replaced inferred Flash queue membership with exact allowlists transcribed
