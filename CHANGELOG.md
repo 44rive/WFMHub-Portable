@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.20.1 — 2026-09-06
+
+- Corrected RTM workforce ownership: OEM uses the exact `OEM FR` FTE LOB and
+  RSA Belgium explicitly combines `RSA FR` with `RSA VL`. Existing profile
+  files receive a recoverable automatic upgrade.
+- Prevented date-level source availability from marking an individual agent
+  `ABSENT NOW`. Absence and Call Now now require agent-specific Agent Status,
+  LILO, or proven no-show evidence; missing evidence stays `UNKNOWN`.
+- Separated the live attendance checkpoint from the latest Call-by-Call hour.
+  It now follows the latest Agent Status evidence time (with the configured
+  staleness guard), and older service days use a final-day attendance mode.
+- Fixed Agent Status deduplication when Storm serial numbers restart across
+  exported files by using the agent and exact physical status interval as the
+  attendance identity.
+- Added a visible `BREAK & MEAL` sheet to Attendance Review with completed-day
+  totals, spell counts, longest spells, configurable allowances, overruns, and
+  evidence-gated alerts. `Meal`, `Lunch`, `Repas`, and common break labels are
+  recognized from Agent Status.
+- Made the Review Board reconcile to exact candidates: dark red is the gap
+  owned by the current row, light red is another counted gap for that shift,
+  and grey is status noise inside the configured tolerance.
+- Added spacing between the RTM Control table, operating notes, and chart.
+
 ## 0.20.0 — 2026-09-06
 
 - Replaced the separate Service Flashes and Attendance Callout operating

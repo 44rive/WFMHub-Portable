@@ -71,6 +71,10 @@ admitted only through `End date if leaver`; other statuses and undated leavers
 are excluded. The same rule is applied to schedules, LILO, Agent Status, and
 Call by Call for each row's business date.
 
+RTM workforce ownership follows the roster labels exactly: OEM uses `OEM FR`,
+RSA Belgium combines `RSA FR` and `RSA VL`, Ford Netherlands uses `Ford Dutch`,
+and RSA Netherlands uses `RSA NL`.
+
 The standard FTE workbook also owns PTO and Away registers. Approved PTO and
 effective Away intervals change expected work and net staffing without editing
 any extract. Planned Away affects future capacity only. Exact attendance gaps
@@ -123,6 +127,13 @@ table reconcile Scheduled Now, Present Now, Call Now, Late Today, and unknown
 evidence for that exact LOB. Hourly absence context comes from the profile's
 configured staffing LOB and is never fabricated at queue level.
 
+The latest call hour and attendance checkpoint are independent. Live attendance
+uses the latest Agent Status evidence time, not the later workbook refresh time.
+`PRESENT NOW` and `ABSENT NOW` require evidence for that specific agent at the
+checkpoint; a file merely existing for the date is not enough. A last known
+state is accepted only inside `rules.rta_stale_minutes`. Missing or stale
+per-agent evidence is `UNKNOWN` and never increases ABS HC or Call Now.
+
 Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in
 `config\metric_catalog.toml`.
@@ -168,6 +179,9 @@ never trusted. Approved rows use the selected rulebook category, Dismissed rows
 count as no loss, and Open rows stay unverified. The full-shift 15-minute visual
 is on that same row. The stored decision ledger and exact source evidence remain
 hidden by default because normal reviewers do not need to operate those sheets.
+`BREAK & MEAL` totals completed-day Agent Status intervals per agent, compares
+them with the configurable break and meal allowances, and raises an overrun
+only when source coverage is sufficient.
 
 `Reports\Final Absenteeism.xlsx` follows the same long-lived-file principle.
 `TEAM_VIEW` filters agent results and review cases; `COMPONENT_VIEW` explains

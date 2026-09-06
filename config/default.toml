@@ -44,9 +44,11 @@ end = ""
 # Runtime status settings. Attendance evidence rules live in wfm_rules.toml;
 # all KPI arithmetic, targets and scopes live in metric_catalog.toml.
 tolerance_minutes = 5
+# Completed-day allowances used by Attendance Review > BREAK & MEAL.
 break_minutes = 30
 lunch_minutes = 45
 minimum_status_coverage = 0.80
+# A live state older than this is UNKNOWN instead of assumed present/absent.
 rta_stale_minutes = 30
 
 [modules]

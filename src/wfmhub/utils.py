@@ -189,9 +189,9 @@ def classify_status(status: str | None) -> str:
     text = (status or "").upper().strip()
     if text == "LOGGED OFF":
         return "Logged Off"
-    if "LUNCH" in text:
+    if any(token in text for token in ("LUNCH", "MEAL", "REPAS", "DÉJEUNER", "DEJEUNER")):
         return "Lunch"
-    if text in {"BREAK", "ON BREAK", "PAUSE ECRAN", "PAUSE ÉCRAN"}:
+    if "BREAK" in text or text in {"PAUSE ECRAN", "PAUSE ÉCRAN"}:
         return "Break"
     if text == "UNAVAILABLE":
         return "Unavailable"

@@ -124,14 +124,14 @@ def ensure_service_profiles(home: Path, target: Path | None = None) -> Path:
         if (
             str(current.get("version", "")) in {
                 "2026.09.3", "2026.09.4", "2026.09.5", "2026.09.6",
-                "2026.09.7", "2026.09.8",
+                "2026.09.7", "2026.09.8", "2026.09.9",
             }
-            and str(default.get("version", "")) == "2026.09.9"
+            and str(default.get("version", "")) == "2026.09.10"
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(
                 target,
-                target.with_name(f"{target.stem}_pre_call_service_{stamp}{target.suffix}"),
+                target.with_name(f"{target.stem}_pre_lob_scope_{stamp}{target.suffix}"),
             )
             shutil.copy2(source, target)
     return target

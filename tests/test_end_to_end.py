@@ -96,7 +96,9 @@ def make_logged_off_status(path: Path):
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(["[Serial Number]", "[Status]", "[Status Start Date and Time]", "[Agent]", "[Agent ID]", "[Status Duration]", "[Queue]"])
-        writer.writerow(["off", "Logged Off", "8/1/2026 8:00", "Agent 200", "200", "8:00:00", "Queue"])
+        # Storm serial numbers can restart in another export. This deliberately
+        # collides with Agent 100's first row and must not remove either status.
+        writer.writerow(["one", "Logged Off", "8/1/2026 8:00", "Agent 200", "200", "8:00:00", "Queue"])
 
 
 def make_forecast(path: Path):
@@ -465,6 +467,12 @@ class EndToEndTests(unittest.TestCase):
                 attendance = {row[0]: row[1] for row in conn.execute("SELECT agent_day_key, attendance_result FROM mart.attendance_agent_day").fetchall()}
                 self.assertEqual(attendance["20260801-200"], "No show")
                 self.assertEqual(attendance["20260801-300"], "Missing actual evidence")
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT status_covered_minutes FROM mart.attendance_agent_day WHERE agent_day_key='20260801-100'"
+                    ).fetchone()[0],
+                    460,
+                )
                 late = conn.execute("SELECT gap_start, gap_end, gap_minutes FROM mart.correction_candidate WHERE agent_id='100' AND detected_issue='Late'").fetchone()
                 self.assertEqual(str(late[0]), "2026-08-01 08:00:00")
                 self.assertEqual(str(late[1]), "2026-08-01 08:20:00")
@@ -847,8 +855,9 @@ class EndToEndTests(unittest.TestCase):
             corrections_book = load_workbook(corrections_report, read_only=True, data_only=True)
             try:
                 self.assertEqual(corrections_book.sheetnames, [
-                    "CONTROL", "REVIEW BOARD", "DECISION LEDGER", "EVIDENCE",
-                    "DEFINITIONS", "_LOOKUPS", "_AUDIT",
+                    "CONTROL", "REVIEW BOARD", "BREAK & MEAL",
+                    "DECISION LEDGER", "EVIDENCE", "DEFINITIONS", "_LOOKUPS",
+                    "_AUDIT",
                 ])
                 self.assertIn("2026-08-01 to 2026-08-02", corrections_book["CONTROL"]["A2"].value)
                 review = corrections_book["REVIEW BOARD"]
@@ -872,6 +881,19 @@ class EndToEndTests(unittest.TestCase):
                     corrections_book["DECISION LEDGER"].sheet_state, "hidden",
                 )
                 self.assertEqual(corrections_book["EVIDENCE"].sheet_state, "hidden")
+                self.assertEqual(corrections_book["BREAK & MEAL"].sheet_state, "visible")
+                break_meal = corrections_book["BREAK & MEAL"]
+                break_meal_headers = [cell.value for cell in break_meal[4]]
+                self.assertIn("Break Minutes", break_meal_headers)
+                self.assertIn("Meal Minutes", break_meal_headers)
+                alert_column = break_meal_headers.index("Alert")
+                alerts = {
+                    row[alert_column]
+                    for row in break_meal.iter_rows(min_row=5, values_only=True)
+                    if row[alert_column] is not None
+                }
+                self.assertIn("WITHIN LIMIT", alerts)
+                self.assertIn("INSUFFICIENT EVIDENCE", alerts)
                 self.assertEqual(corrections_book["_AUDIT"].sheet_state, "hidden")
             finally:
                 corrections_book.close()

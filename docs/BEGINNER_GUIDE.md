@@ -113,6 +113,13 @@ Agent Status is the detailed evidence. A temporary Logged Off or Unavailable
 interval becomes an internal gap. If the agent returns later, that return is
 kept and the case is not labelled early leave. LILO is used only to complete
 the outer login/logout boundaries when Agent Status coverage is too sparse.
+An agent can be `ABSENT NOW` only when that agent has explicit evidence. If the
+file has no state for that person at the checkpoint, RTM shows `UNKNOWN` and
+does not add the person to ABS HC or Call Now.
+
+The attendance checkpoint is the newest Agent Status evidence time, not the
+time the workbook finishes building. A last known state older than
+`rules.rta_stale_minutes` is shown as `UNKNOWN`.
 
 RTM is intentionally a same-day control. Use Attendance Review for completed
 historical days or a whole current-week review.
@@ -179,10 +186,17 @@ control evidence.
    imported; edit only the five blue decision cells.
 3. Choose `Approved` plus a category, `Dismissed`, or leave `Open`.
 4. Read the colored full-shift timeline on that same row: green is Logged,
-   amber is Break/Lunch, and red is Gap. Exact support evidence is retained in
+   amber is Break/Lunch, dark red is the exact gap owned by this row, light red
+   is another counted gap for the same shift, and grey is a status interval
+   inside the configured tolerance. Exact support evidence is retained in
    hidden sheets for audit but is not part of the normal workflow.
 5. Save and close the workbook.
 6. In WFMHub choose **Attendance Review > Import completed decisions**.
+
+Open `BREAK & MEAL` to check completed shifts. It totals all Agent Status break
+and meal spells inside the shift, compares them with the values in
+`config\wfmhub.toml`, and places overruns first. `INSUFFICIENT EVIDENCE` means
+the Hub deliberately refused to judge that agent-day.
 
 ## Final Absenteeism
 

@@ -4,7 +4,7 @@ it replaces one, the previous copy is saved under Reports\Archive\YYYY-MM-DD.
 RTM Daily Control.xlsx    Service state and matching attendance actions by LOB
 Staffing Gaps.xlsx        Actual control and future weekly capacity plan
 Realisations.xlsx         Actual versus plan across all mapped LOBs
-Attendance Review.xlsx    Completed-day exact gaps awaiting human decisions
+Attendance Review.xlsx    Exact-gap decisions plus break/meal overrun control
 Final Absenteeism.xlsx    Reviewed absence/shrinkage ledger
 Bonus Management.xlsx     Bonus Matrix v1.2 decision workbook
 PCS Performance.xlsx      PCS, participation, trends and coaching

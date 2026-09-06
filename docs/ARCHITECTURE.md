@@ -124,7 +124,7 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `realisations` | `Reports/Realisations.xlsx` | All mapped LOB actual/forecast, service, staffing, absence and shrinkage results |
 | `staffing` | `Reports/Staffing Gaps.xlsx` | Full-period actual staffing control and future capacity planning |
 | `attendance` | `_system/legacy_reports/Legacy Attendance Callout.xlsx` | Compatibility-only callout builder; absent from the normal menu |
-| `corrections` | `Reports/Attendance Review.xlsx` | Selected-period completed-day exact gaps, human decisions, and shift visualization |
+| `corrections` | `Reports/Attendance Review.xlsx` | Selected-period exact gaps, visual decisions, and evidence-gated break/meal control |
 | `absence` | `Reports/Final Absenteeism.xlsx` | Reviewed attendance-decision absence/shrinkage ledger |
 
 Products share the same visual identity but use purpose-specific layouts.
@@ -133,9 +133,10 @@ sheets. Each LOB combines the validated hourly service view with its own
 reconciling attendance/call list. `ISSUES & DRIVERS` replaces the separate
 exceptions and queue-diagnosis surfaces. Attendance Review uses one editable
 visual `REVIEW BOARD`; its stored `DECISION LEDGER` and exact `EVIDENCE` are
-hidden audit support. Standalone Attendance Callout, legacy `operations`, and
-legacy `quality_pcs` remain callable under `_system/legacy_reports` but are
-absent from the menu.
+hidden audit support. `BREAK & MEAL` aggregates completed-day Agent Status
+spells and never revives adherence. Standalone Attendance Callout, legacy
+`operations`, and legacy `quality_pcs` remain callable under
+`_system/legacy_reports` but are absent from the menu.
 
 PCS is generated directly from SQLite. `PCS_DATA`, `COACHING_QUEUE` and
 `COACHING` are ordinary visible Excel Tables. Dashboard selectors use Excel

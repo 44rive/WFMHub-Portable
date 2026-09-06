@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.14"
+version = "2026.09.15"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
@@ -49,9 +49,9 @@ sheets = ["DASHBOARD", "ACTIONS", "TREND", "DEFINITIONS", "_AUDIT"]
 [[packs]]
 key = "corrections"
 title = "ATTENDANCE REVIEW"
-purpose = "Completed-day exact gaps, editable human decisions and full-shift evidence."
+purpose = "Completed-day exact gaps, editable decisions, full-shift evidence and break/meal overrun control."
 finding_domains = ["attendance", "data_quality"]
-sheets = ["CONTROL", "REVIEW BOARD", "DECISION LEDGER", "EVIDENCE", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
+sheets = ["CONTROL", "REVIEW BOARD", "BREAK & MEAL", "DECISION LEDGER", "EVIDENCE", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
 
 [[packs]]
 key = "absence"

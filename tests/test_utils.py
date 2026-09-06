@@ -47,6 +47,8 @@ class UtilsTests(unittest.TestCase):
     def test_unavailable_is_not_misclassified_as_available(self):
         self.assertEqual(classify_status("Unavailable"), "Unavailable")
         self.assertEqual(classify_status("Pause écran"), "Break")
+        self.assertEqual(classify_status("Meal"), "Lunch")
+        self.assertEqual(classify_status("Short Break"), "Break")
 
     def test_subtraction_returns_physical_remaining_interval(self):
         start = datetime(2026, 8, 1, 8, 0)

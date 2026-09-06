@@ -157,7 +157,7 @@ class ExcelTemplateTests(unittest.TestCase):
         self.assertEqual(ford.service_level_metric, "service_level")
         self.assertEqual(ford.availability_metric, "service_availability_business")
         self.assertEqual(ford.source_systems, ("CALL_BY_CALL",))
-        self.assertEqual(ford.staffing_lobs, ("Ford FR",))
+        self.assertEqual(ford.staffing_lobs, ("OEM FR",))
         self.assertEqual(
             [group.label for group in ford.groups],
             ["Toyota", "Chery", "Ford"],
@@ -176,7 +176,7 @@ class ExcelTemplateTests(unittest.TestCase):
                 default_text, encoding="utf-8",
             )
             previous_text = default_text.replace(
-                'version = "2026.09.9"', 'version = "2026.09.8"', 1,
+                'version = "2026.09.10"', 'version = "2026.09.9"', 1,
             ).replace(
                 'flash_total_groups = ["Ford", "Chery", "Toyota"]\n', "", 1,
             )
@@ -185,7 +185,7 @@ class ExcelTemplateTests(unittest.TestCase):
 
             catalog = load_service_profiles(home, target)
 
-            self.assertEqual(catalog.version, "2026.09.9")
+            self.assertEqual(catalog.version, "2026.09.10")
             self.assertEqual(
                 catalog.select("ford_oem_fr", date(2026, 9, 1)).flash_total_groups,
                 ("Ford", "Chery", "Toyota"),
@@ -195,7 +195,7 @@ class ExcelTemplateTests(unittest.TestCase):
                 6,
             )
             self.assertEqual(
-                len(list(config.glob("service_profiles_pre_call_service_*.toml"))),
+                len(list(config.glob("service_profiles_pre_lob_scope_*.toml"))),
                 1,
             )
 

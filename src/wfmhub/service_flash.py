@@ -269,7 +269,7 @@ def _attendance_pulse(
     conn: DatabaseConnection,
     profile: ServiceProfile,
     report_day: date,
-    cutoff: int | None,
+    stale_minutes: int = 30,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build one reconcilable same-day attendance pulse for an RTM LOB.
 
@@ -294,21 +294,6 @@ def _attendance_pulse(
     )
     headers = [item[0] for item in cursor.description]
     attendance = [dict(zip(headers, row)) for row in cursor.fetchall()]
-    evaluation_points = [
-        stamp for stamp in (_as_datetime(row.get("evaluation_as_of")) for row in attendance)
-        if stamp is not None and stamp.date() == report_day
-    ]
-    if evaluation_points:
-        checkpoint = max(evaluation_points)
-    elif cutoff is not None:
-        checkpoint = datetime.combine(report_day, datetime.min.time()) + timedelta(
-            hours=cutoff, minutes=59, seconds=59,
-        )
-    else:
-        checkpoint = datetime.combine(report_day, datetime.min.time()) + timedelta(
-            hours=23, minutes=59, seconds=59,
-        )
-
     timeline_cursor = conn.execute(
         f"""SELECT agent_id, segment_start, segment_end, planned_state,
                    actual_category, mismatch_type, is_gap, observed_source
@@ -323,6 +308,46 @@ def _attendance_pulse(
         segment = dict(zip(timeline_headers, values))
         segments_by_agent[str(segment["agent_id"])].append(segment)
 
+    live = report_day == date.today()
+    if live:
+        evaluation_points = [
+            stamp for stamp in (
+                _as_datetime(row.get("evaluation_as_of")) for row in attendance
+            ) if stamp is not None and stamp.date() == report_day
+        ]
+        evaluation_ceiling = max(evaluation_points, default=datetime.now())
+        status_points = [
+            _as_datetime(segment.get("segment_end"))
+            for segments in segments_by_agent.values() for segment in segments
+            if str(segment.get("observed_source") or "").strip().upper()
+            == "AGENT_STATUS"
+        ]
+        status_points = [
+            stamp for stamp in status_points
+            if stamp is not None and stamp <= evaluation_ceiling
+        ]
+        lilo_points = [
+            _as_datetime(segment.get("segment_end"))
+            for segments in segments_by_agent.values() for segment in segments
+            if str(segment.get("observed_source") or "").strip().upper() == "LILO"
+        ]
+        lilo_points = [
+            stamp for stamp in lilo_points
+            if stamp is not None and stamp <= evaluation_ceiling
+        ]
+        # Agent Status is the live attendance clock. Refresh time can be later
+        # than the extract cutoff and would otherwise turn valid agents into
+        # UNKNOWN. LILO is only a fallback when no status interval exists.
+        checkpoint = (
+            max(status_points) if status_points
+            else max(lilo_points) if lilo_points
+            else evaluation_ceiling
+        )
+    else:
+        checkpoint = datetime.combine(report_day, datetime.min.time()) + timedelta(
+            hours=23, minutes=59, seconds=59,
+        )
+
     pulse: list[dict[str, Any]] = []
     for row in attendance:
         start = _as_datetime(row.get("scheduled_start"))
@@ -334,46 +359,96 @@ def _attendance_pulse(
             if (_as_datetime(item.get("segment_start")) or state_checkpoint) <= state_checkpoint
             < (_as_datetime(item.get("segment_end")) or state_checkpoint)
         ), None)
-        state = (
-            "UPCOMING" if start and checkpoint < start
-            else "SHIFT COMPLETE" if end and checkpoint >= end
-            else "NOT SCHEDULED NOW"
+        current_source = str(
+            current_segment.get("observed_source") if current_segment else ""
+        ).strip().upper()
+        recent_segment = (
+            current_segment if current_source not in {"", "NONE"} else None
         )
-        if scheduled_now:
-            if current_segment is not None and bool(current_segment.get("is_gap")):
-                state = "ABSENT NOW"
-            elif current_segment is not None and str(
-                current_segment.get("actual_category") or ""
-            ).upper() in {"PRODUCTIVE", "AUXILIARY", "BREAK", "LUNCH", "LILO_PRESENT"}:
-                state = "PRESENT NOW"
-            else:
-                first_seen = _as_datetime(row.get("actual_first_seen"))
-                last_seen = _as_datetime(row.get("actual_last_seen"))
-                if first_seen and last_seen and first_seen <= checkpoint <= last_seen:
-                    state = "PRESENT NOW"
-                elif bool(row.get("source_loaded")):
+        if recent_segment is None and live:
+            freshness_floor = checkpoint - timedelta(minutes=max(0, stale_minutes))
+            recent_segment = max((
+                item for item in segments_by_agent.get(str(row["agent_id"]), [])
+                if str(item.get("observed_source") or "").strip().upper()
+                not in {"", "NONE"}
+                and freshness_floor <= (
+                    _as_datetime(item.get("segment_end")) or freshness_floor
+                ) <= checkpoint
+            ), key=lambda item: (
+                _as_datetime(item.get("segment_end")) or datetime.min
+            ), default=None)
+        evidence_segment = recent_segment
+        segment_source = str(
+            evidence_segment.get("observed_source") if evidence_segment else ""
+        ).strip().upper()
+        segment_category = str(
+            evidence_segment.get("actual_category") if evidence_segment else ""
+        ).strip().upper()
+        row_evidence = str(row.get("actual_evidence") or "NONE").strip().upper()
+        explicit_segment = segment_source not in {"", "NONE"}
+        first_seen = _as_datetime(row.get("actual_first_seen"))
+        last_seen = _as_datetime(row.get("actual_last_seen"))
+
+        if live:
+            state = (
+                "UPCOMING" if start and checkpoint < start
+                else "SHIFT COMPLETE" if end and checkpoint >= end
+                else "NOT SCHEDULED NOW"
+            )
+            if scheduled_now:
+                if (
+                    evidence_segment is not None
+                    and bool(evidence_segment.get("is_gap"))
+                    and explicit_segment
+                ):
                     state = "ABSENT NOW"
+                elif explicit_segment and segment_category in {
+                    "PRODUCTIVE", "AUXILIARY", "BREAK", "LUNCH", "LILO_PRESENT",
+                }:
+                    state = "PRESENT NOW"
+                elif (
+                    first_seen and last_seen and row_evidence != "NONE"
+                    and first_seen <= checkpoint <= last_seen
+                ):
+                    state = "PRESENT NOW"
                 else:
+                    # A file loaded for the date is not evidence for this agent.
                     state = "UNKNOWN"
+        else:
+            scheduled_now = True
+            result = str(row.get("attendance_result") or "").upper()
+            if "NO SHOW" in result and row_evidence != "NONE":
+                state = "ABSENT DAY"
+            elif result in {
+                "DATA NOT LOADED", "MISSING ACTUAL EVIDENCE",
+                "INCOMPLETE ACTUAL EVIDENCE", "NO SCHEDULE OVERLAP",
+                "SCHEDULE PARSE ERROR",
+            } or row_evidence == "NONE":
+                state = "UNKNOWN"
+            elif first_seen is not None or last_seen is not None:
+                state = "PRESENT DAY — LATE" if "LATE" in result else "PRESENT DAY"
+            else:
+                state = "UNKNOWN"
         late_today = float(row.get("uncoded_late_minutes") or 0) > 0
-        absence_now = state == "ABSENT NOW"
+        absence_now = state in {"ABSENT NOW", "ABSENT DAY"}
         call_action = str(row.get("call_action") or "NONE")
-        call_now = bool(row.get("requires_call")) or absence_now
+        reliable_action = bool(row.get("requires_call")) and row_evidence != "NONE"
+        call_now = (reliable_action or absence_now) and state != "UNKNOWN"
         if absence_now and call_action == "NONE":
             call_action = "CHECK_CURRENT_GAP"
+        current_evidence = (
+            segment_source if explicit_segment else row_evidence
+        )
         pulse.append({
             "flash": profile.label, "checkpoint": checkpoint,
             **row, "scheduled_now": scheduled_now,
             "attendance_state": state, "present_now": state == "PRESENT NOW",
             "absence_now": absence_now, "late_today": late_today,
             "call_now": call_now, "pulse_action": call_action,
-            "current_evidence": (
-                current_segment.get("observed_source")
-                if current_segment is not None else row.get("actual_evidence")
-            ),
+            "current_evidence": current_evidence,
         })
     summary = {
-        "checkpoint": checkpoint,
+        "checkpoint": checkpoint, "mode": "LIVE" if live else "FINAL DAY",
         "agent_rows": len(pulse),
         "scheduled_now": sum(bool(row["scheduled_now"]) for row in pulse),
         "present_now": sum(bool(row["present_now"]) for row in pulse),
@@ -662,7 +737,7 @@ def _add_flash_sheet(
     cutoff_text = f"through {cutoff:02d}:59" if cutoff is not None else "no mapped queue entries"
     ws.merge_range(
         "A2:O2",
-        f"{report_day:%Y-%m-%d}  |  calls {cutoff_text}  |  attendance checkpoint {pulse['checkpoint']:%H:%M}  |  generated {book.generated:%H:%M}",
+        f"{report_day:%Y-%m-%d}  |  calls {cutoff_text}  |  attendance {pulse['mode'].lower()} {pulse['checkpoint']:%H:%M}  |  generated {book.generated:%H:%M}",
         book.report.subtitle,
     )
     ws.set_row(0, 34)
@@ -771,10 +846,11 @@ def _add_flash_sheet(
         attendance_section, 0, attendance_section, 14,
         "ATTENDANCE  /  SAME-DAY OPERATIONAL LIST", book.report.section,
     )
-    attendance_summary_headers = [
-        "Checkpoint", "Scheduled Now", "Present Now", "ABS HC", "Call Now",
-        "Late Today", "Unknown Data",
-    ]
+    attendance_summary_headers = ["Checkpoint"] + (
+        ["Scheduled Now", "Present Now", "ABS HC", "Call Now"]
+        if pulse.get("mode") == "LIVE"
+        else ["Scheduled Day", "Present Day", "Absence HC", "Follow-up"]
+    ) + ["Late Today", "Unknown Data"]
     attendance_summary_values = [
         pulse.get("checkpoint"), pulse.get("scheduled_now"),
         pulse.get("present_now"), pulse.get("absence_hc"),
@@ -969,7 +1045,7 @@ def _add_control_sheet(
         chart.set_title({"name": "Forecast versus actual through cutoff"})
         chart.set_legend({"position": "bottom"})
         chart.set_chartarea({"border": {"none": True}})
-        ws.insert_chart("A16", chart, {"x_scale": 1.25, "y_scale": 1.1})
+        ws.insert_chart("A19", chart, {"x_scale": 1.25, "y_scale": 1.1})
     notes = [
         "Open a LOB name to see its hourly service and attendance list together.",
         "Variance = actual queue entries minus forecast through the latest call hour.",
@@ -978,8 +1054,8 @@ def _add_control_sheet(
         "ABS HC and Call Now reconcile to the attendance summary and agent list on that LOB sheet.",
         "Missing calls, forecasts or attendance evidence stay explicit; they are never converted to zero.",
     ]
-    ws.write("A10", "OPERATING NOTES", book.report.section)
-    for index, note in enumerate(notes, 10):
+    ws.write("A11", "OPERATING NOTES", book.report.section)
+    for index, note in enumerate(notes, 11):
         ws.merge_range(index, 0, index, 10, note, book.report.note)
     ws.set_column("A:A", 23)
     ws.set_column("B:K", 15)
@@ -1144,7 +1220,7 @@ def build_service_flashes_workbook(
                 conn, profile, mapping, metrics, end, source_rows,
             )
             pulse_rows, pulse_summary = _attendance_pulse(
-                conn, profile, end, cutoff,
+                conn, profile, end, config.rules.rta_stale_minutes,
             )
             hourly_by_profile[profile.profile_id] = hourly
             pulse_by_profile[profile.profile_id] = pulse_rows

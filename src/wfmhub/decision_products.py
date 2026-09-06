@@ -2796,6 +2796,139 @@ def build_final_absence_product_workbook(
     return _finish(book, partial, target)
 
 
+def _break_meal_control_rows(
+    conn: DatabaseConnection,
+    config: Config,
+    start: date,
+    completed_through: date,
+) -> tuple[list[str], list[tuple[Any, ...]]]:
+    """Build one evidence-gated break/meal result per completed agent-day."""
+
+    headers = [
+        "business_date", "lob", "team_leader", "agent_id", "agent_name",
+        "scheduled_start", "scheduled_end", "status_coverage_percent",
+        "break_minutes", "break_allowance_minutes", "break_overrun_minutes",
+        "break_spells", "longest_break_minutes", "meal_minutes",
+        "meal_allowance_minutes", "meal_overrun_minutes", "meal_spells",
+        "longest_meal_minutes", "alert", "evidence",
+    ]
+    if completed_through < start:
+        return headers, []
+    attendance_headers, attendance_rows = _query(
+        conn,
+        """SELECT business_date, lob, team_leader, agent_id, agent_name,
+                  scheduled_start, scheduled_end, planned_work_minutes,
+                  status_covered_minutes, actual_evidence
+           FROM mart.attendance_agent_day
+           WHERE business_date BETWEEN ? AND ?
+             AND assignment_type NOT IN ('Off','Planned absence')
+             AND scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL
+             AND planned_work_minutes>0
+           ORDER BY business_date, lob, team_leader, agent_name""",
+        [start, completed_through],
+    )
+    timeline_headers, timeline_rows = _query(
+        conn,
+        """SELECT business_date, agent_id, actual_category,
+                  segment_start, segment_end
+           FROM mart.shift_timeline_segment
+           WHERE business_date BETWEEN ? AND ?
+             AND actual_category IN ('Break','Lunch')
+             AND mismatch_type<>'WORK_DURING_TIME_OFF'
+           ORDER BY business_date, agent_id, actual_category, segment_start""",
+        [start, completed_through],
+    )
+    spells: dict[tuple[Any, str, str], list[tuple[datetime, datetime]]] = defaultdict(list)
+
+    def stamp(value: Any) -> datetime:
+        return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+
+    for values in timeline_rows:
+        item = dict(zip(timeline_headers, values))
+        spells[(
+            item["business_date"], str(item["agent_id"]),
+            str(item["actual_category"]),
+        )].append((stamp(item["segment_start"]), stamp(item["segment_end"])))
+
+    def merged(values: Sequence[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+        output: list[list[datetime]] = []
+        for left, right in sorted(values):
+            if right <= left:
+                continue
+            if not output or left > output[-1][1]:
+                output.append([left, right])
+            else:
+                output[-1][1] = max(output[-1][1], right)
+        return [(left, right) for left, right in output]
+
+    output: list[tuple[Any, ...]] = []
+    alert_order = {
+        "BREAK & MEAL EXCEEDED": 0, "BREAK EXCEEDED": 1,
+        "MEAL EXCEEDED": 2, "INSUFFICIENT EVIDENCE": 3,
+        "WITHIN LIMIT": 4,
+    }
+    for values in attendance_rows:
+        row = dict(zip(attendance_headers, values))
+        key = (row["business_date"], str(row["agent_id"]))
+        break_spells = merged(spells.get((*key, "Break"), ()))
+        meal_spells = merged(spells.get((*key, "Lunch"), ()))
+        break_minutes = int(sum(
+            (right - left).total_seconds() for left, right in break_spells
+        ) // 60)
+        meal_minutes = int(sum(
+            (right - left).total_seconds() for left, right in meal_spells
+        ) // 60)
+        longest_break = max((
+            int((right - left).total_seconds() // 60)
+            for left, right in break_spells
+        ), default=0)
+        longest_meal = max((
+            int((right - left).total_seconds() // 60)
+            for left, right in meal_spells
+        ), default=0)
+        planned = float(row.get("planned_work_minutes") or 0)
+        coverage = min(
+            1.0, float(row.get("status_covered_minutes") or 0) / planned,
+        ) if planned else None
+        reliable = bool(
+            coverage is not None
+            and coverage >= config.rules.minimum_status_coverage
+            and "AGENT_STATUS" in str(row.get("actual_evidence") or "").upper()
+        )
+        break_overrun = (
+            max(0, break_minutes - config.rules.break_minutes)
+            if reliable else None
+        )
+        meal_overrun = (
+            max(0, meal_minutes - config.rules.lunch_minutes)
+            if reliable else None
+        )
+        if not reliable:
+            alert = "INSUFFICIENT EVIDENCE"
+        elif break_overrun and meal_overrun:
+            alert = "BREAK & MEAL EXCEEDED"
+        elif break_overrun:
+            alert = "BREAK EXCEEDED"
+        elif meal_overrun:
+            alert = "MEAL EXCEEDED"
+        else:
+            alert = "WITHIN LIMIT"
+        output.append((
+            row.get("business_date"), row.get("lob"), row.get("team_leader"),
+            row.get("agent_id"), row.get("agent_name"),
+            row.get("scheduled_start"), row.get("scheduled_end"), coverage,
+            break_minutes, config.rules.break_minutes, break_overrun,
+            len(break_spells), longest_break, meal_minutes,
+            config.rules.lunch_minutes, meal_overrun, len(meal_spells),
+            longest_meal, alert, row.get("actual_evidence"),
+        ))
+    output.sort(key=lambda row: (
+        alert_order.get(str(row[18]), 9), row[0], str(row[1] or ""),
+        str(row[2] or ""), str(row[4] or ""),
+    ))
+    return headers, output
+
+
 def build_attendance_corrections_workbook(
     conn: DatabaseConnection,
     config: Config,
@@ -2868,7 +3001,8 @@ def build_attendance_corrections_workbook(
             "Each Gap ID owns one exact start/end interval. Edit only the five blue decision columns in REVIEW BOARD.",
             "Approved uses the selected rulebook category; Dismissed counts as no loss; Open remains unverified.",
             "Import this same workbook from the Attendance Review menu to recalculate absence and shrinkage.",
-            "The colored full-shift timeline sits on the same row as its exact gap and decision; it is visual support, never a replacement for the timestamps.",
+            "Dark red is this row's exact gap; light red is another counted gap; grey is inside tolerance. Exact timestamps remain authoritative.",
+            "BREAK & MEAL totals completed-shift Agent Status spells and judges overruns only when coverage is sufficient.",
         ],
         sheet_name="CONTROL",
     )
@@ -2917,6 +3051,34 @@ def build_attendance_corrections_workbook(
         start, completed_through, choices,
     )
     book.tables.append(ModelTable("REVIEW BOARD", headers, rows))
+    break_meal_headers, break_meal_rows = _break_meal_control_rows(
+        conn, config, start, completed_through,
+    )
+    break_meal_sheet = book.table(
+        "BREAK & MEAL", "Daily break and meal control",
+        "Completed shifts only. Totals come from Agent Status inside the scheduled shift; incomplete coverage is never reported as zero compliance.",
+        break_meal_headers, break_meal_rows,
+    )
+    if break_meal_rows:
+        alert_column = break_meal_headers.index("alert")
+        break_meal_sheet.conditional_format(
+            4, alert_column, 3 + len(break_meal_rows), alert_column,
+            {
+                "type": "text", "criteria": "containing", "value": "EXCEEDED",
+                "format": book.report.error,
+            },
+        )
+        incomplete_format = book.report.workbook.add_format({
+            "font_name": "Aptos", "font_size": 10, "bold": True,
+            "font_color": COLORS["amber"], "bg_color": COLORS["amber_light"],
+        })
+        break_meal_sheet.conditional_format(
+            4, alert_column, 3 + len(break_meal_rows), alert_column,
+            {
+                "type": "text", "criteria": "containing",
+                "value": "INSUFFICIENT EVIDENCE", "format": incomplete_format,
+            },
+        )
     ledger_headers, ledger_rows = _query(
         conn,
         """SELECT c.correction_id AS gap_id, c.business_date, c.agent_id,
@@ -2956,6 +3118,7 @@ def build_attendance_corrections_workbook(
         ("Logged", "Observed working, auxiliary, break or lunch evidence according to its separate color", "Visual shift context", "Exact raw state remains in EVIDENCE"),
         ("Gap", "Scheduled interval without accepted working evidence", "Review candidate", "The exact start/end at the left remain authoritative"),
         ("Current-day tail", "Unfinished part of today's shift", "No review row", "Never classified as early leave"),
+        ("Break and meal control", "Daily Agent Status totals compared with configured allowances", "Operational overrun alert", "Completed shifts with insufficient coverage remain unknown"),
     ])
     lookup = book.report.workbook.add_worksheet("_LOOKUPS")
     lookup.write_row(0, 0, ["Decision Status", "Meaning"])

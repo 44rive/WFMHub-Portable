@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .reports import COLORS, ExcelReport, _display_header
@@ -263,12 +263,14 @@ def add_review_board(
     ws.set_row(1, 21)
 
     legend = [
-        ("Logged", COLORS["green"], COLORS["green_light"]),
-        ("Break", COLORS["amber"], COLORS["amber_light"]),
-        ("Lunch", COLORS["gold"], "#FFF7DD"),
-        ("Gap", COLORS["red"], COLORS["red_light"]),
-        ("PTO / Away", COLORS["blue"], COLORS["blue_light"]),
-        ("Unknown", COLORS["muted"], COLORS["future_light"]),
+        ("Logged", "Logged", COLORS["green"], COLORS["green_light"]),
+        ("Break", "Break", COLORS["amber"], COLORS["amber_light"]),
+        ("Lunch", "Lunch", COLORS["gold"], "#FFF7DD"),
+        ("Gap", "Gap: this row", COLORS["white"], COLORS["red"]),
+        ("Other gap", "Gap: other row", COLORS["red"], COLORS["red_light"]),
+        ("Tolerance", "Within tolerance", COLORS["muted"], COLORS["future_light"]),
+        ("PTO / Away", "PTO / Away", COLORS["blue"], COLORS["blue_light"]),
+        ("Unknown", "Unknown", COLORS["muted"], COLORS["future_light"]),
     ]
     state_formats: dict[str, Any] = {}
     ws.merge_range(
@@ -277,14 +279,14 @@ def add_review_board(
         report.note,
     )
     legend_column = min(9, last_column + 1)
-    for label, font, fill in legend:
-        state_formats[label] = report.workbook.add_format({
+    for key, label, font, fill in legend:
+        state_formats[key] = report.workbook.add_format({
             "font_name": "Aptos", "font_size": 8, "bold": True,
             "font_color": font, "bg_color": fill, "align": "center",
             "valign": "vcenter", "border": 1, "border_color": COLORS["white"],
         })
         if legend_column <= last_column:
-            ws.write(2, legend_column, label, state_formats[label])
+            ws.write(2, legend_column, label, state_formats[key])
             legend_column += 1
 
     header_row = 3
@@ -310,6 +312,16 @@ def add_review_board(
     }
     date_index = display_headers.index("Date")
     agent_index = display_headers.index("Agent ID")
+    exact_start_index = display_headers.index("Exact Start")
+    exact_end_index = display_headers.index("Exact End")
+    review_gaps: dict[tuple[date, str], list[tuple[datetime, datetime]]] = defaultdict(list)
+    for values in decision_rows:
+        raw_start, raw_end = values[exact_start_index], values[exact_end_index]
+        if raw_start is None or raw_end is None:
+            continue
+        review_gaps[(as_date(values[date_index]), str(values[agent_index]))].append((
+            _as_datetime(raw_start), _as_datetime(raw_end),
+        ))
     editable = {
         "Decision Category", "Decision Status", "Reviewed By", "Comment",
         "Reviewed Date",
@@ -317,6 +329,8 @@ def add_review_board(
     for row_index, values in enumerate(decision_rows, header_row + 1):
         business_day = as_date(values[date_index])
         agent_id = str(values[agent_index])
+        current_start = _as_datetime(values[exact_start_index])
+        current_end = _as_datetime(values[exact_end_index])
         agent_segments = sorted(
             by_agent_day.get((business_day, agent_id), []),
             key=lambda item: _as_datetime(item["segment_start"]),
@@ -344,6 +358,19 @@ def add_review_board(
                 right = slot + 15
                 if right <= scheduled_start or slot >= scheduled_end:
                     continue
+                slot_start = datetime.combine(business_day, datetime.min.time()) + timedelta(minutes=slot)
+                slot_end = slot_start + timedelta(minutes=15)
+                if current_start < slot_end and current_end > slot_start:
+                    ws.write(row_index, column, "Gap", state_formats["Gap"])
+                    continue
+                other_gap = any(
+                    gap_start < slot_end and gap_end > slot_start
+                    and (gap_start, gap_end) != (current_start, current_end)
+                    for gap_start, gap_end in review_gaps.get((business_day, agent_id), [])
+                )
+                if other_gap:
+                    ws.write(row_index, column, "Gap", state_formats["Other gap"])
+                    continue
                 best_state = "Unknown"
                 best_rank = (state_priority[best_state], 0.0)
                 for segment in agent_segments:
@@ -356,7 +383,9 @@ def add_review_board(
                     rank = (state_priority[state], overlap)
                     if overlap > 0 and rank > best_rank:
                         best_state, best_rank = state, rank
-                if best_state != "Future":
+                if best_state == "Gap":
+                    ws.write(row_index, column, "Tolerance", state_formats["Tolerance"])
+                elif best_state != "Future":
                     ws.write(row_index, column, best_state, state_formats[best_state])
         ws.set_row(row_index, 20)
 

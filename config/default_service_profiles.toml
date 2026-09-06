@@ -5,7 +5,7 @@
 # follow Storm and reset at midnight.
 
 [catalog]
-version = "2026.09.9"
+version = "2026.09.10"
 default_profile = "ford_oem_fr"
 description = "Effective-dated service and Book1 Flash profiles for RSA Netherlands, RSA Belgium, Ford Netherlands, and Ford OEM France."
 
@@ -13,7 +13,7 @@ description = "Effective-dated service and Book1 Flash profiles for RSA Netherla
 id = "ford_oem_fr"
 label = "Ford OEM France"
 service_scopes = ["Ford FR"]
-staffing_lobs = ["Ford FR"]
+staffing_lobs = ["OEM FR"]
 source_systems = ["CALL_BY_CALL"]
 flash_source_systems = ["CALL_BY_CALL"]
 flash_sheet = "Flash OEM"

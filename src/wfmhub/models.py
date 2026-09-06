@@ -267,7 +267,11 @@ def _load_statuses(
         FROM (
             SELECT r.*, f.file_name AS source_file, f.modified_at,
                    row_number() OVER (
-                       PARTITION BY r.serial_number
+                       -- Serial numbers may restart in every exported file.
+                       -- Attendance identity is the agent's physical status
+                       -- interval, not that report-local display number.
+                       PARTITION BY r.agent_id, r.status_start, r.status_end,
+                                    upper(trim(coalesce(r.status,'')))
                        ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
                    ) AS row_rank
             FROM raw.agent_status r
@@ -820,7 +824,7 @@ def _build_attendance(
         elif (
             shift_in_progress and actual_first is None and start
             and elapsed_work_minutes > tolerance
-            and (source_loaded or status_source_loaded)
+            and (blank_lilo_row or status_proves_disconnected)
         ):
             result = "Not seen - shift in progress"
         elif shift_in_progress:

@@ -4,7 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from wfmhub.database import DatabaseConnection, _migration_statements
@@ -60,29 +60,32 @@ class CallServiceModelTests(unittest.TestCase):
                    observed_source VARCHAR
                )"""
         )
-        report_day = date(2026, 9, 6)
-        start, end = datetime(2026, 9, 6, 8), datetime(2026, 9, 6, 16)
-        checkpoint = datetime(2026, 9, 6, 12)
+        report_day = date.today()
+        start = datetime.combine(report_day, time(8))
+        end = datetime.combine(report_day, time(16))
+        checkpoint = datetime.combine(report_day, time(12))
+        present_evidence_end = checkpoint - timedelta(minutes=10)
+        refresh_time = checkpoint + timedelta(minutes=20)
         conn.executemany(
             "INSERT INTO mart.attendance_agent_day VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [
-                (report_day, "present", "Present Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Late - shift in progress", "CALL_LATE", True, start, checkpoint, 10, "AGENT_STATUS", True, True, checkpoint),
-                (report_day, "absent", "Absent Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Shift in progress", "NONE", False, start, checkpoint, 0, "AGENT_STATUS", True, True, checkpoint),
-                (report_day, "unknown", "Unknown Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Data not loaded", "NONE", False, None, None, 0, "NONE", False, True, checkpoint),
-                (report_day, "pto", "PTO Agent", "TL", "OM", "RSA NL", "NL", start, end, "Planned absence", "Planned absence", "NONE", False, None, None, 0, "PTO", True, False, checkpoint),
+                (report_day, "present", "Present Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Late - shift in progress", "CALL_LATE", True, start, present_evidence_end, 10, "AGENT_STATUS", True, True, refresh_time),
+                (report_day, "absent", "Absent Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Shift in progress", "NONE", False, start, checkpoint, 0, "AGENT_STATUS", True, True, refresh_time),
+                (report_day, "unknown", "Unknown Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Data not loaded", "NONE", False, None, None, 0, "NONE", True, True, refresh_time),
+                (report_day, "pto", "PTO Agent", "TL", "OM", "RSA NL", "NL", start, end, "Planned absence", "Planned absence", "NONE", False, None, None, 0, "PTO", True, False, refresh_time),
             ],
         )
         conn.executemany(
             "INSERT INTO mart.shift_timeline_segment VALUES (?,?,?,?,?,?,?,?,?,?)",
             [
-                (report_day, "present", "RSA NL", start, checkpoint, "WORK", "Productive", "MATCH", False, "AGENT_STATUS"),
+                (report_day, "present", "RSA NL", start, present_evidence_end, "WORK", "Productive", "MATCH", False, "AGENT_STATUS"),
                 (report_day, "absent", "RSA NL", datetime(2026, 9, 6, 11), checkpoint, "WORK", "Logged Off", "GAP", True, "AGENT_STATUS"),
             ],
         )
         profile = load_service_profiles(
             REPO, REPO / "config" / "default_service_profiles.toml",
         ).select("rsa_nl", report_day)
-        rows, summary = _attendance_pulse(conn, profile, report_day, 11)
+        rows, summary = _attendance_pulse(conn, profile, report_day)
         by_agent = {row["agent_id"]: row for row in rows}
         self.assertNotIn("pto", by_agent)
         self.assertEqual(summary["scheduled_now"], 3)
@@ -91,7 +94,12 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertEqual(summary["unknown_now"], 1)
         self.assertEqual(summary["late_today"], 1)
         self.assertEqual(summary["call_now"], 2)
+        self.assertEqual(summary["checkpoint"], checkpoint)
         self.assertEqual(by_agent["absent"]["pulse_action"], "CHECK_CURRENT_GAP")
+        self.assertEqual(by_agent["present"]["attendance_state"], "PRESENT NOW")
+        self.assertEqual(by_agent["present"]["current_evidence"], "AGENT_STATUS")
+        self.assertEqual(by_agent["unknown"]["attendance_state"], "UNKNOWN")
+        self.assertFalse(by_agent["unknown"]["call_now"])
         conn.close()
 
     def test_storm_screenshot_arithmetic_is_reproduced(self):
@@ -184,6 +192,7 @@ class CallServiceModelTests(unittest.TestCase):
                     f"{configured_profile.profile_id}: {queue}",
                 )
         profile = catalog.select("ford_oem_fr", date(2026, 9, 1))
+        self.assertEqual(profile.staffing_lobs, ("OEM FR",))
         self.assertEqual(len(profile.flash_queues), 6)
         self.assertEqual(profile.flash_total_groups, ("Ford", "Chery", "Toyota"))
         self.assertTrue(_included_in_flash_total(
@@ -227,6 +236,7 @@ class CallServiceModelTests(unittest.TestCase):
             rsa_nl, {"queue": "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL"},
         ))
         rsa_be = catalog.select("rsa_be", date(2026, 9, 1))
+        self.assertEqual(rsa_be.staffing_lobs, ("RSA FR", "RSA VL"))
         self.assertEqual(len(rsa_be.flash_queues), 36)
         self.assertTrue(_included_in_flash_total(
             rsa_be, {"queue": "APBN_BRU_MOBILITY_PROVIDER_Interco_EN"},

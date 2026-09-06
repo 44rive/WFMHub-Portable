@@ -75,6 +75,14 @@ rows and list Scheduled Now, Present Now, Call Now, Late Today, and unknown
 evidence so the numbers reconcile. Exact correction and final absence treatment
 remain in Attendance Review.
 
+The roster side of those joins is explicit: OEM = `OEM FR`, RSA Belgium =
+`RSA FR` + `RSA VL`, Ford Netherlands = `Ford Dutch`, and RSA Netherlands =
+`RSA NL`. The call-data cutoff and attendance checkpoint are displayed
+separately. The attendance checkpoint follows the latest Agent Status evidence,
+not workbook refresh time, and the configured RTA staleness limit applies to a
+last known state. No loaded file or LOB aggregate can substitute for
+agent-specific presence/absence evidence.
+
 `ISSUES & DRIVERS` contains only actionable source failures and configured
 queues with real demand below target. It identifies whether late-routed
 contacts, lost contacts, or both are driving the miss. It cannot change queue
