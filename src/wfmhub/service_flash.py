@@ -142,6 +142,15 @@ def _profile_rows(
     start: date,
     end: date,
 ) -> list[dict[str, Any]]:
+    queue_filter = (
+        f"upper(queue) IN ({_marks(profile.flash_queues)})"
+        if profile.flash_queues
+        else f"service_scope IN ({_marks(profile.service_scopes)})"
+    )
+    queue_values = (
+        [queue.upper() for queue in profile.flash_queues]
+        if profile.flash_queues else list(profile.service_scopes)
+    )
     cursor = conn.execute(
         f"""SELECT business_date, hour_start, source_system, service_scope,
                    comparison_scope, queue, designation, language, offered,
@@ -153,10 +162,10 @@ def _profile_rows(
                    transferred_legs, source_files
             FROM mart.call_service_hour
             WHERE business_date BETWEEN ? AND ?
-              AND service_scope IN ({_marks(profile.service_scopes)})
+              AND {queue_filter}
               AND source_system IN ({_marks(profile.flash_source_systems)})
             ORDER BY business_date, hour_start, queue""",
-        [start, end, *profile.service_scopes, *profile.flash_source_systems],
+        [start, end, *queue_values, *profile.flash_source_systems],
     )
     headers = [item[0] for item in cursor.description]
     return [dict(zip(headers, row)) for row in cursor.fetchall()]
@@ -166,10 +175,7 @@ def _included_in_flash_total(
     profile: ServiceProfile,
     row: dict[str, Any],
 ) -> bool:
-    return (
-        not profile.flash_total_groups
-        or profile.group_for(row.get("queue")) in profile.flash_total_groups
-    )
+    return profile.includes_flash_queue(row.get("queue"))
 
 
 def _forecast_by_hour(
@@ -886,33 +892,24 @@ def build_service_flashes_workbook(
             mapped = mapping.map_actual(
                 row.get("source_system"), row.get("source_value"), None, None,
             )
-            matching_profile = next(
-                (
-                    profile for profile in profiles
-                    if mapped.service_scope in profile.service_scopes
-                ),
-                None,
-            )
-            flash_group = (
-                matching_profile.group_for(row.get("source_value"))
-                if matching_profile is not None else None
-            )
-            used = (
-                matching_profile is not None
-                and (
-                    not matching_profile.flash_total_groups
-                    or flash_group in matching_profile.flash_total_groups
-                )
-            )
+            memberships = [
+                profile for profile in profiles
+                if profile.includes_flash_queue(row.get("source_value"))
+            ]
+            flash_group = " | ".join(
+                f"{profile.label}: {profile.group_for(row.get('source_value'))}"
+                for profile in memberships
+            ) or None
+            used = " | ".join(profile.label for profile in memberships)
             mapping_rows.append((
                 row.get("mapping_type"), row.get("source_system"),
                 row.get("source_value"), mapped.service_scope,
                 mapped.comparison_scope, mapped.designation, flash_group,
-                "YES" if used else "NO",
+                used or "NO",
             ))
         book.table(
             "QUEUE_MAP", "Queue-to-Flash control",
-            "The exact configured queues admitted from Call-by-Call. Edit queue_mapping.csv, validate, then refresh.",
+            "Source mapping plus exact screenshot-derived Flash membership. Edit flash_queues in service_profiles.toml; queue_mapping.csv controls source-to-scope mapping.",
             mapping_headers, mapping_rows,
         )
         exception_headers = [
@@ -950,7 +947,7 @@ def build_service_flashes_workbook(
         )
         book.definitions([
             ("Volume Actual", "Every inbound entry into a mapped Flash queue", "Storm Total Entered", "A transfer entering another mapped queue is another queue entry"),
-            ("OEM visible scope", " and ".join(oem_groups) or "Every configured group", "Matches the Storm OEM platform", "Regional Ford queues remain auditable but are excluded from the OEM total"),
+            ("OEM visible scope", " and ".join(oem_groups) or "Every configured group", "Matches the Storm OEM platform", "Four Ford FR queues plus the Chery and Toyota/Lexus queues shown in Storm"),
             ("Volume Handled", "Inbound queue entry routed to an agent", "Storm Total Routed", "Agent may be outside the FTE roster; the queue is the service boundary"),
             ("Response time", "Total Queue Wait Time + Ringing Duration", "Storm threshold clock", "Reproduced from the Call-by-Call business reference"),
             ("Volume Handled in SL", f"Routed queue entry with response time < {rulebook.target_seconds} seconds", "SLA numerator", "Threshold is editable in wfm_rules.toml"),

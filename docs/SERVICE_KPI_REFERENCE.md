@@ -51,9 +51,17 @@ data-quality issue instead of being hidden by a spreadsheet formula.
 
 ## Flash queue scope
 
-- RSA NL and RSA BE include RSA/Allianz queues and exclude Provider queues.
-- Ford NL includes only `APBN_AMS_MOBILITY_Ford_Assistance_NL` and
-  `APBN_AMS_MOBILITY_Ford_Dealers_NL`.
-- OEM includes only the APFR Ford, Chery, and Toyota/Lexus platform queues.
-- Other mapped Provider and regional Ford queues remain available in clean
-  data and queue controls but are marked `Used By Flash = NO`.
+The Storm screenshots are the sole authority for Flash membership. Exact queue
+allowlists live under `flash_queues` in `config\service_profiles.toml`:
+
+- RSA NL includes all 30 queues displayed in `TOLEARN\RSA NL.png`, including
+  its Provider and RSA Ford-labelled rows.
+- RSA BE includes all 36 queues displayed in `TOLEARN\RSA BE.png`, across FR,
+  VL and EN rows, including Provider.
+- Ford NL includes the six NL/VL/DE queues displayed for that Flash.
+- OEM includes the four Ford FR activity queues plus the displayed Chery and
+  Toyota/Lexus queues: six physical queues in total.
+
+No queue is admitted by substring, suffix, designation or inferred LOB. A
+mapped Call-by-Call queue that is absent from the exact profile allowlist stays
+out of that Flash.

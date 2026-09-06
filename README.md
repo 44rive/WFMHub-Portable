@@ -103,9 +103,9 @@ evidence behind the presentation.
 Actual demand comes from exact queues in `queue_mapping.csv`. WFMHub counts each
 mapped inbound queue entry, matching Storm `Total Entered`; outbound companion
 legs are ignored. A transfer entering another displayed queue is therefore a
-new queue entry. The profile catalog excludes Provider queues from RSA, limits
-Ford NL to the two Amsterdam queues, and limits OEM to the APFR Ford, Chery and
-Toyota/Lexus platform queues. PCS stays limited to the effective-dated FTE roster.
+new queue entry. Each Flash uses an exact queue allowlist transcribed from its
+supplied Storm screenshot: RSA NL 30 queues, RSA BE 36 queues, Ford NL six
+queues, and OEM six queues. PCS stays limited to the effective-dated FTE roster.
 
 Verint Forecast supplies forecast only. New 15-minute exports stay at their
 native grain for Staffing and are rolled into hours for the Flashes. Hourly

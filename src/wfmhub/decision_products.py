@@ -1098,7 +1098,15 @@ def _service_rows(
     start: date,
     end: date,
 ) -> list[dict[str, Any]]:
-    scope_marks = ",".join("?" for _ in profile.service_scopes)
+    filter_values = (
+        [queue.upper() for queue in profile.flash_queues]
+        if profile.flash_queues else list(profile.service_scopes)
+    )
+    source_filter = (
+        f"upper(queue) IN ({','.join('?' for _ in filter_values)})"
+        if profile.flash_queues
+        else f"service_scope IN ({','.join('?' for _ in filter_values)})"
+    )
     system_marks = ",".join("?" for _ in profile.source_systems)
     cursor = conn.execute(
         f"""SELECT business_date, interval_start, hour_start, source_system, queue,
@@ -1108,14 +1116,14 @@ def _service_rows(
                    answered_within_target, handled_seconds, source_file
             FROM mart.service_interval
             WHERE business_date BETWEEN ? AND ?
-              AND service_scope IN ({scope_marks})
+              AND {source_filter}
               AND source_system IN ({system_marks})
             ORDER BY business_date, interval_start, source_system, queue""",
-        [start, end, *profile.service_scopes, *profile.source_systems],
+        [start, end, *filter_values, *profile.source_systems],
     )
     headers = [item[0] for item in cursor.description]
     rows = [dict(zip(headers, row)) for row in cursor.fetchall()]
-    if profile.flash_total_groups:
+    if profile.flash_total_groups and not profile.flash_queues:
         allowed = set(profile.flash_total_groups)
         rows = [
             row for row in rows

@@ -160,8 +160,9 @@ class ExcelTemplateTests(unittest.TestCase):
         self.assertEqual(ford.staffing_lobs, ("Ford FR",))
         self.assertEqual(
             [group.label for group in ford.groups],
-            ["Toyota", "Chery", "Ford", "Regional Ford"],
+            ["Toyota", "Chery", "Ford"],
         )
+        self.assertEqual(len(ford.flash_queues), 6)
 
     def test_previous_service_profile_catalog_upgrades_with_backup(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -175,7 +176,7 @@ class ExcelTemplateTests(unittest.TestCase):
                 default_text, encoding="utf-8",
             )
             previous_text = default_text.replace(
-                'version = "2026.09.7"', 'version = "2026.09.6"', 1,
+                'version = "2026.09.8"', 'version = "2026.09.7"', 1,
             ).replace(
                 'flash_total_groups = ["Ford", "Chery", "Toyota"]\n', "", 1,
             )
@@ -184,10 +185,14 @@ class ExcelTemplateTests(unittest.TestCase):
 
             catalog = load_service_profiles(home, target)
 
-            self.assertEqual(catalog.version, "2026.09.7")
+            self.assertEqual(catalog.version, "2026.09.8")
             self.assertEqual(
                 catalog.select("ford_oem_fr", date(2026, 9, 1)).flash_total_groups,
                 ("Ford", "Chery", "Toyota"),
+            )
+            self.assertEqual(
+                len(catalog.select("ford_oem_fr", date(2026, 9, 1)).flash_queues),
+                6,
             )
             self.assertEqual(
                 len(list(config.glob("service_profiles_pre_call_service_*.toml"))),

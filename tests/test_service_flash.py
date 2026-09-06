@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from wfmhub.service_flash import (
     _flash_columns,
     _hourly_model,
     _included_in_flash_total,
+    _profile_rows,
     _ratio,
 )
 from wfmhub.service_profiles import load_service_profiles
@@ -110,7 +112,16 @@ class CallServiceModelTests(unittest.TestCase):
         catalog = load_service_profiles(
             REPO, REPO / "config" / "default_service_profiles.toml",
         )
+        mapping = load_queue_mapping(REPO / "config" / "default_queue_mapping.csv")
+        for configured_profile in catalog.profiles:
+            for queue in configured_profile.flash_queues:
+                self.assertEqual(
+                    mapping.map_actual("STORM", queue, None, None).status,
+                    "MAPPED",
+                    f"{configured_profile.profile_id}: {queue}",
+                )
         profile = catalog.select("ford_oem_fr", date(2026, 9, 1))
+        self.assertEqual(len(profile.flash_queues), 6)
         self.assertEqual(profile.flash_total_groups, ("Ford", "Chery", "Toyota"))
         self.assertTrue(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR"},
@@ -121,22 +132,44 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertTrue(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CHERY_ASSISTANCE_FR"},
         ))
-        self.assertFalse(_included_in_flash_total(
+        self.assertTrue(_included_in_flash_total(
             profile, {"queue": "APBN_BRU_MOBILITY_Ford_Assistance_FR"},
         ))
+        self.assertFalse(_included_in_flash_total(
+            profile, {"queue": "APCH_ZRH_RSA_Ford_Assistance_FR"},
+        ))
         ford_nl = catalog.select("ford_nl", date(2026, 9, 1))
+        self.assertEqual(len(ford_nl.flash_queues), 6)
         self.assertTrue(_included_in_flash_total(
             ford_nl, {"queue": "APBN_AMS_MOBILITY_Ford_Assistance_NL"},
         ))
-        self.assertFalse(_included_in_flash_total(
+        self.assertTrue(_included_in_flash_total(
             ford_nl, {"queue": "APBN_BRU_MOBILITY_Ford_Assistance_VL"},
         ))
+        self.assertFalse(_included_in_flash_total(
+            ford_nl, {"queue": "APBN_BRU_MOBILITY_Ford_Assistance_FR"},
+        ))
         rsa_nl = catalog.select("rsa_nl", date(2026, 9, 1))
+        self.assertEqual(len(rsa_nl.flash_queues), 30)
         self.assertTrue(_included_in_flash_total(
             rsa_nl, {"queue": "APBN_AMS_MOBILITY_INSURAN_Front_NL"},
         ))
-        self.assertFalse(_included_in_flash_total(
+        self.assertTrue(_included_in_flash_total(
             rsa_nl, {"queue": "APBN_AMS_MOBILITY_PROVIDER_Local_NL"},
+        ))
+        self.assertTrue(_included_in_flash_total(
+            rsa_nl, {"queue": "APBN_AMS_RSA_Ford_Assistance_NL"},
+        ))
+        self.assertFalse(_included_in_flash_total(
+            rsa_nl, {"queue": "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL"},
+        ))
+        rsa_be = catalog.select("rsa_be", date(2026, 9, 1))
+        self.assertEqual(len(rsa_be.flash_queues), 36)
+        self.assertTrue(_included_in_flash_total(
+            rsa_be, {"queue": "APBN_BRU_MOBILITY_PROVIDER_Interco_EN"},
+        ))
+        self.assertFalse(_included_in_flash_total(
+            rsa_be, {"queue": "APBN_BRU_MOBILITY_POLICE_OBU_EN"},
         ))
         blank = {
             "hour_label": "08:00", "forecast": 10, "offered": 5,
@@ -305,6 +338,19 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertAlmostEqual(result[10], 2 / 6)
         self.assertAlmostEqual(result[11], 4 / 6)
         self.assertAlmostEqual(result[12], 85.0)
+        rsa_profile = load_service_profiles(
+            REPO, REPO / "config" / "default_service_profiles.toml",
+        ).select("rsa_nl", date(2026, 8, 1))
+        exact_profile = replace(
+            rsa_profile,
+            service_scopes=("DIFFERENT MODEL SCOPE",),
+            flash_queues=("MAPPED_QUEUE",),
+        )
+        selected = _profile_rows(
+            conn, exact_profile, date(2026, 8, 1), date(2026, 8, 1),
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["queue"], "MAPPED_QUEUE")
         conn.close()
 
 

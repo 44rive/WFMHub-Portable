@@ -48,6 +48,7 @@ class ServiceProfile:
     operating_end_hour: int
     display_order: int
     flash_total_groups: tuple[str, ...]
+    flash_queues: tuple[str, ...]
 
     def active_on(self, value: date) -> bool:
         return self.effective_from <= value and (self.effective_to is None or value <= self.effective_to)
@@ -57,6 +58,19 @@ class ServiceProfile:
             if group.matches(queue):
                 return group.label
         return "Other"
+
+    def includes_flash_queue(self, queue: str | None) -> bool:
+        """Apply an exact screenshot-derived Flash allowlist when configured."""
+
+        normalized = str(queue or "").strip().casefold()
+        if self.flash_queues:
+            return normalized in {
+                configured.strip().casefold() for configured in self.flash_queues
+            }
+        return (
+            not self.flash_total_groups
+            or self.group_for(queue) in self.flash_total_groups
+        )
 
     def staffing_pairs(self) -> tuple[tuple[str, str], ...]:
         """Return explicit service-scope to roster-LOB planning links."""
@@ -110,8 +124,9 @@ def ensure_service_profiles(home: Path, target: Path | None = None) -> Path:
         if (
             str(current.get("version", "")) in {
                 "2026.09.3", "2026.09.4", "2026.09.5", "2026.09.6",
+                "2026.09.7",
             }
-            and str(default.get("version", "")) in {"2026.09.5", "2026.09.6", "2026.09.7"}
+            and str(default.get("version", "")) == "2026.09.8"
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(
@@ -160,6 +175,11 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
                 for value in item.get("flash_total_groups", [])
                 if str(value).strip()
             )
+            flash_queues = tuple(
+                str(value).strip()
+                for value in item.get("flash_queues", [])
+                if str(value).strip()
+            )
         except (KeyError, TypeError, ValueError) as exc:
             raise ServiceProfileError(f"Invalid service profile item {index}: {exc}") from exc
         if not profile_id or not scopes or not staffing_lobs or not systems or not flash_systems:
@@ -205,6 +225,7 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
             operating_end_hour=operating_end,
             display_order=display_order,
             flash_total_groups=flash_total_groups,
+            flash_queues=flash_queues,
         ))
     if not profiles or default_profile not in {profile.profile_id for profile in profiles}:
         raise ServiceProfileError("default_profile must identify at least one profile")
@@ -245,6 +266,11 @@ def validate_service_profiles(
             raise ServiceProfileError(
                 f"Service profile {profile.profile_id!r} has unknown "
                 f"flash_total_groups: {', '.join(unknown_total_groups)}"
+            )
+        normalized_queues = [queue.casefold() for queue in profile.flash_queues]
+        if len(normalized_queues) != len(set(normalized_queues)):
+            raise ServiceProfileError(
+                f"Service profile {profile.profile_id!r} has duplicate flash_queues"
             )
         key = profile.flash_sheet.casefold()
         if key in flash_sheets:

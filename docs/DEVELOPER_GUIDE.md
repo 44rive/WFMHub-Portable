@@ -150,5 +150,5 @@ path to the runtime. The Copilot file under `prompts` is a manual handoff only.
 Bonus Matrix imports are content-hashed and replace the active version for one
 period inside a savepoint. Keep the source-cached result as a reconciliation
 control, and keep Scenario Payout distinct from Released Payout. Service-report
-scope and queue grouping belong in `service_profiles.toml`; queue membership
+scope, exact Flash queue membership and display grouping belong in `service_profiles.toml`; source mapping
 continues to belong in `queue_mapping.csv`.

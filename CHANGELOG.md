@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.18.4 — 2026-09-06
+
+- Replaced inferred Flash queue membership with exact allowlists transcribed
+  from the four supplied Storm screenshots: RSA NL 30 queues, RSA BE 36,
+  Ford NL six, and OEM six.
+- Included every Provider and other row displayed by the RSA screenshots and
+  excluded queues absent from those screens; no suffix, designation or broad
+  substring can silently add or remove a Flash queue.
+- Corrected OEM Ford to aggregate its four displayed Ford FR queues alongside
+  Chery and Toyota/Lexus, while Ford NL uses its six displayed NL/VL/DE queues.
+- Removed the model-scope gate from Flash selection so an explicitly listed
+  screenshot queue cannot be dropped because of its separate reporting scope.
+- Added the missing RSA NL `MOBILITY_INSURAN_Front_EN` source mapping, exposed
+  exact Flash membership in the Queue Map/KPI catalog, and added count-locked
+  regression coverage for every allowlist.
+
 ## 0.18.3 — 2026-09-06
 
 - Implemented the supplied Storm custom equation exactly as configured:

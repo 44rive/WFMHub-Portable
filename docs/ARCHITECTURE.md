@@ -367,8 +367,8 @@ seconds up to that target; losses below 5 seconds remain in the denominator.
 Daily headline counters reset at midnight, independently of visible operating
 hours.
 Storm Routed Rate is answered divided by every entered queue entry. Queue
-scopes and profile display groups choose the reported queues; Provider and
-regional Ford rows remain auditable without contaminating the four Flashes.
+profiles use exact screenshot-derived queue allowlists for the four Flashes.
+Provider, language and regional labels never add or remove a queue implicitly.
 AHT is weighted from handled seconds divided by answered contacts. Higher-grain
 reports use ratios of summed components, never averages of interval percentages.
 

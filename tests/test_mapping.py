@@ -41,6 +41,7 @@ class QueueMappingTests(unittest.TestCase):
         reference_additions = {
             "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL": "RSA NL",
             "APBN_AMS_MOBILITY_NIGHT_NightShift_NL": "RSA NL",
+            "APBN_AMS_MOBILITY_INSURAN_Front_EN": "RSA NL",
             "APBN_AMS_RSA_OEM_All_NL": "RSA NL",
             "APBN_AMS_RSA_PROVIDER_All_NL": "RSA NL",
             "APBN_BRU_MOBILITY_BIKE_Bike_FR": "RSA BE FR",

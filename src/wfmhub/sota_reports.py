@@ -96,12 +96,12 @@ def _add_catalog_sheets(
     service_profiles = load_service_profiles(config.home, config.service_profiles)
     report.add_table_sheet(
         "SERVICE_PROFILES", "Effective-dated service and LOB profiles",
-        "Profiles select metric IDs and reporting scopes. KPI formulas and targets remain in METRIC_METHODS.",
+        "Profiles select metric IDs, reporting scopes and exact screenshot-derived Flash queues. KPI formulas and targets remain in METRIC_METHODS.",
         [
             "profile_id", "label", "service_scopes", "source_systems",
             "flash_source_systems", "flash_sheet", "flash_layout",
             "operating_start_hour", "operating_end_hour", "display_order",
-            "flash_total_groups",
+            "flash_total_groups", "flash_queues",
             "service_level_metric", "availability_metric", "aht_metric",
             "effective_from", "effective_to", "catalog_version", "catalog_sha256",
         ],
@@ -113,6 +113,7 @@ def _add_catalog_sheets(
                 profile.flash_layout, profile.operating_start_hour,
                 profile.operating_end_hour, profile.display_order,
                 " | ".join(profile.flash_total_groups),
+                " | ".join(profile.flash_queues),
                 profile.service_level_metric,
                 profile.availability_metric, profile.aht_metric, profile.effective_from,
                 profile.effective_to, service_profiles.version, service_profiles.sha256,

@@ -1,11 +1,11 @@
-# Service reporting scopes. Queue membership remains in queue_mapping.csv.
-# This catalog defines how mapped queues are presented and which SLA contract
-# applies. Formulas and targets remain centralized in metric_catalog.toml.
+# Service reporting scopes. queue_mapping.csv maps source queues into the data
+# model; the exact screenshot-derived Flash allowlists live in this catalog.
+# Formulas and targets remain centralized in metric_catalog.toml.
 # Operating hours control the visible hourly rows. Flash headline totals follow
 # Storm and always reset at midnight.
 
 [catalog]
-version = "2026.09.7"
+version = "2026.09.8"
 default_profile = "ford_oem_fr"
 description = "Effective-dated service and Book1 Flash profiles for RSA Netherlands, RSA Belgium, Ford Netherlands, and Ford OEM France."
 
@@ -22,6 +22,14 @@ operating_start_hour = 0
 operating_end_hour = 23
 display_order = 4
 flash_total_groups = ["Ford", "Chery", "Toyota"]
+flash_queues = [
+  "APBN_BRU_MOBILITY_Ford_Assistance_FR",
+  "APBN_BRU_MOBILITY_Ford_Dealers_FR",
+  "APBN_LUX_MOBILITY_Ford_Assistance_FR",
+  "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR",
+  "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
+  "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
+]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"
 aht_metric = "aht_seconds"
@@ -37,10 +45,6 @@ queue_contains = ["APFR_PAR_RSA_CHERY_ASSISTANCE"]
 
 [[profiles.groups]]
 label = "Ford"
-queue_contains = ["APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE"]
-
-[[profiles.groups]]
-label = "Regional Ford"
 queue_contains = ["FORD"]
 
 [[profiles]]
@@ -55,18 +59,22 @@ flash_layout = "workforce"
 operating_start_hour = 0
 operating_end_hour = 23
 display_order = 3
-flash_total_groups = ["Ford Amsterdam"]
+flash_total_groups = ["Ford NL Scope"]
+flash_queues = [
+  "APBN_AMS_MOBILITY_Ford_Assistance_NL",
+  "APBN_AMS_MOBILITY_Ford_Dealers_NL",
+  "APBN_BRU_MOBILITY_Ford_Assistance_DE",
+  "APBN_BRU_MOBILITY_Ford_Assistance_VL",
+  "APBN_BRU_MOBILITY_Ford_Dealers_VL",
+  "APBN_LUX_MOBILITY_Ford_Assistance_DE",
+]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"
 aht_metric = "aht_seconds"
 effective_from = 2026-01-01
 
 [[profiles.groups]]
-label = "Ford Amsterdam"
-queue_contains = ["APBN_AMS_MOBILITY_FORD"]
-
-[[profiles.groups]]
-label = "Regional Ford"
+label = "Ford NL Scope"
 queue_contains = ["FORD"]
 
 [[profiles]]
@@ -81,7 +89,45 @@ flash_layout = "standard"
 operating_start_hour = 7
 operating_end_hour = 21
 display_order = 2
-flash_total_groups = ["RSA"]
+flash_total_groups = ["RSA", "Provider"]
+flash_queues = [
+  "APBN_BRU_MOBILITY_BIKE_Bike_FR",
+  "APBN_BRU_MOBILITY_BIKE_Bike_VL",
+  "APBN_BRU_MOBILITY_INSURAN_Front_FR",
+  "APBN_BRU_MOBILITY_INSURAN_Front_VL",
+  "APBN_BRU_MOBILITY_INTERNAT_Front_FR",
+  "APBN_BRU_MOBILITY_INTERNAT_Front_VL",
+  "APBN_BRU_MOBILITY_NIGHT_NightShift_FR",
+  "APBN_BRU_MOBILITY_NIGHT_NightShift_VL",
+  "APBN_BRU_MOBILITY_OEM-CONS_Front_FR",
+  "APBN_BRU_MOBILITY_OEM-CONS_Front_VL",
+  "APBN_BRU_MOBILITY_PROVIDER_Interco_EN",
+  "APBN_BRU_MOBILITY_PROVIDER_Interco_FR",
+  "APBN_BRU_MOBILITY_PROVIDER_Interco_VL",
+  "APBN_BRU_MOBILITY_PROVIDER_Local_FR",
+  "APBN_BRU_MOBILITY_PROVIDER_Local_VL",
+  "APBN_BRU_MOBILITY_PROVIDER_Morocco_EN",
+  "APBN_BRU_MOBILITY_VIP_Front_FR",
+  "APBN_BRU_MOBILITY_VIP_Front_VL",
+  "APBN_BRU_RSA_INSURAN_AB_FR",
+  "APBN_BRU_RSA_INSURAN_AB_VL",
+  "APBN_BRU_RSA_INSURAN_All_FR",
+  "APBN_BRU_RSA_INSURAN_All_VL",
+  "APBN_BRU_RSA_INSURAN_AzB_FR",
+  "APBN_BRU_RSA_INSURAN_AzB_VL",
+  "APBN_BRU_RSA_INTERNAT_All_EN",
+  "APBN_BRU_RSA_INTERNAT_All_FR",
+  "APBN_BRU_RSA_INTERNAT_All_VL",
+  "APBN_BRU_RSA_OEM-CONS_All_FR",
+  "APBN_BRU_RSA_OEM-CONS_All_VL",
+  "APBN_BRU_RSA_OEM_All_EN",
+  "APBN_BRU_RSA_OEM_All_FR",
+  "APBN_BRU_RSA_OEM_All_VL",
+  "APBN_BRU_RSA_PROVIDER_All_FR",
+  "APBN_BRU_RSA_PROVIDER_All_VL",
+  "APBN_BRU_RSA_VIP_Front_FR",
+  "APBN_BRU_RSA_VIP_Front_VL",
+]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"
 aht_metric = "aht_seconds"
@@ -107,7 +153,39 @@ flash_layout = "standard"
 operating_start_hour = 7
 operating_end_hour = 22
 display_order = 1
-flash_total_groups = ["RSA"]
+flash_total_groups = ["RSA", "Provider"]
+flash_queues = [
+  "APBN_AMS_MOBILITY_BIKE_Bike_NL",
+  "APBN_AMS_MOBILITY_CRM_ConciergeBBH_NL",
+  "APBN_AMS_MOBILITY_INSURAN_AllianzNetherlandsOEM_NL",
+  "APBN_AMS_MOBILITY_INSURAN_FollowUp_NL",
+  "APBN_AMS_MOBILITY_INSURAN_Front_EN",
+  "APBN_AMS_MOBILITY_INSURAN_Front_NL",
+  "APBN_AMS_MOBILITY_INTERNAT_FollowUp_NL",
+  "APBN_AMS_MOBILITY_INTERNAT_Front_NL",
+  "APBN_AMS_MOBILITY_LEASE-RE_FollowUp_NL",
+  "APBN_AMS_MOBILITY_LEASE-RE_Front_NL",
+  "APBN_AMS_MOBILITY_NIGHT_NightShift_NL",
+  "APBN_AMS_MOBILITY_OEM-CONS_FollowUp_NL",
+  "APBN_AMS_MOBILITY_OEM-CONS_Front_NL",
+  "APBN_AMS_MOBILITY_PROVIDER_Interco_NL",
+  "APBN_AMS_MOBILITY_PROVIDER_Local_NL",
+  "APBN_AMS_MOBILITY_PROVIDER_Morocco_NL",
+  "APBN_AMS_MOBILITY_VIP_FollowUp_NL",
+  "APBN_AMS_MOBILITY_VIP_Front_NL",
+  "APBN_AMS_RSA_CRM_ConciergeBBH_NL",
+  "APBN_AMS_RSA_Ford_Assistance_NL",
+  "APBN_AMS_RSA_Ford_Dealers_NL",
+  "APBN_AMS_RSA_INSURAN_All_EN",
+  "APBN_AMS_RSA_INSURAN_All_NL",
+  "APBN_AMS_RSA_INSURAN_AzN_NL",
+  "APBN_AMS_RSA_INTERNAT_All_EN",
+  "APBN_AMS_RSA_INTERNAT_All_NL",
+  "APBN_AMS_RSA_OEM_All_EN",
+  "APBN_AMS_RSA_OEM_All_NL",
+  "APBN_AMS_RSA_PROVIDER_All_NL",
+  "APBN_AMS_RSA_VIP_All_NL",
+]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"
 aht_metric = "aht_seconds"
