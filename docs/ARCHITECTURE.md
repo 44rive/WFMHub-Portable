@@ -131,9 +131,10 @@ Products share the same visual identity but use purpose-specific layouts.
 RTM Daily Control begins with `CONTROL`, then provides four purpose-built LOB
 sheets. Each LOB combines the validated hourly service view with its own
 reconciling attendance/call list. `ISSUES & DRIVERS` replaces the separate
-exceptions and queue-diagnosis surfaces. Attendance Review uses one editable
-visual `REVIEW BOARD`; its stored `DECISION LEDGER` and exact `EVIDENCE` are
-hidden audit support. `BREAK & MEAL` aggregates completed-day Agent Status
+exceptions and queue-diagnosis surfaces. Attendance Review pairs a scheduled
+band directly above the actual evidence band for every editable gap. Its stored
+`DECISION LEDGER` and exact `EVIDENCE` are hidden audit support. `BREAK & MEAL`
+aggregates completed-day Agent Status
 spells and never revives adherence. Standalone Attendance Callout, legacy
 `operations`, and legacy `quality_pcs` remain callable under
 `_system/legacy_reports` but are absent from the menu.

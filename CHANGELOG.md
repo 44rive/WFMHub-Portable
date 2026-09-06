@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.20.2 — 2026-09-06
+
+- Redefined RTM `No Show HC` to count only a scheduled agent with no observed
+  presence and explicit agent-specific no-show evidence. Late arrivals,
+  early leavers, and agents who went offline after attending remain present.
+- Added `Offline Now` as a separate operational alert and kept missing or stale
+  evidence in `Unknown HC — Possible No Show`; unknown never increases the
+  confirmed no-show or automatic call counts.
+- Reworked every Attendance Review case into two aligned visual bands:
+  scheduled work/PTO directly above actual Logged, Break, Lunch, Gap and
+  Unknown evidence. Exact gap decisions remain on the ACTUAL row and continue
+  to import through the stable Gap ID.
+- Updated hourly RTM attendance context, headline cards, LOB control totals,
+  definitions, report contracts and tests to use the same no-show boundary.
+
 ## 0.20.1 — 2026-09-06
 
 - Corrected RTM workforce ownership: OEM uses the exact `OEM FR` FTE LOB and

@@ -67,13 +67,14 @@ No queue is admitted by substring, suffix, designation or inferred LOB. A
 mapped Call-by-Call queue that is absent from the exact profile allowlist stays
 out of that Flash.
 
-Every RTM LOB sheet shows only `ABS HC` as lightweight attendance context. It is the
-distinct scheduled HC in a reliable attendance gap at the shown checkpoint or
-hour. PTO/Away and missing evidence are not counted as absent. The attendance
-summary and named list below the service table use the same governed agent/day
-rows and list Scheduled Now, Present Now, Call Now, Late Today, and unknown
-evidence so the numbers reconcile. Exact correction and final absence treatment
-remain in Attendance Review.
+Every RTM LOB sheet uses `No Show HC` as its absence callout. It counts only a
+scheduled agent who has no observed presence and whose agent-specific evidence
+proves a no-show. An agent who arrived late, left early, or is currently offline
+after attending remains present. `Offline Now` is a separate operational alert.
+`Unknown HC` means possible no-show or missing/stale evidence and is never added
+to confirmed No Show HC or the automatic call count. Exact gap treatment remains
+in Attendance Review. `Due HC = Present HC + No Show HC + Unknown HC`, while
+Offline Now is a subset of Present HC.
 
 The roster side of those joins is explicit: OEM = `OEM FR`, RSA Belgium =
 `RSA FR` + `RSA VL`, Ford Netherlands = `Ford Dutch`, and RSA Netherlands =

@@ -113,9 +113,14 @@ Agent Status is the detailed evidence. A temporary Logged Off or Unavailable
 interval becomes an internal gap. If the agent returns later, that return is
 kept and the case is not labelled early leave. LILO is used only to complete
 the outer login/logout boundaries when Agent Status coverage is too sparse.
-An agent can be `ABSENT NOW` only when that agent has explicit evidence. If the
-file has no state for that person at the checkpoint, RTM shows `UNKNOWN` and
-does not add the person to ABS HC or Call Now.
+`No Show HC` means the agent never showed presence and Agent Status explicitly
+supports a no-show. Late agents, early leavers, and agents who went offline
+after working remain present. Offline Now is a separate alert. If the file has
+no reliable state for that person, RTM shows `UNKNOWN — POSSIBLE NO SHOW`; check
+the data before calling.
+
+The summary balances as `Due HC = Present HC + No Show HC + Unknown HC`.
+Offline Now is already included inside Present HC, so never add it again.
 
 The attendance checkpoint is the newest Agent Status evidence time, not the
 time the workbook finishes building. A last known state older than
@@ -146,7 +151,7 @@ abandoned call is still demand even though it has no Agent ID. Verint supplies
 forecast only.
 
 Open `CONTROL`, then click a LOB name. Each LOB shows hourly forecast, actual,
-absolute volume variance, TSL, Routed Rate, weighted AHT, and `ABS HC` through
+absolute volume variance, TSL, Routed Rate, weighted AHT, and `No Show HC` through
 the latest actual hour. The attendance summary and named call/late list are
 directly below that hourly table, so there is no second callout workbook to
 reconcile. Open `ISSUES & DRIVERS` only when you need actionable missing data
@@ -182,14 +187,13 @@ WFMHub compares schedule with Agent Status first and uses LILO as fallback and
 control evidence.
 
 1. Open `REVIEW BOARD`.
-2. Each row is one exact continuous interval. White evidence cells are not
-   imported; edit only the five blue decision cells.
+2. Each case uses two rows: SCHEDULE directly above ACTUAL. White evidence cells
+   are not imported; edit only the five blue cells on the ACTUAL row.
 3. Choose `Approved` plus a category, `Dismissed`, or leave `Open`.
-4. Read the colored full-shift timeline on that same row: green is Logged,
-   amber is Break/Lunch, dark red is the exact gap owned by this row, light red
-   is another counted gap for the same shift, and grey is a status interval
-   inside the configured tolerance. Exact support evidence is retained in
-   hidden sheets for audit but is not part of the normal workflow.
+4. Compare the paired timeline. Scheduled work is teal, PTO/Away is blue,
+   Logged is green, Break/Lunch is amber, dark red is the exact gap owned by the
+   ACTUAL row, light red is another counted gap, and grey is inside tolerance.
+   Exact support evidence remains in hidden sheets.
 5. Save and close the workbook.
 6. In WFMHub choose **Attendance Review > Import completed decisions**.
 

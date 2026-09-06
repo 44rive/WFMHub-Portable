@@ -120,19 +120,21 @@ and AHT are weighted by volume. Routed Rate is
 entered - lost calls from 5 to 30 seconds)`; AHT is weighted handled seconds per
 routed queue entry. The threshold clock is total queue wait plus ringing.
 
-Every LOB displays the full 00:00-23:00 day. The six headline controls are TSL,
-Routed Rate, Actual, Forecast, ABS HC, and Call Now. `Volume Variance` is actual
-minus forecast. The attendance summary and named agent list below the hourly
-table reconcile Scheduled Now, Present Now, Call Now, Late Today, and unknown
-evidence for that exact LOB. Hourly absence context comes from the profile's
-configured staffing LOB and is never fabricated at queue level.
+Every LOB displays the full 00:00-23:00 day. Headline controls show TSL, Routed
+Rate, Actual, Forecast, `No Show HC`, `Offline Now`, and Call Now. `No Show HC`
+means the agent has no observed presence at all and agent-specific evidence
+proves the no-show. Late agents, early leavers, and agents who went offline
+after attending remain present. `Unknown HC` is a possible no-show or data
+problem and is never added to No Show HC or the automatic call count.
+The attendance strip reconciles `Due HC = Present HC + No Show HC + Unknown HC`;
+Offline Now is a subset of Present HC.
 
 The latest call hour and attendance checkpoint are independent. Live attendance
 uses the latest Agent Status evidence time, not the later workbook refresh time.
-`PRESENT NOW` and `ABSENT NOW` require evidence for that specific agent at the
-checkpoint; a file merely existing for the date is not enough. A last known
-state is accepted only inside `rules.rta_stale_minutes`. Missing or stale
-per-agent evidence is `UNKNOWN` and never increases ABS HC or Call Now.
+Presence and no-show require evidence for that specific agent at the checkpoint;
+a file merely existing for the date is not enough. A last known state is
+accepted only inside `rules.rta_stale_minutes`. Missing or stale per-agent
+evidence is `UNKNOWN — POSSIBLE NO SHOW` and requires a data check.
 
 Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in
@@ -176,8 +178,10 @@ the required completed dates, edit only the five blue columns on `REVIEW BOARD`,
 save it, then choose **Attendance Review > Import completed decisions**. Gap ID
 anchors the exact immutable start/end interval in SQLite; edited evidence is
 never trusted. Approved rows use the selected rulebook category, Dismissed rows
-count as no loss, and Open rows stay unverified. The full-shift 15-minute visual
-is on that same row. The stored decision ledger and exact source evidence remain
+count as no loss, and Open rows stay unverified. Every case has a SCHEDULE band
+directly above its ACTUAL band, so shift boundaries and PTO/Away can be compared
+with Logged, Break, Lunch, Gap and Unknown evidence. Decisions are edited only
+on the ACTUAL row. The stored decision ledger and exact source evidence remain
 hidden by default because normal reviewers do not need to operate those sheets.
 `BREAK & MEAL` totals completed-day Agent Status intervals per agent, compares
 them with the configurable break and meal allowances, and raises an overrun

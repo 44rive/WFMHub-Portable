@@ -24,6 +24,7 @@ from wfmhub.service_flash import (
     _included_in_flash_total,
     _profile_rows,
     _ratio,
+    _workforce_by_hour,
 )
 from wfmhub.service_profiles import load_service_profiles
 
@@ -61,6 +62,8 @@ class CallServiceModelTests(unittest.TestCase):
                )"""
         )
         report_day = date.today()
+        early_start = datetime.combine(report_day, time(6))
+        early_end = datetime.combine(report_day, time(10))
         start = datetime.combine(report_day, time(8))
         end = datetime.combine(report_day, time(16))
         checkpoint = datetime.combine(report_day, time(12))
@@ -70,8 +73,10 @@ class CallServiceModelTests(unittest.TestCase):
             "INSERT INTO mart.attendance_agent_day VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [
                 (report_day, "present", "Present Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Late - shift in progress", "CALL_LATE", True, start, present_evidence_end, 10, "AGENT_STATUS", True, True, refresh_time),
-                (report_day, "absent", "Absent Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Shift in progress", "NONE", False, start, checkpoint, 0, "AGENT_STATUS", True, True, refresh_time),
+                (report_day, "offline", "Offline Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Shift in progress", "NONE", False, start, checkpoint, 0, "AGENT_STATUS", True, True, refresh_time),
+                (report_day, "no-show", "No Show Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Not seen - shift in progress", "CALL_NOT_SEEN_NOW", True, None, None, 0, "AGENT_STATUS", True, True, refresh_time),
                 (report_day, "unknown", "Unknown Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Data not loaded", "NONE", False, None, None, 0, "NONE", True, True, refresh_time),
+                (report_day, "early", "Early Agent", "TL", "OM", "RSA NL", "NL", early_start, early_end, "Working", "Early leave", "NONE", False, early_start, datetime.combine(report_day, time(9, 30)), 0, "AGENT_STATUS", True, False, refresh_time),
                 (report_day, "pto", "PTO Agent", "TL", "OM", "RSA NL", "NL", start, end, "Planned absence", "Planned absence", "NONE", False, None, None, 0, "PTO", True, False, refresh_time),
             ],
         )
@@ -79,7 +84,9 @@ class CallServiceModelTests(unittest.TestCase):
             "INSERT INTO mart.shift_timeline_segment VALUES (?,?,?,?,?,?,?,?,?,?)",
             [
                 (report_day, "present", "RSA NL", start, present_evidence_end, "WORK", "Productive", "MATCH", False, "AGENT_STATUS"),
-                (report_day, "absent", "RSA NL", datetime(2026, 9, 6, 11), checkpoint, "WORK", "Logged Off", "GAP", True, "AGENT_STATUS"),
+                (report_day, "offline", "RSA NL", datetime.combine(report_day, time(11)), checkpoint, "WORK", "Logged Off", "GAP", True, "AGENT_STATUS"),
+                (report_day, "no-show", "RSA NL", start, checkpoint, "WORK", "Logged Off", "GAP", True, "AGENT_STATUS"),
+                (report_day, "early", "RSA NL", early_start, datetime.combine(report_day, time(9, 30)), "WORK", "Productive", "MATCH", False, "AGENT_STATUS"),
             ],
         )
         profile = load_service_profiles(
@@ -88,18 +95,37 @@ class CallServiceModelTests(unittest.TestCase):
         rows, summary = _attendance_pulse(conn, profile, report_day)
         by_agent = {row["agent_id"]: row for row in rows}
         self.assertNotIn("pto", by_agent)
-        self.assertEqual(summary["scheduled_now"], 3)
-        self.assertEqual(summary["present_now"], 1)
-        self.assertEqual(summary["absence_hc"], 1)
-        self.assertEqual(summary["unknown_now"], 1)
+        self.assertEqual(summary["scheduled_now"], 4)
+        self.assertEqual(summary["due_hc"], 5)
+        self.assertEqual(summary["present_hc"], 3)
+        self.assertEqual(summary["no_show_hc"], 1)
+        self.assertEqual(summary["offline_now"], 1)
+        self.assertEqual(summary["unknown_hc"], 1)
         self.assertEqual(summary["late_today"], 1)
+        self.assertEqual(summary["early_leave"], 1)
         self.assertEqual(summary["call_now"], 2)
+        self.assertEqual(
+            summary["due_hc"],
+            summary["present_hc"] + summary["no_show_hc"] + summary["unknown_hc"],
+        )
         self.assertEqual(summary["checkpoint"], checkpoint)
-        self.assertEqual(by_agent["absent"]["pulse_action"], "CHECK_CURRENT_GAP")
-        self.assertEqual(by_agent["present"]["attendance_state"], "PRESENT NOW")
+        self.assertEqual(by_agent["no-show"]["pulse_action"], "CALL_NO_SHOW")
+        self.assertEqual(by_agent["no-show"]["attendance_state"], "NO SHOW")
+        self.assertEqual(by_agent["offline"]["pulse_action"], "CHECK_OFFLINE_NOW")
+        self.assertEqual(by_agent["offline"]["attendance_state"], "PRESENT — OFFLINE NOW")
+        self.assertFalse(by_agent["offline"]["no_show"])
+        self.assertEqual(by_agent["present"]["attendance_state"], "PRESENT — LATE")
         self.assertEqual(by_agent["present"]["current_evidence"], "AGENT_STATUS")
-        self.assertEqual(by_agent["unknown"]["attendance_state"], "UNKNOWN")
+        self.assertEqual(by_agent["early"]["attendance_state"], "PRESENT — EARLY LEAVE")
+        self.assertFalse(by_agent["early"]["no_show"])
+        self.assertEqual(by_agent["unknown"]["attendance_state"], "UNKNOWN — POSSIBLE NO SHOW")
+        self.assertEqual(
+            by_agent["unknown"]["pulse_action"], "CHECK_DATA_POSSIBLE_NO_SHOW",
+        )
         self.assertFalse(by_agent["unknown"]["call_now"])
+        hourly = _workforce_by_hour(profile, report_day, rows, summary)
+        self.assertEqual(hourly[11]["no_show_hc"], 1)
+        self.assertIsNone(hourly[12]["no_show_hc"])
         conn.close()
 
     def test_storm_screenshot_arithmetic_is_reproduced(self):
@@ -260,7 +286,7 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertEqual(headers, [
             "Hour", "Forecast", "Actual", "Variance", "Ford Volume",
             "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
-            "TSL Chery", "TSL Toyota", "Routed Rate", "AHT", "ABS HC",
+            "TSL Chery", "TSL Toyota", "Routed Rate", "AHT", "No Show HC",
             "Data State",
         ])
         cards = _flash_cards(
@@ -268,10 +294,11 @@ class CallServiceModelTests(unittest.TestCase):
             {"availability": 0.8, "service_level": 0.6,
              "service_method": "gross_30", "forecast_attainment": 0.5},
             blank["groups"],
-            {"absence_hc": 1},
+            {"no_show_hc": 1, "offline_now": 2},
         )
         self.assertEqual([card[0] for card in cards], [
-            "TSL", "Routed Rate", "Actual", "Forecast", "ABS HC", "Call Now",
+            "TSL", "Routed Rate", "Actual", "Forecast", "No Show HC",
+            "Offline Now", "Call Now",
         ])
         ford_cards = _flash_cards(
             ford_nl,
@@ -280,10 +307,11 @@ class CallServiceModelTests(unittest.TestCase):
              "availability": 8 / 9, "service_level": 7 / 9,
              "service_method": "storm_custom_30", "aht_seconds": 200},
             {},
-            {"absence_hc": 1},
+            {"no_show_hc": 1, "offline_now": 2},
         )
         self.assertEqual([card[0] for card in ford_cards], [
-            "TSL", "Routed Rate", "Actual", "Forecast", "ABS HC", "Call Now",
+            "TSL", "Routed Rate", "Actual", "Forecast", "No Show HC",
+            "Offline Now", "Call Now",
         ])
 
     def test_forecast_only_hour_has_no_attainment_instead_of_crashing(self):

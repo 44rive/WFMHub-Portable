@@ -25,12 +25,12 @@ become an early leave.
 8. Save and close Excel.
 9. Choose **Attendance Review > Import completed decisions**.
 
-The same row shows the agent's whole shift in a simple visual. Dark red is the
-exact gap owned by that row, light red is another counted gap for the same
-agent-day, and grey is a status interval inside the configured tolerance.
-Logged, Break, Lunch, PTO/Away, and Unknown keep their separate colors. The
-cells are a 15-minute reading aid; Exact Start and Exact End remain the decision
-boundary. Hidden
+Each case uses two aligned rows. `SCHEDULE` is directly above `ACTUAL` and shows
+scheduled work plus PTO/Away; `ACTUAL` shows Logged, Break, Lunch, gaps and
+unknown evidence. Edit blue decision cells only on the ACTUAL row. Dark red is
+the exact gap owned by that row, light red is another counted gap for the same
+agent-day, and grey is inside the configured tolerance. The cells are a
+15-minute reading aid; Exact Start and Exact End remain authoritative. Hidden
 `EVIDENCE` keeps every exact source segment, while hidden `DECISION LEDGER` is
 the read-only snapshot already persisted in WFM Hub. They are audit and
 troubleshooting sheets, not places to type decisions.

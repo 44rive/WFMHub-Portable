@@ -212,7 +212,7 @@ def add_review_board(
     period_end: date,
     category_choices: list[str],
 ):
-    """Combine exact gap decisions and the full-shift picture on one row."""
+    """Place the scheduled band directly above actual evidence for each gap."""
 
     ws = report.workbook.add_worksheet("REVIEW BOARD")
     ws.set_tab_color(COLORS["purple"])
@@ -251,7 +251,8 @@ def add_review_board(
         slots = []
 
     display_headers = [_display_header(header) for header in decision_headers]
-    timeline_start = len(display_headers)
+    band_column = len(display_headers)
+    timeline_start = band_column + 1
     last_column = max(timeline_start + len(slots) - 1, len(display_headers) - 1)
     ws.merge_range(0, 0, 0, last_column, "ATTENDANCE REVIEW  /  VISUAL DECISION BOARD", report.title)
     ws.merge_range(
@@ -263,6 +264,7 @@ def add_review_board(
     ws.set_row(1, 21)
 
     legend = [
+        ("Scheduled", "Scheduled work", COLORS["teal"], COLORS["teal_light"]),
         ("Logged", "Logged", COLORS["green"], COLORS["green_light"]),
         ("Break", "Break", COLORS["amber"], COLORS["amber_light"]),
         ("Lunch", "Lunch", COLORS["gold"], "#FFF7DD"),
@@ -275,7 +277,7 @@ def add_review_board(
     state_formats: dict[str, Any] = {}
     ws.merge_range(
         2, 0, 2, min(8, last_column),
-        "EDIT BLUE CELLS ONLY  |  save this workbook, then import it from Attendance Review",
+        "SCHEDULE ABOVE ACTUAL  |  edit blue cells on ACTUAL rows only, save, then import",
         report.note,
     )
     legend_column = min(9, last_column + 1)
@@ -292,6 +294,7 @@ def add_review_board(
     header_row = 3
     for column, header in enumerate(display_headers):
         ws.write(header_row, column, header, report.header)
+    ws.write(header_row, band_column, "Band", report.header)
     rotated = report.workbook.add_format({
         "font_name": "Aptos", "font_size": 8, "bold": True,
         "font_color": COLORS["white"], "bg_color": COLORS["teal"],
@@ -326,7 +329,40 @@ def add_review_board(
         "Decision Category", "Decision Status", "Reviewed By", "Comment",
         "Reviewed Date",
     }
-    for row_index, values in enumerate(decision_rows, header_row + 1):
+    gap_id_index = display_headers.index("Gap ID")
+    schedule_body = report.workbook.add_format({
+        "font_name": "Aptos", "font_size": 9, "font_color": COLORS["muted"],
+        "bg_color": COLORS["blue_light"], "bottom": 1,
+        "bottom_color": COLORS["white"],
+    })
+    schedule_date = report.workbook.add_format({
+        "font_name": "Aptos", "font_size": 9, "font_color": COLORS["muted"],
+        "bg_color": COLORS["blue_light"], "num_format": "yyyy-mm-dd",
+        "bottom": 1, "bottom_color": COLORS["white"],
+    })
+    schedule_datetime = report.workbook.add_format({
+        "font_name": "Aptos", "font_size": 9, "font_color": COLORS["muted"],
+        "bg_color": COLORS["blue_light"], "num_format": "yyyy-mm-dd hh:mm",
+        "bottom": 1, "bottom_color": COLORS["white"],
+    })
+    schedule_integer = report.workbook.add_format({
+        "font_name": "Aptos", "font_size": 9, "font_color": COLORS["muted"],
+        "bg_color": COLORS["blue_light"], "num_format": "0",
+        "bottom": 1, "bottom_color": COLORS["white"],
+    })
+    schedule_band = report.workbook.add_format({
+        "font_name": "Aptos", "font_size": 9, "bold": True,
+        "font_color": COLORS["blue"], "bg_color": COLORS["blue_light"],
+        "align": "center", "bottom": 1, "bottom_color": COLORS["white"],
+    })
+    actual_band = report.workbook.add_format({
+        "font_name": "Aptos", "font_size": 9, "bold": True,
+        "font_color": COLORS["green"], "bg_color": COLORS["green_light"],
+        "align": "center", "bottom": 1, "bottom_color": COLORS["thin"],
+    })
+    for item_index, values in enumerate(decision_rows):
+        schedule_row = header_row + 1 + item_index * 2
+        row_index = schedule_row + 1
         business_day = as_date(values[date_index])
         agent_id = str(values[agent_index])
         current_start = _as_datetime(values[exact_start_index])
@@ -335,6 +371,21 @@ def add_review_board(
             by_agent_day.get((business_day, agent_id), []),
             key=lambda item: _as_datetime(item["segment_start"]),
         )
+        for column, value in enumerate(values):
+            if column == gap_id_index:
+                ws.write_blank(schedule_row, column, None, schedule_body)
+                continue
+            fmt = (
+                schedule_datetime if isinstance(value, datetime)
+                else schedule_date if isinstance(value, date)
+                else schedule_integer if isinstance(value, (int, float)) and not isinstance(value, bool)
+                else schedule_body
+            )
+            if value is None:
+                ws.write_blank(schedule_row, column, None, fmt)
+            else:
+                ws.write(schedule_row, column, value, fmt)
+        ws.write(schedule_row, band_column, "SCHEDULE", schedule_band)
         for column, value in enumerate(values):
             header = display_headers[column]
             if header in editable:
@@ -351,6 +402,7 @@ def add_review_board(
                 ws.write_blank(row_index, column, None, fmt)
             else:
                 ws.write(row_index, column, value, fmt)
+        ws.write(row_index, band_column, "ACTUAL", actual_band)
         if agent_segments:
             scheduled_start = minute_offset(agent_segments[0]["scheduled_start"], business_day)
             scheduled_end = minute_offset(agent_segments[0]["scheduled_end"], business_day)
@@ -360,6 +412,20 @@ def add_review_board(
                     continue
                 slot_start = datetime.combine(business_day, datetime.min.time()) + timedelta(minutes=slot)
                 slot_end = slot_start + timedelta(minutes=15)
+                planned_time_off = any(
+                    segment_start < slot_end and segment_end > slot_start
+                    and any(token in str(segment.get("planned_state") or "").upper()
+                            for token in ("PTO", "AWAY", "PLANNED ABSENCE", "VACATION"))
+                    for segment in agent_segments
+                    for segment_start, segment_end in [(
+                        _as_datetime(segment["segment_start"]),
+                        _as_datetime(segment["segment_end"]),
+                    )]
+                )
+                if planned_time_off:
+                    ws.write(schedule_row, column, "PTO / Away", state_formats["PTO / Away"])
+                else:
+                    ws.write(schedule_row, column, "Work", state_formats["Scheduled"])
                 if current_start < slot_end and current_end > slot_start:
                     ws.write(row_index, column, "Gap", state_formats["Gap"])
                     continue
@@ -387,6 +453,7 @@ def add_review_board(
                     ws.write(row_index, column, "Tolerance", state_formats["Tolerance"])
                 elif best_state != "Future":
                     ws.write(row_index, column, best_state, state_formats[best_state])
+        ws.set_row(schedule_row, 15)
         ws.set_row(row_index, 20)
 
     if not decision_rows:
@@ -395,25 +462,26 @@ def add_review_board(
         category_col = display_headers.index("Decision Category")
         status_col = display_headers.index("Decision Status")
         date_col = display_headers.index("Reviewed Date")
+        data_last_row = header_row + len(decision_rows) * 2
         ws.data_validation(
-            header_row + 1, category_col, header_row + len(decision_rows), category_col,
+            header_row + 1, category_col, data_last_row, category_col,
             {"validate": "list", "source": category_choices},
         )
         ws.data_validation(
-            header_row + 1, status_col, header_row + len(decision_rows), status_col,
+            header_row + 1, status_col, data_last_row, status_col,
             {"validate": "list", "source": ["Open", "Approved", "Dismissed"]},
         )
         ws.data_validation(
-            header_row + 1, date_col, header_row + len(decision_rows), date_col,
+            header_row + 1, date_col, data_last_row, date_col,
             {"validate": "date", "criteria": "between",
              "minimum": date(2020, 1, 1), "maximum": date(2100, 12, 31)},
         )
         ws.conditional_format(
-            header_row + 1, status_col, header_row + len(decision_rows), status_col,
+            header_row + 1, status_col, data_last_row, status_col,
             {"type": "text", "criteria": "containing", "value": "Open", "format": report.error},
         )
         ws.autofilter(
-            header_row, 0, header_row + len(decision_rows), last_column,
+            header_row, 0, data_last_row, last_column,
         )
 
     widths = {
@@ -426,6 +494,7 @@ def add_review_board(
     }
     for column, header in enumerate(display_headers):
         ws.set_column(column, column, widths.get(header, 16))
+    ws.set_column(band_column, band_column, 11)
     if slots:
         ws.set_column(timeline_start, timeline_start + len(slots) - 1, 7.5)
     ws.freeze_panes(header_row + 1, 7)

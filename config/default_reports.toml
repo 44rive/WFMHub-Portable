@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.15"
+version = "2026.09.16"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
@@ -21,7 +21,7 @@ sheets = ["Policy_Decisions", "Control_Checks", "KPI_Config", "Raw_Data", "Resul
 [[packs]]
 key = "service"
 title = "RTM DAILY CONTROL"
-purpose = "Daily service, attendance call actions and queue drivers for RSA and OEM operational LOBs."
+purpose = "Daily service, proven no-show callouts, offline alerts and queue drivers for RSA and OEM operational LOBs."
 finding_domains = ["service", "forecast", "data_quality"]
 sheets = ["CONTROL", "RSA NL", "RSA BE", "FORD NL", "OEM", "ISSUES & DRIVERS", "DEFINITIONS", "_AUDIT"]
 
@@ -49,7 +49,7 @@ sheets = ["DASHBOARD", "ACTIONS", "TREND", "DEFINITIONS", "_AUDIT"]
 [[packs]]
 key = "corrections"
 title = "ATTENDANCE REVIEW"
-purpose = "Completed-day exact gaps, editable decisions, full-shift evidence and break/meal overrun control."
+purpose = "Completed-day exact gaps with schedule-over-actual decisions and break/meal overrun control."
 finding_domains = ["attendance", "data_quality"]
 sheets = ["CONTROL", "REVIEW BOARD", "BREAK & MEAL", "DECISION LEDGER", "EVIDENCE", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
 

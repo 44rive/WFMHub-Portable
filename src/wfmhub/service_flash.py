@@ -215,53 +215,33 @@ def _forecast_by_hour(
 
 
 def _workforce_by_hour(
-    conn: DatabaseConnection,
     profile: ServiceProfile,
     report_day: date,
-) -> dict[int, dict[str, float]]:
-    """Return rough intraday absent HC from the governed attendance timeline.
+    attendance: Sequence[dict[str, Any]],
+    pulse: dict[str, Any],
+) -> dict[int, dict[str, float | None]]:
+    """Return proven no-show HC by scheduled hour.
 
-    Agent Status is already the primary source behind this timeline and LILO is
-    only its fallback/control.  A future segment or missing evidence is never
-    turned into absence here.
+    Late arrivals, internal gaps and early leavers have attended the day and
+    therefore never enter this counter. Missing evidence remains unknown.
     """
 
-    lob_marks = _marks(profile.staffing_lobs)
-    attendance = conn.execute(
-        f"""SELECT agent_id, scheduled_start, scheduled_end, assignment_type,
-                   planned_work_minutes
-            FROM mart.attendance_agent_day
-            WHERE business_date=? AND lob IN ({lob_marks})""",
-        [report_day, *profile.staffing_lobs],
-    ).fetchall()
-    timeline = conn.execute(
-        f"""SELECT agent_id, segment_start, segment_end
-            FROM mart.shift_timeline_segment
-            WHERE business_date=? AND lob IN ({lob_marks}) AND is_gap=true""",
-        [report_day, *profile.staffing_lobs],
-    ).fetchall()
-    output: dict[int, dict[str, float]] = {}
+    checkpoint = _as_datetime(pulse.get("checkpoint"))
+    live = pulse.get("mode") == "LIVE"
+    output: dict[int, dict[str, float | None]] = {}
     for hour in range(profile.operating_start_hour, profile.operating_end_hour + 1):
         left = datetime.combine(report_day, datetime.min.time()) + timedelta(hours=hour)
         right = left + timedelta(hours=1)
-        planned = {
-            str(agent_id)
-            for agent_id, raw_start, raw_end, assignment_type, planned_work in attendance
-            if str(assignment_type or "").casefold() != "off"
-            and float(planned_work or 0) > 0
-            and (_as_datetime(raw_start) or right) < right
-            and (_as_datetime(raw_end) or left) > left
+        if live and checkpoint is not None and left >= checkpoint:
+            output[hour] = {"no_show_hc": None}
+            continue
+        no_show = {
+            str(row.get("agent_id")) for row in attendance
+            if bool(row.get("no_show"))
+            and (_as_datetime(row.get("scheduled_start")) or right) < right
+            and (_as_datetime(row.get("scheduled_end")) or left) > left
         }
-        absent = {
-            str(agent_id)
-            for agent_id, raw_start, raw_end in timeline
-            if str(agent_id) in planned
-            and (_as_datetime(raw_start) or right) < right
-            and (_as_datetime(raw_end) or left) > left
-        }
-        output[hour] = {
-            "absence_hc": float(len(absent)),
-        }
+        output[hour] = {"no_show_hc": float(len(no_show))}
     return output
 
 
@@ -381,81 +361,94 @@ def _attendance_pulse(
         segment_source = str(
             evidence_segment.get("observed_source") if evidence_segment else ""
         ).strip().upper()
-        segment_category = str(
-            evidence_segment.get("actual_category") if evidence_segment else ""
-        ).strip().upper()
         row_evidence = str(row.get("actual_evidence") or "NONE").strip().upper()
         explicit_segment = segment_source not in {"", "NONE"}
         first_seen = _as_datetime(row.get("actual_first_seen"))
-        last_seen = _as_datetime(row.get("actual_last_seen"))
 
-        if live:
-            state = (
-                "UPCOMING" if start and checkpoint < start
-                else "SHIFT COMPLETE" if end and checkpoint >= end
-                else "NOT SCHEDULED NOW"
-            )
-            if scheduled_now:
-                if (
-                    evidence_segment is not None
-                    and bool(evidence_segment.get("is_gap"))
-                    and explicit_segment
-                ):
-                    state = "ABSENT NOW"
-                elif explicit_segment and segment_category in {
-                    "PRODUCTIVE", "AUXILIARY", "BREAK", "LUNCH", "LILO_PRESENT",
-                }:
-                    state = "PRESENT NOW"
-                elif (
-                    first_seen and last_seen and row_evidence != "NONE"
-                    and first_seen <= checkpoint <= last_seen
-                ):
-                    state = "PRESENT NOW"
-                else:
-                    # A file loaded for the date is not evidence for this agent.
-                    state = "UNKNOWN"
-        else:
-            scheduled_now = True
-            result = str(row.get("attendance_result") or "").upper()
-            if "NO SHOW" in result and row_evidence != "NONE":
-                state = "ABSENT DAY"
-            elif result in {
-                "DATA NOT LOADED", "MISSING ACTUAL EVIDENCE",
-                "INCOMPLETE ACTUAL EVIDENCE", "NO SCHEDULE OVERLAP",
-                "SCHEDULE PARSE ERROR",
-            } or row_evidence == "NONE":
-                state = "UNKNOWN"
-            elif first_seen is not None or last_seen is not None:
-                state = "PRESENT DAY — LATE" if "LATE" in result else "PRESENT DAY"
-            else:
-                state = "UNKNOWN"
+        result = str(row.get("attendance_result") or "").upper()
         late_today = float(row.get("uncoded_late_minutes") or 0) > 0
-        absence_now = state in {"ABSENT NOW", "ABSENT DAY"}
+        early_leave = "EARLY LEAVE" in result
+        presence_categories = {
+            "PRODUCTIVE", "AUXILIARY", "BREAK", "LUNCH", "LILO_PRESENT",
+        }
+        has_presence = bool(first_seen and first_seen <= checkpoint) or any(
+            str(item.get("actual_category") or "").strip().upper()
+            in presence_categories
+            and (_as_datetime(item.get("segment_start")) or checkpoint) < checkpoint
+            for item in segments_by_agent.get(str(row["agent_id"]), [])
+        )
+        proven_no_show = bool(
+            not has_presence and row_evidence != "NONE"
+            and ("NO SHOW" in result or "NOT SEEN" in result)
+        )
+        offline_now = bool(
+            live and scheduled_now and has_presence and explicit_segment
+            and evidence_segment is not None
+            and bool(evidence_segment.get("is_gap"))
+        )
+        if proven_no_show:
+            state = "NO SHOW"
+        elif has_presence:
+            qualifiers = []
+            if late_today:
+                qualifiers.append("LATE")
+            if early_leave:
+                qualifiers.append("EARLY LEAVE")
+            elif offline_now:
+                qualifiers.append("OFFLINE NOW")
+            state = "PRESENT" + (" — " + " + ".join(qualifiers) if qualifiers else "")
+        elif live and start and checkpoint < start:
+            state = "UPCOMING"
+        elif start and checkpoint >= start:
+            # No positive presence and no agent-specific no-show proof.
+            state = "UNKNOWN — POSSIBLE NO SHOW"
+        else:
+            state = "UNKNOWN"
         call_action = str(row.get("call_action") or "NONE")
-        reliable_action = bool(row.get("requires_call")) and row_evidence != "NONE"
-        call_now = (reliable_action or absence_now) and state != "UNKNOWN"
-        if absence_now and call_action == "NONE":
-            call_action = "CHECK_CURRENT_GAP"
+        if proven_no_show:
+            call_action = "CALL_NO_SHOW"
+        elif offline_now and call_action == "NONE":
+            call_action = "CHECK_OFFLINE_NOW"
+        elif state.startswith("UNKNOWN"):
+            call_action = "CHECK_DATA_POSSIBLE_NO_SHOW"
+        reliable_action = (
+            call_action in {"CALL_NO_SHOW", "CALL_LATE"}
+            and row_evidence != "NONE"
+        )
+        call_now = bool(reliable_action)
         current_evidence = (
             segment_source if explicit_segment else row_evidence
         )
         pulse.append({
             "flash": profile.label, "checkpoint": checkpoint,
             **row, "scheduled_now": scheduled_now,
-            "attendance_state": state, "present_now": state == "PRESENT NOW",
-            "absence_now": absence_now, "late_today": late_today,
+            "attendance_state": state, "present": has_presence,
+            "no_show": proven_no_show, "absence_now": proven_no_show,
+            "offline_now": offline_now, "late_today": late_today,
+            "early_leave": early_leave,
             "call_now": call_now, "pulse_action": call_action,
             "current_evidence": current_evidence,
         })
+    due_rows = [
+        row for row in pulse
+        if _as_datetime(row.get("scheduled_start")) is not None
+        and _as_datetime(row.get("scheduled_start")) <= checkpoint
+    ]
     summary = {
         "checkpoint": checkpoint, "mode": "LIVE" if live else "FINAL DAY",
         "agent_rows": len(pulse),
+        "due_hc": len(due_rows),
         "scheduled_now": sum(bool(row["scheduled_now"]) for row in pulse),
-        "present_now": sum(bool(row["present_now"]) for row in pulse),
-        "absence_hc": sum(bool(row["absence_now"]) for row in pulse),
-        "call_now": sum(bool(row["call_now"]) for row in pulse),
-        "late_today": sum(bool(row["late_today"]) for row in pulse),
-        "unknown_now": sum(row["attendance_state"] == "UNKNOWN" for row in pulse),
+        "present_hc": sum(bool(row["present"]) for row in due_rows),
+        "no_show_hc": sum(bool(row["no_show"]) for row in due_rows),
+        "offline_now": sum(bool(row["offline_now"]) for row in due_rows),
+        "call_now": sum(bool(row["call_now"]) for row in due_rows),
+        "late_today": sum(bool(row["late_today"]) for row in due_rows),
+        "early_leave": sum(bool(row["early_leave"]) for row in due_rows),
+        "unknown_hc": sum(
+            str(row["attendance_state"]).startswith("UNKNOWN")
+            for row in due_rows
+        ),
     }
     return pulse, summary
 
@@ -467,6 +460,8 @@ def _hourly_model(
     metrics: MetricCatalog,
     report_day: date,
     all_rows: Sequence[dict[str, Any]],
+    attendance: Sequence[dict[str, Any]] = (),
+    pulse: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, dict[str, Any] | None], int | None]:
     rows = [
         row for row in all_rows
@@ -479,7 +474,7 @@ def _hourly_model(
         if hour is not None and 0 <= hour.hour <= 23:
             by_hour[hour.hour].append(row)
     forecast = _forecast_by_hour(conn, profile, mapping, report_day)
-    workforce = _workforce_by_hour(conn, profile, report_day)
+    workforce = _workforce_by_hour(profile, report_day, attendance, pulse or {})
     cutoff = max(by_hour) if by_hour else None
     hourly: list[dict[str, Any]] = []
     for hour in range(profile.operating_start_hour, profile.operating_end_hour + 1):
@@ -544,11 +539,9 @@ def _hourly_model(
             total["offered"] - total["forecast"]
             if total.get("forecast") is not None else None
         )
-        absence_values = [
-            row.get("absence_hc") for row in hourly
-            if row.get("absence_hc") is not None
-        ]
-        total["absence_hc"] = max(absence_values) if absence_values else None
+        total["no_show_hc"] = (
+            pulse.get("no_show_hc") if pulse is not None else None
+        )
     group_totals = {
         group.label: _aggregate(
             [row for row in total_source if profile.group_for(row.get("queue")) == group.label],
@@ -649,7 +642,10 @@ def _table_value_format(book: DecisionWorkbook, header: str):
             "font_name": "Aptos", "font_size": 10, "font_color": COLORS["dark"],
             "num_format": '0 "s"', "bottom": 1, "bottom_color": COLORS["thin"],
         })
-    if any(token in lowered for token in ("forecast", "actual", "handled", "variance", "absence hc", "abs hc")):
+    if any(token in lowered for token in (
+        "forecast", "actual", "handled", "variance", "absence hc", "abs hc",
+        "no show hc",
+    )):
         return book.report.integer
     return book.report.body
 
@@ -662,7 +658,7 @@ def _flash_columns(
         headers = [
             "Hour", "Forecast", "Actual", "Variance", "Ford Volume",
             "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
-            "TSL Chery", "TSL Toyota", "Routed Rate", "AHT", "ABS HC",
+            "TSL Chery", "TSL Toyota", "Routed Rate", "AHT", "No Show HC",
             "Data State",
         ]
         rows = []
@@ -676,17 +672,17 @@ def _flash_columns(
                 chery.get("offered"), toyota.get("offered"), row["service_level"],
                 ford.get("service_level"), chery.get("service_level"),
                 toyota.get("service_level"), row["availability"],
-                row["aht_seconds"], row.get("absence_hc"), row["data_state"],
+                row["aht_seconds"], row.get("no_show_hc"), row["data_state"],
             ])
         return headers, rows, 1, 2, 7
     headers = [
         "Hour", "Forecast", "Actual", "Variance", "TSL", "Routed Rate",
-        "AHT", "ABS HC", "Data State",
+        "AHT", "No Show HC", "Data State",
     ]
     rows = [[
         row["hour_label"], row["forecast"], row["offered"], row.get("volume_variance"),
         row["service_level"], row["availability"], row["aht_seconds"],
-        row.get("absence_hc"), row["data_state"],
+        row.get("no_show_hc"), row["data_state"],
     ] for row in hourly]
     return headers, rows, 1, 2, 4
 
@@ -712,7 +708,8 @@ def _flash_cards(
         ("Routed Rate", value.get("availability"), "percent", "Routed / entered"),
         ("Actual", value.get("offered"), "integer", actual_note),
         ("Forecast", forecast, "integer", "Through latest call hour"),
-        ("ABS HC", pulse.get("absence_hc"), "integer", "Reliable absence now"),
+        ("No Show HC", pulse.get("no_show_hc"), "integer", "No presence; evidence proven"),
+        ("Offline Now", pulse.get("offline_now"), "integer", "Present earlier; currently in a gap"),
         ("Call Now", pulse.get("call_now"), "integer", "Attendance list below"),
     ]
 
@@ -778,14 +775,14 @@ def _add_flash_sheet(
             total_values.get("service_level"), ford.get("service_level"),
             chery.get("service_level"), toyota.get("service_level"),
             total_values.get("availability"), total_values.get("aht_seconds"),
-            total_values.get("absence_hc"), "READY" if total else "INCOMPLETE",
+            total_values.get("no_show_hc"), "READY" if total else "INCOMPLETE",
         ]
     else:
         values = [
             total_values.get("forecast"), total_values.get("offered"),
             total_values.get("volume_variance"), total_values.get("service_level"),
             total_values.get("availability"), total_values.get("aht_seconds"),
-            total_values.get("absence_hc"),
+            total_values.get("no_show_hc"),
             "READY" if total else "INCOMPLETE",
         ]
     for column, value in enumerate(values, 1):
@@ -846,16 +843,17 @@ def _add_flash_sheet(
         attendance_section, 0, attendance_section, 14,
         "ATTENDANCE  /  SAME-DAY OPERATIONAL LIST", book.report.section,
     )
-    attendance_summary_headers = ["Checkpoint"] + (
-        ["Scheduled Now", "Present Now", "ABS HC", "Call Now"]
-        if pulse.get("mode") == "LIVE"
-        else ["Scheduled Day", "Present Day", "Absence HC", "Follow-up"]
-    ) + ["Late Today", "Unknown Data"]
+    attendance_summary_headers = [
+        "Checkpoint", "Due HC",
+        "Present HC", "No Show HC", "Late HC", "Early Leave HC",
+        "Offline Now", "Unknown HC", "Call Now",
+    ]
     attendance_summary_values = [
-        pulse.get("checkpoint"), pulse.get("scheduled_now"),
-        pulse.get("present_now"), pulse.get("absence_hc"),
-        pulse.get("call_now"), pulse.get("late_today"),
-        pulse.get("unknown_now"),
+        pulse.get("checkpoint"), pulse.get("due_hc"),
+        pulse.get("present_hc"), pulse.get("no_show_hc"),
+        pulse.get("late_today"), pulse.get("early_leave"),
+        pulse.get("offline_now"), pulse.get("unknown_hc"),
+        pulse.get("call_now"),
     ]
     for column, header in enumerate(attendance_summary_headers):
         ws.write(attendance_section + 2, column, header, book.report.header)
@@ -870,7 +868,8 @@ def _add_flash_sheet(
         "CALL_NO_SHOW": "CALL NOW — NO SHOW",
         "CALL_NOT_SEEN_NOW": "CALL NOW — NOT SEEN",
         "CALL_LATE": "CALL / FOLLOW UP — LATE",
-        "CHECK_CURRENT_GAP": "CHECK CURRENT GAP",
+        "CHECK_OFFLINE_NOW": "CHECK — OFFLINE NOW",
+        "CHECK_DATA_POSSIBLE_NO_SHOW": "CHECK DATA — POSSIBLE NO SHOW",
         "NONE": "—",
     }
     attendance_headers = [
@@ -880,10 +879,11 @@ def _add_flash_sheet(
     sorted_attendance = sorted(
         attendance,
         key=lambda row: (
-            0 if row.get("call_now") else
-            1 if row.get("late_today") else
-            2 if row.get("attendance_state") == "UNKNOWN" else
-            3 if row.get("attendance_state") == "PRESENT NOW" else 4,
+            0 if row.get("no_show") else
+            1 if row.get("call_now") else
+            2 if row.get("offline_now") else
+            3 if str(row.get("attendance_state")).startswith("UNKNOWN") else
+            4 if row.get("late_today") else 5,
             str(row.get("team_leader") or ""),
             str(row.get("agent_name") or ""),
         ),
@@ -986,15 +986,16 @@ def _add_control_sheet(
     ws = book.report.workbook.add_worksheet("CONTROL")
     ws.hide_gridlines(2)
     ws.set_tab_color(COLORS["gold"])
-    ws.merge_range("A1:K1", "RTM DAILY CONTROL", book.report.title)
+    ws.merge_range("A1:M1", "RTM DAILY CONTROL", book.report.title)
     ws.merge_range(
-        "A2:K2",
+        "A2:M2",
         f"{report_day:%Y-%m-%d}  |  service, attendance and call actions by operational LOB",
         book.report.subtitle,
     )
     headers = [
         "LOB", "Last Call Hour", "TSL", "Target", "Actual", "Forecast",
-        "Variance", "Routed Rate", "ABS HC", "Call Now", "Status",
+        "Variance", "Routed Rate", "No Show HC", "Offline Now", "Unknown HC",
+        "Call Now", "Status",
     ]
     for col, header in enumerate(headers):
         ws.write(4, col, header, book.report.header)
@@ -1010,12 +1011,13 @@ def _add_control_sheet(
             value.get("service_level"), value.get("service_target"),
             value.get("offered"), value.get("forecast"),
             value.get("volume_variance"), value.get("availability"),
-            pulse.get("absence_hc"), pulse.get("call_now"), status,
+            pulse.get("no_show_hc"), pulse.get("offline_now"),
+            pulse.get("unknown_hc"), pulse.get("call_now"), status,
         ]
         for col, item in enumerate(row):
             fmt = (
                 book.report.percent if col in {2, 3, 7}
-                else book.report.integer if col in {4, 5, 6, 8, 9}
+                else book.report.integer if col in {4, 5, 6, 8, 9, 10, 11}
                 else book.report.body
             )
             if item is None:
@@ -1028,7 +1030,7 @@ def _add_control_sheet(
             "name": "tblFlashControl", "style": "Table Style Light 9",
             "columns": [{"header": header, "header_format": book.report.header} for header in headers],
         })
-        ws.conditional_format(5, 10, 4 + len(summaries), 10, {
+        ws.conditional_format(5, 12, 4 + len(summaries), 12, {
             "type": "text", "criteria": "containing", "value": "MISSING",
             "format": book.report.error,
         })
@@ -1051,14 +1053,15 @@ def _add_control_sheet(
         "Variance = actual queue entries minus forecast through the latest call hour.",
         f"Storm SLA = C / (A + B - D): connected within {rulebook.target_seconds}s / "
         f"(lost + connected - lost from {rulebook.short_abandon_seconds}s to {rulebook.target_seconds}s).",
-        "ABS HC and Call Now reconcile to the attendance summary and agent list on that LOB sheet.",
+        "No Show HC counts only agents with no presence and explicit evidence; late, offline-after-presence and early leave remain present.",
+        "Unknown HC is a possible no-show/data issue, never a confirmed no-show or automatic call.",
         "Missing calls, forecasts or attendance evidence stay explicit; they are never converted to zero.",
     ]
     ws.write("A11", "OPERATING NOTES", book.report.section)
     for index, note in enumerate(notes, 11):
-        ws.merge_range(index, 0, index, 10, note, book.report.note)
+        ws.merge_range(index, 0, index, 12, note, book.report.note)
     ws.set_column("A:A", 23)
-    ws.set_column("B:K", 15)
+    ws.set_column("B:M", 15)
     ws.freeze_panes(5, 0)
     ws.set_landscape()
     ws.fit_to_pages(1, 1)
@@ -1108,11 +1111,12 @@ def _issues_and_drivers_rows(
                 None, None, None, None, None, None,
                 "NO SCHEDULED AGENT ROWS", "Check schedule and active FTE coverage",
             ))
-        elif pulse.get("unknown_now"):
+        elif pulse.get("unknown_hc"):
             output.append((
                 "DATA ISSUE", profile.label, f"{pulse.get('checkpoint'):%H:%M}",
-                pulse.get("unknown_now"), None, None, None, None, None,
-                "ATTENDANCE DATA UNKNOWN", "Check Agent Status before calling",
+                pulse.get("unknown_hc"), None, None, None, None, None,
+                "POSSIBLE NO SHOW / DATA UNKNOWN",
+                "Validate Agent Status evidence before calling",
             ))
 
         day_rows = [
@@ -1216,11 +1220,12 @@ def build_service_flashes_workbook(
         for profile in profiles:
             source_rows = _profile_rows(conn, profile, start, end)
             source_by_profile[profile.profile_id] = source_rows
-            hourly, total, group_totals, cutoff = _hourly_model(
-                conn, profile, mapping, metrics, end, source_rows,
-            )
             pulse_rows, pulse_summary = _attendance_pulse(
                 conn, profile, end, config.rules.rta_stale_minutes,
+            )
+            hourly, total, group_totals, cutoff = _hourly_model(
+                conn, profile, mapping, metrics, end, source_rows,
+                pulse_rows, pulse_summary,
             )
             hourly_by_profile[profile.profile_id] = hourly
             pulse_by_profile[profile.profile_id] = pulse_rows
@@ -1272,8 +1277,11 @@ def build_service_flashes_workbook(
             ("Routed Rate", "Total routed / total entered", "Service availability", "Matches the Storm screenshot; not agent availability or adherence"),
             ("TSL", "Connected within target / (lost + connected - lost from 5 seconds to target)", "Storm C/(A+B-D)", "The supplied Storm custom-equation screen is the business authority"),
             ("AHT", "Sum of inbound talk + hold + wrap / routed queue entries", "Workload", "Weighted; never an average of hourly averages"),
-            ("ABS HC", "Distinct scheduled agents in a reliable attendance gap at the checkpoint/hour", "Rough same-day capacity signal", "PTO/Away and missing evidence are not counted; exact treatment stays in Attendance Review"),
-            ("LOB attendance list", "Scheduled working agents from the governed attendance mart plus checkpoint timeline state", "Call and late action list", "It is operational context, not a final absence decision"),
+            ("No Show HC", "Scheduled agents with no presence at all and explicit agent-specific no-show evidence", "Confirmed RTM callout population", "Late, early leave and offline-after-presence remain present"),
+            ("Due HC", "Working shifts started by the attendance checkpoint", "Attendance reconciliation", "Due HC = Present HC + No Show HC + Unknown HC"),
+            ("Offline Now", "Agents with presence earlier in the day whose latest reliable state is a current gap", "Operational follow-up", "It is not No Show HC; the exact gap stays in Attendance Review"),
+            ("Unknown HC", "Shift started but neither presence nor agent-specific no-show proof exists", "Possible no-show or data problem", "Validate Agent Status before calling; never add it to No Show HC"),
+            ("LOB attendance list", "Scheduled working agents from the governed attendance mart plus checkpoint timeline state", "No-show, late, offline and data-check list", "It is operational context, not a final absence decision"),
             ("Issues & Drivers", "Missing source evidence plus below-target configured queues with real demand", "One operational exception list", "Healthy and empty queues are omitted"),
         ])
         book.report.workbook.get_worksheet_by_name("DEFINITIONS").hide()

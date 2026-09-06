@@ -693,6 +693,10 @@ class EndToEndTests(unittest.TestCase):
                 approved_gap = None
                 dismissed_gap = None
                 for row_number in range(5, decisions.max_row + 1):
+                    if not decisions.cell(
+                        row_number, decision_headers["Gap ID"],
+                    ).value:
+                        continue
                     agent_id = str(
                         decisions.cell(row_number, decision_headers["Agent ID"]).value or ""
                     )
@@ -865,6 +869,7 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("Exact Start", review_headers)
                 self.assertIn("Exact End", review_headers)
                 self.assertIn("Decision Status", review_headers)
+                self.assertIn("Band", review_headers)
                 self.assertIn("08:00", review_headers)
                 start_column = review_headers.index("Exact Start")
                 end_column = review_headers.index("Exact End")
@@ -958,7 +963,7 @@ class EndToEndTests(unittest.TestCase):
                         "Hour", "Forecast", "Actual", "Variance", "Ford Volume",
                         "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
                         "TSL Chery", "TSL Toyota", "Routed Rate", "AHT",
-                        "ABS HC", "Data State",
+                        "No Show HC", "Data State",
                     ],
                 )
                 self.assertNotIn(

@@ -102,13 +102,17 @@ class AttendanceControlTests(unittest.TestCase):
             try:
                 sheet = workbook["REVIEW BOARD"]
                 columns = {cell.value: cell.column for cell in sheet[4]}
-                first_row = 5
-                self.assertEqual(sheet.cell(first_row, columns["08:00"]).value, "Gap")
-                self.assertTrue(sheet.cell(first_row, columns["08:00"]).fill.fgColor.rgb.endswith("B42318"))
-                self.assertEqual(sheet.cell(first_row, columns["08:30"]).value, "Tolerance")
-                self.assertTrue(sheet.cell(first_row, columns["08:30"]).fill.fgColor.rgb.endswith("EEF1F4"))
-                self.assertEqual(sheet.cell(first_row, columns["09:00"]).value, "Gap")
-                self.assertTrue(sheet.cell(first_row, columns["09:00"]).fill.fgColor.rgb.endswith("FDE7E5"))
+                schedule_row, actual_row = 5, 6
+                self.assertEqual(sheet.cell(schedule_row, columns["Band"]).value, "SCHEDULE")
+                self.assertEqual(sheet.cell(actual_row, columns["Band"]).value, "ACTUAL")
+                self.assertEqual(sheet.cell(schedule_row, columns["08:00"]).value, "Work")
+                self.assertTrue(sheet.cell(schedule_row, columns["08:00"]).fill.fgColor.rgb.endswith("DFF3F3"))
+                self.assertEqual(sheet.cell(actual_row, columns["08:00"]).value, "Gap")
+                self.assertTrue(sheet.cell(actual_row, columns["08:00"]).fill.fgColor.rgb.endswith("B42318"))
+                self.assertEqual(sheet.cell(actual_row, columns["08:30"]).value, "Tolerance")
+                self.assertTrue(sheet.cell(actual_row, columns["08:30"]).fill.fgColor.rgb.endswith("EEF1F4"))
+                self.assertEqual(sheet.cell(actual_row, columns["09:00"]).value, "Gap")
+                self.assertTrue(sheet.cell(actual_row, columns["09:00"]).fill.fgColor.rgb.endswith("FDE7E5"))
             finally:
                 workbook.close()
 

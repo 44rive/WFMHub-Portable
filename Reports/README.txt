@@ -1,10 +1,10 @@
 WFMHub publishes every current report in this folder using a fixed name. Before
 it replaces one, the previous copy is saved under Reports\Archive\YYYY-MM-DD.
 
-RTM Daily Control.xlsx    Service state and matching attendance actions by LOB
+RTM Daily Control.xlsx    Service, proven no-shows and offline alerts by LOB
 Staffing Gaps.xlsx        Actual control and future weekly capacity plan
 Realisations.xlsx         Actual versus plan across all mapped LOBs
-Attendance Review.xlsx    Exact-gap decisions plus break/meal overrun control
+Attendance Review.xlsx    Schedule-vs-actual gaps plus break/meal control
 Final Absenteeism.xlsx    Reviewed absence/shrinkage ledger
 Bonus Management.xlsx     Bonus Matrix v1.2 decision workbook
 PCS Performance.xlsx      PCS, participation, trends and coaching
