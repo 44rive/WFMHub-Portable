@@ -187,13 +187,17 @@ WFMHub compares schedule with Agent Status first and uses LILO as fallback and
 control evidence.
 
 1. Open `REVIEW BOARD`.
-2. Each case uses two rows: SCHEDULE directly above ACTUAL. White evidence cells
-   are not imported; edit only the five blue cells on the ACTUAL row.
+2. Each case uses two rows: SCHEDULE directly above ACTUAL, followed by a small
+   blank separator before the next case. White evidence cells are not imported;
+   edit only the five blue cells on the ACTUAL row.
 3. Choose `Approved` plus a category, `Dismissed`, or leave `Open`.
 4. Compare the paired timeline. Scheduled work is teal, PTO/Away is blue,
    Logged is green, Break/Lunch is amber, dark red is the exact gap owned by the
    ACTUAL row, light red is another counted gap, and grey is inside tolerance.
    Exact support evidence remains in hidden sheets.
+   Explicit `Meal Aux` Agent Status appears as Lunch. A LILO logout inside that
+   interval does not turn the meal into a gap; any later gap starts only after
+   the meal interval ends.
 5. Save and close the workbook.
 6. In WFMHub choose **Attendance Review > Import completed decisions**.
 

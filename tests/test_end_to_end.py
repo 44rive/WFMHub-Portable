@@ -101,6 +101,15 @@ def make_logged_off_status(path: Path):
         writer.writerow(["one", "Logged Off", "8/1/2026 8:00", "Agent 200", "200", "8:00:00", "Queue"])
 
 
+def make_meal_aux_status(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["[Serial Number]", "[Status]", "[Status Start Date and Time]", "[Agent]", "[Agent ID]", "[Status Duration]", "[Queue]"])
+        writer.writerow(["available", "Available", "8/1/2026 8:00", "Agent 100", "100", "4:00:00", "Queue"])
+        writer.writerow(["meal", "Meal Aux", "8/1/2026 12:00", "Agent 100", "100", "1:00:00", "Queue"])
+
+
 def make_forecast(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -203,6 +212,67 @@ class EndToEndTests(unittest.TestCase):
         supplied = datetime(2026, 8, 1, 14)
         with patch("wfmhub.models.ZoneInfo", side_effect=ZoneInfoNotFoundError("missing")):
             self.assertEqual(_evaluation_time("Europe/Berlin", supplied), supplied)
+
+    def test_lilo_logout_inside_meal_aux_does_not_create_a_meal_gap(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder) / "hub"
+            source = Path(folder) / "source"
+            (home / "config").mkdir(parents=True)
+            for name in (
+                "default.toml", "default_rules.toml", "default_metrics.toml",
+                "default_analytics.toml", "default_reports.toml",
+            ):
+                shutil.copy2(REPO / "config" / name, home / "config" / name)
+            shutil.copytree(REPO / "sql", home / "sql")
+            make_fte(source / "FTE/FTE Count.xlsx")
+            make_start_end_schedule(source / "Verint/Schedules & Activities/StartEndTimes.txt")
+            make_lilo(source / "Storm/LILO/LILO 2026-08-01.csv", [
+                ["Agent 100", "100", "2026-08-01 08:00:00", "2026-08-01 12:15:00"],
+            ])
+            make_meal_aux_status(
+                source / "Storm/Agent Status/Agent Status 2026-08-01.csv",
+            )
+
+            config_file = ensure_user_config(home)
+            write_source_root(config_file, source)
+            config = load_config(home)
+            with write_session(config) as conn:
+                self.assertEqual(ingest_all(conn, config).failed, 0)
+                refresh_models(
+                    conn, config, "meal-aux-boundary",
+                    date(2026, 8, 1), date(2026, 8, 1),
+                    as_of=datetime(2026, 8, 1, 17, 0),
+                )
+                attendance = conn.execute(
+                    "SELECT actual_last_seen, uncoded_early_leave_minutes "
+                    "FROM mart.attendance_agent_day WHERE agent_id='100'",
+                ).fetchone()
+                self.assertEqual(str(attendance[0]), "2026-08-01 13:00:00")
+                self.assertEqual(attendance[1], 180)
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT actual_category, mismatch_type, is_gap "
+                        "FROM mart.shift_timeline_segment "
+                        "WHERE agent_id='100' AND segment_start=? AND segment_end=?",
+                        [datetime(2026, 8, 1, 12), datetime(2026, 8, 1, 13)],
+                    ).fetchone(),
+                    ("Lunch", "MATCH", 0),
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT count(*) FROM mart.correction_candidate "
+                        "WHERE agent_id='100' AND gap_start<? AND gap_end>?",
+                        [datetime(2026, 8, 1, 13), datetime(2026, 8, 1, 12)],
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    str(conn.execute(
+                        "SELECT gap_start FROM mart.correction_candidate "
+                        "WHERE agent_id='100' AND detected_issue='Early leave'",
+                    ).fetchone()[0]),
+                    "2026-08-01 13:00:00",
+                )
 
     def test_activities_shift_assignment_is_safe_schedule_fallback(self):
         with tempfile.TemporaryDirectory() as folder:

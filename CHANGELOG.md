@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.20.3 — 2026-09-06
+
+- Added a short blank separator between every Schedule/Actual case on the
+  Attendance Review board so adjacent agents and gaps are easier to scan.
+- Locked the attendance precedence rule around meals: explicit Agent Status
+  `Meal Aux` is shown as Lunch and remains non-gap presence when a LILO logout
+  timestamp falls inside it. A later early-leave gap starts only after the
+  meal interval ends.
+
 ## 0.20.2 — 2026-09-06
 
 - Redefined RTM `No Show HC` to count only a scheduled agent with no observed

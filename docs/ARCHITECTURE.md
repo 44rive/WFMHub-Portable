@@ -133,7 +133,10 @@ sheets. Each LOB combines the validated hourly service view with its own
 reconciling attendance/call list. `ISSUES & DRIVERS` replaces the separate
 exceptions and queue-diagnosis surfaces. Attendance Review pairs a scheduled
 band directly above the actual evidence band for every editable gap. Its stored
-`DECISION LEDGER` and exact `EVIDENCE` are hidden audit support. `BREAK & MEAL`
+`DECISION LEDGER` and exact `EVIDENCE` are hidden audit support. Each paired
+schedule/actual case has a short visual separator. Explicit Agent Status
+`Meal Aux` remains Lunch even when the LILO logout boundary falls inside it.
+`BREAK & MEAL`
 aggregates completed-day Agent Status
 spells and never revives adherence. Standalone Attendance Callout, legacy
 `operations`, and legacy `quality_pcs` remain callable under

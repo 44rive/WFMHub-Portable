@@ -756,6 +756,9 @@ def _build_attendance(
         )
         status_coverage_ratio = status_covered / elapsed_work_minutes if elapsed_work_minutes else 0.0
         status_is_primary = bool(statuses) and status_coverage_ratio >= minimum_status_coverage
+        # Explicit Agent Status presence always remains real presence at its
+        # physical boundary.  In particular, a LILO logout that falls inside
+        # Meal Aux/Lunch must not truncate the meal or manufacture a gap.
         if status_is_primary and status_first is not None:
             actual_first = status_first
         else:

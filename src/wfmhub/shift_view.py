@@ -361,7 +361,10 @@ def add_review_board(
         "align": "center", "bottom": 1, "bottom_color": COLORS["thin"],
     })
     for item_index, values in enumerate(decision_rows):
-        schedule_row = header_row + 1 + item_index * 2
+        # Keep every schedule/actual pair visually self-contained.  The blank,
+        # short row between cases is deliberately not an editable ledger row;
+        # the importer ignores it because it has no Gap ID.
+        schedule_row = header_row + 1 + item_index * 3
         row_index = schedule_row + 1
         business_day = as_date(values[date_index])
         agent_id = str(values[agent_index])
@@ -455,6 +458,8 @@ def add_review_board(
                     ws.write(row_index, column, best_state, state_formats[best_state])
         ws.set_row(schedule_row, 15)
         ws.set_row(row_index, 20)
+        if item_index < len(decision_rows) - 1:
+            ws.set_row(row_index + 1, 6)
 
     if not decision_rows:
         ws.write(header_row + 1, 0, "No rows for this period.", report.subtitle)
@@ -462,7 +467,7 @@ def add_review_board(
         category_col = display_headers.index("Decision Category")
         status_col = display_headers.index("Decision Status")
         date_col = display_headers.index("Reviewed Date")
-        data_last_row = header_row + len(decision_rows) * 2
+        data_last_row = header_row + len(decision_rows) * 3 - 1
         ws.data_validation(
             header_row + 1, category_col, data_last_row, category_col,
             {"validate": "list", "source": category_choices},

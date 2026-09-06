@@ -25,15 +25,21 @@ become an early leave.
 8. Save and close Excel.
 9. Choose **Attendance Review > Import completed decisions**.
 
-Each case uses two aligned rows. `SCHEDULE` is directly above `ACTUAL` and shows
-scheduled work plus PTO/Away; `ACTUAL` shows Logged, Break, Lunch, gaps and
-unknown evidence. Edit blue decision cells only on the ACTUAL row. Dark red is
+Each case uses two aligned rows followed by a short blank separator. `SCHEDULE`
+is directly above `ACTUAL` and shows scheduled work plus PTO/Away; `ACTUAL`
+shows Logged, Break, Lunch, gaps and unknown evidence. Edit blue decision cells
+only on the ACTUAL row. Dark red is
 the exact gap owned by that row, light red is another counted gap for the same
 agent-day, and grey is inside the configured tolerance. The cells are a
 15-minute reading aid; Exact Start and Exact End remain authoritative. Hidden
 `EVIDENCE` keeps every exact source segment, while hidden `DECISION LEDGER` is
 the read-only snapshot already persisted in WFM Hub. They are audit and
 troubleshooting sheets, not places to type decisions.
+
+`Meal Aux` is explicit Agent Status presence and is displayed as Lunch. If a
+LILO logout timestamp falls inside that interval, Agent Status wins: the meal
+is not counted as a gap, and a genuine early-leave interval can begin only
+after the Meal Aux interval ends. Missing evidence is never invented as meal.
 
 `BREAK & MEAL` is a separate completed-day control, not adherence. It totals
 Agent Status break and meal intervals inside each scheduled shift. The default

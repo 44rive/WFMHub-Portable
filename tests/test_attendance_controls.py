@@ -113,6 +113,10 @@ class AttendanceControlTests(unittest.TestCase):
                 self.assertTrue(sheet.cell(actual_row, columns["08:30"]).fill.fgColor.rgb.endswith("EEF1F4"))
                 self.assertEqual(sheet.cell(actual_row, columns["09:00"]).value, "Gap")
                 self.assertTrue(sheet.cell(actual_row, columns["09:00"]).fill.fgColor.rgb.endswith("FDE7E5"))
+                self.assertIsNone(sheet.cell(7, columns["Band"]).value)
+                self.assertEqual(sheet.row_dimensions[7].height, 6)
+                self.assertEqual(sheet.cell(8, columns["Band"]).value, "SCHEDULE")
+                self.assertEqual(sheet.cell(9, columns["Band"]).value, "ACTUAL")
             finally:
                 workbook.close()
 
