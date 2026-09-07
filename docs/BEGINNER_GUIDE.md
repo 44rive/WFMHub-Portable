@@ -79,8 +79,9 @@ Reports\Analysis\...xlsx
 ```
 
 When a normal report is replaced, WFMHub first saves its previous version in
-`Reports\Archive`. PCS is different: its operational tracker is created once
-and preserved while only its feeds update.
+`Reports\Archive`. PCS is different: its operational tracker is preserved on
+normal updates. Only a declared design upgrade archives and rebuilds it, after
+first carrying its keyed coaching actions forward.
 
 `Feed` is separate from `Reports`: each successful refresh updates the fixed
 PCS and Absenteeism CSV feeds there. Any other clean CSV/XLSX export appears
@@ -235,17 +236,20 @@ an absence KPI plus a second hidden penalty.
 
 ## PCS Operational Tracker
 
-Choose **PCS Operational Tracker**. The first run creates one complete workbook
-and the fixed clean feeds. Put that workbook in the agreed SharePoint/Teams
-location. Later PCS runs update only the feeds; they do not erase coaching.
+Choose **PCS Operational Tracker**, then **Update PCS now**. Close the tracker
+before you start. The Hub loads FTE and Call by Call, updates the fixed clean
+feeds, installs or refreshes Power Query through desktop Excel, and opens the
+same permanent workbook. Put that workbook in the agreed synced
+SharePoint/Teams location. A normal update does not erase coaching.
 
-On `DASHBOARD`, choose Latest day, Current/Previous week, Current MTD,
+On `CONTROL`, choose Latest day, Current/Previous week, Current MTD,
 Previous-month same days, Previous full month, or Custom period. Then choose
-LOB, Team Leader, or Agent. The KPI cards, benchmark, and chart all recalculate
-from the included `PCS_DATA` table.
+LOB, Team Leader, or Agent from left to right. `OVERVIEW`, `TEAM_VIEW`,
+`AGENT_RESULTS`, `COACHING_WORKSPACE`, and `FILTERED_DATA` all follow the same
+selection.
 
 Open `TEAM_VIEW` for the easiest TL workflow. Select LOB, Team Leader, and Agent
-from left to right on `DASHBOARD`; the two result views follow automatically.
+from left to right on `CONTROL`; the result views follow automatically.
 The selector lists and result rows expand after Refresh All, including new
 agents. This requires Microsoft 365 desktop Excel.
 
@@ -258,16 +262,18 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-For coaching, use `TEAM_VIEW` or `COACHING_QUEUE` to see low-score
-opportunities. Copy a new case A:M to the next empty row in `COACHING`, then fill
-the five blue columns: status, coach, coaching date, due date, and comment. Save
-normally. WFMHub never rebuilds this permanent action log.
+For coaching, use `COACHING_WORKSPACE` to see filtered low-score opportunities.
+Open `COACHING`, go to the first blank row, and choose the exact Coaching Key
+from the dropdown. The LOB, team, agent, date, score, customer comment, and call
+reference fill automatically. Fill the five blue action fields: status, coach,
+coaching date, due date, and comment. Save normally.
 
 The stable inputs are `PCS_AGENT_DAY_CURRENT.csv` and
 `PCS_COACHING_OPPORTUNITY_CURRENT.csv`. Agent ID is the employee key; Agent
-Selector is only `Name [ID]`; Coaching Key identifies the exact call. One owner
-uses the scripts shown on `SETUP` to connect both feeds once. Everybody else
-uses **Data > Refresh All** and works in the permanent workbook.
+Selector is only `Name [ID]`; Coaching Key identifies the exact call. The first
+**Update PCS now** installs both governed queries automatically using Windows
+desktop Excel. Everybody else works in the permanent workbook; the owner can
+update it with WFMHub or **Data > Refresh All**.
 
 Follow [EXCEL_REFRESH_GUIDE.md](EXCEL_REFRESH_GUIDE.md) for every click in the
 one-time PCS and Absenteeism setup.

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.22.0 — 2026-09-07
+
+- Replaced the misleading PCS build action with a dedicated operational menu:
+  update sources and feeds, open the permanent tracker, install/repair its
+  connection, refresh Excel only, or inspect connection and freshness state.
+- Added a packaged Windows desktop Excel helper that creates the `PCS_DATA` and
+  `COACHING_QUEUE` Power Queries, loads them as the governed worksheet tables,
+  refreshes synchronously, saves on success, and never targets `COACHING`.
+- Versioned the PCS workbook design. Normal runs preserve the current workbook
+  byte-for-byte; a design upgrade archives the old file and migrates unique
+  keyed coaching actions before rebuilding and reinstalling Power Query.
+- Reworked PCS into `CONTROL`, management `OVERVIEW`, team and agent views,
+  filtered coaching workspace, permanent one-key coaching ledger, and
+  selector-driven clean data. LOB filters cascade to Team Leader and Agent;
+  Team Leader filters cascade to Agent.
+- Split feed freshness, loaded-feed freshness, and Excel refresh time so the
+  owner can see whether the CSV changed without the workbook being refreshed.
+
 ## 0.21.0 — 2026-09-06
 
 - Promoted PCS to Operational as one permanent SharePoint-ready tracker. After

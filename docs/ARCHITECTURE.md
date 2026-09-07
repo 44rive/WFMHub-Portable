@@ -144,17 +144,19 @@ spells and never revives adherence. Standalone Attendance Callout, legacy
 
 PCS has a deliberate split lifecycle. SQLite and Python calculate a configurable
 rolling month history and atomically publish the versioned agent/day and
-coaching-opportunity feeds. WFMHub creates `PCS Operational Tracker.xlsx` only
-when it does not exist; later PCS runs preserve it byte-for-byte. Power Query is
-transport only and replaces `tblPcsData` and `tblCoachingQueue`. `tblCoaching`
-is the permanent editable record under SharePoint version history and is never
-a query target.
+coaching-opportunity feeds. Normal PCS runs preserve the current tracker
+byte-for-byte. A declared template-version change triggers an archived,
+versioned rebuild that carries forward the keyed coaching action ledger. The
+Windows Excel helper then installs or refreshes the two governed Power Queries.
+Power Query is transport only and replaces `tblPcsData` and
+`tblCoachingQueue`; `tblCoaching` is the permanent editable record under
+SharePoint version history and is never a query target.
 
-Dashboard ratios use additive counters in `SUMPRODUCT`. Microsoft 365 dynamic
-arrays drive cascading selectors, `TEAM_VIEW`, `AGENT_RESULTS`, and rolling
-trends, so new dates and agents appear without rebuilding. The shipped workbook
-works as an initial snapshot before connection setup. No Data Model or ODBC
-driver is required.
+`CONTROL` ratios use additive counters in `SUMPRODUCT`. Microsoft 365 dynamic
+arrays drive cascading selectors, `OVERVIEW`, `TEAM_VIEW`, `AGENT_RESULTS`,
+`COACHING_WORKSPACE`, `FILTERED_DATA`, and rolling trends, so new dates and
+agents appear without rebuilding. The shipped workbook works as an initial
+snapshot before connection setup. No Data Model or ODBC driver is required.
 
 Final Absenteeism uses the same collaboration boundary. Power Query may replace
 `tblAbsenceData`, `tblActionQueue`, and `tblActivityDetail` from stable CSVs;

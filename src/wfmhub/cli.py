@@ -23,6 +23,12 @@ from .models import refresh_models
 from .mapping import load_queue_mapping
 from .metrics import diff_metric_catalogs, evaluate_metric, load_metric_catalog, validate_metric_catalog
 from .on_demand_analysis import ANALYSIS_DOMAINS, COMPARISON_MODES, build_analysis_workbook
+from .pcs_excel import (
+    PCSExcelError,
+    inspect_pcs_tracker,
+    open_pcs_tracker,
+    run_pcs_excel_action,
+)
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
 from .progress import ProgressBar, ProgressCallback
 from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack, report_current_path
@@ -739,9 +745,109 @@ def _build_menu_product(home: Path, pack: str, *, service_profile: str | None = 
         service_profile=service_profile,
     )
     print(f"Report ready: {paths[0]}")
-    if pack == "pcs":
-        print("PCS is a permanent team tracker: WFMHub refreshed its feeds and preserved the workbook.")
-        print("After the one-time SETUP, open the shared workbook and use Data > Refresh All.")
+
+
+def _print_pcs_status(home: Path) -> None:
+    config = load_config(home)
+    workbook = report_current_path(config, "pcs")
+    state = inspect_pcs_tracker(workbook, config.feed / "PCS")
+    print("\nPCS TRACKER STATUS")
+    print(f"Workbook       : {state.path}")
+    print(f"Exists         : {'YES' if state.exists else 'NO'}")
+    if state.problem:
+        print(f"Problem        : {state.problem}")
+        return
+    print(f"Template       : {state.template_version or '-'} ({'CURRENT' if state.current_template else 'UPGRADE NEEDED'})")
+    print(f"Connection     : {state.connection_mode or '-'} / {'READY' if state.queries_installed else 'INSTALL NEEDED'}")
+    print(f"Power Queries  : {state.query_parts} table(s)")
+    print(f"Feed through   : {state.feed_data_through or '-'}")
+    print(f"Feed refreshed : {state.feed_refreshed_at or '-'}")
+    print(f"Excel through  : {state.workbook_data_through or '-'}")
+    print(f"Loaded feed    : {state.workbook_feed_refreshed_at or '-'}")
+    print(f"Excel refreshed: {state.workbook_refreshed_at or '-'}")
+    print(f"Pending refresh: {'YES' if state.needs_excel_refresh else 'NO'}")
+
+
+def pcs_excel_tool(
+    home: Path,
+    action: str,
+    mode: str = "LOCAL",
+    *,
+    open_after: bool = False,
+) -> int:
+    """Inspect, open, install, or refresh the permanent PCS workbook."""
+
+    config = load_config(home)
+    workbook = report_current_path(config, "pcs")
+    normalized = action.strip().lower()
+    if normalized == "status":
+        _print_pcs_status(home)
+        return 0
+    if normalized == "open":
+        open_pcs_tracker(workbook)
+        return 0
+    state = inspect_pcs_tracker(workbook, config.feed / "PCS")
+    if not state.exists:
+        raise PCSExcelError("PCS tracker does not exist. Choose Update PCS now first.")
+    if not state.current_template:
+        raise PCSExcelError("PCS tracker design is old. Choose Update PCS now before installing or refreshing.")
+    if normalized == "refresh" and not state.queries_installed:
+        raise PCSExcelError("PCS Power Query is not installed. Choose Install / repair connection first.")
+    message = run_pcs_excel_action(
+        config, workbook, "Install" if normalized == "install" else "Refresh",
+        mode, open_after=open_after,
+    )
+    print(message)
+    _print_pcs_status(home)
+    return 0
+
+
+def _update_pcs_now(home: Path) -> None:
+    """Refresh governed inputs and then refresh the same Excel tracker."""
+
+    print("\nPCS UPDATE")
+    print("Close PCS Operational Tracker.xlsx before continuing.")
+    result = refresh(
+        home, None, None, ("pcs",), "pcs", False,
+    )
+    if result:
+        raise RuntimeError(
+            "PCS source refresh completed with one or more rejected files. "
+            "Review the error list before refreshing the shared workbook."
+        )
+    config = load_config(home)
+    workbook = report_current_path(config, "pcs")
+    state = inspect_pcs_tracker(workbook, config.feed / "PCS")
+    action = "Refresh" if state.current_template and state.queries_installed else "Install"
+    print(f"Desktop Excel  : {action.lower()}ing the governed PCS connection")
+    message = run_pcs_excel_action(
+        config, workbook, action, state.connection_mode or "LOCAL", open_after=True,
+    )
+    print(message)
+    print("The permanent PCS tracker is updated and open. Coaching actions were preserved.")
+
+
+def _pcs_menu(home: Path) -> None:
+    print("\nPCS OPERATIONAL TRACKER")
+    print("1. Update PCS now")
+    print("2. Open the permanent tracker")
+    print("3. Install / repair the Excel connection")
+    print("4. Refresh Excel only (feeds already updated)")
+    print("5. Show tracker status")
+    print("6. Back")
+    choice = input("Choose 1-6: ").strip()
+    if choice == "1":
+        _update_pcs_now(home)
+    elif choice == "2":
+        pcs_excel_tool(home, "open")
+    elif choice == "3":
+        pcs_excel_tool(home, "install", open_after=True)
+    elif choice == "4":
+        pcs_excel_tool(home, "refresh", open_after=True)
+    elif choice == "5":
+        pcs_excel_tool(home, "status")
+    elif choice != "6":
+        raise ValueError("Please choose a number from 1 to 6")
 
 
 def _advanced_menu(home: Path) -> None:
@@ -824,7 +930,7 @@ def menu(home: Path) -> int:
             elif choice == "3":
                 _attendance_review_menu(home)
             elif choice == "4":
-                _build_menu_product(home, "pcs")
+                _pcs_menu(home)
             elif choice == "5":
                 domain, comparison = _choose_analysis()
                 start, end, use_config = _choose_period()
@@ -903,6 +1009,12 @@ def parser() -> argparse.ArgumentParser:
         help="Import Attendance Review decisions and recalculate",
     )
     decisions_p.add_argument("workbook", type=Path)
+    pcs_excel_p = commands.add_parser(
+        "pcs-excel", help="Inspect, install, refresh, or open the permanent PCS tracker",
+    )
+    pcs_excel_p.add_argument("action", choices=("status", "install", "refresh", "open"))
+    pcs_excel_p.add_argument("--mode", choices=("LOCAL", "SHAREPOINT"), default="LOCAL")
+    pcs_excel_p.add_argument("--open", action="store_true", dest="open_after")
     analysis_p = commands.add_parser("analyze", help="Run on-demand period analysis")
     analysis_p.add_argument("domain", choices=ANALYSIS_DOMAINS)
     analysis_p.add_argument("--start", type=_date)
@@ -939,6 +1051,8 @@ def main(argv: list[str] | None = None) -> int:
             return import_bonus_tool(home, args.workbook)
         if args.command == "import-attendance-decisions":
             return import_attendance_decisions_tool(home, args.workbook)
+        if args.command == "pcs-excel":
+            return pcs_excel_tool(home, args.action, args.mode, open_after=args.open_after)
         if args.command == "analyze":
             return analyze_period(home, args.domain, args.start, args.end, args.comparison, args.output)
         if args.command == "export":

@@ -123,16 +123,26 @@ builder must create the exact ordered sheets declared in
 `default_reports.toml` and keep `_AUDIT` hidden. Do not add raw extract tables
 to workbooks.
 
-PCS is a build-once operational tracker. The default builder must always publish
-the fixed feeds first, then return an existing `PCS Operational Tracker.xlsx`
-without changing a byte. An explicit output path remains a diagnostic snapshot.
-Keep `PCS_DATA`, `COACHING_QUEUE`, `COACHING`, and `SETUP` as real Excel Tables:
-Power Query may replace only the first two, while the third is the permanent
-collaborative record. Do not require a Data Model or ODBC driver.
+PCS is a versioned permanent operational tracker. The default builder always
+publishes the fixed feeds first. It returns a tracker with the current template
+version without changing a byte; an older template is archived and rebuilt only
+after the keyed `COACHING` action ledger is read for migration. An explicit
+output path remains a diagnostic snapshot. Keep `PCS_DATA`, `COACHING_QUEUE`,
+`COACHING`, and `SETUP` as real Excel Tables. Power Query may replace only the
+first two, while the third is the permanent collaborative record. Do not
+require a Data Model or ODBC driver.
+
+Desktop Excel owns Power Query's OOXML/mashup parts. The Windows helper under
+`_system/scripts` installs the generated M definitions as `PCS_DATA` and
+`COACHING_QUEUE`, loads them at the existing table anchors, restores dependent
+formulas and names, refreshes synchronously, and saves only on success. Linux
+tests validate the generated workbook and helper contract; they cannot replace
+an end-to-end Windows Excel COM test.
 
 The PCS agent/day feed schema and copy-ready M scripts are centralized in
 `shared_feeds.py`. Schema changes require a feed-schema increment, workbook
-contract migration, documentation, and a preservation test. Dashboard formulas
+template-version and report-contract migration, documentation, and a
+preservation test. `CONTROL` formulas
 must calculate ratios from summed counters, not from averaged daily ratios.
 
 Call-by-call uses a stable deterministic leg key. Full-history extracts may

@@ -39,10 +39,13 @@ external link:
 - each opportunity is identified by the stable deduplicated call-leg key;
 - `Actions Rate = unique completed Coaching Keys / all coaching opportunities`;
 - the TL fills Status, Coach, Coaching Date, Due Date and Comment in Excel;
-- the shared tracker is created once and its coaching table is never regenerated
+- the shared tracker is permanent and its coaching table is not regenerated
   during normal PCS refreshes;
-- Power Query refreshes the separate opportunity queue; a new case is copied
-  into the permanent coaching table by Coaching Key;
+- Power Query refreshes the separate opportunity queue; a reviewer chooses its
+  Coaching Key in the first blank permanent coaching row, and the identity fields
+  populate automatically;
+- a template upgrade archives the previous file and migrates each unique keyed
+  coaching action before the Power Query connections are reinstalled;
 - coaching decisions are never imported into SQLite.
 
 `Not required` remains in the denominator and is not counted as completed.

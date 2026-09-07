@@ -19,6 +19,7 @@ from wfmhub.database import write_session
 from wfmhub.ingestion import ingest_all
 from wfmhub.models import _evaluation_time, refresh_models, resolve_period
 from wfmhub.on_demand_analysis import build_analysis_workbook
+from wfmhub.pcs_excel import PCS_TEMPLATE_VERSION, inspect_pcs_tracker
 from wfmhub.exports import export_dataset
 from wfmhub.report_packs import build_report_pack
 from wfmhub.reports import build_report
@@ -907,7 +908,11 @@ class EndToEndTests(unittest.TestCase):
                 pcs_actions = pcs_edit["COACHING"]
                 pcs_headers = {cell.value: cell.column for cell in pcs_actions[4]}
                 self.assertEqual(pcs_actions.max_row, 5)
-                self.assertEqual(pcs_actions.cell(5, pcs_headers["Agent ID"]).value, "200")
+                queue = pcs_edit["COACHING_QUEUE"]
+                queue_headers = {cell.value: cell.column for cell in queue[4]}
+                coaching_key = queue.cell(5, queue_headers["Coaching Key"]).value
+                self.assertTrue(coaching_key)
+                pcs_actions.cell(5, pcs_headers["Coaching Key"], coaching_key)
                 pcs_actions.cell(5, pcs_headers["Coaching Status"], "Completed")
                 pcs_actions.cell(5, pcs_headers["Coaching Date"], date(2026, 8, 2))
                 pcs_actions.cell(5, pcs_headers["Coach"], "TL 1")
@@ -921,6 +926,21 @@ class EndToEndTests(unittest.TestCase):
                     focused_pcs_report,
                 )
                 self.assertEqual(focused_pcs_report.read_bytes(), preserved_tracker)
+
+                # A design upgrade rebuilds only the governed template and
+                # carries the permanent coaching ledger into the new version.
+                pcs_old = load_workbook(focused_pcs_report)
+                setup = pcs_old["SETUP"]
+                for row in range(5, setup.max_row + 1):
+                    if setup.cell(row, 1).value == "Template Version":
+                        setup.cell(row, 2, "2026.09.18")
+                        break
+                pcs_old.save(focused_pcs_report)
+                pcs_old.close()
+                self.assertEqual(
+                    build_report_pack("pcs", conn, config, model.start, model.end),
+                    focused_pcs_report,
+                )
 
             self.assertTrue(report.exists())
             workbook = load_workbook(report, read_only=True, data_only=True)
@@ -1001,11 +1021,13 @@ class EndToEndTests(unittest.TestCase):
             try:
                 self.assertEqual(focused_pcs_report.name, "PCS Operational Tracker.xlsx")
                 self.assertEqual(focused_pcs_book.sheetnames, [
-                    "DASHBOARD", "TEAM_VIEW", "AGENT_RESULTS", "COACHING",
-                    "COACHING_QUEUE", "PCS_DATA", "SETUP", "HELP", "DEFINITIONS",
-                    "_LOOKUPS", "_AUDIT",
+                    "CONTROL", "OVERVIEW", "TEAM_VIEW", "AGENT_RESULTS",
+                    "COACHING_WORKSPACE", "COACHING", "COACHING_QUEUE",
+                    "FILTERED_DATA", "PCS_DATA", "SETUP", "HELP",
+                    "DEFINITIONS", "_LOOKUPS", "_AUDIT",
                 ])
-                self.assertIn("SUMPRODUCT", focused_pcs_book["DASHBOARD"]["A11"].value)
+                self.assertIn("SUMPRODUCT", focused_pcs_book["CONTROL"]["A11"].value)
+                self.assertGreaterEqual(len(focused_pcs_book["OVERVIEW"]._charts), 2)
                 self.assertIn("tblPcsData", focused_pcs_book["PCS_DATA"].tables)
                 self.assertIn("tblCoaching", focused_pcs_book["COACHING"].tables)
                 self.assertIn("tblCoachingQueue", focused_pcs_book["COACHING_QUEUE"].tables)
@@ -1014,6 +1036,10 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("tblPcsData", getattr(agent_formula, "text", str(agent_formula)))
                 team_formula = focused_pcs_book["TEAM_VIEW"]["A11"].value
                 self.assertIn("tblPcsData", getattr(team_formula, "text", str(team_formula)))
+                coaching_formula = focused_pcs_book["COACHING_WORKSPACE"]["A8"].value
+                self.assertIn("tblCoachingQueue", getattr(coaching_formula, "text", str(coaching_formula)))
+                filtered_formula = focused_pcs_book["FILTERED_DATA"]["A5"].value
+                self.assertIn("tblPcsData", getattr(filtered_formula, "text", str(filtered_formula)))
                 self.assertEqual(focused_pcs_book["_LOOKUPS"].sheet_state, "hidden")
                 pcs_table_headers = [cell.value for cell in focused_pcs_book["PCS_DATA"][4]]
                 defined = {
@@ -1028,11 +1054,25 @@ class EndToEndTests(unittest.TestCase):
                     if row[0]
                 }
                 self.assertEqual(setup_values["Power Query Installed"], "NO")
+                self.assertEqual(setup_values["Template Version"], PCS_TEMPLATE_VERSION)
+                coaching_values = {
+                    row[0]: row
+                    for row in focused_pcs_book["COACHING"].iter_rows(min_row=5, values_only=True)
+                    if row[0]
+                }
+                self.assertEqual(coaching_values[coaching_key][12], "Completed")
+                self.assertEqual(coaching_values[coaching_key][13], "TL 1")
                 self.assertIn("Agent Day Key", pcs_table_headers)
                 self.assertIn("Feed Refreshed At", pcs_table_headers)
                 self.assertIn("PCS Rule SHA-256", pcs_table_headers)
             finally:
                 focused_pcs_book.close()
+            pcs_state = inspect_pcs_tracker(
+                focused_pcs_report, home / "Feed" / "PCS",
+            )
+            self.assertTrue(pcs_state.current_template)
+            self.assertFalse(pcs_state.queries_installed)
+            self.assertEqual(pcs_state.query_parts, 0)
             service_book = load_workbook(service_report, read_only=False, data_only=False)
             try:
                 self.assertEqual(service_report, home / "Reports" / "RTM Daily Control.xlsx")

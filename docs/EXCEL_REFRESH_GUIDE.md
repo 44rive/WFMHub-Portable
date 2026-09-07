@@ -11,65 +11,39 @@ The idea is simple:
 
 Do this once per shared workbook. Make a backup copy before starting.
 
-## PCS: decide who refreshes
+## PCS: the simple owner workflow
 
-The simplest production method is one named owner:
+Use one named owner on the WFM work machine:
 
-1. Keep `PCS Operational Tracker.xlsx` in SharePoint or Teams for everybody.
-2. The owner opens it in desktop Excel on the WFM work machine.
-3. The owner uses the `LOCAL` scripts, clicks **Refresh All**, saves, and closes.
-4. Team leaders and Quality open the same shared file and update `COACHING`.
+1. Close `PCS Operational Tracker.xlsx` if it is open.
+2. In WFMHub choose **PCS Operational Tracker**.
+3. Choose **Update PCS now**.
+4. Wait while WFMHub loads FTE and Call by Call, publishes the fixed CSV feeds,
+   installs or refreshes both Power Queries through desktop Excel, and saves.
+5. The same permanent tracker opens when the update succeeds.
 
-They do not need WFMHub, Python, a database driver, or the source extracts.
+The first run automatically replaces the starter tables with two refreshable
+query tables: `tblPcsData` on `PCS_DATA` and `tblCoachingQueue` on
+`COACHING_QUEUE`. It does not add either table to the Data Model. Later runs
+refresh the existing connections. If a future WFMHub release changes the
+template, the Hub archives the old workbook and carries its coaching action
+ledger into the new design before reinstalling the queries.
 
-Use `SHAREPOINT` mode only when the two fixed CSV feeds are also copied or
-synced into one SharePoint folder after every Hub refresh. In that case, fill in
-the SharePoint URL and unique folder fragment on `SETUP`.
+Keep the permanent workbook in a locally synced SharePoint/Teams folder if the
+team must collaborate in it. Team leaders and Quality do not need WFMHub,
+Python, SQLite, or the source extracts. Only the owner updates the feeds.
 
-## PCS: connect the clean data once
+Use **Show tracker status** to compare the latest feed timestamp with the feed
+currently loaded in Excel. Use **Install / repair the Excel connection** if the
+queries are missing. `LOCAL` mode is the supported simple workflow. The
+SharePoint query scripts remain available for an advanced setup where the CSV
+feeds themselves are also synchronized to SharePoint.
 
-1. Run **WFMHub > Refresh source data once > Agent PCS**.
-2. Open `Reports\PCS Operational Tracker.xlsx` in desktop Excel.
-3. Open `SETUP`. Leave **Connection Mode** as `LOCAL` for the simple owner
-   workflow. Confirm **Local Feed Folder** points to `Feed\PCS`.
-4. Open the file shown in **Local Data Script** using Notepad. Select all and
-   copy it.
-5. In Excel choose **Data > Get Data > From Other Sources > Blank Query**.
-6. In Power Query choose **Home > Advanced Editor**. Delete everything, paste
-   the script, and choose **Done**.
-7. Rename the query exactly `PCS_DATA`.
-8. Back in Excel open `PCS_DATA`, click inside the starter table, choose **Table
-   Design > Convert to Range**, and confirm **Yes**.
-9. Clear the old area from `A4` through `Z` downward. Keep the sheet itself.
-10. In **Queries & Connections**, right-click `PCS_DATA`, choose **Load To...**,
-    select **Table** and **Existing worksheet**, then choose `PCS_DATA!$A$4`.
-11. Click inside the new query table. Under **Table Design > Table Name** rename
-    it exactly `tblPcsData`.
-12. Right-click the query, choose **Properties**, and clear **Enable background
-    refresh**. Do not select **Add this data to the Data Model**.
-
-The Dashboard now follows the newest `Date` in `tblPcsData`. `Current week`
-means Monday through that newest date. LOB, Team Leader and Agent are combined
-as filters. If a combination has no data, set one or more boxes back to `All`.
-
-## PCS: connect new coaching opportunities once
-
-1. Open the file shown in `SETUP` under **Local Coaching Script**.
-2. Repeat the Blank Query and Advanced Editor steps above.
-3. Rename this query exactly `COACHING_QUEUE`.
-4. On the worksheet `COACHING_QUEUE`, convert the starter table to a range and
-   clear `A4:M` downward.
-5. Load the query as a Table to existing cell `COACHING_QUEUE!$A$4`.
-6. Rename the new query table exactly `tblCoachingQueue`.
-7. Clear **Enable background refresh** and do not add it to the Data Model.
-8. Click **Refresh All**. If both queries succeed, set **Power Query Installed**
-   to `YES` on `SETUP`, save, and close the workbook.
-9. For a new case, copy columns A:M from `COACHING_QUEUE` into the next empty
-   row of `COACHING`. Fill only the five blue columns there.
-
-`COACHING` is the team’s permanent action log. Power Query must never load into
-that sheet. Agent ID identifies the employee; Coaching Key identifies the exact
-survey call.
+`CONTROL` drives the period, LOB, Team Leader, and Agent selectors. For a
+coaching action, open `COACHING_WORKSPACE`, then open `COACHING`, choose one
+Coaching Key in its first blank row, and fill only the blue action fields. The
+agent and call identity fills automatically. Power Query never loads into
+`COACHING`.
 
 ## Absenteeism: connect the clean ledger
 
@@ -77,8 +51,8 @@ survey call.
 2. Confirm this file exists:
    `Feed\Absenteeism\ABSENCE_AGENT_DAY_CURRENT.csv`.
 3. Open `Reports\Final Absenteeism.xlsx`.
-4. Repeat the PCS clean-data steps on `ABSENCE_DATA`, loading at
-   `ABSENCE_DATA!$A$4`.
+4. Create a Blank Query in desktop Excel from the generated Absenteeism M
+   script and load it as a table at `ABSENCE_DATA!$A$4`.
 5. Rename the new table exactly to `tblAbsenceData`.
 6. Set the `Date` column to **Date** in Power Query.
 7. Save the workbook.
@@ -89,7 +63,7 @@ Case ID keeps each comment attached to the correct agent and day.
 ## Absenteeism: connect the review queue
 
 1. Confirm `Feed\Absenteeism\ABSENCE_REVIEW_CASE_CURRENT.csv` exists.
-2. Repeat the Power Query steps on `ACTION_QUEUE`, loading at
+2. Create a Blank Query from the generated review-queue M script, loading at
    `ACTION_QUEUE!$A$4`.
 3. Rename the table exactly to `tblActionQueue`.
 4. Add one table column at the right named `Action Status`.
@@ -105,7 +79,7 @@ Case ID keeps each comment attached to the correct agent and day.
 ## Absenteeism: connect exact activity detail
 
 1. Confirm `Feed\Absenteeism\ABSENCE_COMPONENT_CURRENT.csv` exists.
-2. Repeat the Power Query steps on `ACTIVITY_DETAIL`, loading at
+2. Create a Blank Query from the generated component-detail M script, loading at
    `ACTIVITY_DETAIL!$A$4`.
 3. In Power Query set `Date` to **Date** and `Start`/`End` to **Date/Time**.
 4. Rename the table exactly to `tblActivityDetail`.
@@ -119,12 +93,11 @@ correct agent and day.
 ## Normal refresh after setup
 
 1. Put new untouched exports in the normal source folders.
-2. Run **Refresh source data once** in WFMHub.
-3. Wait for **Refresh complete**.
-4. For PCS, open the shared workbook and choose **Data > Refresh All**.
-5. Wait until **Queries & Connections** shows no query still refreshing, then
-   save.
-6. For Absenteeism, the same **Refresh All** updates `TEAM_VIEW`,
+2. For PCS, use **PCS Operational Tracker > Update PCS now**. It refreshes the
+   source data, both Excel queries, and the permanent workbook in one action.
+3. Alternatively, after the owner updates the fixed feeds, open the PCS workbook
+   and use **Data > Refresh All**, wait for both queries, then save.
+4. For Absenteeism, **Refresh All** updates `TEAM_VIEW`,
    `COMPONENT_VIEW`, and the review queue. Do not rebuild the shared workbook
    unless WFMHub ships a new workbook design.
 
