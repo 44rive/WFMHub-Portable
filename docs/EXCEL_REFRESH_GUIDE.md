@@ -19,12 +19,13 @@ Use one named owner on the WFM work machine:
 2. In WFMHub choose **PCS Operational Tracker**.
 3. Choose **Update PCS now**.
 4. Wait while WFMHub loads FTE and Call by Call, publishes the fixed CSV feeds,
-   installs or refreshes both Power Queries through desktop Excel, and saves.
+   installs or refreshes four Power Queries through desktop Excel, and saves.
 5. The same permanent tracker opens when the update succeeds.
 
-The first run automatically replaces the starter tables with two refreshable
-query tables: `tblPcsData` on `PCS_DATA` and `tblCoachingQueue` on
-`COACHING_QUEUE`. It does not add either table to the Data Model. Later runs
+The first run automatically replaces four starter tables with refreshable query
+tables: `tblPcsLob` on `OVERVIEW`, `tblResults` on `RESULTS`, `tblPcsData` on
+`PCS_DATA`, and `tblCoachingQueue` on `COACHING_QUEUE`. It does not add any table
+to the Data Model. Later runs
 refresh the existing connections. If a future WFMHub release changes the
 template, the Hub archives the old workbook and carries its coaching action
 ledger into the new design before reinstalling the queries.
@@ -39,10 +40,11 @@ queries are missing. `LOCAL` mode is the supported simple workflow. The
 SharePoint query scripts remain available for an advanced setup where the CSV
 feeds themselves are also synchronized to SharePoint.
 
-`CONTROL` drives the period, LOB, Team Leader, and Agent selectors. For a
-coaching action, open `COACHING_WORKSPACE`, then open `COACHING`, choose one
-Coaching Key in its first blank row, and fill only the blue action fields. The
-agent and call identity fills automatically. Power Query never loads into
+Use `OVERVIEW` for management totals and the per-LOB comparison. In `RESULTS`,
+filter `Period View`, then `Scope Level`, LOB, Team Leader, or Agent. For a
+coaching action, filter `COACHING_QUEUE`, copy its Coaching Key into the first
+blank blue cell in `COACHING`, and fill only the blue action fields. The agent
+and call identity fills with classic `INDEX/MATCH`. Power Query never loads into
 `COACHING`.
 
 ## Absenteeism: connect the clean ledger
@@ -94,9 +96,9 @@ correct agent and day.
 
 1. Put new untouched exports in the normal source folders.
 2. For PCS, use **PCS Operational Tracker > Update PCS now**. It refreshes the
-   source data, both Excel queries, and the permanent workbook in one action.
+   source data, all four Excel queries, and the permanent workbook in one action.
 3. Alternatively, after the owner updates the fixed feeds, open the PCS workbook
-   and use **Data > Refresh All**, wait for both queries, then save.
+   and use **Data > Refresh All**, wait for all queries, then save.
 4. For Absenteeism, **Refresh All** updates `TEAM_VIEW`,
    `COMPONENT_VIEW`, and the review queue. Do not rebuild the shared workbook
    unless WFMHub ships a new workbook design.
@@ -107,11 +109,12 @@ correct agent and day.
   manually renamed. Select the fixed `..._CURRENT.csv` file again.
 - **Table name already exists:** convert or rename the old table before naming
   the query table.
-- **The selector is blank:** set LOB, Team Leader, and Agent back to `All`, then
-  choose them again from left to right.
+- **A filter appears blank:** clear the preceding table filters, then apply
+  Period View, Scope Level, LOB, Team Leader, and Agent in that order.
 - **Someone is editing:** do not replace the workbook. Refresh only the query,
   and use a personal Sheet View before applying table filters.
-- **A new agent is missing from PCS TEAM_VIEW:** reset LOB, Team Leader, and
-  Agent to `All`, then choose **Data > Refresh All**. Do not rebuild the tracker.
-- **Formula shows `_xlfn` or `#NAME?`:** open the file in current Microsoft 365
-  desktop Excel; the selector views use LET, FILTER, MAP, and dynamic arrays.
+- **A new agent is missing from PCS RESULTS:** clear the filters and choose
+  **Data > Refresh All**. Do not rebuild the tracker.
+- **Excel reports repaired records:** keep the recovered copy closed, use the
+  Hub's **Install / repair** action on the current template, and retain the log.
+  The current template contains no dynamic-array report formulas.

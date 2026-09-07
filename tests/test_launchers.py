@@ -26,6 +26,12 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("Microsoft.Mashup.OleDb.1", text)
         self.assertIn('Remove-StarterTable "PCS_DATA" "tblPcsData"', text)
         self.assertIn('Remove-StarterTable "COACHING_QUEUE" "tblCoachingQueue"', text)
+        self.assertIn('Remove-StarterTable "OVERVIEW" "tblPcsLob"', text)
+        self.assertIn('Remove-StarterTable "RESULTS" "tblResults"', text)
+        self.assertIn('Add-QueryTable "PCS_LOB"', text)
+        self.assertIn('Add-QueryTable "PCS_RESULTS"', text)
+        self.assertNotIn("Save-FormulaState", text)
+        self.assertNotIn("Restore-FormulaState", text)
         self.assertIn("$script:Workbook.RefreshAll()", text)
         self.assertNotIn("/home/founder", text)
 

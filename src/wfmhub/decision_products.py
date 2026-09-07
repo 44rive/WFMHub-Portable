@@ -978,6 +978,243 @@ def _add_pcs_setup(book: DecisionWorkbook, config: Config) -> None:
     })
 
 
+def _add_pcs_stable_overview(
+    book: DecisionWorkbook,
+    status: str,
+    status_text: str,
+    latest: date,
+    headers: Sequence[str],
+    rows: Sequence[Sequence[Any]],
+) -> None:
+    """Create a repair-resistant management page with a visible per-LOB table."""
+
+    wb = book.report.workbook
+    ws = wb.add_worksheet("OVERVIEW")
+    ws.hide_gridlines(2)
+    ws.set_tab_color(COLORS["gold"])
+    ws.set_zoom(82)
+    ws.set_landscape()
+    ws.fit_to_pages(1, 0)
+    ws.freeze_panes(34, 0)
+    ws.merge_range("A1:S1", "PCS  /  OPERATIONAL SCORECARD", book.report.title)
+    ws.merge_range(
+        "A2:S2",
+        f"Data through {latest:%Y-%m-%d}  |  latest day and current month versus the comparable previous month  |  prepared by Anass ASSRI",
+        book.report.subtitle,
+    )
+    badge = status if status in book.badge_formats else "INCOMPLETE"
+    ws.merge_range("A4:S4", f"{badge}  /  {status_text}", book.badge_formats[badge])
+
+    all_values = list(rows[0]) if rows else [None] * len(headers)
+    card_specs = (
+        ("LATEST DAY PCS", 2, book.card_decimal, "Latest available business day"),
+        ("CURRENT MTD PCS", 5, book.card_decimal, "Weighted valid Q1 score"),
+        ("PRIOR MTD PCS", 6, book.card_decimal, "Previous month, same number of days"),
+        ("MTD MOVEMENT", 7, book.card_decimal, "Current MTD minus prior MTD"),
+        ("MTD PARTICIPATION", 8, book.card_percent, "Q1 nonblank / PCS Status 1"),
+        ("VALID RESPONSES", 10, book.card_integer, "Current MTD sample"),
+        ("SCORE <= 3", 13, book.card_integer, "Current MTD coaching opportunities"),
+        ("INBOUND LEGS", 15, book.card_integer, "Current MTD inbound volume"),
+    )
+    for index, (label, source_column, fmt, note) in enumerate(card_specs):
+        row = 5 if index < 4 else 10
+        column = (index % 4) * 4
+        excel_column = chr(ord("A") + source_column)
+        formula = (
+            f'=IFERROR(INDEX(${excel_column}$35:${excel_column}$234,'
+            'MATCH("ALL",$A$35:$A$234,0)),"")'
+        )
+        cached = all_values[source_column] if source_column < len(all_values) else ""
+        ws.merge_range(row, column, row, column + 2, label, book.report.kpi_label)
+        ws.merge_range(row + 1, column, row + 2, column + 2, "", fmt)
+        ws.write_formula(row + 1, column, formula, fmt, cached if cached is not None else "")
+        ws.merge_range(row + 3, column, row + 3, column + 2, note, book.card_compare)
+
+    score_chart = wb.add_chart({"type": "column"})
+    for name, column, color in (
+        ("Current MTD PCS", 5, COLORS["teal"]),
+        ("Prior MTD PCS", 6, COLORS["muted"]),
+    ):
+        score_chart.add_series({
+            "name": name,
+            "categories": ["OVERVIEW", 35, 0, 64, 0],
+            "values": ["OVERVIEW", 35, column, 64, column],
+            "fill": {"color": color}, "border": {"none": True},
+        })
+    score_chart.set_title({"name": "PCS by LOB — current MTD vs prior MTD"})
+    score_chart.set_y_axis({"min": 1, "max": 5, "major_unit": 1, "major_gridlines": {"visible": False}})
+    score_chart.set_legend({"position": "bottom"})
+    score_chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    score_chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    ws.insert_chart("A16", score_chart, {"x_scale": 1.2, "y_scale": 1.0})
+
+    participation_chart = wb.add_chart({"type": "column"})
+    for name, column, color in (
+        ("Current MTD participation", 8, COLORS["gold"]),
+        ("Prior MTD participation", 9, COLORS["muted"]),
+    ):
+        participation_chart.add_series({
+            "name": name,
+            "categories": ["OVERVIEW", 35, 0, 64, 0],
+            "values": ["OVERVIEW", 35, column, 64, column],
+            "fill": {"color": color}, "border": {"none": True},
+        })
+    participation_chart.set_title({"name": "Participation by LOB"})
+    participation_chart.set_y_axis({"min": 0, "max": 1, "major_unit": 0.2, "num_format": "0%", "major_gridlines": {"visible": False}})
+    participation_chart.set_legend({"position": "bottom"})
+    participation_chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    participation_chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    ws.insert_chart("J16", participation_chart, {"x_scale": 1.2, "y_scale": 1.0})
+
+    ws.merge_range("A32:S32", "PER-LOB PCS RECONCILIATION", book.report.section)
+    display_headers = list(headers)
+    table_rows = list(rows) or [tuple(None for _ in headers)]
+    for row_index, values in enumerate(table_rows, 34):
+        for column, value in enumerate(values):
+            header = display_headers[column]
+            fmt = book.report.body
+            if isinstance(value, datetime):
+                fmt = book.report.datetime
+            elif isinstance(value, date):
+                fmt = book.report.date
+            elif "Participation" in header:
+                fmt = book.report.percent
+            elif "PCS" in header or header == "MTD Change":
+                fmt = book.report.decimal
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                fmt = book.report.integer
+            ws.write(row_index, column, value, fmt)
+    ws.add_table(33, 0, 33 + len(table_rows), len(headers) - 1, {
+        "name": "tblPcsLob", "style": "Table Style Light 9",
+        "columns": [{"header": header, "header_format": book.report.header} for header in display_headers],
+    })
+    book.tables.append(ModelTable("OVERVIEW", display_headers, table_rows))
+    ws.conditional_format("H35:H234", {"type": "cell", "criteria": "<", "value": 0, "format": book.report.error})
+    ws.set_column("A:A", 18)
+    ws.set_column("B:B", 14)
+    ws.set_column("C:J", 18)
+    ws.set_column("K:P", 19)
+    ws.set_column("Q:Q", 16)
+    ws.set_column("R:S", 20)
+
+
+def _add_pcs_stable_coaching(
+    book: DecisionWorkbook,
+    previous: Sequence[dict[str, Any]],
+) -> None:
+    """Create a permanent action table using only classic INDEX/MATCH formulas."""
+
+    wb = book.report.workbook
+    ws = wb.add_worksheet("COACHING")
+    ws.hide_gridlines(2)
+    ws.set_tab_color(COLORS["gold"])
+    ws.freeze_panes(4, 0)
+    ws.set_zoom(85)
+    headers = [
+        "Coaching Key", "LOB", "Team Leader", "Agent Selector", "Agent ID",
+        "Agent", "Date", "Call Start", "Q1 Score", "Customer Comment",
+        "Call Reference Number", "Language", "Coaching Status", "Coach",
+        "Coaching Date", "Due Date", "Coaching Comment",
+    ]
+    ws.merge_range("A1:Q1", "PCS  /  COACHING ACTIONS", book.report.title)
+    ws.merge_range(
+        "A2:Q2",
+        "Filter COACHING_QUEUE, copy its Coaching Key, then paste it in the first blank blue cell here. Identity fields fill automatically.",
+        book.report.subtitle,
+    )
+    rows = list(previous) or [{}]
+    editable = {
+        "Coaching Key", "Coaching Status", "Coach", "Coaching Date",
+        "Due Date", "Coaching Comment",
+    }
+    for row_index, item in enumerate(rows, 4):
+        for column, header in enumerate(headers):
+            key = header.casefold().replace(" ", "_")
+            value = item.get(key)
+            fmt = book.report.editable if header in editable else book.report.body
+            if header in {"Coaching Date", "Due Date"}:
+                fmt = book.report.editable_date
+            ws.write(row_index, column, value, fmt)
+    queue_columns = {
+        "LOB": "A", "Team Leader": "B", "Agent Selector": "C",
+        "Agent": "D", "Agent ID": "E", "Date": "G", "Call Start": "H",
+        "Q1 Score": "I", "Customer Comment": "J",
+        "Call Reference Number": "K", "Language": "L",
+    }
+    columns = []
+    for header in headers:
+        column: dict[str, Any] = {"header": header, "header_format": book.report.header}
+        if header in queue_columns:
+            source = queue_columns[header]
+            column["formula"] = (
+                '=IF([@[Coaching Key]]="","",IFERROR('
+                f'INDEX(COACHING_QUEUE!${source}$5:${source}$100004,'
+                'MATCH([@[Coaching Key]],COACHING_QUEUE!$M$5:$M$100004,0)),'
+                '"KEY NOT IN CURRENT QUEUE"))'
+            )
+            if header == "Date":
+                column["format"] = book.report.date
+            elif header == "Call Start":
+                column["format"] = book.report.datetime
+        columns.append(column)
+    ws.add_table(3, 0, 3 + len(rows), len(headers) - 1, {
+        "name": "tblCoaching", "style": "Table Style Light 9", "columns": columns,
+    })
+    book.tables.append(ModelTable(
+        "COACHING", headers,
+        [tuple(item.get(header.casefold().replace(" ", "_")) for header in headers) for item in rows],
+    ))
+    wb.define_name(
+        "PCS_COACHING_KEY_LIST",
+        "=COACHING_QUEUE!$M$5:INDEX(COACHING_QUEUE!$M:$M,MAX(5,COUNTA(COACHING_QUEUE!$M:$M)+3))",
+    )
+    ws.data_validation("A5:A1004", {
+        "validate": "list", "source": "=PCS_COACHING_KEY_LIST",
+        "input_title": "Exact PCS case",
+        "input_message": "Paste or select a key from COACHING_QUEUE.",
+    })
+    ws.data_validation("M5:M1004", {
+        "validate": "list", "source": ["Pending", "Planned", "Completed", "Not required"],
+    })
+    ws.conditional_format("A5:A1004", {"type": "duplicate", "format": book.report.error})
+    ws.write_url("A3", "internal:'COACHING_QUEUE'!A1", book.report.editable, string="OPEN FILTERABLE OPPORTUNITY QUEUE")
+    ws.set_column("A:A", 34)
+    ws.set_column("B:C", 20)
+    ws.set_column("D:D", 30)
+    ws.set_column("E:I", 18)
+    ws.set_column("J:J", 38)
+    ws.set_column("K:P", 20)
+    ws.set_column("Q:Q", 42)
+
+
+def _add_pcs_stable_setup(book: DecisionWorkbook, config: Config) -> None:
+    folder = config.feed / "PCS"
+    ws = book.table(
+        "SETUP", "PCS connection status",
+        "The WFMHub PCS menu installs or refreshes four ordinary Power Query tables. No Data Model is used.",
+        ["Setting", "Value", "Why it exists"],
+        [
+            ("Power Query Installed", "NO", "Set automatically after all four query tables refresh"),
+            ("Connection Mode", "LOCAL", "One WFM owner refreshes the locally synced workbook"),
+            ("Connection Owner", "Anass ASSRI", "Prevents competing setup changes"),
+            ("Local Feed Folder", str(folder), "Fixed clean CSV folder"),
+            ("SharePoint Site URL", "https://company.sharepoint.com/sites/WFM", "Only needed for advanced SharePoint-feed mode"),
+            ("SharePoint Feed Folder", "/Shared Documents/WFMHub/Feed/PCS/", "Unique folder fragment containing the fixed feeds"),
+            ("LOB Script", str(folder / "POWER_QUERY_PCS_LOB_LOCAL.txt"), "Per-LOB scorecard"),
+            ("Results Script", str(folder / "POWER_QUERY_PCS_RESULTS_LOCAL.txt"), "Filterable period/team/agent results"),
+            ("Coaching Script", str(folder / "POWER_QUERY_COACHING_QUEUE_LOCAL.txt"), "Filterable opportunity queue"),
+            ("Data Script", str(folder / "POWER_QUERY_PCS_DATA_LOCAL.txt"), "Clean agent/day table for pivots"),
+            ("Workbook Last Refreshed", "Never", "Written only after all queries complete"),
+            ("Last Installer Result", "Not run", "Latest desktop Excel result"),
+            ("Template Version", PCS_TEMPLATE_VERSION, "Controls safe workbook upgrades"),
+        ],
+        editable_headers={"Value"},
+    )
+    ws.set_column("A:A", 28)
+    ws.set_column("B:B", 76)
+    ws.set_column("C:C", 58)
+
+
 def _pcs_workbook_template_version(path: Path) -> str | None:
     """Read the permanent tracker's declared template version without changing it."""
 
@@ -1180,24 +1417,29 @@ def build_pcs_performance_workbook(
     end: date,
     output: Path | None = None,
 ) -> Path:
-    """Create or safely upgrade the versioned permanent PCS tracker."""
+    """Create or safely upgrade the repair-resistant permanent PCS tracker."""
 
-    from .shared_feeds import PCS_AGENT_DAY_HEADERS, PCS_COACHING_HEADERS, publish_pcs_feeds
+    from .shared_feeds import (
+        PCS_AGENT_DAY_HEADERS,
+        PCS_COACHING_HEADERS,
+        PCS_LOB_SCORECARD_HEADERS,
+        PCS_RESULTS_HEADERS,
+        pcs_lob_scorecard_rows,
+        pcs_result_rows,
+        publish_pcs_feeds,
+    )
 
     publish_pcs_feeds(conn, config, start, end)
     target = _output_path(config, "pcs", start, end, datetime.now(), output)
     current_version = _pcs_workbook_template_version(target)
     if output is None and target.exists() and current_version == PCS_TEMPLATE_VERSION:
-        # The current design is a shared operational record. Power Query owns
-        # its replaceable facts while the team owns the coaching action table.
         return target
-    legacy_target = (config.reports / "PCS Performance.xlsx").resolve()
-    previous_target = target if target.exists() else legacy_target
+    previous_target = target if target.exists() else (config.reports / "PCS Performance.xlsx").resolve()
     previous_actions = _previous_coaching_actions(previous_target)
-    book, partial, target = _atomic_book(config, "pcs", "PCS OPERATIONAL TRACKER", start, end, output)
-    latest_value = conn.execute(
-        "SELECT max(business_date) FROM mart.agent_pcs_day"
-    ).fetchone()[0]
+    book, partial, target = _atomic_book(
+        config, "pcs", "PCS OPERATIONAL TRACKER", start, end, output,
+    )
+    latest_value = conn.execute("SELECT max(business_date) FROM mart.agent_pcs_day").fetchone()[0]
     latest = latest_value or end
     if isinstance(latest, str):
         latest = date.fromisoformat(latest[:10])
@@ -1209,78 +1451,62 @@ def build_pcs_performance_workbook(
     first_index = month_index - (config.pcs_tracker.history_months - 1)
     history_start = date(first_index // 12, first_index % 12 + 1, 1)
     data_start = min(start, history_start)
-    selector_rows = conn.execute(
-        """SELECT DISTINCT coalesce(lob,''), coalesce(team_leader,''),
-                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']', agent_id
-           FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?""",
-        [data_start, latest],
-    ).fetchall()
-    lobs = sorted({str(row[0]) for row in selector_rows if row[0]})
-    team_leaders = sorted({str(row[1]) for row in selector_rows if row[1]})
-    agents = sorted({str(row[2]) for row in selector_rows if row[2]})
-    month_start = latest.replace(day=1)
-    default_period = NamedPeriod("Current MTD", month_start, latest)
-    default_aggregate = _pcs_aggregate(conn, config, default_period)
-    default_values = {
-        "pcs_average": default_aggregate[3], "participation": default_aggregate[4],
-        "valid": default_aggregate[5], "low": default_aggregate[7],
-        "positive": default_aggregate[8], "inbound": default_aggregate[9],
-    }
-    _add_pcs_dashboard(
-        book, status, status_text, start, end, lobs, team_leaders, agents,
-        data_start, latest, config.pcs_tracker.trend_days, minimum_sample, default_values,
+
+    lob_rows = pcs_lob_scorecard_rows(conn, latest, minimum_sample, book.generated)
+    result_rows = pcs_result_rows(conn, latest, minimum_sample, book.generated)
+    _add_pcs_stable_overview(
+        book, status, status_text, latest,
+        list(PCS_LOB_SCORECARD_HEADERS), lob_rows,
     )
-    _add_pcs_overview(book, minimum_sample, config.pcs_tracker.trend_days)
-    _add_pcs_team_view(book, minimum_sample)
-    _add_pcs_agent_results(book, minimum_sample)
+    results_sheet = book.table(
+        "RESULTS", "PCS team and agent results",
+        "Use the table filters: first Period View, then Scope Level, LOB, Team Leader and Agent. Add native slicers here if desired.",
+        list(PCS_RESULTS_HEADERS), result_rows or [tuple(None for _ in PCS_RESULTS_HEADERS)],
+    )
+    if pcs_method is not None and pcs_method.target is not None:
+        results_sheet.conditional_format("K5:K100004", {
+            "type": "cell", "criteria": "<", "value": pcs_method.target,
+            "format": book.report.error,
+        })
+    results_sheet.conditional_format("S5:S100004", {
+        "type": "text", "criteria": "containing", "value": "LOW SAMPLE", "format": book.report.error,
+    })
 
-    action_headers, actions = _pcs_coaching_rows(conn, config, data_start, end)
-    queue_source = list(actions)
-    _add_pcs_coaching_workspace(book)
-    _add_pcs_coaching_actions(book, previous_actions)
-
-    queue_headers = list(PCS_COACHING_HEADERS)
-    queue_indexes = {header: index for index, header in enumerate(action_headers)}
-    queue_source_headers = {
+    action_headers, actions = _pcs_coaching_rows(conn, config, data_start, latest)
+    indexes = {header: index for index, header in enumerate(action_headers)}
+    sources = {
         "LOB": "lob", "Team Leader": "team_leader", "Agent Selector": "agent_selector",
         "Agent": "agent_name", "Agent ID": "agent_id", "Priority": "priority",
         "Date": "business_date", "Call Start": "call_start", "Q1 Score": "q1_score",
         "Customer Comment": "customer_comment", "Call Reference Number": "call_reference_number",
         "Language": "language", "Coaching Key": "coaching_key",
     }
-    queue_rows = []
-    for values in queue_source:
-        queue_rows.append(tuple(
-            values[queue_indexes[queue_source_headers[header]]]
-            for header in queue_headers
-        ))
+    queue_rows = [
+        tuple(values[indexes[sources[header]]] for header in PCS_COACHING_HEADERS)
+        for values in actions
+    ]
     queue_sheet = book.table(
         "COACHING_QUEUE", "PCS coaching opportunity queue",
-        "Power Query replaces this opportunity feed. Use COACHING_WORKSPACE to review it and COACHING to select a key and record action.",
-        queue_headers, queue_rows or [tuple(None for _ in queue_headers)],
+        "Filter by date, LOB, Team Leader or Agent. Copy only the exact Coaching Key into the permanent COACHING action table.",
+        list(PCS_COACHING_HEADERS), queue_rows or [tuple(None for _ in PCS_COACHING_HEADERS)],
     )
-    del queue_sheet
-    _add_pcs_filtered_data(book)
+    queue_sheet.conditional_format("F5:F100004", {
+        "type": "text", "criteria": "containing", "value": "HIGH", "format": book.report.error,
+    })
+    _add_pcs_stable_coaching(book, previous_actions)
+
     rulebook = load_rulebook(config.home, config.business_rules)
-    _data_query_headers, data_rows = _query(
+    _headers, data_rows = _query(
         conn,
         """SELECT lob, team_leader,
-                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']' AS agent_selector,
-                  agent_id, agent_name, business_date, ops_manager,
-                  language, inbound_calls AS inbound_call_legs,
-                  pcs_status_calls AS pcs_status_1,
-                  pcs_participation_responses AS q1_nonblank,
-                  survey_responses AS valid_q1,
-                  pcs_score_sum AS q1_score_sum,
-                  pcs_average, pcs_participation_rate AS participation_rate,
-                  low_score_responses AS score_le_3,
-                  top_box_responses AS score_gt_3,
-                  pcs_invalid_responses AS invalid_q1,
-                  CASE WHEN survey_responses<? THEN 'LOW_SAMPLE' ELSE 'OK' END AS sample_state,
-                  agent_id || '|' || business_date AS agent_day_key,
-                  ? AS data_through, ? AS feed_refreshed_at,
-                  ? AS pcs_rule_version, ? AS pcs_rule_sha_256,
-                  ? AS metric_catalog_version, ? AS metric_catalog_sha_256
+                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']',
+                  agent_id, agent_name, business_date, ops_manager, language,
+                  inbound_calls, pcs_status_calls, pcs_participation_responses,
+                  survey_responses, pcs_score_sum, pcs_average,
+                  pcs_participation_rate, low_score_responses,
+                  top_box_responses, pcs_invalid_responses,
+                  CASE WHEN survey_responses<? THEN 'LOW_SAMPLE' ELSE 'OK' END,
+                  agent_id || '|' || business_date, ?, ?, ?, ?, ?, ?
            FROM mart.agent_pcs_day WHERE business_date BETWEEN ? AND ?
            ORDER BY business_date, lob, team_leader, agent_name""",
         [
@@ -1288,37 +1514,33 @@ def build_pcs_performance_workbook(
             metric_catalog.version, metric_catalog.sha256, data_start, latest,
         ],
     )
-    data_headers = list(PCS_AGENT_DAY_HEADERS)
     book.table(
-        "PCS_DATA", "PCS clean calculation table",
-        "Power Query replaces this table from PCS_AGENT_DAY_CURRENT.csv. One row is one agent/day; report ratios always use additive counters.",
-        data_headers, data_rows or [tuple(None for _ in data_headers)],
+        "PCS_DATA", "PCS clean agent-day data",
+        "Use this ordinary refreshable table for pivots, slicers or a custom date range. Calculated reports use summed counters, never averaged averages.",
+        list(PCS_AGENT_DAY_HEADERS), data_rows or [tuple(None for _ in PCS_AGENT_DAY_HEADERS)],
     )
-    _add_pcs_setup(book, config)
+    _add_pcs_stable_setup(book, config)
     book.table(
-        "HELP", "PCS shared workbook guide",
-        "Keep one copy of this workbook in SharePoint. Refresh its two data tables; never generate or replace it every day.",
-        ["Step", "What to do", "What changes", "Important"],
+        "HELP", "PCS operating guide",
+        "This design uses ordinary tables and classic formulas to avoid Excel repair prompts.",
+        ["Step", "What to do", "Result", "Important"],
         [
-            (1, "From WFMHub choose PCS Operational Tracker > Update PCS now", "The Hub loads FTE and Call by Call, publishes feeds, upgrades the design if required, and asks desktop Excel to refresh", "Close the workbook first so Excel can update it safely"),
-            (2, "The first run installs both governed Power Queries automatically in desktop Excel", "PCS_DATA and COACHING_QUEUE become refreshable query tables", "If corporate policy blocks Excel automation, use Repair connection and send the exact error"),
-            (3, "Choose period, LOB, Team Leader and Agent on CONTROL", "OVERVIEW, TEAM_VIEW, AGENT_RESULTS, COACHING_WORKSPACE and FILTERED_DATA follow", "Choose filters from left to right"),
-            (4, "Quality opens COACHING, selects a Coaching Key in the first blank row, and fills only the blue action fields", "Agent and call details fill automatically", "No thirteen-column copy/paste is required"),
-            (5, "Save the same shared workbook normally", "Coaching remains permanent under SharePoint version history", "WFMHub upgrades older designs only after preserving the action ledger"),
-            (6, "Use personal Sheet Views when applying native table filters", "Other users keep their own view", "The selector-driven FILTERED_DATA sheet is safer for copying a scoped extract"),
+            (1, "Close the workbook, then choose PCS > Update PCS now in WFMHub", "Four clean feeds and four Excel query tables refresh", "Keep one permanent workbook"),
+            (2, "Open OVERVIEW", "See total and per-LOB latest day, current MTD and prior-MTD PCS and participation", "The ALL row reconciles the headline cards"),
+            (3, "Open RESULTS and use its filter arrows", "Choose a period, LOB, team or agent without formulas or technical selectors", "Add slicers to this table if desired"),
+            (4, "Quality filters COACHING_QUEUE and copies one Coaching Key", "Paste the key in the first blank blue COACHING row", "Fill only status, owner, dates and comment"),
+            (5, "Save the same shared workbook", "Coaching remains under SharePoint version history", "A template upgrade archives and migrates keyed actions"),
         ],
     )
     book.definitions([
-        ("PCS Average", "Sum of valid inbound Q1 scores / valid inbound Q1 responses", "Customer experience result", "Only configured discrete Q1 scores are valid"),
+        ("PCS Average", "Sum of valid inbound Q1 scores / valid inbound Q1 responses", "Weighted service, LOB, team and agent result", "Never sum Q1 score or average agent averages"),
         ("PCS Participation", "Inbound raw Q1 nonblank / inbound PCSStatus=1", "Survey participation opportunity", "Invalid nonblank Q1 remains in the numerator"),
-        ("Score <= 3", "Count of valid Q1 responses at or below 3", "Follow-up volume", "A count, not a percentage"),
-        ("Actions Rate", "Unique completed Coaching Keys / valid Q1 responses at or below 3", "Coaching completion", "Duplicate keys are highlighted and never increase the numerator"),
-        ("Low sample", f"Fewer than {minimum_sample} valid responses in the selected period", "Interpretation warning", "Use a larger sample before drawing conclusions"),
-        ("Selectors", "Period, LOB, Team Leader and Agent filters are combined", "CONTROL drives every calculated view", "Raw Power Query tables keep native table filters"),
-        ("Team realizations", "Selected period and previous-MTD at agent grain", "Dynamic TL action list", "Microsoft 365 formulas expand after Refresh All"),
+        ("Score <= 3", "Count of valid inbound Q1 responses at or below 3", "Coaching opportunity volume", "One exact call equals one Coaching Key"),
+        ("Current MTD", "First day of the latest data month through the latest data date", "Current-month operating result", "Driven by data, not today's computer date"),
+        ("Previous MTD same days", "Previous month from day one through the comparable day", "Fair MTD comparison", "Month length is capped safely"),
+        ("Low sample", f"Fewer than {minimum_sample} valid responses in the row period", "Interpretation warning", "Use a broader period before concluding"),
     ])
-    _add_pcs_lookups(book, config.pcs_tracker.trend_days)
-    book.audit(_audit_rows(conn, config, "pcs", start, end))
+    book.audit(_audit_rows(conn, config, "pcs", start, end, (("Workbook engine", "Compatibility", "No dynamic-array report formulas"),)))
     result = _finish(book, partial, target)
     if output is None:
         archive_superseded_reports(config, ("PCS Performance.xlsx",), book.generated)

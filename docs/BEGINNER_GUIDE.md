@@ -242,16 +242,11 @@ feeds, installs or refreshes Power Query through desktop Excel, and opens the
 same permanent workbook. Put that workbook in the agreed synced
 SharePoint/Teams location. A normal update does not erase coaching.
 
-On `CONTROL`, choose Latest day, Current/Previous week, Current MTD,
-Previous-month same days, Previous full month, or Custom period. Then choose
-LOB, Team Leader, or Agent from left to right. `OVERVIEW`, `TEAM_VIEW`,
-`AGENT_RESULTS`, `COACHING_WORKSPACE`, and `FILTERED_DATA` all follow the same
-selection.
-
-Open `TEAM_VIEW` for the easiest TL workflow. Select LOB, Team Leader, and Agent
-from left to right on `CONTROL`; the result views follow automatically.
-The selector lists and result rows expand after Refresh All, including new
-agents. This requires Microsoft 365 desktop Excel.
+Open `OVERVIEW` for the total and per-LOB management view. Open `RESULTS` for
+detail. Use its normal filter arrows in this order: Period View, Scope Level,
+LOB, Team Leader, then Agent. `LOB` gives one line per LOB, `TEAM` gives team
+lines, and `AGENT` gives agent lines. New dates and agents appear after Refresh
+All; no formula selector is involved.
 
 PCS formulas:
 
@@ -262,23 +257,23 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-For coaching, use `COACHING_WORKSPACE` to see filtered low-score opportunities.
-Open `COACHING`, go to the first blank row, and choose the exact Coaching Key
-from the dropdown. The LOB, team, agent, date, score, customer comment, and call
-reference fill automatically. Fill the five blue action fields: status, coach,
-coaching date, due date, and comment. Save normally.
+For coaching, filter `COACHING_QUEUE` by LOB, Team Leader, Agent, or date. Copy
+the exact Coaching Key. Open `COACHING`, paste it in the first blank blue row,
+then fill status, coach, coaching date, due date, and comment. The identity
+fields fill automatically with a classic lookup. Save normally.
 
-The stable inputs are `PCS_AGENT_DAY_CURRENT.csv` and
+The stable inputs include `PCS_LOB_SCORECARD_CURRENT.csv`,
+`PCS_RESULTS_CURRENT.csv`, `PCS_AGENT_DAY_CURRENT.csv`, and
 `PCS_COACHING_OPPORTUNITY_CURRENT.csv`. Agent ID is the employee key; Agent
 Selector is only `Name [ID]`; Coaching Key identifies the exact call. The first
-**Update PCS now** installs both governed queries automatically using Windows
+**Update PCS now** installs all four governed queries automatically using Windows
 desktop Excel. Everybody else works in the permanent workbook; the owner can
 update it with WFMHub or **Data > Refresh All**.
 
 Follow [EXCEL_REFRESH_GUIDE.md](EXCEL_REFRESH_GUIDE.md) for every click in the
 one-time PCS and Absenteeism setup.
 
-If you prefer native slicers, click inside `PCS_DATA` or `COACHING` and choose
+If you prefer native slicers, click inside `RESULTS`, `PCS_DATA`, or `COACHING` and choose
 **Table Design > Insert Slicer**.
 
 ## Analysis and clean data

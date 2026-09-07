@@ -2,7 +2,7 @@
 
 The Python report generator can create a valid ``.xlsx`` file, but Power Query's
 binary mashup parts are owned by desktop Excel.  The packaged Windows helper uses
-Excel automation to install the two governed queries, refresh them, and save the
+Excel automation to install the four governed queries, refresh them, and save the
 same collaborative workbook.
 """
 
@@ -22,7 +22,7 @@ from openpyxl import load_workbook
 from .config import Config
 
 
-PCS_TEMPLATE_VERSION = "2026.09.20"
+PCS_TEMPLATE_VERSION = "2026.09.21"
 
 
 class PCSExcelError(RuntimeError):
@@ -55,7 +55,7 @@ class PCSTrackerState:
         return (
             self.setup_state == "YES"
             and self.has_connections
-            and self.query_parts >= 2
+            and self.query_parts >= 4
         )
 
 
@@ -219,6 +219,8 @@ def run_pcs_excel_action(
         "-FeedFolder", str(folder.resolve()),
         "-DataQueryPath", str(folder / f"POWER_QUERY_PCS_DATA_{suffix}.txt"),
         "-CoachingQueryPath", str(folder / f"POWER_QUERY_COACHING_QUEUE_{suffix}.txt"),
+        "-LobQueryPath", str(folder / f"POWER_QUERY_PCS_LOB_{suffix}.txt"),
+        "-ResultsQueryPath", str(folder / f"POWER_QUERY_PCS_RESULTS_{suffix}.txt"),
     ]
     if open_after:
         command.append("-OpenAfter")

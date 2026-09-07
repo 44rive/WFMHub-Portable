@@ -10,7 +10,7 @@ from __future__ import annotations
 import csv
 import os
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -20,7 +20,7 @@ from .metrics import load_metric_catalog
 from .rules import load_rulebook
 
 
-PCS_FEED_SCHEMA_VERSION = "2"
+PCS_FEED_SCHEMA_VERSION = "3"
 PCS_AGENT_DAY_HEADERS = (
     "LOB", "Team Leader", "Agent Selector", "Agent ID", "Agent", "Date",
     "Ops Manager", "Language", "Inbound Call Legs", "PCS Status 1",
@@ -34,6 +34,22 @@ PCS_COACHING_HEADERS = (
     "LOB", "Team Leader", "Agent Selector", "Agent", "Agent ID",
     "Priority", "Date", "Call Start", "Q1 Score", "Customer Comment",
     "Call Reference Number", "Language", "Coaching Key",
+)
+PCS_LOB_SCORECARD_HEADERS = (
+    "LOB", "As Of Date", "Latest Day PCS", "Latest Day Participation",
+    "Latest Day Valid Q1", "Current MTD PCS", "Prior MTD PCS",
+    "MTD Change", "Current MTD Participation", "Prior MTD Participation",
+    "Current MTD Valid Q1", "Current MTD PCS Status 1",
+    "Current MTD Q1 Nonblank", "Current MTD Score <= 3",
+    "Current MTD Score > 3", "Current MTD Inbound Call Legs",
+    "Sample State", "Data Through", "Feed Refreshed At",
+)
+PCS_RESULTS_HEADERS = (
+    "Period View", "Period Start", "Period End", "Scope Level", "LOB",
+    "Team Leader", "Agent Selector", "Agent ID", "Agent", "Language",
+    "PCS Average", "Participation Rate", "Valid Q1", "PCS Status 1",
+    "Q1 Nonblank", "Score <= 3", "Score > 3", "Inbound Call Legs",
+    "Sample State", "Data Through", "Feed Refreshed At",
 )
 
 
@@ -188,6 +204,178 @@ in
     Typed'''
 
 
+def _pcs_reporting_periods(as_of: date) -> tuple[tuple[str, date, date], ...]:
+    """Return the stable novice-facing periods used in the PCS result feed."""
+
+    month_start = as_of.replace(day=1)
+    previous_end = month_start - timedelta(days=1)
+    previous_start = previous_end.replace(day=1)
+    previous_mtd_end = min(
+        previous_end,
+        previous_start + timedelta(days=as_of.day - 1),
+    )
+    return (
+        ("Latest day", as_of, as_of),
+        ("Current week", as_of - timedelta(days=as_of.weekday()), as_of),
+        ("Current MTD", month_start, as_of),
+        ("Previous MTD same days", previous_start, previous_mtd_end),
+        ("Previous full month", previous_start, previous_end),
+    )
+
+
+def _pcs_scope_aggregates(
+    conn: DatabaseConnection,
+    start: date,
+    end: date,
+    level: str,
+) -> list[dict[str, Any]]:
+    """Aggregate additive PCS counters at one explicit presentation grain."""
+
+    dimensions = {
+        "ALL": (
+            "'ALL', '', '', '', '', ''",
+            "",
+            "",
+        ),
+        "LOB": (
+            "coalesce(lob,'Unassigned'), '', '', '', '', ''",
+            "GROUP BY coalesce(lob,'Unassigned')",
+            "ORDER BY 1",
+        ),
+        "TEAM": (
+            "coalesce(lob,'Unassigned'), coalesce(team_leader,'Unassigned'), '', '', '', ''",
+            "GROUP BY coalesce(lob,'Unassigned'), coalesce(team_leader,'Unassigned')",
+            "ORDER BY 1, 2",
+        ),
+        "AGENT": (
+            "coalesce(lob,'Unassigned'), coalesce(team_leader,'Unassigned'), "
+            "coalesce(agent_name,'Agent') || ' [' || agent_id || ']', agent_id, "
+            "coalesce(agent_name,'Agent'), coalesce(language,'')",
+            "GROUP BY coalesce(lob,'Unassigned'), coalesce(team_leader,'Unassigned'), "
+            "agent_id, coalesce(agent_name,'Agent'), coalesce(language,'')",
+            "ORDER BY 1, 2, 5, 4",
+        ),
+    }
+    try:
+        select_dimensions, group_by, order_by = dimensions[level]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported PCS result level: {level}") from exc
+    cursor = conn.execute(
+        f"""SELECT {select_dimensions},
+                   coalesce(sum(pcs_score_sum),0),
+                   coalesce(sum(survey_responses),0),
+                   coalesce(sum(pcs_participation_responses),0),
+                   coalesce(sum(pcs_status_calls),0),
+                   coalesce(sum(low_score_responses),0),
+                   coalesce(sum(top_box_responses),0),
+                   coalesce(sum(inbound_calls),0)
+            FROM mart.agent_pcs_day
+            WHERE business_date BETWEEN ? AND ?
+            {group_by} {order_by}""",
+        (start, end),
+    )
+    output = []
+    for row in cursor.fetchall():
+        lob, team, selector, agent_id, agent, language = row[:6]
+        score_sum, valid, q1_nonblank, eligible, low, positive, inbound = row[6:]
+        # SQLite returns one all-zero aggregate row for an empty ungrouped set.
+        if level != "ALL" and not any((valid, eligible, inbound)):
+            continue
+        output.append({
+            "lob": lob,
+            "team_leader": team,
+            "agent_selector": selector,
+            "agent_id": agent_id,
+            "agent": agent,
+            "language": language,
+            "pcs_average": float(score_sum) / float(valid) if valid else None,
+            "participation_rate": float(q1_nonblank) / float(eligible) if eligible else None,
+            "valid_q1": valid,
+            "pcs_status_1": eligible,
+            "q1_nonblank": q1_nonblank,
+            "low_scores": low,
+            "positive_scores": positive,
+            "inbound_legs": inbound,
+        })
+    return output
+
+
+def pcs_lob_scorecard_rows(
+    conn: DatabaseConnection,
+    as_of: date,
+    minimum_sample: int,
+    refreshed: datetime,
+) -> list[tuple[Any, ...]]:
+    """Build one management-ready row per LOB plus a reconciling ALL row."""
+
+    periods = {label: (start, end) for label, start, end in _pcs_reporting_periods(as_of)}
+    latest = {
+        str(row["lob"]): row
+        for row in _pcs_scope_aggregates(conn, *periods["Latest day"], "LOB")
+    }
+    current = {
+        str(row["lob"]): row
+        for row in _pcs_scope_aggregates(conn, *periods["Current MTD"], "LOB")
+    }
+    prior = {
+        str(row["lob"]): row
+        for row in _pcs_scope_aggregates(conn, *periods["Previous MTD same days"], "LOB")
+    }
+    for target, label in ((latest, "Latest day"), (current, "Current MTD"), (prior, "Previous MTD same days")):
+        target["ALL"] = _pcs_scope_aggregates(conn, *periods[label], "ALL")[0]
+    lobs = ["ALL", *sorted((set(latest) | set(current) | set(prior)) - {"ALL"})]
+    rows: list[tuple[Any, ...]] = []
+    empty: dict[str, Any] = {}
+    for lob in lobs:
+        day = latest.get(lob, empty)
+        mtd = current.get(lob, empty)
+        previous = prior.get(lob, empty)
+        mtd_score = mtd.get("pcs_average")
+        prior_score = previous.get("pcs_average")
+        valid = int(mtd.get("valid_q1") or 0)
+        rows.append((
+            lob, as_of,
+            day.get("pcs_average"), day.get("participation_rate"),
+            int(day.get("valid_q1") or 0),
+            mtd_score, prior_score,
+            (mtd_score - prior_score) if mtd_score is not None and prior_score is not None else None,
+            mtd.get("participation_rate"), previous.get("participation_rate"),
+            valid, int(mtd.get("pcs_status_1") or 0),
+            int(mtd.get("q1_nonblank") or 0), int(mtd.get("low_scores") or 0),
+            int(mtd.get("positive_scores") or 0), int(mtd.get("inbound_legs") or 0),
+            "LOW SAMPLE" if valid < minimum_sample else "OK",
+            as_of, refreshed,
+        ))
+    return rows
+
+
+def pcs_result_rows(
+    conn: DatabaseConnection,
+    as_of: date,
+    minimum_sample: int,
+    refreshed: datetime,
+) -> list[tuple[Any, ...]]:
+    """Build filter-ready LOB, team, and agent scorecards for standard periods."""
+
+    rows: list[tuple[Any, ...]] = []
+    for period_label, period_start, period_end in _pcs_reporting_periods(as_of):
+        for level in ("LOB", "TEAM", "AGENT"):
+            for item in _pcs_scope_aggregates(conn, period_start, period_end, level):
+                valid = int(item["valid_q1"] or 0)
+                rows.append((
+                    period_label, period_start, period_end, level,
+                    item["lob"], item["team_leader"], item["agent_selector"],
+                    item["agent_id"], item["agent"], item["language"],
+                    item["pcs_average"], item["participation_rate"], valid,
+                    int(item["pcs_status_1"] or 0), int(item["q1_nonblank"] or 0),
+                    int(item["low_scores"] or 0), int(item["positive_scores"] or 0),
+                    int(item["inbound_legs"] or 0),
+                    "LOW SAMPLE" if valid < minimum_sample else "OK",
+                    as_of, refreshed,
+                ))
+    return rows
+
+
 def _publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
     data_types = (
         ("LOB", "type text"), ("Team Leader", "type text"),
@@ -213,11 +401,46 @@ def _publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
         ("Call Reference Number", "type text"), ("Language", "type text"),
         ("Coaching Key", "type text"),
     )
+    lob_types = (
+        ("LOB", "type text"), ("As Of Date", "type date"),
+        ("Latest Day PCS", "type number"),
+        ("Latest Day Participation", "type number"),
+        ("Latest Day Valid Q1", "Int64.Type"),
+        ("Current MTD PCS", "type number"),
+        ("Prior MTD PCS", "type number"), ("MTD Change", "type number"),
+        ("Current MTD Participation", "type number"),
+        ("Prior MTD Participation", "type number"),
+        ("Current MTD Valid Q1", "Int64.Type"),
+        ("Current MTD PCS Status 1", "Int64.Type"),
+        ("Current MTD Q1 Nonblank", "Int64.Type"),
+        ("Current MTD Score <= 3", "Int64.Type"),
+        ("Current MTD Score > 3", "Int64.Type"),
+        ("Current MTD Inbound Call Legs", "Int64.Type"),
+        ("Sample State", "type text"), ("Data Through", "type date"),
+        ("Feed Refreshed At", "type datetime"),
+    )
+    result_types = (
+        ("Period View", "type text"), ("Period Start", "type date"),
+        ("Period End", "type date"), ("Scope Level", "type text"),
+        ("LOB", "type text"), ("Team Leader", "type text"),
+        ("Agent Selector", "type text"), ("Agent ID", "type text"),
+        ("Agent", "type text"), ("Language", "type text"),
+        ("PCS Average", "type number"), ("Participation Rate", "type number"),
+        ("Valid Q1", "Int64.Type"), ("PCS Status 1", "Int64.Type"),
+        ("Q1 Nonblank", "Int64.Type"), ("Score <= 3", "Int64.Type"),
+        ("Score > 3", "Int64.Type"), ("Inbound Call Legs", "Int64.Type"),
+        ("Sample State", "type text"), ("Data Through", "type date"),
+        ("Feed Refreshed At", "type datetime"),
+    )
     specifications = (
         ("POWER_QUERY_PCS_DATA_SHAREPOINT.txt", "PCS_AGENT_DAY_CURRENT.csv", PCS_AGENT_DAY_HEADERS, data_types, True),
         ("POWER_QUERY_COACHING_QUEUE_SHAREPOINT.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types, True),
+        ("POWER_QUERY_PCS_LOB_SHAREPOINT.txt", "PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS, lob_types, True),
+        ("POWER_QUERY_PCS_RESULTS_SHAREPOINT.txt", "PCS_RESULTS_CURRENT.csv", PCS_RESULTS_HEADERS, result_types, True),
         ("POWER_QUERY_PCS_DATA_LOCAL.txt", "PCS_AGENT_DAY_CURRENT.csv", PCS_AGENT_DAY_HEADERS, data_types, False),
         ("POWER_QUERY_COACHING_QUEUE_LOCAL.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types, False),
+        ("POWER_QUERY_PCS_LOB_LOCAL.txt", "PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS, lob_types, False),
+        ("POWER_QUERY_PCS_RESULTS_LOCAL.txt", "PCS_RESULTS_CURRENT.csv", PCS_RESULTS_HEADERS, result_types, False),
     )
     paths = []
     for script_name, filename, headers, types, sharepoint in specifications:
@@ -270,6 +493,16 @@ def publish_pcs_feeds(
     )
     path = folder / "PCS_AGENT_DAY_CURRENT.csv"
     counts.append((path.name, _atomic_csv(path, PCS_AGENT_DAY_HEADERS, rows)))
+    files.append(path)
+
+    lob_rows = pcs_lob_scorecard_rows(conn, end, minimum_sample, refreshed)
+    path = folder / "PCS_LOB_SCORECARD_CURRENT.csv"
+    counts.append((path.name, _atomic_csv(path, PCS_LOB_SCORECARD_HEADERS, lob_rows)))
+    files.append(path)
+
+    result_rows = pcs_result_rows(conn, end, minimum_sample, refreshed)
+    path = folder / "PCS_RESULTS_CURRENT.csv"
+    counts.append((path.name, _atomic_csv(path, PCS_RESULTS_HEADERS, result_rows)))
     files.append(path)
 
     primary = config.pcs.primary_score_question

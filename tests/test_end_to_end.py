@@ -1021,33 +1021,34 @@ class EndToEndTests(unittest.TestCase):
             try:
                 self.assertEqual(focused_pcs_report.name, "PCS Operational Tracker.xlsx")
                 self.assertEqual(focused_pcs_book.sheetnames, [
-                    "CONTROL", "OVERVIEW", "TEAM_VIEW", "AGENT_RESULTS",
-                    "COACHING_WORKSPACE", "COACHING", "COACHING_QUEUE",
-                    "FILTERED_DATA", "PCS_DATA", "SETUP", "HELP",
-                    "DEFINITIONS", "_LOOKUPS", "_AUDIT",
+                    "OVERVIEW", "RESULTS", "COACHING_QUEUE", "COACHING",
+                    "PCS_DATA", "SETUP", "HELP", "DEFINITIONS", "_AUDIT",
                 ])
-                self.assertIn("SUMPRODUCT", focused_pcs_book["CONTROL"]["A11"].value)
                 self.assertGreaterEqual(len(focused_pcs_book["OVERVIEW"]._charts), 2)
+                self.assertIn("tblPcsLob", focused_pcs_book["OVERVIEW"].tables)
+                self.assertIn("tblResults", focused_pcs_book["RESULTS"].tables)
                 self.assertIn("tblPcsData", focused_pcs_book["PCS_DATA"].tables)
                 self.assertIn("tblCoaching", focused_pcs_book["COACHING"].tables)
                 self.assertIn("tblCoachingQueue", focused_pcs_book["COACHING_QUEUE"].tables)
                 self.assertIn("tblSetup", focused_pcs_book["SETUP"].tables)
-                agent_formula = focused_pcs_book["AGENT_RESULTS"]["A5"].value
-                self.assertIn("tblPcsData", getattr(agent_formula, "text", str(agent_formula)))
-                team_formula = focused_pcs_book["TEAM_VIEW"]["A11"].value
-                self.assertIn("tblPcsData", getattr(team_formula, "text", str(team_formula)))
-                coaching_formula = focused_pcs_book["COACHING_WORKSPACE"]["A8"].value
-                self.assertIn("tblCoachingQueue", getattr(coaching_formula, "text", str(coaching_formula)))
-                filtered_formula = focused_pcs_book["FILTERED_DATA"]["A5"].value
-                self.assertIn("tblPcsData", getattr(filtered_formula, "text", str(filtered_formula)))
-                self.assertEqual(focused_pcs_book["_LOOKUPS"].sheet_state, "hidden")
+                lob_headers = [cell.value for cell in focused_pcs_book["OVERVIEW"][34]]
+                self.assertIn("Current MTD PCS", lob_headers)
+                self.assertIn("Prior MTD PCS", lob_headers)
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["A35"].value, "ALL")
+                result_headers = [cell.value for cell in focused_pcs_book["RESULTS"][4]]
+                self.assertIn("Period View", result_headers)
+                self.assertIn("Scope Level", result_headers)
+                coaching_formula = focused_pcs_book["COACHING"]["B5"].value
+                self.assertIn("INDEX", str(coaching_formula))
+                self.assertIn("MATCH", str(coaching_formula))
+                self.assertNotIn("XLOOKUP", str(coaching_formula))
                 pcs_table_headers = [cell.value for cell in focused_pcs_book["PCS_DATA"][4]]
                 defined = {
                     item.name: item.attr_text
                     for item in focused_pcs_book.defined_names.values()
                 }
-                self.assertIn("Current week", defined["PCS_From"])
-                self.assertIn("#", defined["PCS_LOB_LIST"])
+                self.assertIn("INDEX", defined["PCS_COACHING_KEY_LIST"])
+                self.assertNotIn("#", defined["PCS_COACHING_KEY_LIST"])
                 setup_values = {
                     row[0]: row[1]
                     for row in focused_pcs_book["SETUP"].iter_rows(min_row=5, values_only=True)
@@ -1067,6 +1068,14 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("PCS Rule SHA-256", pcs_table_headers)
             finally:
                 focused_pcs_book.close()
+            with zipfile.ZipFile(focused_pcs_report) as archive:
+                self.assertNotIn("xl/metadata.xml", archive.namelist())
+                worksheet_xml = b"".join(
+                    archive.read(name)
+                    for name in archive.namelist()
+                    if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+                )
+                self.assertNotIn(b"_xlfn._xlws", worksheet_xml)
             pcs_state = inspect_pcs_tracker(
                 focused_pcs_report, home / "Feed" / "PCS",
             )
@@ -1145,8 +1154,12 @@ class EndToEndTests(unittest.TestCase):
                 absence_book.close()
             self.assertTrue((home / "Feed").is_dir())
             pcs_feed = home / "Feed" / "PCS" / "PCS_AGENT_DAY_CURRENT.csv"
+            pcs_lob_feed = home / "Feed" / "PCS" / "PCS_LOB_SCORECARD_CURRENT.csv"
+            pcs_results_feed = home / "Feed" / "PCS" / "PCS_RESULTS_CURRENT.csv"
             absence_feed = home / "Feed" / "Absenteeism" / "ABSENCE_AGENT_DAY_CURRENT.csv"
             self.assertTrue(pcs_feed.is_file())
+            self.assertTrue(pcs_lob_feed.is_file())
+            self.assertTrue(pcs_results_feed.is_file())
             self.assertTrue(absence_feed.is_file())
             with pcs_feed.open("r", encoding="utf-8-sig", newline="") as handle:
                 self.assertEqual(
@@ -1156,8 +1169,12 @@ class EndToEndTests(unittest.TestCase):
             for script in (
                 "POWER_QUERY_PCS_DATA_SHAREPOINT.txt",
                 "POWER_QUERY_COACHING_QUEUE_SHAREPOINT.txt",
+                "POWER_QUERY_PCS_LOB_SHAREPOINT.txt",
+                "POWER_QUERY_PCS_RESULTS_SHAREPOINT.txt",
                 "POWER_QUERY_PCS_DATA_LOCAL.txt",
                 "POWER_QUERY_COACHING_QUEUE_LOCAL.txt",
+                "POWER_QUERY_PCS_LOB_LOCAL.txt",
+                "POWER_QUERY_PCS_RESULTS_LOCAL.txt",
             ):
                 text = (home / "Feed" / "PCS" / script).read_text(encoding="utf-8")
                 self.assertIn("tblSetup", text)
@@ -1166,6 +1183,14 @@ class EndToEndTests(unittest.TestCase):
                     "SharePoint.Files" if "SHAREPOINT" in script else "File.Contents",
                     text,
                 )
+            with pcs_lob_feed.open("r", encoding="utf-8-sig", newline="") as handle:
+                lob_rows = list(csv.DictReader(handle))
+                self.assertEqual(lob_rows[0]["LOB"], "ALL")
+                self.assertIn("Current MTD PCS", lob_rows[0])
+            with pcs_results_feed.open("r", encoding="utf-8-sig", newline="") as handle:
+                result_rows = list(csv.DictReader(handle))
+                self.assertIn("Current MTD", {row["Period View"] for row in result_rows})
+                self.assertIn("AGENT", {row["Scope Level"] for row in result_rows})
             with absence_feed.open("r", encoding="utf-8-sig", newline="") as handle:
                 self.assertEqual(
                     next(csv.reader(handle)),

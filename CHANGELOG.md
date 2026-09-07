@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.22.1 — 2026-09-07
+
+- Rebuilt the PCS tracker around repair-resistant ordinary Excel tables. Removed
+  all dynamic-array report views, spilled named ranges, and installer formula
+  capture/restore behavior.
+- Added governed per-LOB and result feeds. `OVERVIEW` now contains headline
+  cards, current-versus-prior LOB charts, and a visible reconciling LOB table;
+  `RESULTS` provides filterable period, LOB, team, and agent scorecards.
+- Kept `COACHING` permanent and collaborative, using classic `INDEX/MATCH` from
+  the replaceable opportunity queue. Power Query never writes into coaching.
+- Expanded the desktop installer from two to four ordinary Power Query tables
+  and added workbook-package checks that reject dynamic-array metadata.
+
 ## 0.22.0 — 2026-09-07
 
 - Replaced the misleading PCS build action with a dedicated operational menu:

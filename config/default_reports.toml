@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.20"
+version = "2026.09.21"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
@@ -9,7 +9,7 @@ key = "pcs"
 title = "PCS OPERATIONAL TRACKER"
 purpose = "Permanent Power Query-fed daily, MTD and historical PCS score, participation, and coaching."
 finding_domains = ["pcs", "data_quality"]
-sheets = ["CONTROL", "OVERVIEW", "TEAM_VIEW", "AGENT_RESULTS", "COACHING_WORKSPACE", "COACHING", "COACHING_QUEUE", "FILTERED_DATA", "PCS_DATA", "SETUP", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
+sheets = ["OVERVIEW", "RESULTS", "COACHING_QUEUE", "COACHING", "PCS_DATA", "SETUP", "HELP", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "bonus"

@@ -20,6 +20,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$CoachingQueryPath,
 
+    [Parameter(Mandatory = $true)]
+    [string]$LobQueryPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ResultsQueryPath,
+
     [switch]$OpenAfter
 )
 
@@ -96,90 +102,13 @@ function Remove-WorkbookQuery {
     }
 }
 
-function Save-FormulaState {
-    $items = New-Object System.Collections.Generic.List[object]
-    foreach ($sheet in $script:Workbook.Worksheets) {
-        try {
-            if ($sheet.Name -in @("PCS_DATA", "COACHING_QUEUE")) {
-                continue
-            }
-            $used = $sheet.UsedRange
-            try {
-                foreach ($cell in $used.Cells) {
-                    try {
-                        if ($cell.HasFormula) {
-                            $formula = $null
-                            try { $formula = [string]$cell.Formula2 } catch { $formula = [string]$cell.Formula }
-                            $items.Add([pscustomobject]@{
-                                Sheet = [string]$sheet.Name
-                                Address = [string]$cell.Address($false, $false)
-                                Formula = $formula
-                            })
-                        }
-                    }
-                    finally {
-                        Release-ComObject $cell
-                    }
-                }
-            }
-            finally {
-                Release-ComObject $used
-            }
-        }
-        finally {
-            Release-ComObject $sheet
-        }
-    }
-    return $items
-}
-
-function Restore-FormulaState {
-    param([object[]]$Items)
-    foreach ($item in $Items) {
-        $sheet = $script:Workbook.Worksheets.Item($item.Sheet)
-        $cell = $sheet.Range($item.Address)
-        try {
-            try { $cell.Formula2 = $item.Formula } catch { $cell.Formula = $item.Formula }
-        }
-        finally {
-            Release-ComObject $cell
-            Release-ComObject $sheet
-        }
-    }
-}
-
-function Save-NameState {
-    $items = @{}
-    foreach ($name in $script:Workbook.Names) {
-        try {
-            $plain = ([string]$name.Name).Split("!")[-1]
-            if ($plain.StartsWith("PCS_")) {
-                $items[$plain] = [string]$name.RefersTo
-            }
-        }
-        finally {
-            Release-ComObject $name
-        }
-    }
-    return $items
-}
-
-function Restore-NameState {
-    param([hashtable]$Items)
-    foreach ($name in $Items.Keys) {
-        try {
-            $existing = $script:Workbook.Names.Item($name)
-            $existing.RefersTo = $Items[$name]
-            Release-ComObject $existing
-        }
-        catch {
-            [void]$script:Workbook.Names.Add($name, $Items[$name])
-        }
-    }
-}
-
 function Remove-StarterTable {
-    param([string]$SheetName, [string]$TableName, [int]$LastColumn)
+    param(
+        [string]$SheetName,
+        [string]$TableName,
+        [int]$FirstRow,
+        [int]$LastColumn
+    )
     $sheet = $script:Workbook.Worksheets.Item($SheetName)
     try {
         try {
@@ -190,8 +119,15 @@ function Remove-StarterTable {
         catch {
             # A partially installed workbook may already have lost the starter table.
         }
-        $lastRow = [Math]::Max(5, [int]$sheet.UsedRange.Rows.Count)
-        $first = $sheet.Cells.Item(4, 1)
+        $used = $sheet.UsedRange
+        try {
+            $usedLastRow = [int]$used.Row + [int]$used.Rows.Count - 1
+        }
+        finally {
+            Release-ComObject $used
+        }
+        $lastRow = [Math]::Max($FirstRow + 1, $usedLastRow)
+        $first = $sheet.Cells.Item($FirstRow, 1)
         $last = $sheet.Cells.Item($lastRow, $LastColumn)
         $range = $sheet.Range($first, $last)
         try { $range.Clear() } finally {
@@ -210,11 +146,12 @@ function Add-QueryTable {
         [string]$QueryName,
         [string]$Formula,
         [string]$SheetName,
-        [string]$TableName
+        [string]$TableName,
+        [string]$DestinationAddress
     )
     [void]$script:Workbook.Queries.Add($QueryName, $Formula)
     $sheet = $script:Workbook.Worksheets.Item($SheetName)
-    $destination = $sheet.Range("A4")
+    $destination = $sheet.Range($DestinationAddress)
     $source = "OLEDB;Provider=Microsoft.Mashup.OleDb.1;Data Source=`$Workbook`$;Location=$QueryName;Extended Properties=`"`""
     try {
         $table = $sheet.ListObjects.Add(0, $source, $null, 1, $destination)
@@ -280,23 +217,25 @@ try {
     $script:Workbook = $script:Excel.Workbooks.Open($resolvedWorkbook, 0, $false)
 
     if ($Action -eq "Install") {
-        foreach ($path in @($DataQueryPath, $CoachingQueryPath)) {
+        foreach ($path in @($DataQueryPath, $CoachingQueryPath, $LobQueryPath, $ResultsQueryPath)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
                 throw "Power Query definition not found: $path"
             }
         }
-        $formulaState = Save-FormulaState
-        $nameState = Save-NameState
         Remove-WorkbookQuery "PCS_DATA"
         Remove-WorkbookQuery "COACHING_QUEUE"
-        Remove-StarterTable "PCS_DATA" "tblPcsData" 26
-        Remove-StarterTable "COACHING_QUEUE" "tblCoachingQueue" 13
+        Remove-WorkbookQuery "PCS_LOB"
+        Remove-WorkbookQuery "PCS_RESULTS"
+        Remove-StarterTable "OVERVIEW" "tblPcsLob" 34 19
+        Remove-StarterTable "RESULTS" "tblResults" 4 21
+        Remove-StarterTable "COACHING_QUEUE" "tblCoachingQueue" 4 13
+        Remove-StarterTable "PCS_DATA" "tblPcsData" 4 26
         Set-SetupValue "Connection Mode" $Mode
         Set-SetupValue "Local Feed Folder" ([System.IO.Path]::GetFullPath($FeedFolder))
-        Add-QueryTable "PCS_DATA" ([System.IO.File]::ReadAllText($DataQueryPath)) "PCS_DATA" "tblPcsData"
-        Add-QueryTable "COACHING_QUEUE" ([System.IO.File]::ReadAllText($CoachingQueryPath)) "COACHING_QUEUE" "tblCoachingQueue"
-        Restore-FormulaState $formulaState
-        Restore-NameState $nameState
+        Add-QueryTable "PCS_LOB" ([System.IO.File]::ReadAllText($LobQueryPath)) "OVERVIEW" "tblPcsLob" "A34"
+        Add-QueryTable "PCS_RESULTS" ([System.IO.File]::ReadAllText($ResultsQueryPath)) "RESULTS" "tblResults" "A4"
+        Add-QueryTable "COACHING_QUEUE" ([System.IO.File]::ReadAllText($CoachingQueryPath)) "COACHING_QUEUE" "tblCoachingQueue" "A4"
+        Add-QueryTable "PCS_DATA" ([System.IO.File]::ReadAllText($DataQueryPath)) "PCS_DATA" "tblPcsData" "A4"
         Set-SetupValue "Power Query Installed" "YES"
         Set-SetupValue "Last Installer Result" "Installed successfully"
     }

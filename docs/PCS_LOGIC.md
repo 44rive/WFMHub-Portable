@@ -43,7 +43,7 @@ external link:
   during normal PCS refreshes;
 - Power Query refreshes the separate opportunity queue; a reviewer chooses its
   Coaching Key in the first blank permanent coaching row, and the identity fields
-  populate automatically;
+  populate with classic `INDEX/MATCH`;
 - a template upgrade archives the previous file and migrates each unique keyed
   coaching action before the Power Query connections are reinstalled;
 - coaching decisions are never imported into SQLite.
@@ -54,6 +54,13 @@ Low sample is an interpretation warning, not a coaching opportunity by itself.
 
 At team and month level, counters are summed first and the ratios are then
 recalculated. Agent averages and percentages are never averaged together.
+
+The permanent tracker consumes four fixed feeds. `PCS_LOB_SCORECARD_CURRENT.csv`
+drives the management cards, LOB charts, and visible LOB reconciliation table.
+`PCS_RESULTS_CURRENT.csv` contains the standard period results at LOB, team, and
+agent grain. `PCS_AGENT_DAY_CURRENT.csv` remains available for custom pivots,
+and `PCS_COACHING_OPPORTUNITY_CURRENT.csv` is the replaceable case queue. Excel
+does not recalculate those grains with spill formulas.
 
 ## Reference reconciliation
 

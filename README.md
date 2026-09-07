@@ -144,38 +144,34 @@ Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 
 PCS is one permanent shared Excel workbook. **PCS Operational Tracker > Update
 PCS now** updates the fixed clean CSV feeds under `Feed\PCS`, installs or
-refreshes the two governed Power Queries in desktop Excel, saves, and opens the
+refreshes four governed Power Queries in desktop Excel, saves, and opens the
 same tracker. A normal refresh does not rebuild it. When WFMHub ships a newer
 template version, it archives the old copy and migrates the coaching action
 ledger before installing the connections again.
 
 `Reports\PCS Operational Tracker.xlsx` contains:
 
-- selector boxes for latest day, current/previous week, current/previous month,
-  custom dates, LOB, team leader, and Agent ID;
-- a clean `OVERVIEW` with separate PCS and participation trends;
-- KPI cards that recalculate in Microsoft 365 from the refreshed clean table;
-- cascading LOB, Team Leader, and Agent lists;
-- dynamic `TEAM_VIEW` and `AGENT_RESULTS` realization lists that include new
-  agents after refresh without rebuilding the workbook;
-- a filtered `COACHING_WORKSPACE`, a permanent `COACHING` action ledger, and a
-  replaceable `COACHING_QUEUE`;
-- `FILTERED_DATA`, which follows the same selectors for scoped analysis/export;
-- visible `PCS_DATA` at agent/day grain and a beginner `SETUP` sheet.
+- an `OVERVIEW` with total KPI cards, two management charts, and a visible
+  current-versus-prior PCS table for every LOB;
+- a filterable `RESULTS` table already calculated for latest day, current week,
+  current MTD, previous MTD same days, and previous full month at LOB, team, and
+  agent levels;
+- a replaceable `COACHING_QUEUE` and permanent collaborative `COACHING` ledger;
+- visible `PCS_DATA` at agent/day grain for optional pivots or custom analysis;
+- plain `SETUP`, `HELP`, `DEFINITIONS`, and audit sheets.
 
-Choose values in the boxes on `CONTROL`. To add native slicers manually,
-click inside `PCS_DATA`, `COACHING_QUEUE`, or `COACHING`, then choose **Table
-Design > Insert Slicer**. For coaching, choose one Coaching Key in the first
-blank row of `COACHING`; the agent and call fields fill automatically. Then fill
-the five blue action columns and save. Use a personal Sheet View before applying
-native table filters.
+There are no spill-formula dashboards and no Data Model. Team leaders use the
+ordinary filter arrows or add native slicers to `RESULTS`. For coaching, filter
+`COACHING_QUEUE`, copy its exact Coaching Key into the first blank blue row in
+`COACHING`, complete the blue action columns, and save. Use a personal Sheet
+View before filtering a workbook shared with other people.
 
 The Hub performs the one-time Local Power Query installation through Windows
 desktop Excel. After that, the owner may use the same **Update PCS now** action
-or Excel **Data > Refresh All**. Power Query replaces only `PCS_DATA` and
-`COACHING_QUEUE`; it never loads into `COACHING`. No Data Model, ODBC driver, or
-daily workbook generation is involved. `SETUP`, `HELP`, and the PCS status page
-show the connection and feed/workbook freshness separately.
+or Excel **Data > Refresh All**. Power Query replaces `OVERVIEW`'s LOB table,
+`RESULTS`, `PCS_DATA`, and `COACHING_QUEUE`; it never loads into `COACHING`. No
+Data Model, ODBC driver, or daily workbook generation is involved. `SETUP`,
+`HELP`, and the PCS status page show connection and freshness separately.
 
 ## Attendance decisions and shared absenteeism
 

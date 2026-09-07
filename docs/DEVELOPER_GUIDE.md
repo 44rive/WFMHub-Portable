@@ -127,23 +127,23 @@ PCS is a versioned permanent operational tracker. The default builder always
 publishes the fixed feeds first. It returns a tracker with the current template
 version without changing a byte; an older template is archived and rebuilt only
 after the keyed `COACHING` action ledger is read for migration. An explicit
-output path remains a diagnostic snapshot. Keep `PCS_DATA`, `COACHING_QUEUE`,
-`COACHING`, and `SETUP` as real Excel Tables. Power Query may replace only the
-first two, while the third is the permanent collaborative record. Do not
-require a Data Model or ODBC driver.
+output path remains a diagnostic snapshot. Keep `OVERVIEW`'s LOB table,
+`RESULTS`, `PCS_DATA`, `COACHING_QUEUE`, `COACHING`, and `SETUP` as real Excel
+Tables. Power Query may replace the first four data tables, while `COACHING` is
+the permanent collaborative record. Do not require a Data Model or ODBC driver.
 
 Desktop Excel owns Power Query's OOXML/mashup parts. The Windows helper under
-`_system/scripts` installs the generated M definitions as `PCS_DATA` and
-`COACHING_QUEUE`, loads them at the existing table anchors, restores dependent
-formulas and names, refreshes synchronously, and saves only on success. Linux
+`_system/scripts` installs the four generated M definitions at their existing
+table anchors, refreshes synchronously, and saves only on success. It does not
+capture or rewrite report formulas. Linux
 tests validate the generated workbook and helper contract; they cannot replace
 an end-to-end Windows Excel COM test.
 
 The PCS agent/day feed schema and copy-ready M scripts are centralized in
 `shared_feeds.py`. Schema changes require a feed-schema increment, workbook
 template-version and report-contract migration, documentation, and a
-preservation test. `CONTROL` formulas
-must calculate ratios from summed counters, not from averaged daily ratios.
+preservation test. Python/SQLite presentation grains must calculate ratios from
+summed counters, not from averaged daily ratios.
 
 Call-by-call uses a stable deterministic leg key. Full-history extracts may
 overlap, so `core.clean_call_leg` chooses the newest active row at that key.
