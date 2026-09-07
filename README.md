@@ -77,8 +77,10 @@ and RSA Netherlands uses `RSA NL`.
 
 The standard FTE workbook also owns PTO and Away registers. Approved PTO and
 effective Away intervals change expected work and net staffing without editing
-any extract. Planned Away affects future capacity only. Exact attendance gaps
-are classified through the imported Attendance Review ledger.
+any extract. Pending/Cancelled entries do not change the calculations. Active
+and Closed Away apply inside their effective dates; Planned Away affects future
+capacity only and never erases past or current attendance evidence. Exact
+attendance gaps are classified through the imported Attendance Review ledger.
 
 ## Windows quick start
 
@@ -127,7 +129,10 @@ proves the no-show. Late agents, early leavers, and agents who went offline
 after attending remain present. `Unknown HC` is a possible no-show or data
 problem and is never added to No Show HC or the automatic call count.
 The attendance strip reconciles `Due HC = Present HC + No Show HC + Unknown HC`;
-Offline Now is a subset of Present HC.
+Offline Now is a subset of Present HC. `PTO / Away HC` shows scheduled people
+with registered leave that day. Full-day leave is visible but excluded from Due
+HC; partial-day leave removes only its exact interval, so the remaining working
+time is still controlled normally.
 
 The latest call hour and attendance checkpoint are independent. Live attendance
 uses the latest Agent Status evidence time, not the later workbook refresh time.

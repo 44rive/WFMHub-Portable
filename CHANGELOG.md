@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.22.2 — 2026-09-07
+
+- Audited PTO/Away from the governed FTE registers through attendance,
+  exact-gap correction, shift timelines, staffing, absence/shrinkage, clean
+  exports, on-demand analysis, and RTM.
+- Added visible `PTO / Away HC` and the source register label to every RTM LOB
+  attendance section. Full-day leave remains visible but never enters Due HC,
+  No Show HC, Unknown HC, or Call Now.
+- Corrected partial-day PTO in RTM: work is evaluated only in the exact
+  non-leave intervals. An agent whose first working interval has not begun is
+  now `PTO — NOT DUE`, never a possible no-show; hourly no-show also excludes
+  the PTO interval.
+- Added regression coverage proving Approved PTO and Active Away suppress false
+  calls and gaps, reduce net staffing, and enter the absence/shrinkage ledger,
+  while Pending PTO, Cancelled Away, and historical Planned Away do not hide an
+  absence.
+
 ## 0.22.1 — 2026-09-07
 
 - Rebuilt the PCS tracker around repair-resistant ordinary Excel tables. Removed

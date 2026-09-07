@@ -394,9 +394,12 @@ class EndToEndTests(unittest.TestCase):
             pto.append(["200", "Agent 200", date(2026, 8, 1), date(2026, 8, 1), "Full day", None, None, "Vacation", "Approved", "Approved request"])
             pto.append(["100", "Agent 100", date(2026, 8, 1), date(2026, 8, 1), "Partial day", "12:00", "13:00", "Personal leave", "Approved", "Appointment"])
             pto.append(["300", "Agent 300", date(2026, 8, 1), date(2026, 8, 1), "Partial day", "10:00", "11:00", "Personal leave", "Approved", "Appointment"])
+            pto.append(["300", "Agent 300", date(2026, 8, 1), date(2026, 8, 1), "Full day", None, None, "Vacation", "Pending", "Must not affect attendance yet"])
             away = workbook.create_sheet("Away")
             away.append(["Client ID", "Name", "Start date", "End date", "Away type", "Case status", "Comment"])
             away.append(["300", "Agent 300", date(2026, 8, 1), date(2026, 8, 1), "Long sickness", "Planned", "Future planning only"])
+            away.append(["300", "Agent 300", date(2026, 8, 1), date(2026, 8, 1), "Long sickness", "Cancelled", "Must not affect attendance"])
+            away.append(["300", "Agent 300", date(2026, 8, 2), None, "Long sickness", "Active", "Open case"])
             workbook.save(fte)
             workbook.close()
             make_start_end_schedule(source / "Verint/Schedules & Activities/StartEndTimes.txt")
@@ -418,33 +421,40 @@ class EndToEndTests(unittest.TestCase):
             with write_session(config) as conn:
                 self.assertEqual(ingest_all(conn, config).failed, 0)
                 refresh_models(
-                    conn, config, "pto-test", date(2026, 8, 1), date(2026, 8, 1),
-                    as_of=datetime(2026, 8, 1, 17, 0),
+                    conn, config, "pto-test", date(2026, 8, 1), date(2026, 8, 2),
+                    as_of=datetime(2026, 8, 2, 17, 0),
                 )
                 attendance = conn.execute(
                     """SELECT attendance_result, planned_work_minutes,
                               planning_overlay_minutes, requires_call
-                       FROM mart.attendance_agent_day WHERE agent_id='200'"""
+                       FROM mart.attendance_agent_day
+                       WHERE business_date='2026-08-01' AND agent_id='200'"""
                 ).fetchone()
                 self.assertEqual(attendance, ("PTO", 0, 480, 0))
                 self.assertEqual(
-                    conn.execute("SELECT count(*) FROM mart.correction_candidate WHERE agent_id='200'").fetchone()[0],
+                    conn.execute(
+                        "SELECT count(*) FROM mart.correction_candidate "
+                        "WHERE business_date='2026-08-01' AND agent_id='200'"
+                    ).fetchone()[0],
                     0,
                 )
                 partial = conn.execute(
                     """SELECT planned_work_minutes, planning_overlay_minutes
-                       FROM mart.attendance_agent_day WHERE agent_id='100'"""
+                       FROM mart.attendance_agent_day
+                       WHERE business_date='2026-08-01' AND agent_id='100'"""
                 ).fetchone()
                 self.assertEqual(partial, (420, 60))
                 planned_past = conn.execute(
                     """SELECT attendance_result, planning_overlay_minutes, no_show_minutes
-                       FROM mart.attendance_agent_day WHERE agent_id='300'"""
+                       FROM mart.attendance_agent_day
+                       WHERE business_date='2026-08-01' AND agent_id='300'"""
                 ).fetchone()
                 self.assertNotEqual(planned_past[0], "Away")
                 self.assertEqual(planned_past, ("No show - partial time off", 60, 420))
                 split_gaps = conn.execute(
                     """SELECT time(gap_start), time(gap_end), gap_minutes
-                       FROM mart.correction_candidate WHERE agent_id='300'
+                       FROM mart.correction_candidate
+                       WHERE business_date='2026-08-01' AND agent_id='300'
                        ORDER BY gap_start"""
                 ).fetchall()
                 self.assertEqual(split_gaps, [
@@ -452,26 +462,64 @@ class EndToEndTests(unittest.TestCase):
                     ("11:00:00", "16:00:00", 300),
                 ])
                 self.assertEqual(
-                    conn.execute("SELECT count(*) FROM mart.correction_candidate WHERE agent_id='100'").fetchone()[0],
+                    conn.execute(
+                        "SELECT count(*) FROM mart.correction_candidate "
+                        "WHERE business_date='2026-08-01' AND agent_id='100'"
+                    ).fetchone()[0],
                     0,
                 )
                 staffing = conn.execute(
                     """SELECT gross_scheduled_fte, planned_time_off_fte, scheduled_fte
                        FROM mart.staffing_interval WHERE time(interval_start)='08:00:00'
+                         AND business_date='2026-08-01'
                          AND lob='RSA' AND language='EN'"""
                 ).fetchone()
                 self.assertEqual(staffing, (3.0, 1.0, 2.0))
                 noon_staffing = conn.execute(
                     """SELECT gross_scheduled_fte, planned_time_off_fte, scheduled_fte
                        FROM mart.staffing_interval WHERE time(interval_start)='12:00:00'
+                         AND business_date='2026-08-01'
                          AND lob='RSA' AND language='EN'"""
                 ).fetchone()
                 self.assertEqual(noon_staffing, (3.0, 2.0, 1.0))
                 self.assertEqual(
                     conn.execute(
-                        "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_id='200'"
+                        "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day "
+                        "WHERE business_date='2026-08-01' AND agent_id='200'"
                     ).fetchone()[0],
                     "CLEAR",
+                )
+                active_away = conn.execute(
+                    """SELECT attendance_result, planned_work_minutes,
+                              planning_overlay_minutes, requires_call
+                       FROM mart.attendance_agent_day
+                       WHERE business_date='2026-08-02' AND agent_id='300'"""
+                ).fetchone()
+                self.assertEqual(active_away, ("Away", 0, 480, 0))
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT count(*) FROM mart.correction_candidate "
+                        "WHERE business_date='2026-08-02' AND agent_id='300'"
+                    ).fetchone()[0],
+                    0,
+                )
+                away_staffing = conn.execute(
+                    """SELECT gross_scheduled_fte, planned_time_off_fte,
+                              scheduled_fte
+                       FROM mart.staffing_interval
+                       WHERE business_date='2026-08-02'
+                         AND time(interval_start)='08:00:00'
+                         AND lob='RSA' AND language='EN'"""
+                ).fetchone()
+                self.assertEqual(away_staffing, (1.0, 1.0, 0.0))
+                self.assertEqual(
+                    conn.execute(
+                        """SELECT final_ledger_status, final_absence_minutes,
+                                  final_shrinkage_minutes
+                           FROM mart.verint_final_absence_agent_day
+                           WHERE business_date='2026-08-02' AND agent_id='300'"""
+                    ).fetchone(),
+                    ("ABSENCE_RECORDED", 480, 480),
                 )
 
     def test_refresh_builds_safe_attendance_gaps_and_excel(self):
@@ -1090,6 +1138,10 @@ class EndToEndTests(unittest.TestCase):
                     "ISSUES & DRIVERS", "DEFINITIONS", "_AUDIT",
                 ])
                 self.assertEqual(service_book["CONTROL"]["A1"].value, "RTM DAILY CONTROL")
+                self.assertIn(
+                    "PTO / Away HC",
+                    [cell.value for cell in service_book["CONTROL"][5]],
+                )
                 self.assertEqual(
                     [cell.value for cell in service_book["OEM"][11]][:15],
                     [
@@ -1122,6 +1174,8 @@ class EndToEndTests(unittest.TestCase):
                     }
                     self.assertIn("ATTENDANCE  /  SAME-DAY OPERATIONAL LIST", visible_values)
                     self.assertIn("Agent ID", visible_values)
+                    self.assertIn("PTO / Away HC", visible_values)
+                    self.assertIn("Time Off", visible_values)
                 self.assertEqual(service_book["DEFINITIONS"].sheet_state, "hidden")
                 self.assertEqual(service_book["_AUDIT"].sheet_state, "hidden")
                 self.assertFalse(any(

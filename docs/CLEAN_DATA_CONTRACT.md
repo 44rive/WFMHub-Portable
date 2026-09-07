@@ -58,6 +58,13 @@ coverage and never overwrites explicit Logged Off or Unavailable states. A
 logout followed by a return stays an internal gap. Today never produces an
 early-leave decision.
 
+PTO/Away precedence is interval-based and schedule-clipped. Approved PTO and
+effective Active/Closed Away remove their exact intervals before late,
+early-leave, no-show, correction-gap, and net-staffing calculations. Pending or
+Cancelled rows do nothing. Planned Away is future-capacity information only and
+cannot erase elapsed attendance evidence. RTM exposes registered time off while
+keeping it outside Due HC and all call/no-show counters.
+
 The Excel importer reads only Gap ID and the five editable decision columns.
 SQLite supplies the authoritative date, agent and exact start/end. Approved
 decisions use `config\wfm_rules.toml`; Dismissed counts as no loss; Open remains

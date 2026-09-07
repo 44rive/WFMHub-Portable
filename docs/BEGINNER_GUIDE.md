@@ -45,8 +45,9 @@ Populate them using the dropdowns and inclusive dates. Approved PTO and
 Active/Closed Away are removed from expected-work minutes, attendance calls,
 correction gaps, and net staffing. Planned Away changes future staffing only;
 it never hides a current or historical no-show. Partial-day PTO uses its exact
-start/end time. Reviewed Attendance decisions plus these registers drive the
-Hub absence/shrinkage ledger.
+start/end time. Pending or Cancelled records have no calculation effect.
+Reviewed Attendance decisions plus these registers drive the Hub
+absence/shrinkage ledger.
 
 ## The normal daily routine
 
@@ -123,6 +124,9 @@ the data before calling.
 
 The summary balances as `Due HC = Present HC + No Show HC + Unknown HC`.
 Offline Now is already included inside Present HC, so never add it again.
+`PTO / Away HC` is separate context: full-day leave is shown in the agent list
+but not counted as Due, Unknown, No Show, or Call Now. For partial-day PTO, RTM
+starts judging attendance only when the next real working interval begins.
 
 The attendance checkpoint is the newest Agent Status evidence time, not the
 time the workbook finishes building. A last known state older than

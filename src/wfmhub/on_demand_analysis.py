@@ -152,6 +152,8 @@ def _evidence(conn: DatabaseConnection, domain: str, start: date, end: date) -> 
         "attendance": """SELECT business_date, agent_id, agent_name, team_leader, lob, language,
                                 scheduled_start, scheduled_end, attendance_result, call_action,
                                 uncoded_late_minutes, uncoded_early_leave_minutes, no_show_minutes,
+                                planned_work_minutes, planning_overlay,
+                                planning_overlay_minutes, planning_overlay_source,
                                 source_loaded, is_provisional
                          FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ?
                          ORDER BY business_date, lob, team_leader, agent_name""",

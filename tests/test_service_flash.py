@@ -49,7 +49,8 @@ class CallServiceModelTests(unittest.TestCase):
                    requires_call BOOLEAN, actual_first_seen TIMESTAMP,
                    actual_last_seen TIMESTAMP, uncoded_late_minutes INTEGER,
                    actual_evidence VARCHAR, source_loaded BOOLEAN,
-                   is_provisional BOOLEAN, evaluation_as_of TIMESTAMP
+                   is_provisional BOOLEAN, evaluation_as_of TIMESTAMP,
+                   planning_overlay VARCHAR, planning_overlay_minutes INTEGER
                )"""
         )
         conn.execute(
@@ -70,14 +71,16 @@ class CallServiceModelTests(unittest.TestCase):
         present_evidence_end = checkpoint - timedelta(minutes=10)
         refresh_time = checkpoint + timedelta(minutes=20)
         conn.executemany(
-            "INSERT INTO mart.attendance_agent_day VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO mart.attendance_agent_day VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [
-                (report_day, "present", "Present Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Late - shift in progress", "CALL_LATE", True, start, present_evidence_end, 10, "AGENT_STATUS", True, True, refresh_time),
-                (report_day, "offline", "Offline Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Shift in progress", "NONE", False, start, checkpoint, 0, "AGENT_STATUS", True, True, refresh_time),
-                (report_day, "no-show", "No Show Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Not seen - shift in progress", "CALL_NOT_SEEN_NOW", True, None, None, 0, "AGENT_STATUS", True, True, refresh_time),
-                (report_day, "unknown", "Unknown Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Data not loaded", "NONE", False, None, None, 0, "NONE", True, True, refresh_time),
-                (report_day, "early", "Early Agent", "TL", "OM", "RSA NL", "NL", early_start, early_end, "Working", "Early leave", "NONE", False, early_start, datetime.combine(report_day, time(9, 30)), 0, "AGENT_STATUS", True, False, refresh_time),
-                (report_day, "pto", "PTO Agent", "TL", "OM", "RSA NL", "NL", start, end, "Planned absence", "Planned absence", "NONE", False, None, None, 0, "PTO", True, False, refresh_time),
+                (report_day, "present", "Present Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Late - shift in progress", "CALL_LATE", True, start, present_evidence_end, 10, "AGENT_STATUS", True, True, refresh_time, None, 0),
+                (report_day, "offline", "Offline Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Shift in progress", "NONE", False, start, checkpoint, 0, "AGENT_STATUS", True, True, refresh_time, None, 0),
+                (report_day, "no-show", "No Show Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Not seen - shift in progress", "CALL_NOT_SEEN_NOW", True, None, None, 0, "AGENT_STATUS", True, True, refresh_time, None, 0),
+                (report_day, "unknown", "Unknown Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Data not loaded", "NONE", False, None, None, 0, "NONE", True, True, refresh_time, None, 0),
+                (report_day, "early", "Early Agent", "TL", "OM", "RSA NL", "NL", early_start, early_end, "Working", "Early leave", "NONE", False, early_start, datetime.combine(report_day, time(9, 30)), 0, "AGENT_STATUS", True, False, refresh_time, None, 0),
+                (report_day, "pto", "PTO Agent", "TL", "OM", "RSA NL", "NL", start, end, "Planned absence", "PTO", "NONE", False, None, None, 0, "PTO", True, False, refresh_time, "PTO: Vacation", 480),
+                (report_day, "away", "Away Agent", "TL", "OM", "RSA NL", "NL", start, end, "Planned absence", "Away", "NONE", False, None, None, 0, "AWAY", True, False, refresh_time, "AWAY: Long sickness", 480),
+                (report_day, "partial-pto", "Partial PTO Agent", "TL", "OM", "RSA NL", "NL", start, end, "Working", "Shift in progress", "NONE", False, None, None, 0, "NONE", True, True, refresh_time, "PTO: Vacation", 240),
             ],
         )
         conn.executemany(
@@ -87,6 +90,10 @@ class CallServiceModelTests(unittest.TestCase):
                 (report_day, "offline", "RSA NL", datetime.combine(report_day, time(11)), checkpoint, "WORK", "Logged Off", "GAP", True, "AGENT_STATUS"),
                 (report_day, "no-show", "RSA NL", start, checkpoint, "WORK", "Logged Off", "GAP", True, "AGENT_STATUS"),
                 (report_day, "early", "RSA NL", early_start, datetime.combine(report_day, time(9, 30)), "WORK", "Productive", "MATCH", False, "AGENT_STATUS"),
+                (report_day, "pto", "RSA NL", start, end, "PTO: Vacation", "PTO", "PLANNED_TIME_OFF", False, "PTO"),
+                (report_day, "away", "RSA NL", start, end, "AWAY: Long sickness", "AWAY", "PLANNED_TIME_OFF", False, "AWAY"),
+                (report_day, "partial-pto", "RSA NL", start, checkpoint, "PTO: Vacation", "PTO", "PLANNED_TIME_OFF", False, "PTO"),
+                (report_day, "partial-pto", "RSA NL", checkpoint, end, "Working", "FUTURE", "FUTURE", False, "NONE"),
             ],
         )
         profile = load_service_profiles(
@@ -94,9 +101,15 @@ class CallServiceModelTests(unittest.TestCase):
         ).select("rsa_nl", report_day)
         rows, summary = _attendance_pulse(conn, profile, report_day)
         by_agent = {row["agent_id"]: row for row in rows}
-        self.assertNotIn("pto", by_agent)
+        self.assertEqual(by_agent["pto"]["attendance_state"], "PTO")
+        self.assertEqual(by_agent["pto"]["pulse_action"], "NONE")
+        self.assertEqual(by_agent["away"]["attendance_state"], "AWAY")
+        self.assertEqual(by_agent["away"]["pulse_action"], "NONE")
+        self.assertEqual(by_agent["partial-pto"]["attendance_state"], "PTO — NOT DUE")
+        self.assertEqual(by_agent["partial-pto"]["pulse_action"], "NONE")
         self.assertEqual(summary["scheduled_now"], 4)
         self.assertEqual(summary["due_hc"], 5)
+        self.assertEqual(summary["time_off_hc"], 3)
         self.assertEqual(summary["present_hc"], 3)
         self.assertEqual(summary["no_show_hc"], 1)
         self.assertEqual(summary["offline_now"], 1)
@@ -126,6 +139,23 @@ class CallServiceModelTests(unittest.TestCase):
         hourly = _workforce_by_hour(profile, report_day, rows, summary)
         self.assertEqual(hourly[11]["no_show_hc"], 1)
         self.assertIsNone(hourly[12]["no_show_hc"])
+        partial_only = [{
+            "agent_id": "partial-absent", "no_show": True,
+            "assignment_type": "Working", "scheduled_start": start,
+            "scheduled_end": end,
+            "expected_work_intervals": [
+                (datetime.combine(report_day, time(10)), end),
+            ],
+        }]
+        final_summary = {
+            "mode": "FINAL DAY",
+            "checkpoint": datetime.combine(report_day, time(23, 59, 59)),
+        }
+        hourly = _workforce_by_hour(
+            profile, report_day, partial_only, final_summary,
+        )
+        self.assertEqual(hourly[8]["no_show_hc"], 0)
+        self.assertEqual(hourly[10]["no_show_hc"], 1)
         conn.close()
 
     def test_storm_screenshot_arithmetic_is_reproduced(self):
