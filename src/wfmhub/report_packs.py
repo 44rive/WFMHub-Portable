@@ -120,6 +120,10 @@ IMPLEMENTED_REPORT_PACK_KEYS = (
 )
 
 
+class ReportPublishError(RuntimeError):
+    """Raised when a finished workbook cannot be published safely."""
+
+
 def report_pack(key: str) -> ReportPack:
     try:
         return REPORT_PACKS[key]
@@ -155,16 +159,23 @@ def publish_report(
     standard fixed-name product is copied into Reports/Archive.
     """
 
-    if key not in REPORT_PACKS:
+    try:
+        if key not in REPORT_PACKS:
+            partial.replace(target)
+            return target
+        current = report_current_path(config, key)
+        if target.resolve() == current and target.exists():
+            archive_dir = config.reports / "Archive" / generated.strftime("%Y-%m-%d")
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archived = archive_dir / f"{target.stem}_{generated:%Y%m%d_%H%M%S_%f}{target.suffix}"
+            shutil.copy2(target, archived)
         partial.replace(target)
-        return target
-    current = report_current_path(config, key)
-    if target.resolve() == current and target.exists():
-        archive_dir = config.reports / "Archive" / generated.strftime("%Y-%m-%d")
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        archived = archive_dir / f"{target.stem}_{generated:%Y%m%d_%H%M%S_%f}{target.suffix}"
-        shutil.copy2(target, archived)
-    partial.replace(target)
+    except PermissionError as exc:
+        raise ReportPublishError(
+            f"Cannot replace '{target.name}'. It is open in Excel or temporarily "
+            "locked by OneDrive. Close the workbook, wait for OneDrive to finish "
+            "syncing, then retry; the existing workbook was not deleted."
+        ) from exc
     return target
 
 

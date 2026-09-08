@@ -3334,3 +3334,86 @@ def refresh_models(
         conn.execute("ROLLBACK TO SAVEPOINT refresh_models")
         conn.execute("RELEASE SAVEPOINT refresh_models")
         raise
+
+
+def refresh_pcs_models(
+    conn: DatabaseConnection,
+    config: Config,
+    run_id: str,
+    start: date | None = None,
+    end: date | None = None,
+    use_config_period: bool = True,
+    progress: ProgressCallback | None = None,
+) -> ModelSummary:
+    """Refresh only the employee dimension and PCS mart.
+
+    The permanent PCS tracker does not consume attendance, staffing, forecast,
+    service, absence, or findings. Rebuilding those domains made a simple PCS
+    update slow and increased the blast radius of an Excel-only failure.
+    """
+
+    total_stages = 5
+
+    def stage(completed: int, label: str) -> None:
+        if progress is not None:
+            progress(completed, total_stages, label)
+
+    conn.execute("SAVEPOINT refresh_pcs_models")
+    try:
+        stage(0, "Validating PCS rules and metrics")
+        rulebook = load_rulebook(config.home, config.business_rules)
+        metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
+        validate_metric_catalog(metric_catalog, SOURCE_COMPONENTS)
+
+        stage(1, "Selecting PCS Call-by-Call period")
+        requested_start = start or (config.period_start if use_config_period else None)
+        requested_end = end or (config.period_end if use_config_period else None)
+        if requested_start and requested_end and requested_start > requested_end:
+            raise ValueError("Start date cannot be after end date")
+        first_call, last_call = conn.execute(
+            """SELECT min(r.business_date), max(r.business_date)
+               FROM raw.call_leg r
+               JOIN meta.source_file f ON f.file_id=r.source_file_id
+               WHERE f.active=true AND f.status='SUCCESS'""",
+        ).fetchone()
+        selected_start = requested_start or first_call
+        selected_end = requested_end or last_call
+        if selected_start is None or selected_end is None:
+            raise RuntimeError(
+                "No Call-by-Call dates were found. Load a valid call extract first."
+            )
+        if isinstance(selected_start, datetime):
+            selected_start = selected_start.date()
+        elif not isinstance(selected_start, date):
+            selected_start = date.fromisoformat(str(selected_start)[:10])
+        if isinstance(selected_end, datetime):
+            selected_end = selected_end.date()
+        elif not isinstance(selected_end, date):
+            selected_end = date.fromisoformat(str(selected_end)[:10])
+
+        stage(2, "Updating the active FTE employee dimension")
+        _build_agents(conn)
+
+        stage(3, "Building exact PCS agent-day counters")
+        month_index = selected_end.year * 12 + selected_end.month - 1
+        first_index = month_index - (config.pcs_tracker.history_months - 1)
+        history_start = date(first_index // 12, first_index % 12 + 1, 1)
+        pcs_start = min(selected_start, history_start)
+        pcs = _build_pcs(conn, config, metric_catalog, pcs_start, selected_end)
+
+        stage(4, "Updating source health")
+        _build_source_health(conn, config)
+        _record_rule_application(conn, run_id, rulebook)
+
+        result = ModelSummary(
+            start=selected_start,
+            end=selected_end,
+            pcs_rows=pcs,
+        )
+        conn.execute("RELEASE SAVEPOINT refresh_pcs_models")
+        stage(total_stages, "PCS data ready")
+        return result
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT refresh_pcs_models")
+        conn.execute("RELEASE SAVEPOINT refresh_pcs_models")
+        raise

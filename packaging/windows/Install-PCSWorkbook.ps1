@@ -215,6 +215,9 @@ try {
     $script:Excel.Visible = $false
     $script:Excel.DisplayAlerts = $false
     $script:Workbook = $script:Excel.Workbooks.Open($resolvedWorkbook, 0, $false)
+    if ($script:Workbook.ReadOnly) {
+        throw "PCS workbook opened read-only. It is probably already open in Excel or locked by OneDrive. Close it, wait for sync to finish, then retry."
+    }
 
     if ($Action -eq "Install") {
         foreach ($path in @($DataQueryPath, $CoachingQueryPath, $LobQueryPath, $ResultsQueryPath)) {

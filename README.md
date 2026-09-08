@@ -150,9 +150,11 @@ Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 PCS is one permanent shared Excel workbook. **PCS Operational Tracker > Update
 PCS now** updates the fixed clean CSV feeds under `Feed\PCS`, installs or
 refreshes four governed Power Queries in desktop Excel, saves, and opens the
-same tracker. A normal refresh does not rebuild it. When WFMHub ships a newer
-template version, it archives the old copy and migrates the coaching action
-ledger before installing the connections again.
+same tracker. A normal update never rebuilds or replaces it. The PCS-only path
+also leaves attendance, RTM, staffing, forecast, service, and absence marts
+untouched. If a design upgrade is needed, close Excel and choose
+**Repair/rebuild tracker and connection**; WFMHub archives the old copy and
+migrates readable coaching actions before installing the connections again.
 
 `Reports\PCS Operational Tracker.xlsx` contains:
 
@@ -177,6 +179,8 @@ or Excel **Data > Refresh All**. Power Query replaces `OVERVIEW`'s LOB table,
 `RESULTS`, `PCS_DATA`, and `COACHING_QUEUE`; it never loads into `COACHING`. No
 Data Model, ODBC driver, or daily workbook generation is involved. `SETUP`,
 `HELP`, and the PCS status page show connection and freshness separately.
+If Excel or OneDrive locks the workbook after the feeds update, do not repeat
+the source refresh: close Excel and choose **Refresh Excel only**.
 
 ## Attendance decisions and shared absenteeism
 

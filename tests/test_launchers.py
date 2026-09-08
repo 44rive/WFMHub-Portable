@@ -33,6 +33,8 @@ class LauncherTests(unittest.TestCase):
         self.assertNotIn("Save-FormulaState", text)
         self.assertNotIn("Restore-FormulaState", text)
         self.assertIn("$script:Workbook.RefreshAll()", text)
+        self.assertIn("$script:Workbook.ReadOnly", text)
+        self.assertIn("locked by OneDrive", text)
         self.assertNotIn("/home/founder", text)
 
 

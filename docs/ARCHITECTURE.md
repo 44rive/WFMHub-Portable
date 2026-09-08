@@ -128,6 +128,12 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `absence` | `Reports/Final Absenteeism.xlsx` | Reviewed attendance-decision absence/shrinkage ledger |
 
 Products share the same visual identity but use purpose-specific layouts.
+The PCS operational update is deliberately domain-scoped: FTE and Call-by-Call
+are ingested, only the employee dimension and PCS mart are rebuilt, and only PCS
+feeds are published. The permanent Excel tracker is refreshed afterward and is
+never part of the database transaction. A workbook lock therefore cannot undo
+the committed PCS data refresh.
+
 RTM Daily Control begins with `CONTROL`, then provides four purpose-built LOB
 sheets. Each LOB combines the validated hourly service view with its own
 reconciling attendance/call list. `ISSUES & DRIVERS` replaces the separate

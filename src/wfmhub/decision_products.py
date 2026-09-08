@@ -14,7 +14,7 @@ from .config import Config
 from .database import DatabaseConnection
 from .mapping import load_queue_mapping
 from .metrics import MetricCatalog, evaluate_metric, load_metric_catalog
-from .pcs_excel import PCS_TEMPLATE_VERSION
+from .pcs_excel import PCSExcelError, PCS_TEMPLATE_VERSION
 from .report_packs import archive_superseded_reports, publish_report, report_current_path
 from .reports import COLORS, _query
 from .rules import load_rulebook
@@ -1416,8 +1416,10 @@ def build_pcs_performance_workbook(
     start: date,
     end: date,
     output: Path | None = None,
+    *,
+    force_rebuild: bool = False,
 ) -> Path:
-    """Create or safely upgrade the repair-resistant permanent PCS tracker."""
+    """Create the permanent tracker without replacing it during normal updates."""
 
     from .shared_feeds import (
         PCS_AGENT_DAY_HEADERS,
@@ -1429,11 +1431,17 @@ def build_pcs_performance_workbook(
         publish_pcs_feeds,
     )
 
-    publish_pcs_feeds(conn, config, start, end)
     target = _output_path(config, "pcs", start, end, datetime.now(), output)
     current_version = _pcs_workbook_template_version(target)
-    if output is None and target.exists() and current_version == PCS_TEMPLATE_VERSION:
-        return target
+    if output is None and target.exists() and not force_rebuild:
+        if current_version == PCS_TEMPLATE_VERSION:
+            return target
+        raise PCSExcelError(
+            "The permanent PCS tracker needs a one-time design repair or upgrade. "
+            "WFMHub did not replace it during a normal update. Close the workbook, "
+            "then choose PCS > Repair/rebuild tracker and connection."
+        )
+    publish_pcs_feeds(conn, config, start, end)
     previous_target = target if target.exists() else (config.reports / "PCS Performance.xlsx").resolve()
     previous_actions = _previous_coaching_actions(previous_target)
     book, partial, target = _atomic_book(

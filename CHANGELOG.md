@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.22.3 — 2026-09-08
+
+- Removed permanent-workbook generation from the normal PCS update path. The
+  database and all four fixed PCS CSV feeds now commit before Excel automation,
+  so an open workbook can no longer roll back or misreport the data refresh.
+- Added a targeted five-stage PCS model refresh. It updates only FTE, active
+  Call-by-Call scope, PCS agent-day counters, source health, and PCS feeds;
+  attendance, RTM, staffing, forecast, service, and absence marts are untouched.
+- Added an explicit `Repair/rebuild tracker and connection` action. Current
+  trackers are never rebuilt; old or damaged designs are archived and coaching
+  actions are migrated when readable before the four Power Queries are installed.
+- Detects unreadable/locked workbooks before the expensive source refresh where
+  possible. Excel automation now rejects a read-only open and reports that data
+  and feeds already succeeded when only the final Excel refresh/save fails.
+- Replaced raw Windows `PermissionError` traces with instructions to close the
+  workbook, wait for OneDrive sync, and retry the correct PCS-only step.
+
 ## 0.22.2 — 2026-09-07
 
 - Audited PTO/Away from the governed FTE registers through attendance,

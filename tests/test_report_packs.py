@@ -6,12 +6,14 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from wfmhub.cli import SOURCE_GROUPS
 from wfmhub.config import ConfigError, load_config
 from wfmhub.report_packs import (
     IMPLEMENTED_REPORT_PACK_KEYS,
     REPORT_PACKS,
+    ReportPublishError,
     archive_superseded_reports,
     build_report_pack,
     publish_report,
@@ -120,6 +122,23 @@ class ReportPackTests(unittest.TestCase):
             self.assertEqual(len(archived), 3)
             self.assertFalse((config.reports / "Attendance Callout.xlsx").exists())
             self.assertTrue(all(path.is_file() for path in archived))
+
+    def test_locked_workbook_has_an_actionable_publish_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            partial = root / "PCS Operational Tracker.partial.xlsx"
+            target = root / "PCS Operational Tracker.xlsx"
+            partial.write_bytes(b"complete replacement")
+            with patch.object(
+                Path, "replace", side_effect=PermissionError("access denied"),
+            ):
+                with self.assertRaisesRegex(
+                    ReportPublishError, "open in Excel.*locked by OneDrive",
+                ):
+                    publish_report(
+                        SimpleNamespace(), "custom", partial, target,
+                        datetime(2026, 9, 8, 0, 5),
+                    )
 
 
 if __name__ == "__main__":

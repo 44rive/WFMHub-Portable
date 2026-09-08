@@ -19,7 +19,7 @@ from .database import HubLockedError, backup_database, connect, migrate, write_s
 from .doctor import run_doctor
 from .exports import DATASETS, export_dataset
 from .ingestion import ingest_all
-from .models import refresh_models
+from .models import refresh_models, refresh_pcs_models
 from .mapping import load_queue_mapping
 from .metrics import diff_metric_catalogs, evaluate_metric, load_metric_catalog, validate_metric_catalog
 from .on_demand_analysis import ANALYSIS_DOMAINS, COMPARISON_MODES, build_analysis_workbook
@@ -37,7 +37,7 @@ from .rules import load_rulebook, validate_rulebook
 from .semantic import SOURCE_COMPONENTS
 from .sota_reports import build_kpi_catalog
 from .service_profiles import load_service_profiles, validate_service_profiles
-from .shared_feeds import publish_shared_feeds
+from .shared_feeds import publish_pcs_feeds, publish_shared_feeds
 from .ui import clear_screen, render_dashboard
 
 
@@ -163,13 +163,23 @@ def refresh(
                     conn, config, SOURCE_GROUPS[source_group],
                     _phase_progress(bar, 0.03, 0.55),
                 )
-                model = refresh_models(
-                    conn, config, run_id, start, end, use_config_period,
-                    _phase_progress(bar, 0.55, 0.85),
+                pcs_only = source_group == "pcs" and set(packs) <= {"pcs"}
+                model = (
+                    refresh_pcs_models(
+                        conn, config, run_id, start, end, use_config_period,
+                        _phase_progress(bar, 0.55, 0.85),
+                    )
+                    if pcs_only else
+                    refresh_models(
+                        conn, config, run_id, start, end, use_config_period,
+                        _phase_progress(bar, 0.55, 0.85),
+                    )
                 )
                 bar.update(0.85, "Updating shared report data")
-                shared_feeds = publish_shared_feeds(
-                    conn, config, model.start, model.end,
+                shared_feeds = (
+                    (publish_pcs_feeds(conn, config, model.start, model.end),)
+                    if pcs_only else
+                    publish_shared_feeds(conn, config, model.start, model.end)
                 )
                 report_paths = []
                 total_packs = len(packs)
@@ -184,7 +194,11 @@ def refresh(
                     bar.update(report_end, f"Created {pack} report")
                 conn.execute(
                     """UPDATE meta.refresh_run SET finished_at=?, status='SUCCESS', files_loaded=?, files_skipped=?, files_failed=?, details=? WHERE run_id=?""",
-                    [datetime.now(), ingested.loaded, ingested.skipped, ingested.failed, f"attendance={model.attendance_rows}; absence={model.absence_rows}; service={model.service_rows}; gaps={model.correction_rows}; metrics={model.metric_rows}; findings={model.finding_rows}; quality={model.quality_rows}; scoped_out={ingested.scoped_out}", run_id],
+                    [datetime.now(), ingested.loaded, ingested.skipped, ingested.failed, (
+                        f"pcs={model.pcs_rows}; targeted=PCS; scoped_out={ingested.scoped_out}"
+                        if pcs_only else
+                        f"attendance={model.attendance_rows}; absence={model.absence_rows}; service={model.service_rows}; gaps={model.correction_rows}; metrics={model.metric_rows}; findings={model.finding_rows}; quality={model.quality_rows}; scoped_out={ingested.scoped_out}"
+                    ), run_id],
                 )
             except Exception as exc:
                 conn.execute("UPDATE meta.refresh_run SET finished_at=?, status='ERROR', details=? WHERE run_id=?", [datetime.now(), str(exc)[:4000], run_id])
@@ -199,19 +213,23 @@ def refresh(
     print(f"Period      : {model.start} to {model.end}")
     print(f"Files       : {ingested.loaded} loaded, {ingested.skipped} unchanged, {ingested.failed} failed")
     print(f"Agent scope : {ingested.scoped_out:,} outside-roster source rows excluded")
-    print(f"Attendance  : {model.attendance_rows:,} rows")
-    print(f"Gaps        : {model.correction_rows:,} rows")
-    print(f"Absence     : {model.absence_rows:,} agent-day + {model.absence_event_rows:,} evidence rows")
-    print(
-        f"Service     : {model.service_rows:,} governed Call-by-Call + "
-        f"{model.call_service_rows:,} mapped queue/hour + "
-        f"{model.forecast_rows:,} forecast rows"
-    )
+    if not pcs_only:
+        print(f"Attendance  : {model.attendance_rows:,} rows")
+        print(f"Gaps        : {model.correction_rows:,} rows")
+        print(f"Absence     : {model.absence_rows:,} agent-day + {model.absence_event_rows:,} evidence rows")
+        print(
+            f"Service     : {model.service_rows:,} governed Call-by-Call + "
+            f"{model.call_service_rows:,} mapped queue/hour + "
+            f"{model.forecast_rows:,} forecast rows"
+        )
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
     print(f"Shared data : {sum(item.rows for item in shared_feeds):,} feed rows updated")
-    print(f"Metrics     : {model.metric_rows:,} calculated values")
-    print(f"Findings    : {model.finding_rows:,} checks and observations")
-    print(f"Quality     : {model.quality_rows:,} issues")
+    if pcs_only:
+        print("Other marts : unchanged (attendance, service, staffing and absence)")
+    else:
+        print(f"Metrics     : {model.metric_rows:,} calculated values")
+        print(f"Findings    : {model.finding_rows:,} checks and observations")
+        print(f"Quality     : {model.quality_rows:,} issues")
     business = load_rulebook(home, config.business_rules)
     mapping = load_queue_mapping(config.queue_mapping)
     print(f"Rules       : {business.version} ({business.sha256[:12]})")
@@ -790,9 +808,15 @@ def pcs_excel_tool(
     if not state.exists:
         raise PCSExcelError("PCS tracker does not exist. Choose Update PCS now first.")
     if not state.current_template:
-        raise PCSExcelError("PCS tracker design is old. Choose Update PCS now before installing or refreshing.")
+        raise PCSExcelError(
+            "PCS tracker design is old. Choose Repair/rebuild tracker and "
+            "connection before installing or refreshing."
+        )
     if normalized == "refresh" and not state.queries_installed:
-        raise PCSExcelError("PCS Power Query is not installed. Choose Install / repair connection first.")
+        raise PCSExcelError(
+            "PCS Power Query is not installed. Choose Repair/rebuild tracker and "
+            "connection first."
+        )
     message = run_pcs_excel_action(
         config, workbook, "Install" if normalized == "install" else "Refresh",
         mode, open_after=open_after,
@@ -802,13 +826,97 @@ def pcs_excel_tool(
     return 0
 
 
+def _pcs_mart_period(conn, config) -> tuple[date, date]:
+    """Return the real PCS data boundary, with a safe empty-database fallback."""
+
+    first, last = conn.execute(
+        "SELECT min(business_date), max(business_date) FROM mart.agent_pcs_day",
+    ).fetchone()
+
+    def parsed(value, fallback: date) -> date:
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        if value is not None:
+            return date.fromisoformat(str(value)[:10])
+        return fallback
+
+    fallback_end = config.period_end or date.today()
+    fallback_start = config.period_start or fallback_end.replace(day=1)
+    end = parsed(last, fallback_end)
+    return parsed(first, fallback_start), end
+
+
+def _pcs_lock_problem(problem: str | None) -> bool:
+    text = str(problem or "").casefold()
+    return any(value in text for value in (
+        "permission", "access is denied", "being used by another process",
+        "sharing violation", "winerror 5", "winerror 32",
+    ))
+
+
+def _rebuild_pcs_tracker_from_marts(home: Path) -> Path:
+    """Explicitly rebuild the PCS design from committed marts and archive the old file."""
+
+    from .decision_products import build_pcs_performance_workbook
+
+    config = load_config(home)
+    with write_session(config) as conn:
+        start, end = _pcs_mart_period(conn, config)
+        path = build_pcs_performance_workbook(
+            conn, config, start, end, force_rebuild=True,
+        )
+    print(f"PCS tracker design ready: {path}")
+    return path
+
+
+def _repair_pcs_tracker(home: Path) -> None:
+    """Repair the design only when needed, then reinstall the four queries."""
+
+    print("\nPCS REPAIR")
+    print("Close PCS Operational Tracker.xlsx before continuing.")
+    config = load_config(home)
+    workbook = report_current_path(config, "pcs")
+    state = inspect_pcs_tracker(workbook, config.feed / "PCS")
+    if _pcs_lock_problem(state.problem):
+        raise PCSExcelError(
+            "The PCS tracker is open in Excel or locked by OneDrive. Close it, "
+            "wait for sync to finish, then run Repair/rebuild again."
+        )
+    if not state.exists or state.problem or not state.current_template:
+        if state.problem:
+            print(f"Existing tracker cannot be inspected: {state.problem}")
+            print("The existing file will be archived before a clean rebuild.")
+        _rebuild_pcs_tracker_from_marts(home)
+    pcs_excel_tool(home, "install", open_after=True)
+
+
 def _update_pcs_now(home: Path) -> None:
-    """Refresh governed inputs and then refresh the same Excel tracker."""
+    """Commit PCS data/feeds, then refresh—but never rebuild—the permanent tracker."""
 
     print("\nPCS UPDATE")
     print("Close PCS Operational Tracker.xlsx before continuing.")
+    config = load_config(home)
+    workbook = report_current_path(config, "pcs")
+    before = inspect_pcs_tracker(workbook, config.feed / "PCS")
+    if before.exists and before.problem:
+        if _pcs_lock_problem(before.problem):
+            raise PCSExcelError(
+                "WFMHub cannot safely inspect the permanent PCS tracker because "
+                "it is open in Excel or locked by OneDrive. Close it, wait for "
+                f"sync to finish, and retry. Details: {before.problem}"
+            )
+        raise PCSExcelError(
+            "The permanent PCS tracker is unreadable or damaged. WFMHub did not "
+            "replace it. Choose Repair/rebuild tracker and connection; the old "
+            f"file will be archived first. Details: {before.problem}"
+        )
+    if before.exists and not before.current_template:
+        print("One-time PCS design upgrade detected; archiving and rebuilding it first.")
+        _rebuild_pcs_tracker_from_marts(home)
     result = refresh(
-        home, None, None, ("pcs",), "pcs", False,
+        home, None, None, (), "pcs", False,
     )
     if result:
         raise RuntimeError(
@@ -817,12 +925,34 @@ def _update_pcs_now(home: Path) -> None:
         )
     config = load_config(home)
     workbook = report_current_path(config, "pcs")
+    if not workbook.is_file():
+        _rebuild_pcs_tracker_from_marts(home)
     state = inspect_pcs_tracker(workbook, config.feed / "PCS")
+    if state.problem:
+        raise PCSExcelError(
+            "PCS data and clean feeds updated successfully, but the workbook "
+            f"cannot be inspected: {state.problem}. Close Excel and use "
+            "Refresh Excel only; do not rerun the source refresh."
+        )
+    if not state.current_template:
+        raise PCSExcelError(
+            "PCS data and clean feeds updated successfully, but the permanent "
+            "tracker needs Repair/rebuild tracker and connection."
+        )
     action = "Refresh" if state.current_template and state.queries_installed else "Install"
     print(f"Desktop Excel  : {action.lower()}ing the governed PCS connection")
-    message = run_pcs_excel_action(
-        config, workbook, action, state.connection_mode or "LOCAL", open_after=True,
-    )
+    try:
+        message = run_pcs_excel_action(
+            config, workbook, action, state.connection_mode or "LOCAL",
+            open_after=True,
+        )
+    except PCSExcelError as exc:
+        raise PCSExcelError(
+            "PCS data and all four clean feeds updated successfully; only Excel "
+            "could not refresh/save the permanent tracker. Close the workbook, "
+            "wait for OneDrive sync, then choose Refresh Excel only. Do not rerun "
+            f"the source refresh. Excel details: {exc}"
+        ) from exc
     print(message)
     print("The permanent PCS tracker is updated and open. Coaching actions were preserved.")
 
@@ -831,7 +961,7 @@ def _pcs_menu(home: Path) -> None:
     print("\nPCS OPERATIONAL TRACKER")
     print("1. Update PCS now")
     print("2. Open the permanent tracker")
-    print("3. Install / repair the Excel connection")
+    print("3. Repair/rebuild tracker and connection")
     print("4. Refresh Excel only (feeds already updated)")
     print("5. Show tracker status")
     print("6. Back")
@@ -841,7 +971,7 @@ def _pcs_menu(home: Path) -> None:
     elif choice == "2":
         pcs_excel_tool(home, "open")
     elif choice == "3":
-        pcs_excel_tool(home, "install", open_after=True)
+        _repair_pcs_tracker(home)
     elif choice == "4":
         pcs_excel_tool(home, "refresh", open_after=True)
     elif choice == "5":

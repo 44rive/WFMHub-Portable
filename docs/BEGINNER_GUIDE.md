@@ -244,7 +244,9 @@ Choose **PCS Operational Tracker**, then **Update PCS now**. Close the tracker
 before you start. The Hub loads FTE and Call by Call, updates the fixed clean
 feeds, installs or refreshes Power Query through desktop Excel, and opens the
 same permanent workbook. Put that workbook in the agreed synced
-SharePoint/Teams location. A normal update does not erase coaching.
+SharePoint/Teams location. A normal update does not rebuild the workbook or
+erase coaching. It updates only PCS data; attendance, RTM, staffing, service,
+forecast, and absence are left as they were.
 
 Open `OVERVIEW` for the total and per-LOB management view. Open `RESULTS` for
 detail. Use its normal filter arrows in this order: Period View, Scope Level,
@@ -274,6 +276,13 @@ Selector is only `Name [ID]`; Coaching Key identifies the exact call. The first
 desktop Excel. Everybody else works in the permanent workbook; the owner can
 update it with WFMHub or **Data > Refresh All**.
 
+Use **Repair/rebuild tracker and connection** only when the PCS status says the
+template is old/damaged or the four queries need reinstalling. Close Excel
+first. The old workbook is archived and readable keyed coaching actions are
+carried forward. If the Hub says the feeds updated but Excel could not save,
+close the tracker and choose **Refresh Excel only**—do not spend time loading
+the extracts again.
+
 Follow [EXCEL_REFRESH_GUIDE.md](EXCEL_REFRESH_GUIDE.md) for every click in the
 one-time PCS and Absenteeism setup.
 
@@ -296,6 +305,8 @@ Use CSV for large Call by Call data.
 - **No Time zone found:** the portable package was incompletely extracted.
 - **Required columns missing:** read the named source file in the error/log.
 - **Empty report:** check source health and date coverage in System tools.
+- **PCS workbook access denied:** close the tracker, wait for OneDrive to stop
+  syncing, then use Refresh Excel only if the message says feeds already updated.
 - **Red INCOMPLETE badge:** fix the missing or stale source; do not replace the
   blank with zero.
 

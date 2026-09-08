@@ -16,10 +16,16 @@ from openpyxl import Workbook, load_workbook
 from wfmhub.actions import import_attendance_decisions
 from wfmhub.config import ensure_user_config, load_config, write_source_root
 from wfmhub.database import write_session
+from wfmhub.decision_products import build_pcs_performance_workbook
 from wfmhub.ingestion import ingest_all
-from wfmhub.models import _evaluation_time, refresh_models, resolve_period
+from wfmhub.models import (
+    _evaluation_time,
+    refresh_models,
+    refresh_pcs_models,
+    resolve_period,
+)
 from wfmhub.on_demand_analysis import build_analysis_workbook
-from wfmhub.pcs_excel import PCS_TEMPLATE_VERSION, inspect_pcs_tracker
+from wfmhub.pcs_excel import PCSExcelError, PCS_TEMPLATE_VERSION, inspect_pcs_tracker
 from wfmhub.exports import export_dataset
 from wfmhub.report_packs import build_report_pack
 from wfmhub.reports import build_report
@@ -574,6 +580,27 @@ class EndToEndTests(unittest.TestCase):
                     progress=lambda current, total, label: model_progress.append((current, total, label)),
                 )
                 self.assertEqual(model_progress[-1], (22, 22, "Models ready"))
+                attendance_before_pcs = conn.execute(
+                    "SELECT agent_day_key, attendance_result "
+                    "FROM mart.attendance_agent_day ORDER BY agent_day_key"
+                ).fetchall()
+                pcs_progress = []
+                pcs_only = refresh_pcs_models(
+                    conn, config, "pcs-only-test",
+                    date(2026, 8, 1), date(2026, 8, 2),
+                    progress=lambda current, total, label: pcs_progress.append(
+                        (current, total, label)
+                    ),
+                )
+                self.assertEqual(pcs_only.pcs_rows, 2)
+                self.assertEqual(pcs_progress[-1], (5, 5, "PCS data ready"))
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT agent_day_key, attendance_result "
+                        "FROM mart.attendance_agent_day ORDER BY agent_day_key"
+                    ).fetchall(),
+                    attendance_before_pcs,
+                )
                 self.assertEqual(
                     dict(conn.execute(
                         "SELECT source_variant, count(*) FROM meta.source_file WHERE source_family='schedule' AND active=true GROUP BY source_variant"
@@ -985,8 +1012,15 @@ class EndToEndTests(unittest.TestCase):
                         break
                 pcs_old.save(focused_pcs_report)
                 pcs_old.close()
+                with self.assertRaisesRegex(
+                    PCSExcelError, "one-time design repair or upgrade",
+                ):
+                    build_report_pack("pcs", conn, config, model.start, model.end)
                 self.assertEqual(
-                    build_report_pack("pcs", conn, config, model.start, model.end),
+                    build_pcs_performance_workbook(
+                        conn, config, model.start, model.end,
+                        force_rebuild=True,
+                    ),
                     focused_pcs_report,
                 )
 
