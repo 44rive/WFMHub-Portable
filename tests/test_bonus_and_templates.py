@@ -121,7 +121,11 @@ class BonusImportTests(unittest.TestCase):
                     "Results", "KPI_Analysis", "Team_Lead_Analysis", "Dashboard",
                 ])
                 self.assertEqual(workbook.active.title, "Dashboard")
-                self.assertGreaterEqual(len(workbook["Dashboard"]._charts), 1)
+                self.assertEqual(len(workbook["Dashboard"]._charts), 2)
+                self.assertEqual(
+                    [workbook["Dashboard"][cell].value for cell in ("A5", "H5", "O5", "V5")],
+                    ["TOTAL PAYOUT", "PAID AGENTS", "AVG PAID PAYOUT", "REVIEW ITEMS"],
+                )
                 self.assertEqual(len(workbook._external_links), 0)
                 self.assertIn("tblKpiConfig", workbook["KPI_Config"].tables)
                 self.assertIn("Tier 1 Bonus %", [cell.value for cell in workbook["KPI_Config"][4]])

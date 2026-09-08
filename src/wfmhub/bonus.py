@@ -12,6 +12,7 @@ from typing import Any
 from .config import Config
 from .database import DatabaseConnection
 from .decision_products import _atomic_book, _audit_rows, _finish, _ratio
+from .excel_layout import V2ChartSpec, render_v2_dashboard
 from .bonus_analysis_report import _cached_result_total
 from .shared_reports import (
     _bonus_period,
@@ -659,36 +660,39 @@ def build_bonus_performance_workbook(
         f"{review_items or 0:,} row(s) need attention before release"
         if agents else "Import Bonus Matrix v1.2 to populate the report"
     )
-    book.dashboard(
-        [
-            KpiCard("Total payout", payout, "money"),
-            KpiCard("Paid agents", paid, "integer", f"{agents:,} loaded"),
-            KpiCard("Average payout", average_payout, "money"),
-            KpiCard("Payout rate", _ratio(paid, agents), "percent"),
-            KpiCard("Maximum payout", max_payout, "money"),
-            KpiCard("Review items", review_items, "integer"),
-            KpiCard("Average achievement", achievement, "percent"),
-            KpiCard("Average proration", proration, "percent"),
-        ],
-        status,
-        status_text,
-        [
-            "Population", "Agents", "Paid Agents", "Payout Rate %",
-            "Total Payout", "Average Payout", "Average Achievement",
-            "Review Items",
-        ],
-        population_rows,
-        [
-            "Policy_Decisions and KPI_Config hold the monthly rules used by Results.",
-            "Control_Checks must show OK or INFO before the result is sent for approval.",
-            "Team_Lead_Analysis explains payout distribution and the teams needing attention.",
-            "Absence follows the selected policy. Do not apply a second absence penalty outside this workbook.",
-        ],
-        (("Total payout", 4),),
-        "column",
-        "Dashboard",
+    dashboard = book.report.workbook.add_worksheet("Dashboard")
+    render_v2_dashboard(
+        book.report.workbook, dashboard,
+        title="BONUS MANAGEMENT",
+        filters=(
+            ("Period", period), ("Population", "All"),
+            ("Team Lead", "All"), ("Result status", "All"),
+        ),
+        kpis=(
+            ("Total payout", payout, "money"),
+            ("Paid agents", paid, "integer"),
+            ("Avg paid payout", average_payout, "money"),
+            ("Review items", review_items, "integer"),
+        ),
+        left_chart=V2ChartSpec(
+            "PAYOUT BY POPULATION", "column",
+            tuple(str(row[0]) for row in population_rows),
+            (("Total payout", tuple(row[4] for row in population_rows), COLORS["gold"]),),
+        ),
+        right_chart=V2ChartSpec(
+            "KPI ATTAINMENT", "bar",
+            tuple(f"{row[0]} / {row[1]}" for row in kpi_analysis_rows),
+            (("Attainment rate", tuple(row[6] for row in kpi_analysis_rows), COLORS["teal"]),),
+            "percent", 0, 1,
+        ),
+        action_title="Population payout summary",
+        action_headers=("POPULATION", "AGENTS", "PAID AGENTS", "PAYOUT RATE", "TOTAL PAYOUT", "AVG ACHIEVEMENT", "REVIEW"),
+        action_rows=tuple((row[0], row[1], row[2], row[3], row[4], row[6], row[7]) for row in population_rows),
+        action_kinds=("text", "integer", "integer", "percent", "money", "percent", "alert"),
+        status="CHECK DATA" if status == "INCOMPLETE" else "IN DEVELOPMENT",
+        status_kind="INCOMPLETE" if status == "INCOMPLETE" else "PROVISIONAL",
+        status_note=status_text,
     )
-    dashboard = book.report.workbook.get_worksheet_by_name("Dashboard")
     dashboard.activate()
     if import_row:
         dashboard.write_comment("A1", f"Source: {import_row[1]}\nImported: {import_row[2]}", {

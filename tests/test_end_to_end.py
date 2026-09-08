@@ -1041,16 +1041,17 @@ class EndToEndTests(unittest.TestCase):
                     "DECISION LEDGER", "EVIDENCE", "DEFINITIONS", "_LOOKUPS",
                     "_AUDIT",
                 ])
-                self.assertIn("2026-08-01 to 2026-08-02", corrections_book["CONTROL"]["A2"].value)
+                self.assertEqual(corrections_book["CONTROL"]["A2"].value, "PERIOD")
+                self.assertIn("01 Aug", corrections_book["CONTROL"]["C2"].value)
                 self.assertEqual(
-                    [corrections_book["CONTROL"][cell].value for cell in ("A6", "F6", "K6", "P6")],
+                    [corrections_book["CONTROL"][cell].value for cell in ("A5", "H5", "O5", "V5")],
                     ["REVIEW GAPS", "GAP HOURS", "OPEN DECISIONS", "MISSING EVIDENCE"],
                 )
                 self.assertIn(
                     "tblAttendanceReviewSummary",
                     corrections_book["CONTROL"].tables,
                 )
-                self.assertGreaterEqual(len(corrections_book["CONTROL"]._charts), 1)
+                self.assertEqual(len(corrections_book["CONTROL"]._charts), 2)
                 review = corrections_book["REVIEW BOARD"]
                 review_headers = [cell.value for cell in review[4]]
                 self.assertIn("Exact Start", review_headers)
@@ -1195,14 +1196,14 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(service_book["CONTROL"]["A1"].value, "RTM DAILY CONTROL")
                 self.assertIn(
                     "PTO / Away HC",
-                    [cell.value for cell in service_book["CONTROL"][11]],
+                    [cell.value for cell in service_book["CONTROL"][35]],
                 )
                 self.assertEqual(
-                    [service_book["CONTROL"][cell].value for cell in ("A6", "E6", "I6", "L6")],
+                    [service_book["CONTROL"][cell].value for cell in ("A5", "H5", "O5", "V5")],
                     ["LOBS ON TARGET", "DEMAND VARIANCE", "NO SHOW HC", "CALL NOW"],
                 )
                 self.assertEqual(
-                    [cell.value for cell in service_book["OEM"][11]][:15],
+                    [cell.value for cell in service_book["OEM"][35]][:15],
                     [
                         "Hour", "Forecast", "Actual", "Variance", "Ford Volume",
                         "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
@@ -1212,7 +1213,7 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertNotIn(
                     "Short Sickness",
-                    [cell.value for cell in service_book["OEM"][11]],
+                    [cell.value for cell in service_book["OEM"][35]],
                 )
                 self.assertIn(
                     "Issue Or Driver",
@@ -1220,11 +1221,11 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertEqual(service_book.properties.creator, "Anass ASSRI")
                 self.assertEqual(len(service_book._external_links), 0)
-                self.assertGreaterEqual(len(service_book["CONTROL"]._charts), 1)
+                self.assertEqual(len(service_book["CONTROL"]._charts), 2)
                 for sheet_name in ("RSA NL", "RSA BE", "FORD NL", "OEM"):
-                    self.assertGreaterEqual(len(service_book[sheet_name]._charts), 1)
+                    self.assertEqual(len(service_book[sheet_name]._charts), 2)
                     self.assertEqual(
-                        [service_book[sheet_name][cell].value for cell in ("A5", "E5", "I5", "M5")],
+                        [service_book[sheet_name][cell].value for cell in ("A5", "H5", "O5", "V5")],
                         ["TSL", "OFFERED", "VOLUME VARIANCE", "NO SHOW HC"],
                     )
                     table_names = set(service_book[sheet_name].tables)
@@ -1257,6 +1258,11 @@ class EndToEndTests(unittest.TestCase):
                     "SHRINKAGE_COMPONENTS", "COMPONENT_VIEW", "ACTIVITY_DETAIL",
                     "ABSENCE_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT",
                 ])
+                self.assertEqual(
+                    [absence_book["DASHBOARD"][cell].value for cell in ("A5", "H5", "O5", "V5")],
+                    ["ABSENCE RATE", "SHRINKAGE RATE", "FINALIZED COVERAGE", "REVIEW CASES"],
+                )
+                self.assertEqual(len(absence_book["DASHBOARD"]._charts), 2)
                 self.assertIn("tblAbsenceData", absence_book["ABSENCE_DATA"].tables)
                 self.assertIn("tblActions", absence_book["ACTIONS"].tables)
                 self.assertIn("tblActionQueue", absence_book["ACTION_QUEUE"].tables)
@@ -1323,7 +1329,11 @@ class EndToEndTests(unittest.TestCase):
                     "DASHBOARD", "LOB_RESULTS", "TREND", "DATA", "DEFINITIONS", "_AUDIT",
                 ])
                 self.assertIn("Processing Hours", [cell.value for cell in realisations_book["LOB_RESULTS"][4]])
-                self.assertGreaterEqual(len(realisations_book["DASHBOARD"]._charts), 1)
+                self.assertEqual(len(realisations_book["DASHBOARD"]._charts), 2)
+                self.assertEqual(
+                    [realisations_book["DASHBOARD"][cell].value for cell in ("A5", "H5", "O5", "V5")],
+                    ["ACTUAL VOLUME", "FORECAST ATTAINMENT", "ROUTED RATE", "WEIGHTED AHT"],
+                )
             finally:
                 realisations_book.close()
             all_realisations_book = load_workbook(
@@ -1343,9 +1353,14 @@ class EndToEndTests(unittest.TestCase):
                 })
             finally:
                 all_realisations_book.close()
-            staffing_book = load_workbook(staffing_report, read_only=True, data_only=True)
+            staffing_book = load_workbook(staffing_report, read_only=False, data_only=True)
             try:
                 self.assertIn("WEEKLY_PLAN", staffing_book.sheetnames)
+                self.assertEqual(len(staffing_book["DASHBOARD"]._charts), 2)
+                self.assertEqual(
+                    [staffing_book["DASHBOARD"][cell].value for cell in ("A5", "H5", "O5", "V5")],
+                    ["PEAK GAP FTE", "FUTURE GAP HOURS", "FORECAST COVERAGE", "PTO / AWAY IMPACT"],
+                )
                 staffing_dates = {
                     row[0].date() if isinstance(row[0], datetime) else row[0]
                     for row in staffing_book["INTRADAY"].iter_rows(

@@ -3,10 +3,10 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `2.0.0` |
+| Version | `2.1.0` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
-| First compatible Hub version | `0.23.1` |
+| First compatible Hub version | `0.24.0` |
 
 This is the visual contract for every WFMHub workbook. It changes presentation,
 never business calculations, source scope, table keys, or report maturity.
@@ -56,8 +56,11 @@ Titles and KPI values use Aptos Display. Body, table and note text use Aptos.
 - Gridlines hidden; decision surface frozen; landscape print layout.
 - Footer: `Prepared by Anass ASSRI | WFM` plus page count and confidentiality.
 
-The approved visual preview is available from the v0.22.3 release assets. Its
-numbers and generic LOB names are illustrative. Real reports use governed data.
+The approved visual prototypes are available from the v0.23.1 release assets.
+Their numbers are illustrative. Real reports use governed data.
+A data-free workbook reference for PCS and all six report families is shipped as
+`docs/WFMHub Report Design Reference.xlsx`; it is generated from the same
+production renderer so later visual work has one verifiable baseline.
 A target line or pass/fail state is shown only when the effective metric catalog
 defines a target; WFMHub never invents the pictured PCS target.
 
@@ -97,9 +100,10 @@ defines a target; WFMHub never invents the pictured PCS target.
 
 ### In-development workbooks
 
-Staffing, Realisations, Final Absenteeism and Bonus may reuse these components,
-but visual alignment does not promote them to Operational. Their calculations
-and decision workflow must pass their own production review first.
+Staffing, Realisations, Final Absenteeism and Bonus use the same measured first
+screen: four scope fields, four decision KPIs, two equal charts and a compact
+prioritized action grid. Visual alignment does not promote them to Operational;
+their calculations and decision workflows still require production review.
 
 ## Chart and table rules
 
@@ -136,6 +140,10 @@ Every design change requires:
 
 ## Change log
 
+- `2.1.0`: the measured V2 dashboard renderer is shared by RTM, every LOB
+  Flash, Attendance Review, Staffing, Realisations, Absenteeism/Shrinkage and
+  Bonus while their calculations, table names and editable ledgers remain
+  report-owned.
 - `2.0.0`: measured 28-column operational grid, equal cards/charts, real PCS
   selectors, hidden query staging and coaching Call ID.
 - `1.0.0`: approved compact operational system for PCS, RTM/LOB Service Flash,

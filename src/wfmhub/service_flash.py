@@ -10,6 +10,7 @@ from typing import Any, Iterable, Sequence
 
 from .config import Config
 from .database import DatabaseConnection
+from .excel_layout import V2ChartSpec, render_v2_dashboard
 from .mapping import QueueMapping, load_queue_mapping
 from .metrics import MetricCatalog, evaluate_metric, load_metric_catalog
 from .report_packs import (
@@ -805,35 +806,89 @@ def _add_flash_sheet(
 ) -> None:
     sheet_name = _rtm_sheet(profile)
     ws = book.report.workbook.add_worksheet(sheet_name)
-    ws.hide_gridlines(2)
-    ws.set_tab_color(COLORS["gold"])
-    ws.set_zoom(85)
     cutoff_text = f"through {cutoff:02d}:59" if cutoff is not None else "no mapped queue entries"
     ready = total is not None and total.get("forecast") is not None
-    book.compact_header(
-        ws,
-        f"SERVICE FLASH  /  {profile.label.upper()}",
-        f"Calls {cutoff_text}  |  attendance {pulse['mode'].lower()} at {pulse['checkpoint']:%H:%M}  |  generated {book.generated:%H:%M}",
-        last_col=14,
-        status="LIVE" if ready else "INCOMPLETE",
-        status_label="UPDATED" if ready else "CHECK DATA",
+    headers, display_rows, forecast_col, actual_col, sl_col = _flash_columns(profile, hourly)
+    action_labels = {
+        "CALL_NO_SHOW": "CALL NOW — NO SHOW",
+        "CALL_NOT_SEEN_NOW": "CALL NOW — NOT SEEN",
+        "CALL_LATE": "CALL / FOLLOW UP — LATE",
+        "CHECK_OFFLINE_NOW": "CHECK — OFFLINE NOW",
+        "CHECK_DATA_POSSIBLE_NO_SHOW": "CHECK DATA",
+        "NONE": "—",
+    }
+    sorted_attendance = sorted(
+        attendance,
+        key=lambda row: (
+            0 if row.get("no_show") else
+            1 if row.get("call_now") else
+            2 if row.get("offline_now") else
+            3 if str(row.get("attendance_state")).startswith("UNKNOWN") else
+            4 if row.get("late_today") else 5,
+            str(row.get("team_leader") or ""),
+            str(row.get("agent_name") or ""),
+        ),
     )
-    book.scope_strip(
-        ws,
-        (
+    action_rows = []
+    for row in sorted_attendance[:8]:
+        start = _as_datetime(row.get("scheduled_start"))
+        end = _as_datetime(row.get("scheduled_end"))
+        shift = f"{start:%H:%M}–{end:%H:%M}" if start and end else "—"
+        action_rows.append((
+            f"{row.get('agent_name') or 'Agent'} [{row.get('agent_id') or '—'}]",
+            shift, row.get("attendance_state") or "UNKNOWN",
+            int(bool(row.get("no_show"))),
+            int(bool(row.get("late_today"))),
+            int(bool(row.get("early_leave"))),
+            action_labels.get(
+                str(row.get("pulse_action") or "NONE"),
+                str(row.get("pulse_action") or "—"),
+            ),
+        ))
+    hourly_categories = tuple(str(row.get("hour_label") or "") for row in hourly)
+    render_v2_dashboard(
+        book.report.workbook, ws,
+        title=f"{sheet_name.upper()} SERVICE FLASH",
+        filters=(
             ("Date", report_day.isoformat()),
-            ("LOB", profile.label),
-            ("Call data", cutoff_text),
+            ("Snapshot", cutoff_text.replace("through ", "")),
+            ("Queue scope", "Configured"),
             ("Attendance", f"{pulse['checkpoint']:%H:%M}"),
         ),
-        row=3,
-        last_col=14,
+        kpis=(
+            ("TSL", (total or {}).get("service_level"), "percent"),
+            ("Offered", (total or {}).get("offered"), "integer"),
+            ("Volume variance", (total or {}).get("volume_variance"), "integer"),
+            ("No Show HC", pulse.get("no_show_hc"), "integer"),
+        ),
+        left_chart=V2ChartSpec(
+            "HOURLY ACTUAL VS FORECAST", "column", hourly_categories,
+            (
+                ("Actual", tuple(row.get("offered") for row in hourly), COLORS["teal"]),
+                ("Forecast", tuple(row.get("forecast") for row in hourly), COLORS["muted"]),
+            ),
+        ),
+        right_chart=V2ChartSpec(
+            "HOURLY SERVICE LEVEL", "line", hourly_categories,
+            (
+                ("TSL", tuple(row.get("service_level") for row in hourly), COLORS["teal"]),
+                ("Target", tuple(row.get("service_target") for row in hourly), COLORS["muted"]),
+            ),
+            "percent", 0, 1,
+        ),
+        action_title="Attendance pulse & call list",
+        action_headers=("AGENT", "SHIFT", "STATE NOW", "NO SHOW", "LATE", "EARLY LEAVE", "ACTION"),
+        action_rows=action_rows,
+        action_kinds=("text", "text", "text", "integer", "integer", "integer", "alert"),
+        status=f"UPDATED {book.generated:%H:%M}" if ready else "CHECK DATA",
+        status_kind="LIVE" if ready else "INCOMPLETE",
+        status_note=(
+            f"Calls {cutoff_text}; attendance {pulse['mode'].lower()} at "
+            f"{pulse['checkpoint']:%H:%M}."
+        ),
     )
     formats = _formats(book)
-    for index, card in enumerate(_flash_cards(profile, total, group_totals, pulse)):
-        _write_card(ws, formats, index * 4, *card)
-    headers, display_rows, forecast_col, actual_col, sl_col = _flash_columns(profile, hourly)
-    table_row = 10
+    table_row = 34
     for column, header in enumerate(headers):
         ws.write(table_row, column, header, book.report.header)
     for row_index, values in enumerate(display_rows, table_row + 1):
@@ -893,34 +948,6 @@ def _add_flash_sheet(
             ws.write(total_row, column, value, fmt)
 
     data_last_row = table_row + len(display_rows)
-    if display_rows:
-        chart = book.report.workbook.add_chart({"type": "column"})
-        volume_series = (
-            ("Forecast", forecast_col, COLORS["muted"]),
-            ("Actual", actual_col, COLORS["teal"]),
-        )
-        for label_text, column, color in volume_series:
-            chart.add_series({
-                "name": label_text,
-                "categories": [sheet_name, table_row + 1, 0, data_last_row, 0],
-                "values": [sheet_name, table_row + 1, column, data_last_row, column],
-                "fill": {"color": color}, "border": {"none": True},
-            })
-        line = book.report.workbook.add_chart({"type": "line"})
-        line.add_series({
-            "name": "TSL",
-            "categories": [sheet_name, table_row + 1, 0, data_last_row, 0],
-            "values": [sheet_name, table_row + 1, sl_col, data_last_row, sl_col],
-            "y2_axis": True, "line": {"color": COLORS["gold"], "width": 2.25},
-        })
-        chart.combine(line)
-        chart.set_title({"name": "Hourly demand and service"})
-        chart.set_legend({"position": "bottom"})
-        chart.set_y2_axis({"num_format": "0%", "min": 0, "max": 1})
-        chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-        chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-        ws.insert_chart(table_row, len(headers) + 1, chart, {"x_scale": 1.05, "y_scale": 1.0})
-
     target = total_values.get("service_target")
     if target is not None and display_rows:
         ws.conditional_format(table_row + 1, sl_col, data_last_row, sl_col, {
@@ -954,30 +981,10 @@ def _add_flash_sheet(
         else:
             ws.write(attendance_section + 3, column, value, fmt)
 
-    action_labels = {
-        "CALL_NO_SHOW": "CALL NOW — NO SHOW",
-        "CALL_NOT_SEEN_NOW": "CALL NOW — NOT SEEN",
-        "CALL_LATE": "CALL / FOLLOW UP — LATE",
-        "CHECK_OFFLINE_NOW": "CHECK — OFFLINE NOW",
-        "CHECK_DATA_POSSIBLE_NO_SHOW": "CHECK DATA — POSSIBLE NO SHOW",
-        "NONE": "—",
-    }
     attendance_headers = [
         "Agent", "Agent ID", "Team Leader", "Shift", "First Seen", "State",
         "Time Off", "Late Min", "Action", "Evidence",
     ]
-    sorted_attendance = sorted(
-        attendance,
-        key=lambda row: (
-            0 if row.get("no_show") else
-            1 if row.get("call_now") else
-            2 if row.get("offline_now") else
-            3 if str(row.get("attendance_state")).startswith("UNKNOWN") else
-            4 if row.get("late_today") else 5,
-            str(row.get("team_leader") or ""),
-            str(row.get("agent_name") or ""),
-        ),
-    )
     attendance_rows = []
     for row in sorted_attendance:
         start = _as_datetime(row.get("scheduled_start"))
@@ -1043,25 +1050,6 @@ def _add_flash_sheet(
             "No scheduled working agents were found for this LOB/date.",
             book.report.note,
         )
-    for column, header in enumerate(headers):
-        width = 13
-        if header == "Hour":
-            width = 10
-        elif header == "Data State":
-            width = 20
-        elif len(header) > 17:
-            width = 18
-        ws.set_column(column, column, width)
-    ws.set_column(0, 0, 22)
-    ws.set_column(1, 2, 16)
-    ws.set_column(3, 4, 18)
-    ws.set_column(5, 5, 18)
-    ws.set_column(6, 6, 24)
-    ws.set_column(7, 7, 12)
-    ws.set_column(8, 8, 28)
-    ws.set_column(9, 14, 17)
-    ws.set_column(len(headers) + 1, len(headers) + 10, 11)
-    ws.freeze_panes(table_row + 1, 1)
     ws.set_landscape()
     ws.fit_to_pages(1, 0)
 
@@ -1096,48 +1084,60 @@ def _add_control_sheet(
     no_show_hc = sum(int(pulse.get("no_show_hc") or 0) for *_rest, pulse in summaries)
     call_now = sum(int(pulse.get("call_now") or 0) for *_rest, pulse in summaries)
     workbook_ready = bool(summaries) and ready_count == len(summaries)
-    book.compact_header(
-        ws,
-        "RTM DAILY CONTROL",
-        f"Service, attendance and call actions by operational LOB  |  {ready_count}/{len(summaries)} LOBs ready",
-        last_col=13,
-        status="LIVE" if workbook_ready else "INCOMPLETE",
-        status_label=f"UPDATED {book.generated:%H:%M}" if workbook_ready else "CHECK DATA",
-    )
     latest_cutoffs = [cutoff for _profile, _total, cutoff, _pulse in summaries if cutoff is not None]
     checkpoint_values = [
         pulse.get("checkpoint") for _profile, _total, _cutoff, pulse in summaries
         if pulse.get("checkpoint") is not None
     ]
-    book.scope_strip(
-        ws,
-        (
+    lob_labels = tuple(profile.label for profile, *_rest in summaries)
+    render_v2_dashboard(
+        book.report.workbook, ws,
+        title="RTM DAILY CONTROL",
+        filters=(
             ("Date", report_day.isoformat()),
-            ("Snapshot", f"through {max(latest_cutoffs):02d}:59" if latest_cutoffs else "No calls"),
-            ("LOB", f"All {len(summaries)} operational LOBs"),
+            ("Snapshot", f"Through {max(latest_cutoffs):02d}:59" if latest_cutoffs else "No calls"),
+            ("LOB", f"All {len(summaries)}"),
             ("Attendance", max(checkpoint_values).strftime("%H:%M") if checkpoint_values else "No evidence"),
         ),
-        row=3,
-        last_col=13,
-    )
-    book.four_card_row(
-        ws,
-        (
-            KpiCard("LOBs on target", f"{on_target} / {len(summaries)}", "text", "Configured TSL target by LOB"),
-            KpiCard("Demand variance", sum(variances) if variances else None, "integer", "Actual minus forecast through cutoff"),
-            KpiCard("No Show HC", no_show_hc, "integer", "Confirmed absence evidence only"),
-            KpiCard("Call now", call_now, "integer", "Exact agents are on each LOB tab"),
+        kpis=(
+            ("LOBs on target", f"{on_target} / {len(summaries)}", "text"),
+            ("Demand variance", sum(variances) if variances else None, "integer"),
+            ("No Show HC", no_show_hc, "integer"),
+            ("Call now", call_now, "integer"),
         ),
-        row=5,
-        starts=(0, 4, 8, 11),
-        width=3,
+        left_chart=V2ChartSpec(
+            "SERVICE LEVEL BY LOB", "bar", lob_labels,
+            (
+                ("TSL", tuple((total or {}).get("service_level") for _p, total, _c, _a in summaries), COLORS["teal"]),
+                ("Target", tuple((total or {}).get("service_target") for _p, total, _c, _a in summaries), COLORS["muted"]),
+            ),
+            "percent", 0, 1,
+        ),
+        right_chart=V2ChartSpec(
+            "ACTUAL VS FORECAST", "column", lob_labels,
+            (
+                ("Actual", tuple((total or {}).get("offered") for _p, total, _c, _a in summaries), COLORS["teal"]),
+                ("Forecast", tuple((total or {}).get("forecast") for _p, total, _c, _a in summaries), COLORS["muted"]),
+            ),
+        ),
+        action_title="LOB service & attendance actions",
+        action_headers=("LOB", "TSL", "VAR CALLS", "NO SHOW", "LATE", "EARLY LEAVE", "CALL NOW"),
+        action_rows=tuple((
+            profile.label, (total or {}).get("service_level"),
+            (total or {}).get("volume_variance"), pulse.get("no_show_hc"),
+            pulse.get("late_today"), pulse.get("early_leave"), pulse.get("call_now"),
+        ) for profile, total, _cutoff, pulse in summaries),
+        action_kinds=("text", "percent", "change", "integer", "integer", "integer", "alert"),
+        status=f"UPDATED {book.generated:%H:%M}" if workbook_ready else "CHECK DATA",
+        status_kind="LIVE" if workbook_ready else "INCOMPLETE",
+        status_note=f"{ready_count}/{len(summaries)} operational LOBs have call and forecast data.",
     )
     headers = [
         "LOB", "Last Call Hour", "TSL", "Target", "Actual", "Forecast",
         "Variance", "Routed Rate", "No Show HC", "PTO / Away HC",
         "Offline Now", "Unknown HC", "Call Now", "Status",
     ]
-    table_row = 10
+    table_row = 34
     for col, header in enumerate(headers):
         ws.write(table_row, col, header, book.report.header)
     for offset, (profile, total, cutoff, pulse) in enumerate(summaries, table_row + 1):
@@ -1177,40 +1177,18 @@ def _add_control_sheet(
             "type": "text", "criteria": "containing", "value": "MISSING",
             "format": book.report.error,
         })
-        chart = book.report.workbook.add_chart({"type": "bar"})
-        for label, column, color in (
-                ("TSL", 2, COLORS["teal"]), ("Target", 3, COLORS["muted"]),
-        ):
-            chart.add_series({
-                "name": label,
-                "categories": ["CONTROL", table_row + 1, 0, table_row + len(summaries), 0],
-                "values": ["CONTROL", table_row + 1, column, table_row + len(summaries), column],
-                "fill": {"color": color}, "border": {"none": True},
-            })
-        chart.set_title({"name": "SERVICE LEVEL BY LOB"})
-        chart.set_legend({"position": "bottom"})
-        chart.set_x_axis({
-            "num_format": "0%", "min": 0, "max": 1,
-            "major_gridlines": {"visible": True, "line": {"color": COLORS["thin"]}},
-        })
-        chart.set_y_axis({"reverse": True, "major_gridlines": {"visible": False}})
-        chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-        chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-        ws.insert_chart("A18", chart, {"x_scale": 1.2, "y_scale": 1.05})
     notes = [
         "Open a LOB name for its full-day service curve and matching attendance call list.",
         f"TSL follows the approved Storm C/(A+B-D) method at {rulebook.target_seconds}s; each LOB keeps its configured target.",
         "No Show requires explicit evidence. PTO/Away is excluded; Unknown remains a data check, never an automatic call.",
     ]
-    ws.merge_range("J18:N18", "OPERATING NOTES", book.report.section)
+    notes_row = table_row + len(summaries) + 3
+    ws.merge_range(notes_row, 0, notes_row, 13, "OPERATING NOTES", book.report.section)
     for offset, note in enumerate(notes):
-        note_row = 18 + offset * 3
-        ws.merge_range(note_row, 9, note_row + 1, 13, note, book.report.note)
+        note_row = notes_row + 1 + offset * 2
+        ws.merge_range(note_row, 0, note_row + 1, 13, note, book.report.note)
         ws.set_row(note_row, 24)
         ws.set_row(note_row + 1, 24)
-    ws.set_column("A:A", 23)
-    ws.set_column("B:N", 15)
-    ws.freeze_panes(table_row + 1, 0)
     ws.set_landscape()
     ws.fit_to_pages(1, 1)
 

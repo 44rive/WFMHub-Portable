@@ -16,9 +16,11 @@ from .excel_layout import (
     ACTION_FIRST_ROW,
     ACTION_HEADER_ROW,
     ACTION_VISIBLE_ROWS,
+    V2ChartSpec,
     configure_v2_cell_canvas,
     insert_v2_charts,
     make_v2_formats,
+    render_v2_dashboard,
     style_v2_chart,
     write_v2_filters,
     write_v2_header,
@@ -2317,33 +2319,46 @@ def build_realisations_workbook(
     review_days = sum(1 for row in daily_rows if row[-4])
     if review_days:
         status, status_text = "INCOMPLETE", f"{review_days:,} day(s) include absence review cases"
-    book.dashboard(
-        [
-            KpiCard("Actual volume", total_actual, "integer"),
-            KpiCard("Forecast volume", total_forecast if forecast_present else None, "integer"),
-            KpiCard("Forecast attainment", _ratio(total_actual, total_forecast) if forecast_present else None, "percent"),
-            KpiCard("Mapped LOBs", len(selected_profiles), "integer"),
-            KpiCard("Routed rate", availability_value, "percent"),
-            KpiCard("Weighted AHT", aht_value, "decimal"),
-            KpiCard("Absence rate", _ratio(total_absence, total_planned), "percent"),
-            KpiCard("Shrinkage rate", _ratio(total_shrinkage, total_planned), "percent"),
-        ],
-        status,
-        status_text,
-        [
-            "LOB", "Actual", "Forecast", "Attainment %", "Service Level %",
-            "SL Target %", "Routed Rate %", "AHT Seconds", "Absence Rate %",
-            "Shrinkage Rate %", "State",
-        ],
-        profile_summary,
-        [
-            "Queue membership is maintained in Queue Mapping; service and roster LOB links are maintained in Service Profiles.",
-            "Forecast comes from Verint. Actual volume, service level and AHT come from mapped inbound Call-by-Call queue entries.",
-            "Routed Rate means answered / total entered, matching the Storm dashboard; it is not agent availability.",
-            "Absence uses reviewed Attendance decisions; open gaps remain visible and cannot silently dilute results.",
-            "Adherence is intentionally excluded.",
-        ],
-        (("Service Level", 4), ("Routed Rate", 6)),
+    dashboard = book.report.workbook.add_worksheet("DASHBOARD")
+    render_v2_dashboard(
+        book.report.workbook, dashboard,
+        title="REALISATIONS",
+        filters=(
+            ("Period", f"{start:%d %b} – {end:%d %b %Y}"),
+            ("LOB", "All mapped" if len(selected_profiles) > 1 else selected_profiles[0].label),
+            ("Grain", "Daily"),
+            ("Data state", "Reviewed" if status != "INCOMPLETE" else "Check data"),
+        ),
+        kpis=(
+            ("Actual volume", total_actual, "integer"),
+            ("Forecast attainment", _ratio(total_actual, total_forecast) if forecast_present else None, "percent"),
+            ("Routed rate", availability_value, "percent"),
+            ("Weighted AHT", aht_value, "decimal"),
+        ),
+        left_chart=V2ChartSpec(
+            "ACTUAL VS FORECAST BY LOB", "column",
+            tuple(row[0] for row in profile_summary),
+            (
+                ("Actual", tuple(row[1] for row in profile_summary), COLORS["teal"]),
+                ("Forecast", tuple(row[2] for row in profile_summary), COLORS["muted"]),
+            ),
+        ),
+        right_chart=V2ChartSpec(
+            "SERVICE LEVEL VS TARGET", "bar",
+            tuple(row[0] for row in profile_summary),
+            (
+                ("Service level", tuple(row[4] for row in profile_summary), COLORS["teal"]),
+                ("Target", tuple(row[5] for row in profile_summary), COLORS["muted"]),
+            ),
+            "percent", 0, 1,
+        ),
+        action_title="LOB realisation summary",
+        action_headers=("LOB", "ACTUAL", "FORECAST", "ATTAINMENT", "SERVICE LEVEL", "ABSENCE %", "STATE"),
+        action_rows=tuple((row[0], row[1], row[2], row[3], row[4], row[8], row[10]) for row in profile_summary),
+        action_kinds=("text", "integer", "integer", "percent", "percent", "percent", "alert"),
+        status="CHECK DATA" if status == "INCOMPLETE" else "IN DEVELOPMENT",
+        status_kind="INCOMPLETE" if status == "INCOMPLETE" else "PROVISIONAL",
+        status_note=status_text,
     )
     book.table(
         "LOB_RESULTS", "Daily LOB results",
@@ -2742,36 +2757,61 @@ def build_staffing_coverage_workbook(
     status, status_text = _source_state(conn, ("fte", "start_end", "forecast"), end)
     if no_forecast_intervals:
         status, status_text = "INCOMPLETE", f"{no_forecast_intervals:,} future interval(s) have no mapped forecast"
-    book.dashboard(
-        [
-            KpiCard("Peak gap FTE", peak_gap, "decimal", "Largest 15-minute deficit"),
-            KpiCard("Future gap intervals", future_gap_intervals, "integer"),
-            KpiCard("Future required hours", required_hours, "decimal", "FTE-hours from Verint"),
-            KpiCard("Future net scheduled", net_hours, "decimal", "After PTO and Away"),
-            KpiCard("Future gap hours", gap_hours, "decimal"),
-            KpiCard("PTO / Away impact", pto_hours, "decimal", "Capacity hours removed"),
-            KpiCard("Actual gap intervals", actual_gap_intervals, "integer"),
-            KpiCard("Forecast coverage", _ratio(required_hours - gap_hours, required_hours), "percent"),
-        ],
-        status,
-        status_text,
-        ["Measure", "Value"],
-        [
-            ("Required future FTE-hours", required_hours),
-            ("Net scheduled future FTE-hours", net_hours),
-            ("Future shortage FTE-hours", gap_hours),
-            ("PTO / Away FTE-hours", pto_hours),
-            ("Future gap intervals", future_gap_intervals),
-            ("Actual gap intervals", actual_gap_intervals),
-        ],
-        [
-            "Future plan compares Verint required FTE with net scheduled FTE after approved PTO and effective Away.",
-            "Service-to-roster LOB links are editable in Service Profiles; no text guess is made in the report.",
-            "Observed FTE is calculated from agent-seconds inside each 15-minute interval.",
-            "Missing forecast remains NO FORECAST. It is never converted to zero demand.",
-        ],
-        (("Value", 1),),
-        "column",
+    chart_rows = future_rows or plan_rows
+    by_lob: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
+    by_day: dict[str, float] = defaultdict(float)
+    for row in chart_rows:
+        lob_label = str(row[4] or "Unmapped")
+        by_lob[lob_label][0] += float(row[10] or 0) * 0.25
+        by_lob[lob_label][1] += float(row[13] or 0) * 0.25
+        gap_value = float((row[15] if row[7] == "FUTURE PLAN" else row[18]) or 0)
+        day_label = row[0].strftime("%a %d") if isinstance(row[0], date) else str(row[0])
+        by_day[day_label] = max(by_day[day_label], gap_value)
+    priority_actions = sorted(
+        actions,
+        key=lambda row: max(float(row[15] or 0), float(row[18] or 0)),
+        reverse=True,
+    )[:8]
+    dashboard = book.report.workbook.add_worksheet("DASHBOARD")
+    render_v2_dashboard(
+        book.report.workbook, dashboard,
+        title="STAFFING & COVERAGE",
+        filters=(
+            ("Period", f"{start:%d %b} – {end:%d %b %Y}"),
+            ("Mode", "Future plan" if future_rows else "Actual control"),
+            ("LOB", "All"),
+            ("Language", "All"),
+        ),
+        kpis=(
+            ("Peak gap FTE", peak_gap, "decimal"),
+            ("Future gap hours", gap_hours, "decimal"),
+            ("Forecast coverage", _ratio(required_hours - gap_hours, required_hours), "percent"),
+            ("PTO / Away impact", pto_hours, "decimal"),
+        ),
+        left_chart=V2ChartSpec(
+            "REQUIRED VS NET SCHEDULED HOURS", "column", tuple(by_lob),
+            (
+                ("Required", tuple(values[0] for values in by_lob.values()), COLORS["teal"]),
+                ("Net scheduled", tuple(values[1] for values in by_lob.values()), COLORS["muted"]),
+            ),
+        ),
+        right_chart=V2ChartSpec(
+            "PEAK GAP BY DAY", "line", tuple(by_day),
+            (("Gap FTE", tuple(by_day.values()), COLORS["red"]),),
+        ),
+        action_title="Prioritized capacity actions",
+        action_headers=("INTERVAL", "LOB / LANGUAGE", "MODE", "REQUIRED FTE", "NET / OBSERVED", "GAP FTE", "STATE"),
+        action_rows=tuple((
+            row[2].strftime("%d %b %H:%M") if isinstance(row[2], datetime) else str(row[2]),
+            f"{row[4]} / {row[6]}",
+            "Future" if row[7] == "FUTURE PLAN" else "Actual",
+            row[10], row[13] if row[7] == "FUTURE PLAN" else row[16],
+            row[15] if row[7] == "FUTURE PLAN" else row[18], row[19],
+        ) for row in priority_actions),
+        action_kinds=("text", "text", "text", "decimal", "decimal", "decimal", "alert"),
+        status="CHECK DATA" if status == "INCOMPLETE" else "IN DEVELOPMENT",
+        status_kind="INCOMPLETE" if status == "INCOMPLETE" else "PROVISIONAL",
+        status_note=status_text,
     )
 
     weekly: dict[tuple[str, str, str, str], list[tuple[Any, ...]]] = defaultdict(list)
@@ -3397,32 +3437,81 @@ def build_final_absence_product_workbook(
             values[3] / 60, _ratio(values[3], values[0]),
         ))
     coverage = _ratio(finalized_planned, all_planned)
-    book.dashboard(
-        [
-            KpiCard("Finalized planned hours", planned / 60, "decimal"),
-            KpiCard("Absence hours", absence / 60, "decimal"),
-            KpiCard("Absence rate", _ratio(absence, planned), "percent"),
-            KpiCard("Absence agent-days", absence_days, "integer"),
-            KpiCard("Shrinkage hours", shrinkage / 60, "decimal"),
-            KpiCard("Shrinkage rate", _ratio(shrinkage, planned), "percent"),
-            KpiCard("Vacation / unpaid", (vacation + unpaid) / 60, "decimal"),
-            KpiCard("Finalized coverage", coverage, "percent", f"{exceptions:,} review case(s)"),
-        ],
-        status,
-        status_text,
-        [
-            "Period", "Start", "End", "Planned Hours", "Absence Hours",
-            "Absence Rate %", "Vacation Hours", "Shrinkage Hours",
-            "Shrinkage Rate %",
-        ],
-        period_rows,
-        [
-            "Results use exact Agent Status/LILO gaps inside schedule boundaries and the imported Attendance Review decisions.",
-            "Agent Status is primary evidence; LILO fills missing coverage. Neither source assigns a reason without human review.",
-            "Absence and shrinkage are parallel views. Do not add their percentages together.",
-            "Open ACTIONS for unresolved cases and use ACTIVITY_DETAIL when an exact interval needs investigation.",
-        ],
-        (("Absence rate", 5), ("Shrinkage rate", 8)),
+    lob_dashboard_rows = conn.execute(
+        """SELECT coalesce(lob,'UNMAPPED'),
+                  CASE WHEN sum(planned_net_minutes)>0
+                       THEN sum(final_absence_minutes)*1.0/sum(planned_net_minutes) END,
+                  CASE WHEN sum(planned_net_minutes)>0
+                       THEN sum(final_shrinkage_minutes)*1.0/sum(planned_net_minutes) END
+           FROM mart.verint_final_absence_agent_day
+           WHERE business_date BETWEEN ? AND ?
+             AND final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')
+           GROUP BY coalesce(lob,'UNMAPPED') ORDER BY coalesce(lob,'UNMAPPED')""",
+        [start, end],
+    ).fetchall()
+    daily_dashboard_rows = conn.execute(
+        """SELECT business_date, sum(final_absence_minutes)/60.0,
+                  sum(final_shrinkage_minutes)/60.0
+           FROM mart.verint_final_absence_agent_day
+           WHERE business_date BETWEEN ? AND ?
+             AND final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')
+           GROUP BY business_date ORDER BY business_date""",
+        [start, end],
+    ).fetchall()
+    dashboard_cases = conn.execute(
+        """SELECT business_date,
+                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']',
+                  coalesce(team_leader,'Unmapped'), coalesce(lob,'UNMAPPED'),
+                  final_ledger_status, final_absence_minutes/60.0,
+                  CASE WHEN final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')
+                       THEN 'Pending' ELSE 'Needs review' END
+           FROM mart.verint_final_absence_agent_day
+           WHERE business_date BETWEEN ? AND ?
+             AND (final_absence_day=true
+                  OR final_ledger_status NOT IN ('CLEAR','ABSENCE_RECORDED'))
+           ORDER BY CASE WHEN final_ledger_status IN ('CLEAR','ABSENCE_RECORDED')
+                         THEN 1 ELSE 0 END,
+                    business_date DESC, lob, team_leader, agent_name LIMIT 8""",
+        [start, end],
+    ).fetchall()
+    dashboard = book.report.workbook.add_worksheet("DASHBOARD")
+    render_v2_dashboard(
+        book.report.workbook, dashboard,
+        title="ABSENTEEISM & SHRINKAGE",
+        filters=(
+            ("Period", f"{start:%d %b} – {end:%d %b %Y}"),
+            ("LOB", "All"), ("Team Leader", "All"), ("Agent", "All"),
+        ),
+        kpis=(
+            ("Absence rate", _ratio(absence, planned), "percent"),
+            ("Shrinkage rate", _ratio(shrinkage, planned), "percent"),
+            ("Finalized coverage", coverage, "percent"),
+            ("Review cases", exceptions, "integer"),
+        ),
+        left_chart=V2ChartSpec(
+            "ABSENCE & SHRINKAGE BY LOB", "bar",
+            tuple(str(row[0]) for row in lob_dashboard_rows),
+            (
+                ("Absence", tuple(row[1] for row in lob_dashboard_rows), COLORS["red"]),
+                ("Shrinkage", tuple(row[2] for row in lob_dashboard_rows), COLORS["teal"]),
+            ),
+            "percent", 0,
+        ),
+        right_chart=V2ChartSpec(
+            "DAILY ABSENCE & SHRINKAGE HOURS", "line",
+            tuple(row[0].strftime("%d") if isinstance(row[0], date) else str(row[0]) for row in daily_dashboard_rows),
+            (
+                ("Absence hours", tuple(row[1] for row in daily_dashboard_rows), COLORS["red"]),
+                ("Shrinkage hours", tuple(row[2] for row in daily_dashboard_rows), COLORS["teal"]),
+            ),
+        ),
+        action_title="Prioritized absence review cases",
+        action_headers=("DATE", "AGENT", "TEAM LEADER", "LOB", "RESULT STATUS", "ABSENCE H", "ACTION STATUS"),
+        action_rows=dashboard_cases,
+        action_kinds=("text", "text", "text", "text", "text", "decimal", "alert"),
+        status="CHECK DATA" if status == "INCOMPLETE" else "IN DEVELOPMENT",
+        status_kind="INCOMPLETE" if status == "INCOMPLETE" else "PROVISIONAL",
+        status_note=status_text,
     )
     _add_absence_team_view(book, start, end, data_start, latest)
 
@@ -3809,56 +3898,57 @@ def _add_attendance_review_control(
 
     wb = book.report.workbook
     ws = wb.add_worksheet("CONTROL")
-    ws.hide_gridlines(2)
-    ws.set_tab_color(COLORS["gold"])
-    ws.set_zoom(86)
-    ws.set_landscape()
-    ws.fit_to_pages(1, 1)
-    book.compact_header(
-        ws,
-        "ATTENDANCE REVIEW",
-        f"Completed dates {start:%Y-%m-%d} to {end:%Y-%m-%d}  |  exact schedule-versus-observed decisions  |  {status_text}",
-        last_col=18,
-        status=status,
-        status_label="REVIEW READY" if status != "INCOMPLETE" else "ACTION REQUIRED",
-    )
-    book.scope_strip(
-        ws,
-        (
-            ("Period", f"{start:%d %b} – {end:%d %b %Y}"),
-            ("Completed through", completed_through.isoformat()),
-            ("Evidence", "Agent Status + LILO"),
-            ("Decision", "Open REVIEW BOARD"),
-        ),
-        row=3,
-        last_col=18,
-    )
-    ws.write_url(
-        "Q4", "internal:'REVIEW BOARD'!A1", book.scope_value,
-        string="OPEN REVIEW BOARD",
-    )
-    book.four_card_row(
-        ws,
-        (
-            KpiCard("Review gaps", gap_count, "integer", "Exact completed-day intervals"),
-            KpiCard("Gap hours", gap_minutes / 60 if gap_minutes else 0, "decimal", "Exact minutes / 60"),
-            KpiCard("Open decisions", open_count, "integer", "Awaiting human review"),
-            KpiCard("Missing evidence", missing, "integer", "Never converted to no-show or zero"),
-        ),
-        row=5,
-        starts=(0, 5, 10, 15),
-        width=4,
-    )
-
     summary_headers = (
         "LOB", "Exact Gaps", "Gap Hours", "Agents", "Open", "Approved",
         "Dismissed",
     )
-    ws.merge_range("A11:G11", "BY-LOB ACTION SUMMARY", book.report.section)
-    table_row = 11
+    display_rows = list(lob_rows) or [("No review gaps", 0, 0, 0, 0, 0, 0)]
+    lob_labels = tuple(str(row[0]) for row in display_rows)
+    decision_categories = ("Open", "Approved", "Dismissed", "Missing")
+    decision_values = (
+        sum(int(row[4] or 0) for row in display_rows),
+        sum(int(row[5] or 0) for row in display_rows),
+        sum(int(row[6] or 0) for row in display_rows),
+        missing,
+    )
+    formats = render_v2_dashboard(
+        wb, ws,
+        title="ATTENDANCE REVIEW",
+        filters=(
+            ("Period", f"{start:%d %b} – {end:%d %b %Y}"),
+            ("Completed", f"Through {completed_through:%d %b}"),
+            ("Evidence", "Status + LILO"),
+            ("Decision", "Open review board"),
+        ),
+        kpis=(
+            ("Review gaps", gap_count, "integer"),
+            ("Gap hours", gap_minutes / 60 if gap_minutes else 0, "decimal"),
+            ("Open decisions", open_count, "integer"),
+            ("Missing evidence", missing, "integer"),
+        ),
+        left_chart=V2ChartSpec(
+            "GAP HOURS BY LOB", "bar", lob_labels,
+            (("Gap hours", tuple(float(row[2] or 0) for row in display_rows), COLORS["teal"]),),
+        ),
+        right_chart=V2ChartSpec(
+            "DECISION STATUS", "column", decision_categories,
+            (("Cases", decision_values, COLORS["teal"]),),
+        ),
+        action_title="By-LOB review actions",
+        action_headers=summary_headers,
+        action_rows=display_rows,
+        action_kinds=("text", "integer", "decimal", "integer", "alert", "integer", "integer"),
+        status="REVIEW READY" if status != "INCOMPLETE" else "ACTION REQUIRED",
+        status_kind=status,
+        status_note=status_text,
+    )
+    ws.write_url(
+        1, 23, "internal:'REVIEW BOARD'!A1", formats.filter_value,
+        string="Open review board",
+    )
+    table_row = 34
     for column, header in enumerate(summary_headers):
         ws.write(table_row, column, header, book.report.header)
-    display_rows = list(lob_rows) or [("No review gaps", 0, 0, 0, 0, 0, 0)]
     for row_index, values in enumerate(display_rows, table_row + 1):
         for column, value in enumerate(values):
             fmt = book.report.decimal if column == 2 else (
@@ -3877,27 +3967,7 @@ def _add_attendance_review_control(
         },
     )
     book.tables.append(ModelTable("CONTROL", summary_headers, display_rows))
-    if lob_rows:
-        chart = wb.add_chart({"type": "bar"})
-        chart.add_series({
-            "name": "Gap hours",
-            "categories": ["CONTROL", table_row + 1, 0, table_row + len(lob_rows), 0],
-            "values": ["CONTROL", table_row + 1, 2, table_row + len(lob_rows), 2],
-            "fill": {"color": COLORS["teal"]},
-            "border": {"none": True},
-        })
-        chart.set_title({"name": "GAP HOURS BY LOB"})
-        chart.set_legend({"none": True})
-        chart.set_x_axis({
-            "min": 0,
-            "major_gridlines": {"visible": True, "line": {"color": COLORS["thin"]}},
-        })
-        chart.set_y_axis({"reverse": True, "major_gridlines": {"visible": False}})
-        chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-        chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-        ws.insert_chart("I11", chart, {"x_scale": 1.2, "y_scale": 1.05})
-
-    notes_row = max(28, table_row + len(display_rows) + 3)
+    notes_row = table_row + len(display_rows) + 3
     ws.merge_range(notes_row, 0, notes_row, 18, "OPERATING NOTES", book.report.section)
     for offset, note in enumerate((
         "Open REVIEW BOARD: each case keeps SCHEDULE directly above ACTUAL; edit only the five blue ACTUAL cells.",
@@ -3906,11 +3976,8 @@ def _add_attendance_review_control(
     ), 1):
         ws.merge_range(notes_row + offset, 0, notes_row + offset, 18, note, book.report.note)
         ws.set_row(notes_row + offset, 22)
-    ws.set_column("A:A", 20)
-    ws.set_column("B:G", 14)
-    ws.set_column("H:H", 3)
-    ws.set_column("I:S", 12)
-    ws.freeze_panes(table_row + 1, 0)
+    ws.set_landscape()
+    ws.fit_to_pages(1, 1)
 
 
 def build_attendance_corrections_workbook(

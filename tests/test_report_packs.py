@@ -30,18 +30,22 @@ class ReportPackTests(unittest.TestCase):
         self.assertIs(REPORT_COLORS, COLORS)
         self.assertIs(SHARED_REPORT_COLORS, COLORS)
         self.assertEqual((REPORT_DESIGN_ID, REPORT_DESIGN_VERSION), (
-            "WFMHUB-DESIGN", "2.0.0",
+            "WFMHUB-DESIGN", "2.1.0",
         ))
         reference = repo / "docs" / "WFMHub Report Design Reference.xlsx"
         self.assertTrue(reference.is_file())
         from openpyxl import load_workbook
 
-        workbook = load_workbook(reference, read_only=True, data_only=False)
+        workbook = load_workbook(reference, read_only=False, data_only=False)
         try:
             self.assertEqual(workbook.sheetnames, [
-                "DESIGN SYSTEM", "PCS", "RTM", "ATTENDANCE",
+                "DESIGN SYSTEM", "PCS", "RTM", "ATTENDANCE", "STAFFING",
+                "REALISATIONS", "ABSENCE", "BONUS",
             ])
             self.assertEqual(workbook["DESIGN SYSTEM"]["A1"].value, "WFMHUB REPORT SYSTEM")
+            for sheet_name in workbook.sheetnames[1:]:
+                self.assertEqual(workbook[sheet_name]["A2"].value, "PERIOD" if sheet_name not in {"RTM"} else "DATE")
+                self.assertEqual(len(workbook[sheet_name]._charts), 2)
         finally:
             workbook.close()
 

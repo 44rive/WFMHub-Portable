@@ -1,8 +1,8 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.1.0`
-Applies to: WFMHub `0.23.1` and later
-Last reviewed: `2026-09-08`
+Context version: `1.2.0`
+Applies to: WFMHub `0.24.0` and later
+Last reviewed: `2026-09-09`
 
 Read this file before proposing or changing WFMHub. When details are needed,
 follow the authoritative files listed below. Do not reconstruct decisions from
@@ -150,10 +150,13 @@ Power Query replaces only `tblPcsLob`, `tblResults`, `tblCoachingQueue`,
 or replaces the workbook. Repair/rebuild is explicit, versioned, archives the
 old copy and migrates readable keyed coaching actions.
 
-PCS `OVERVIEW` uses the measured grid in `src/wfmhub/excel_layout.py`: 28 equal
-52-pixel columns, four equal KPI cards, two equal 728 × 310 charts and a compact
-team action grid. Query tables live in detail or hidden staging sheets, never on
-the dashboard. Period → LOB → Team Leader → Agent selectors come from
+Every current report first screen uses the measured grid in
+`src/wfmhub/excel_layout.py`: 28 equal 52-pixel columns, four equal KPI cards,
+two equal 728 × 310 charts and a compact seven-field action grid. RTM and
+Attendance remain Operational; visual consistency does not promote Staffing,
+Realisations, Absenteeism/Shrinkage, or Bonus from In Development. PCS query
+tables live in detail or hidden staging sheets, never on the dashboard.
+Period → LOB → Team Leader → Agent selectors come from
 `tblPcsScope`. `COACHING` shows the exact source Call ID beside the permanent
 Coaching Key; Call ID is calculated and is not typed by Quality.
 

@@ -104,12 +104,14 @@ class V2Formats:
     card_decimal: Any
     card_percent: Any
     card_integer: Any
+    card_money: Any
     card_text: Any
     section: Any
     table_header: Any
     table_text: Any
     table_integer: Any
     table_decimal: Any
+    table_money: Any
     table_percent: Any
     positive: Any
     negative: Any
@@ -201,6 +203,14 @@ def make_v2_formats(workbook) -> V2Formats:
             "left_color": COLORS["line"], "right_color": COLORS["line"],
             "bottom_color": COLORS["line"],
         }),
+        card_money=add({
+            "font_name": TITLE_FONT, "font_size": 30, "bold": True,
+            "font_color": COLORS["teal"], "bg_color": COLORS["white"],
+            "align": "center", "valign": "vcenter", "num_format": "#,##0.00",
+            "left": 1, "right": 1, "bottom": 1,
+            "left_color": COLORS["line"], "right_color": COLORS["line"],
+            "bottom_color": COLORS["line"],
+        }),
         card_text=add({
             "font_name": TITLE_FONT, "font_size": 24, "bold": True,
             "font_color": COLORS["navy"], "bg_color": COLORS["white"],
@@ -235,6 +245,12 @@ def make_v2_formats(workbook) -> V2Formats:
             "font_name": BODY_FONT, "font_size": 10,
             "font_color": COLORS["navy"], "bg_color": COLORS["white"],
             "align": "center", "valign": "vcenter", "num_format": "0.00",
+            **table_border,
+        }),
+        table_money=add({
+            "font_name": BODY_FONT, "font_size": 10,
+            "font_color": COLORS["navy"], "bg_color": COLORS["white"],
+            "align": "right", "valign": "vcenter", "num_format": "#,##0.00",
             **table_border,
         }),
         table_percent=add({
@@ -354,6 +370,7 @@ def write_v2_kpis(
         "decimal": formats.card_decimal,
         "percent": formats.card_percent,
         "integer": formats.card_integer,
+        "money": formats.card_money,
         "text": formats.card_text,
     }
     accents = (formats.card_accent_teal, formats.card_accent_gold) * 2
@@ -435,3 +452,181 @@ def write_v2_section(ws, formats: V2Formats, title: str) -> None:
         ACTION_SECTION_ROW, 0, ACTION_SECTION_ROW, 14,
         title.upper(), formats.section,
     )
+
+
+@dataclass(frozen=True)
+class V2ChartSpec:
+    """Presentation-only chart input built from already-calculated values."""
+
+    title: str
+    kind: str
+    categories: Sequence[Any]
+    series: Sequence[tuple[str, Sequence[Any], str]]
+    value_kind: str = "number"
+    minimum: float | None = None
+    maximum: float | None = None
+
+
+def _v2_chart(workbook, ws, spec: V2ChartSpec, start_column: int):
+    """Build one native Excel chart using hidden dashboard helper cells."""
+
+    categories = tuple(spec.categories) or ("No data",)
+    category_column = start_column
+    first_row = 1
+    last_row = first_row + len(categories) - 1
+    ws.write(0, category_column, "Category")
+    for row, value in enumerate(categories, first_row):
+        ws.write(row, category_column, value)
+    chart = workbook.add_chart({"type": spec.kind})
+    for offset, (name, values, color) in enumerate(spec.series, 1):
+        normalized = tuple(values)
+        if not normalized:
+            normalized = (0,)
+        if len(normalized) < len(categories):
+            normalized += (None,) * (len(categories) - len(normalized))
+        value_column = start_column + offset
+        ws.write(0, value_column, name)
+        for row, value in enumerate(normalized[:len(categories)], first_row):
+            if value is None:
+                ws.write_blank(row, value_column, None)
+            else:
+                ws.write(row, value_column, value)
+        series: dict[str, Any] = {
+            "name": name,
+            "categories": [ws.name, first_row, category_column, last_row, category_column],
+            "values": [ws.name, first_row, value_column, last_row, value_column],
+        }
+        if spec.kind == "line":
+            series.update({
+                "line": {"color": color, "width": 2.25},
+                "marker": {
+                    "type": "circle", "size": 4,
+                    "border": {"color": color}, "fill": {"color": color},
+                },
+            })
+        else:
+            series.update({
+                "fill": {"color": color}, "border": {"none": True},
+                "data_labels": {
+                    "value": True,
+                    "num_format": "0%" if spec.value_kind == "percent" else "0.0",
+                },
+            })
+        chart.add_series(series)
+    style_v2_chart(
+        chart, title=spec.title,
+        kind="bar" if spec.kind == "bar" else "line",
+    )
+    value_axis: dict[str, Any] = {
+        "major_gridlines": {
+            "visible": True,
+            "line": {"color": COLORS["line"], "width": 0.75},
+        },
+    }
+    if spec.value_kind == "percent":
+        value_axis["num_format"] = "0%"
+    if spec.minimum is not None:
+        value_axis["min"] = spec.minimum
+    if spec.maximum is not None:
+        value_axis["max"] = spec.maximum
+    if spec.kind == "bar":
+        chart.set_x_axis(value_axis)
+        chart.set_y_axis({
+            "reverse": True, "major_gridlines": {"visible": False},
+            "num_font": {"name": BODY_FONT, "size": 9, "color": COLORS["navy"]},
+        })
+    else:
+        chart.set_y_axis(value_axis)
+        chart.set_x_axis({
+            "label_position": "low",
+            "num_font": {"name": BODY_FONT, "size": 8, "color": COLORS["muted"]},
+        })
+    chart.show_hidden_data()
+    return chart, start_column + len(spec.series)
+
+
+def _v2_value_format(formats: V2Formats, kind: str, value: Any):
+    if kind == "percent":
+        return formats.table_percent
+    if kind == "decimal":
+        return formats.table_decimal
+    if kind == "money":
+        return formats.table_money
+    if kind == "integer":
+        return formats.table_integer
+    if kind == "change":
+        return (
+            formats.positive
+            if isinstance(value, (int, float)) and value >= 0
+            else formats.negative
+        )
+    if kind == "alert":
+        clear_values = {0, "", None, "READY", "OK", "CLEAR", "NO ACTION", "NO CALL", "—"}
+        return formats.clear if value in clear_values else formats.due
+    return formats.table_text
+
+
+def render_v2_dashboard(
+    workbook,
+    ws,
+    *,
+    title: str,
+    filters: Sequence[tuple[str, Any]],
+    kpis: Sequence[tuple[str, Any, str]],
+    left_chart: V2ChartSpec,
+    right_chart: V2ChartSpec,
+    action_title: str,
+    action_headers: Sequence[str],
+    action_rows: Sequence[Sequence[Any]],
+    action_kinds: Sequence[str],
+    status: str,
+    status_kind: str,
+    status_note: str | None = None,
+    zoom: int = 85,
+) -> V2Formats:
+    """Render the approved measured first screen without business logic.
+
+    Callers remain responsible for every KPI, status and action decision. This
+    function only guarantees that those values are presented identically in
+    every WFMHub report.
+    """
+
+    formats = make_v2_formats(workbook)
+    configure_v2_cell_canvas(ws, formats, zoom=zoom)
+    ws.hide_row_col_headers()
+    ws.set_tab_color(COLORS["gold"])
+    ws.freeze_panes(2, 0)
+    write_v2_header(
+        ws, formats, title, status=status, status_kind=status_kind,
+    )
+    if status_note:
+        ws.write_comment(0, 24, status_note, {"author": "Anass ASSRI"})
+    write_v2_filters(
+        ws, formats, tuple((label, value, None) for label, value in filters),
+    )
+    write_v2_kpis(
+        ws, formats,
+        tuple((label, value, kind, None) for label, value, kind in kpis),
+    )
+    left, left_last = _v2_chart(workbook, ws, left_chart, 29)
+    right, right_last = _v2_chart(workbook, ws, right_chart, 35)
+    insert_v2_charts(ws, left, right)
+    write_v2_section(ws, formats, action_title)
+    for index, header in enumerate(tuple(action_headers)[:7]):
+        ws.merge_range(
+            ACTION_HEADER_ROW, index * 4, ACTION_HEADER_ROW, index * 4 + 3,
+            header, formats.table_header,
+        )
+    blank_row = tuple("" for _ in action_headers)
+    for offset in range(ACTION_VISIBLE_ROWS):
+        values = action_rows[offset] if offset < len(action_rows) else blank_row
+        for index, value in enumerate(tuple(values)[:7]):
+            kind = action_kinds[index] if index < len(action_kinds) else "text"
+            ws.merge_range(
+                ACTION_FIRST_ROW + offset, index * 4,
+                ACTION_FIRST_ROW + offset, index * 4 + 3,
+                value, _v2_value_format(formats, kind, value),
+            )
+    ws.set_column(29, max(left_last, right_last), None, None, {"hidden": True})
+    ws.set_footer("&LPrepared by Anass ASSRI | WFM&COperational report&RPage &P of &N")
+    return formats

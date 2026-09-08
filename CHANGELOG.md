@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.24.0 — 2026-09-09
+
+- Migrates RTM Daily Control, every LOB Service Flash, Attendance Review,
+  Staffing & Coverage, Realisations, Absenteeism & Shrinkage, and Bonus
+  Management to the approved measured V2 first screen.
+- Centralizes the production dashboard renderer: four equal scope modules,
+  four equal KPI cards, two equal 728 × 310 native charts, and one compact
+  seven-field action grid on a fixed 1,456-pixel canvas.
+- Preserves service-level arithmetic and queue scope, attendance and PTO/Away
+  rules, all stable sheet/table names, Attendance Review row-4 import, permanent
+  action fields, Bonus Matrix v1.2 formulas, and report maturity.
+- Adds production regression checks for all six migrated workbooks and raises
+  `WFMHUB-DESIGN` to `2.1.0`.
+
 ## 0.23.1 — 2026-09-08
 
 - Rebuilds the permanent PCS landing page on the approved measured V2 grid:

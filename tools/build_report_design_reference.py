@@ -8,17 +8,8 @@ import xlsxwriter
 
 from wfmhub.design import COLORS, REPORT_DESIGN_ID, REPORT_DESIGN_VERSION
 from wfmhub.excel_layout import (
-    ACTION_FIRST_ROW,
-    ACTION_HEADER_ROW,
-    ACTION_VISIBLE_ROWS,
-    configure_v2_cell_canvas,
-    insert_v2_charts,
-    make_v2_formats,
-    style_v2_chart,
-    write_v2_filters,
-    write_v2_header,
-    write_v2_kpis,
-    write_v2_section,
+    V2ChartSpec,
+    render_v2_dashboard,
 )
 
 
@@ -107,125 +98,83 @@ def table(ws, fmt, row: int, headers: tuple[str, ...], rows: tuple[tuple[object,
 
 
 def blueprint_sheet(workbook, fmt, kind: str) -> None:
+    del fmt
     ws = workbook.add_worksheet(kind)
-    ws.hide_gridlines(2)
-    ws.set_zoom(85)
-    ws.set_tab_color(COLORS["gold"])
-    if kind == "PCS":
-        v2 = make_v2_formats(workbook)
-        configure_v2_cell_canvas(ws, v2, zoom=85)
-        ws.hide_row_col_headers()
-        write_v2_header(ws, v2, "PCS OPERATIONS", status="DATA FRESH")
-        write_v2_filters(ws, v2, (
-            ("Period", "Current MTD", None),
-            ("LOB", "All", None),
-            ("Team Leader", "All", None),
-            ("Agent", "All", None),
-        ))
-        write_v2_kpis(ws, v2, (
-            ("CURRENT PCS", 4.54, "decimal", None),
-            ("PARTICIPATION", .268, "percent", None),
-            ("PRIOR PCS", 4.42, "decimal", None),
-            ("CHANGE", .12, "decimal", None),
-        ))
-        lobs = ("RSA NL", "RSA BE", "FORD NL", "OEM")
-        current = (4.62, 4.38, 4.71, 4.55)
-        prior = (4.51, 4.31, 4.66, 4.48)
-        for row, values in enumerate(zip(lobs, current, prior), 1):
-            ws.write_row(row, 29, values)
-        for offset in range(8):
-            ws.write(offset + 1, 33, offset + 1)
-            ws.write(offset + 1, 34, 4.25 + offset * .04)
-            ws.write(offset + 1, 35, 4.18 + offset * .035)
-        lob_chart = workbook.add_chart({"type": "bar"})
-        for label, column, color in (
-            ("Current period", "AE", COLORS["teal"]),
-            ("Prior comparable", "AF", COLORS["muted"]),
-        ):
-            lob_chart.add_series({
-                "name": label, "categories": "=PCS!$AD$2:$AD$5",
-                "values": f"=PCS!${column}$2:${column}$5",
-                "fill": {"color": color}, "border": {"none": True},
-                "data_labels": {"value": True, "num_format": "0.00"},
-            })
-        style_v2_chart(lob_chart, title="PCS BY LOB", kind="bar")
-        lob_chart.set_x_axis({"min": 1, "max": 5, "major_unit": 1})
-        trend_chart = workbook.add_chart({"type": "line"})
-        for label, column, color in (
-            ("Current period", "AI", COLORS["teal"]),
-            ("Prior comparable", "AJ", COLORS["muted"]),
-        ):
-            trend_chart.add_series({
-                "name": label, "categories": "=PCS!$AH$2:$AH$9",
-                "values": f"=PCS!${column}$2:${column}$9",
-                "line": {"color": color, "width": 2.25},
-            })
-        style_v2_chart(trend_chart, title="DAILY PCS TREND")
-        trend_chart.set_y_axis({"min": 2, "max": 5, "major_unit": .5})
-        insert_v2_charts(ws, lob_chart, trend_chart)
-        write_v2_section(ws, v2, "TEAM PERFORMANCE & ACTIONS")
-        action_headers = (
-            "TEAM LEADER", "PCS AGENTS", "PARTICIPATION", "CURRENT PCS",
-            "PRIOR PCS", "CHANGE", "COACHING DUE",
-        )
-        teams = (
-            ("Sophie Martin", 12, .29, 4.62, 4.51, .11, 2),
-            ("Karim Belkacem", 10, .25, 3.92, 4.08, -.16, 5),
-            ("Elena Rossi", 11, .27, 4.38, 4.31, .07, 1),
-            ("Daniel Weber", 9, .31, 4.71, 4.66, .05, 0),
-        )
-        for index, value in enumerate(action_headers):
-            ws.merge_range(ACTION_HEADER_ROW, index * 4, ACTION_HEADER_ROW, index * 4 + 3, value, v2.table_header)
-        for offset in range(ACTION_VISIBLE_ROWS):
-            values = teams[offset] if offset < len(teams) else ("", "", "", "", "", "", "")
-            for index, value in enumerate(values):
-                cell_format = v2.table_text if index == 0 else v2.table_integer
-                if index == 2:
-                    cell_format = v2.table_percent
-                elif index in {3, 4}:
-                    cell_format = v2.table_decimal
-                elif index == 5:
-                    cell_format = v2.positive if isinstance(value, (int, float)) and value >= 0 else v2.negative
-                elif index == 6:
-                    cell_format = v2.due if value else v2.clear
-                ws.merge_range(
-                    ACTION_FIRST_ROW + offset, index * 4,
-                    ACTION_FIRST_ROW + offset, index * 4 + 3,
-                    value, cell_format,
-                )
-        ws.set_column(29, 35, None, None, {"hidden": True})
-        return
-    ws.set_column("A:N", 12)
-    if kind == "RTM":
-        header(ws, fmt, "RTM DAILY CONTROL", "Combined service, attendance pulse and exact call actions")
-        scope(ws, fmt, (("Date", "08 Sep 2026"), ("Snapshot", "Through 17:59"),
-                        ("LOB", "All operational"), ("Attendance", "17:45")))
-        cards(ws, fmt, (("LOBS ON TARGET", "3 / 4", "Configured target"),
-                        ("DEMAND VARIANCE", "+84", "Actual minus forecast"),
-                        ("NO SHOW HC", "6", "Evidence proven"),
-                        ("CALL NOW", "8", "Exact lists by LOB")))
-        ws.merge_range("A11:N11", "SERVICE LEVEL BY LOB · LINKED OPERATIONAL TABLE", fmt["section"])
-        table(ws, fmt, 12, ("LOB", "TSL", "Target", "Actual", "Forecast", "Variance", "No Show", "Call Now"),
-              (("RSA NL", "89.9%", "80.0%", 840, 810, 30, 2, 2),
-               ("RSA BE", "85.8%", "80.0%", 530, 552, -22, 1, 2),
-               ("FORD NL", "97.3%", "80.0%", 320, 300, 20, 1, 1),
-               ("OEM", "94.9%", "80.0%", 410, 354, 56, 2, 3)))
-    else:
-        header(ws, fmt, "ATTENDANCE REVIEW", "Completed-day schedule-versus-observed decisions")
-        scope(ws, fmt, (("Period", "01–07 Sep 2026"), ("Completed", "Through 07 Sep"),
-                        ("Evidence", "Agent Status + LILO"), ("Decision", "REVIEW BOARD")))
-        cards(ws, fmt, (("REVIEW GAPS", "18", "Exact intervals"),
-                        ("GAP HOURS", "7.4", "Exact minutes / 60"),
-                        ("OPEN DECISIONS", "11", "Awaiting review"),
-                        ("MISSING EVIDENCE", "2", "Never treated as zero")))
-        ws.merge_range("A11:N11", "BY-LOB ACTION SUMMARY · SCHEDULE ABOVE ACTUAL", fmt["section"])
-        table(ws, fmt, 12, ("LOB", "Exact Gaps", "Gap Hours", "Agents", "Open", "Approved", "Dismissed"),
-              (("RSA NL", 6, 2.8, 4, 3, 2, 1), ("RSA BE", 5, 2.1, 4, 4, 1, 0),
-               ("FORD NL", 4, 1.6, 3, 2, 1, 1), ("OEM FR", 3, 0.9, 2, 2, 1, 0)))
-        ws.write("A20", "Editable decision example", fmt["section"])
-        ws.write("A21", "Decision Status", fmt["body"])
-        ws.write("B21", "Open", fmt["editable"])
-    ws.merge_range("A25:N25", "Examples are visual only. Calculations, targets and LOBs always come from WFMHub authorities.", fmt["note"])
+    lobs = ("RSA NL", "RSA BE", "FORD NL", "OEM")
+    definitions = {
+        "PCS": (
+            "PCS OPERATIONS", (("Period", "Current MTD"), ("LOB", "All"), ("Team Leader", "All"), ("Agent", "All")),
+            (("CURRENT PCS", 4.54, "decimal"), ("PARTICIPATION", .268, "percent"), ("PRIOR PCS", 4.42, "decimal"), ("CHANGE", .12, "decimal")),
+            V2ChartSpec("PCS BY LOB", "bar", lobs, (("Current", (4.62, 4.38, 4.71, 4.55), COLORS["teal"]), ("Prior", (4.51, 4.31, 4.66, 4.48), COLORS["muted"]))),
+            V2ChartSpec("DAILY PCS TREND", "line", ("01", "02", "03", "04", "05"), (("Current", (4.25, 4.32, 4.39, 4.48, 4.54), COLORS["teal"]), ("Prior", (4.18, 4.27, 4.31, 4.38, 4.42), COLORS["muted"]))),
+            "TEAM PERFORMANCE & ACTIONS", ("TEAM LEADER", "PCS AGENTS", "PARTICIPATION", "CURRENT PCS", "PRIOR PCS", "CHANGE", "COACHING DUE"),
+            (("Sophie Martin", 12, .29, 4.62, 4.51, .11, 2), ("Karim Belkacem", 10, .25, 3.92, 4.08, -.16, 5)),
+            ("text", "integer", "percent", "decimal", "decimal", "change", "alert"),
+        ),
+        "RTM": (
+            "RTM DAILY CONTROL", (("Date", "08 Sep 2026"), ("Snapshot", "Through 17:59"), ("LOB", "All 4"), ("Attendance", "17:55")),
+            (("LOBS ON TARGET", "4 / 4", "text"), ("DEMAND VARIANCE", 84, "integer"), ("NO SHOW HC", 6, "integer"), ("CALL NOW", 8, "integer")),
+            V2ChartSpec("SERVICE LEVEL BY LOB", "bar", lobs, (("TSL", (.899, .858, .973, .949), COLORS["teal"]), ("Target", (.8, .8, .8, .8), COLORS["muted"])), "percent", 0, 1),
+            V2ChartSpec("ACTUAL VS FORECAST", "column", lobs, (("Actual", (840, 530, 320, 410), COLORS["teal"]), ("Forecast", (810, 552, 300, 354), COLORS["muted"]))),
+            "LOB SERVICE & ATTENDANCE ACTIONS", ("LOB", "TSL", "VAR CALLS", "NO SHOW", "LATE", "EARLY LEAVE", "CALL NOW"),
+            (("RSA NL", .899, 30, 2, 1, 0, 2), ("RSA BE", .858, -22, 1, 2, 1, 2)),
+            ("text", "percent", "change", "integer", "integer", "integer", "alert"),
+        ),
+        "ATTENDANCE": (
+            "ATTENDANCE REVIEW", (("Period", "01–07 Sep 2026"), ("Completed", "Through 07 Sep"), ("Evidence", "Status + LILO"), ("Decision", "Review board")),
+            (("REVIEW GAPS", 18, "integer"), ("GAP HOURS", 7.4, "decimal"), ("OPEN DECISIONS", 11, "integer"), ("MISSING EVIDENCE", 2, "integer")),
+            V2ChartSpec("GAP HOURS BY LOB", "bar", lobs, (("Gap hours", (2.8, 2.1, 1.6, .9), COLORS["teal"]),)),
+            V2ChartSpec("DECISION STATUS", "column", ("Open", "Approved", "Dismissed", "Missing"), (("Cases", (11, 4, 3, 2), COLORS["teal"]),)),
+            "BY-LOB REVIEW ACTIONS", ("LOB", "EXACT GAPS", "GAP HOURS", "AGENTS", "OPEN", "APPROVED", "DISMISSED"),
+            (("RSA NL", 6, 2.8, 4, 3, 2, 1), ("RSA BE", 5, 2.1, 4, 4, 1, 0)),
+            ("text", "integer", "decimal", "integer", "alert", "integer", "integer"),
+        ),
+        "STAFFING": (
+            "STAFFING & COVERAGE", (("Period", "Current + 4 weeks"), ("Mode", "Future plan"), ("LOB", "All"), ("Language", "All")),
+            (("PEAK GAP FTE", 4.5, "decimal"), ("FUTURE GAP HOURS", 36.8, "decimal"), ("FORECAST COVERAGE", .943, "percent"), ("PTO / AWAY IMPACT", 61, "decimal")),
+            V2ChartSpec("REQUIRED VS NET SCHEDULED HOURS", "column", lobs, (("Required", (420, 310, 245, 280), COLORS["teal"]), ("Net scheduled", (401, 298, 251, 260), COLORS["muted"]))),
+            V2ChartSpec("PEAK GAP BY DAY", "line", ("Mon", "Tue", "Wed", "Thu", "Fri"), (("Gap FTE", (2.1, 3.4, 4.5, 2.8, 3.9), COLORS["red"]),)),
+            "PRIORITIZED CAPACITY ACTIONS", ("INTERVAL", "LOB / LANGUAGE", "MODE", "REQUIRED FTE", "NET / OBSERVED", "GAP FTE", "STATE"),
+            (("09 Sep 10:00", "RSA BE / FR-NL", "Future", 22.5, 18, 4.5, "FUTURE GAP"),),
+            ("text", "text", "text", "decimal", "decimal", "decimal", "alert"),
+        ),
+        "REALISATIONS": (
+            "REALISATIONS", (("Period", "Current MTD"), ("LOB", "All mapped"), ("Grain", "Daily"), ("Data state", "Reviewed")),
+            (("ACTUAL VOLUME", 49620, "integer"), ("FORECAST ATTAINMENT", 1.012, "percent"), ("ROUTED RATE", .958, "percent"), ("WEIGHTED AHT", 294, "decimal")),
+            V2ChartSpec("ACTUAL VS FORECAST BY LOB", "column", lobs, (("Actual", (18400, 12150, 8830, 10240), COLORS["teal"]), ("Forecast", (17950, 12600, 8460, 9980), COLORS["muted"]))),
+            V2ChartSpec("SERVICE LEVEL VS TARGET", "bar", lobs, (("Service level", (.899, .858, .973, .949), COLORS["teal"]), ("Target", (.8, .8, .8, .8), COLORS["muted"])), "percent", 0, 1),
+            "LOB REALISATION SUMMARY", ("LOB", "ACTUAL", "FORECAST", "ATTAINMENT", "SERVICE LEVEL", "ABSENCE %", "STATE"),
+            (("RSA NL", 18400, 17950, 1.025, .899, .041, "READY"),),
+            ("text", "integer", "integer", "percent", "percent", "percent", "alert"),
+        ),
+        "ABSENCE": (
+            "ABSENTEEISM & SHRINKAGE", (("Period", "Current MTD"), ("LOB", "All"), ("Team Leader", "All"), ("Agent", "All")),
+            (("ABSENCE RATE", .043, "percent"), ("SHRINKAGE RATE", .118, "percent"), ("FINALIZED COVERAGE", .988, "percent"), ("REVIEW CASES", 7, "integer")),
+            V2ChartSpec("ABSENCE & SHRINKAGE BY LOB", "bar", lobs, (("Absence", (.041, .052, .033, .046), COLORS["red"]), ("Shrinkage", (.118, .129, .104, .123), COLORS["teal"])), "percent", 0),
+            V2ChartSpec("DAILY ABSENCE & SHRINKAGE HOURS", "line", ("01", "02", "03", "04", "05"), (("Absence", (31, 27, 38, 42, 35), COLORS["red"]), ("Shrinkage", (72, 68, 81, 77, 74), COLORS["teal"]))),
+            "PRIORITIZED ABSENCE REVIEW CASES", ("DATE", "AGENT", "TEAM LEADER", "LOB", "RESULT STATUS", "ABSENCE H", "ACTION STATUS"),
+            (("07 Sep", "Amina El Idrissi", "Sophie Martin", "RSA NL", "ABSENCE RECORDED", 8, "Pending"),),
+            ("text", "text", "text", "text", "text", "decimal", "alert"),
+        ),
+        "BONUS": (
+            "BONUS MANAGEMENT", (("Period", "2026-08"), ("Population", "All"), ("Team Lead", "All"), ("Result status", "All")),
+            (("TOTAL PAYOUT", 184520, "money"), ("PAID AGENTS", 84, "integer"), ("AVG PAID PAYOUT", 2196.67, "money"), ("REVIEW ITEMS", 6, "integer")),
+            V2ChartSpec("PAYOUT BY POPULATION", "column", ("RSA", "FORD", "OEM"), (("Total payout", (92100, 54120, 38300), COLORS["gold"]),)),
+            V2ChartSpec("KPI ATTAINMENT", "bar", ("AHT", "Productivity", "PCS", "QM", "Abs%"), (("Attainment", (.82, .76, .69, .88, .73), COLORS["teal"]),), "percent", 0, 1),
+            "POPULATION PAYOUT SUMMARY", ("POPULATION", "AGENTS", "PAID AGENTS", "PAYOUT RATE", "TOTAL PAYOUT", "AVG ACHIEVEMENT", "REVIEW"),
+            (("RSA", 48, 44, .917, 92100, 1.06, 2),),
+            ("text", "integer", "integer", "percent", "money", "percent", "alert"),
+        ),
+    }
+    title, filters, kpis, left, right, action_title, action_headers, action_rows, action_kinds = definitions[kind]
+    render_v2_dashboard(
+        workbook, ws, title=title, filters=filters, kpis=kpis,
+        left_chart=left, right_chart=right, action_title=action_title,
+        action_headers=action_headers, action_rows=action_rows,
+        action_kinds=action_kinds,
+        status="REFERENCE", status_kind="PROVISIONAL",
+        status_note="Illustrative values only; production reports use governed data.",
+    )
 
 
 def main() -> None:
@@ -263,7 +212,10 @@ def main() -> None:
     ws.set_column("A:A", 24)
     ws.set_column("B:B", 16)
     ws.set_column("C:N", 14)
-    for kind in ("PCS", "RTM", "ATTENDANCE"):
+    for kind in (
+        "PCS", "RTM", "ATTENDANCE", "STAFFING", "REALISATIONS",
+        "ABSENCE", "BONUS",
+    ):
         blueprint_sheet(workbook, fmt, kind)
     for sheet in workbook.worksheets():
         sheet.set_footer("&LPrepared by Anass ASSRI | WFM&CDesign reference&RConfidential")
