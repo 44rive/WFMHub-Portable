@@ -20,7 +20,7 @@ from .metrics import load_metric_catalog
 from .rules import load_rulebook
 
 
-PCS_FEED_SCHEMA_VERSION = "3"
+PCS_FEED_SCHEMA_VERSION = "4"
 PCS_AGENT_DAY_HEADERS = (
     "LOB", "Team Leader", "Agent Selector", "Agent ID", "Agent", "Date",
     "Ops Manager", "Language", "Inbound Call Legs", "PCS Status 1",
@@ -33,7 +33,7 @@ PCS_AGENT_DAY_HEADERS = (
 PCS_COACHING_HEADERS = (
     "LOB", "Team Leader", "Agent Selector", "Agent", "Agent ID",
     "Priority", "Date", "Call Start", "Q1 Score", "Customer Comment",
-    "Call Reference Number", "Language", "Coaching Key",
+    "Call Reference Number", "Call ID", "Language", "Coaching Key",
 )
 PCS_LOB_SCORECARD_HEADERS = (
     "LOB", "As Of Date", "Latest Day PCS", "Latest Day Participation",
@@ -50,6 +50,10 @@ PCS_RESULTS_HEADERS = (
     "PCS Average", "Participation Rate", "Valid Q1", "PCS Status 1",
     "Q1 Nonblank", "Score <= 3", "Score > 3", "Inbound Call Legs",
     "Sample State", "Data Through", "Feed Refreshed At",
+)
+PCS_SCOPE_HEADERS = (
+    "List Key", "Sort Order", "Value", "LOB", "Team Leader",
+    "Agent ID", "Agent",
 )
 
 
@@ -77,6 +81,66 @@ def _cell(value: Any) -> Any:
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
     return value
+
+
+def pcs_scope_rows(
+    conn: DatabaseConnection,
+    start: date,
+    end: date,
+) -> list[tuple[Any, ...]]:
+    """Return stable dependent-selector rows for the permanent PCS workbook."""
+
+    _headers, source = _rows(
+        conn,
+        """SELECT DISTINCT coalesce(lob,'Unmapped'),
+                  coalesce(team_leader,'Unassigned'), agent_id,
+                  coalesce(agent_name,'Agent'),
+                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']'
+           FROM mart.agent_pcs_day
+           WHERE business_date BETWEEN ? AND ?
+           ORDER BY 1, 2, 4, 3""",
+        (start, end),
+    )
+    records = [
+        tuple(str(value or "") for value in row)
+        for row in source
+        if str(row[2] or "").strip()
+    ]
+    lobs = sorted({row[0] for row in records}, key=str.casefold)
+    rows: list[tuple[Any, ...]] = []
+
+    def append_group(
+        key: str,
+        values: Sequence[tuple[str, str, str, str, str]],
+    ) -> None:
+        rows.append((key, 0, "All", "", "", "", ""))
+        seen: set[str] = set()
+        order = 1
+        for lob, leader, agent_id, agent, value in values:
+            if value in seen:
+                continue
+            rows.append((key, order, value, lob, leader, agent_id, agent))
+            seen.add(value)
+            order += 1
+
+    append_group(
+        "LOB|All",
+        [(lob, "", "", "", lob) for lob in lobs],
+    )
+    for lob_filter in ("All", *lobs):
+        filtered = [row for row in records if lob_filter == "All" or row[0] == lob_filter]
+        leaders = sorted({row[1] for row in filtered}, key=str.casefold)
+        append_group(
+            f"TL|{lob_filter}",
+            [(lob_filter, leader, "", "", leader) for leader in leaders],
+        )
+        for leader_filter in ("All", *leaders):
+            agents = [
+                row for row in filtered
+                if leader_filter == "All" or row[1] == leader_filter
+            ]
+            append_group(f"AGENT|{lob_filter}|{leader_filter}", agents)
+    return rows
 
 
 def _atomic_csv(path: Path, headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> int:
@@ -398,8 +462,8 @@ def _publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
         ("Agent ID", "type text"), ("Priority", "type text"),
         ("Date", "type date"), ("Call Start", "type datetime"),
         ("Q1 Score", "type number"), ("Customer Comment", "type text"),
-        ("Call Reference Number", "type text"), ("Language", "type text"),
-        ("Coaching Key", "type text"),
+        ("Call Reference Number", "type text"), ("Call ID", "type text"),
+        ("Language", "type text"), ("Coaching Key", "type text"),
     )
     lob_types = (
         ("LOB", "type text"), ("As Of Date", "type date"),
@@ -432,15 +496,23 @@ def _publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
         ("Sample State", "type text"), ("Data Through", "type date"),
         ("Feed Refreshed At", "type datetime"),
     )
+    scope_types = (
+        ("List Key", "type text"), ("Sort Order", "Int64.Type"),
+        ("Value", "type text"), ("LOB", "type text"),
+        ("Team Leader", "type text"), ("Agent ID", "type text"),
+        ("Agent", "type text"),
+    )
     specifications = (
         ("POWER_QUERY_PCS_DATA_SHAREPOINT.txt", "PCS_AGENT_DAY_CURRENT.csv", PCS_AGENT_DAY_HEADERS, data_types, True),
         ("POWER_QUERY_COACHING_QUEUE_SHAREPOINT.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types, True),
         ("POWER_QUERY_PCS_LOB_SHAREPOINT.txt", "PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS, lob_types, True),
         ("POWER_QUERY_PCS_RESULTS_SHAREPOINT.txt", "PCS_RESULTS_CURRENT.csv", PCS_RESULTS_HEADERS, result_types, True),
+        ("POWER_QUERY_PCS_SCOPE_SHAREPOINT.txt", "PCS_SCOPE_CURRENT.csv", PCS_SCOPE_HEADERS, scope_types, True),
         ("POWER_QUERY_PCS_DATA_LOCAL.txt", "PCS_AGENT_DAY_CURRENT.csv", PCS_AGENT_DAY_HEADERS, data_types, False),
         ("POWER_QUERY_COACHING_QUEUE_LOCAL.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types, False),
         ("POWER_QUERY_PCS_LOB_LOCAL.txt", "PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS, lob_types, False),
         ("POWER_QUERY_PCS_RESULTS_LOCAL.txt", "PCS_RESULTS_CURRENT.csv", PCS_RESULTS_HEADERS, result_types, False),
+        ("POWER_QUERY_PCS_SCOPE_LOCAL.txt", "PCS_SCOPE_CURRENT.csv", PCS_SCOPE_HEADERS, scope_types, False),
     )
     paths = []
     for script_name, filename, headers, types, sharepoint in specifications:
@@ -515,8 +587,8 @@ def publish_pcs_feeds(
                    coalesce(d.canonical_name,c.agent_name), c.agent_id,
                    CASE WHEN c.{primary_score}<=2 THEN 'High' ELSE 'Normal' END,
                    c.business_date, c.call_start, c.{primary_score}, c.question_3,
-                   c.call_reference_number, coalesce(d.language,c.language),
-                   c.call_key
+                   c.call_reference_number, c.call_id,
+                   coalesce(d.language,c.language), c.call_key
             FROM core.clean_call_leg c
             LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
             WHERE c.business_date BETWEEN ? AND ?
@@ -531,19 +603,9 @@ def publish_pcs_feeds(
     counts.append((path.name, _atomic_csv(path, PCS_COACHING_HEADERS, rows)))
     files.append(path)
 
-    _query_headers, rows = _rows(
-        conn,
-        """SELECT DISTINCT lob AS LOB, team_leader AS Team_Leader,
-                  agent_id AS Agent_ID, agent_name AS Agent_Name,
-                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']' AS Agent_Selector
-           FROM mart.agent_pcs_day
-           WHERE business_date BETWEEN ? AND ?
-           ORDER BY lob, team_leader, agent_name, agent_id""",
-        (start, end),
-    )
-    headers = ["LOB", "Team Leader", "Agent ID", "Agent", "Agent Selector"]
+    rows = pcs_scope_rows(conn, start, end)
     path = folder / "PCS_SCOPE_CURRENT.csv"
-    counts.append((path.name, _atomic_csv(path, headers, rows)))
+    counts.append((path.name, _atomic_csv(path, PCS_SCOPE_HEADERS, rows)))
     files.append(path)
     files.extend(_publish_pcs_power_query_scripts(folder))
     files.append(_manifest(

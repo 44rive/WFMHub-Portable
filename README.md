@@ -156,7 +156,7 @@ Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 
 PCS is one permanent shared Excel workbook. **PCS Operational Tracker > Update
 PCS now** updates the fixed clean CSV feeds under `Feed\PCS`, installs or
-refreshes four governed Power Queries in desktop Excel, saves, and opens the
+refreshes five governed Power Queries in desktop Excel, saves, and opens the
 same tracker. A normal update never rebuilds or replaces it. The PCS-only path
 also leaves attendance, RTM, staffing, forecast, service, and absence marts
 untouched. If a design upgrade is needed, close Excel and choose

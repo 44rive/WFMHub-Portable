@@ -19,7 +19,7 @@ Use one named owner on the WFM work machine:
 2. In WFMHub choose **PCS Operational Tracker**.
 3. Choose **Update PCS now**.
 4. Wait while WFMHub loads FTE and Call by Call, publishes the fixed CSV feeds,
-   installs or refreshes four Power Queries through desktop Excel, and saves.
+   installs or refreshes five Power Queries through desktop Excel, and saves.
 5. The same permanent tracker opens when the update succeeds.
 
 The first run automatically replaces four starter tables with refreshable query
@@ -97,7 +97,7 @@ correct agent and day.
 
 1. Put new untouched exports in the normal source folders.
 2. For PCS, use **PCS Operational Tracker > Update PCS now**. It refreshes the
-   targeted PCS data, all four Excel queries, and the permanent workbook in one
+   targeted PCS data, all five Excel queries, and the permanent workbook in one
    action. It does not rebuild unrelated WFM models.
 3. Alternatively, after the owner updates the fixed feeds, open the PCS workbook
    and use **Data > Refresh All**, wait for all queries, then save.

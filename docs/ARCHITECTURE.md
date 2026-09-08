@@ -159,9 +159,9 @@ rolling month history and atomically publish the versioned agent/day and
 coaching-opportunity feeds. Normal PCS runs preserve the current tracker
 byte-for-byte. A declared template-version change triggers an archived,
 versioned rebuild that carries forward the keyed coaching action ledger. The
-Windows Excel helper then installs or refreshes four governed Power Queries.
+Windows Excel helper then installs or refreshes five governed Power Queries.
 Power Query is transport only and replaces `tblPcsLob`, `tblResults`,
-`tblPcsData`, and `tblCoachingQueue`; `tblCoaching` is the permanent editable record under
+`tblPcsData`, `tblCoachingQueue`, and `tblPcsScope`; `tblCoaching` is the permanent editable record under
 SharePoint version history and is never a query target.
 
 Python/SQLite sum the additive counters before calculating each LOB, team, or

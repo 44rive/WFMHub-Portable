@@ -11,7 +11,7 @@ PCS Operational Tracker.xlsx  Permanent PCS, participation, trends and coaching
 
 PCS Operational Tracker.xlsx contains OVERVIEW, filterable RESULTS and
 COACHING_QUEUE tables, permanent COACHING actions, refreshable PCS_DATA, and
-SETUP/HELP. The WFMHub PCS menu installs and refreshes four governed Power Query
+SETUP/HELP. The WFMHub PCS menu installs and refreshes five governed Power Query
 tables. Power Query never replaces COACHING.
 
 Final Absenteeism.xlsx includes selector-driven agent/case and component views,

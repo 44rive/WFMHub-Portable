@@ -1114,27 +1114,33 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(focused_pcs_book.sheetnames, [
                     "OVERVIEW", "RESULTS", "COACHING_QUEUE", "COACHING",
                     "PCS_DATA", "SETUP", "HELP", "DEFINITIONS", "_AUDIT",
+                    "_PCS_LOB", "_PCS_SCOPE", "_PCS_CALC",
                 ])
                 self.assertGreaterEqual(len(focused_pcs_book["OVERVIEW"]._charts), 2)
                 self.assertEqual(
-                    [focused_pcs_book["OVERVIEW"][cell].value for cell in ("A6", "F6", "K6", "P6")],
-                    ["CURRENT MTD PCS", "PARTICIPATION", "PRIOR MTD PCS", "CHANGE"],
+                    [focused_pcs_book["OVERVIEW"][cell].value for cell in ("A5", "H5", "O5", "V5")],
+                    ["CURRENT PCS", "PARTICIPATION", "PRIOR PCS", "CHANGE"],
                 )
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["A4"].value, "PERIOD")
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["K4"].value, "TEAM LEADER")
-                self.assertIn("tblPcsLob", focused_pcs_book["OVERVIEW"].tables)
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["A2"].value, "PERIOD")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["O2"].value, "TEAM LEADER")
+                self.assertIn("tblPcsLob", focused_pcs_book["_PCS_LOB"].tables)
+                self.assertIn("tblPcsScope", focused_pcs_book["_PCS_SCOPE"].tables)
                 self.assertIn("tblResults", focused_pcs_book["RESULTS"].tables)
                 self.assertIn("tblPcsData", focused_pcs_book["PCS_DATA"].tables)
                 self.assertIn("tblCoaching", focused_pcs_book["COACHING"].tables)
                 self.assertIn("tblCoachingQueue", focused_pcs_book["COACHING_QUEUE"].tables)
                 self.assertIn("tblSetup", focused_pcs_book["SETUP"].tables)
-                lob_headers = [cell.value for cell in focused_pcs_book["OVERVIEW"][34]]
+                lob_headers = [cell.value for cell in focused_pcs_book["_PCS_LOB"][4]]
                 self.assertIn("Current MTD PCS", lob_headers)
                 self.assertIn("Prior MTD PCS", lob_headers)
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["A35"].value, "ALL")
+                self.assertEqual(focused_pcs_book["_PCS_LOB"]["A5"].value, "ALL")
                 result_headers = [cell.value for cell in focused_pcs_book["RESULTS"][4]]
                 self.assertIn("Period View", result_headers)
                 self.assertIn("Scope Level", result_headers)
+                coaching_headers = [cell.value for cell in focused_pcs_book["COACHING"][4]]
+                queue_headers = [cell.value for cell in focused_pcs_book["COACHING_QUEUE"][4]]
+                self.assertEqual(coaching_headers[:2], ["Coaching Key", "Call ID"])
+                self.assertIn("Call ID", queue_headers)
                 coaching_formula = focused_pcs_book["COACHING"]["B5"].value
                 self.assertIn("INDEX", str(coaching_formula))
                 self.assertIn("MATCH", str(coaching_formula))
@@ -1158,8 +1164,8 @@ class EndToEndTests(unittest.TestCase):
                     for row in focused_pcs_book["COACHING"].iter_rows(min_row=5, values_only=True)
                     if row[0]
                 }
-                self.assertEqual(coaching_values[coaching_key][12], "Completed")
-                self.assertEqual(coaching_values[coaching_key][13], "TL 1")
+                self.assertEqual(coaching_values[coaching_key][13], "Completed")
+                self.assertEqual(coaching_values[coaching_key][14], "TL 1")
                 self.assertIn("Agent Day Key", pcs_table_headers)
                 self.assertIn("Feed Refreshed At", pcs_table_headers)
                 self.assertIn("PCS Rule SHA-256", pcs_table_headers)
@@ -1267,10 +1273,12 @@ class EndToEndTests(unittest.TestCase):
             pcs_feed = home / "Feed" / "PCS" / "PCS_AGENT_DAY_CURRENT.csv"
             pcs_lob_feed = home / "Feed" / "PCS" / "PCS_LOB_SCORECARD_CURRENT.csv"
             pcs_results_feed = home / "Feed" / "PCS" / "PCS_RESULTS_CURRENT.csv"
+            pcs_scope_feed = home / "Feed" / "PCS" / "PCS_SCOPE_CURRENT.csv"
             absence_feed = home / "Feed" / "Absenteeism" / "ABSENCE_AGENT_DAY_CURRENT.csv"
             self.assertTrue(pcs_feed.is_file())
             self.assertTrue(pcs_lob_feed.is_file())
             self.assertTrue(pcs_results_feed.is_file())
+            self.assertTrue(pcs_scope_feed.is_file())
             self.assertTrue(absence_feed.is_file())
             with pcs_feed.open("r", encoding="utf-8-sig", newline="") as handle:
                 self.assertEqual(
@@ -1282,10 +1290,12 @@ class EndToEndTests(unittest.TestCase):
                 "POWER_QUERY_COACHING_QUEUE_SHAREPOINT.txt",
                 "POWER_QUERY_PCS_LOB_SHAREPOINT.txt",
                 "POWER_QUERY_PCS_RESULTS_SHAREPOINT.txt",
+                "POWER_QUERY_PCS_SCOPE_SHAREPOINT.txt",
                 "POWER_QUERY_PCS_DATA_LOCAL.txt",
                 "POWER_QUERY_COACHING_QUEUE_LOCAL.txt",
                 "POWER_QUERY_PCS_LOB_LOCAL.txt",
                 "POWER_QUERY_PCS_RESULTS_LOCAL.txt",
+                "POWER_QUERY_PCS_SCOPE_LOCAL.txt",
             ):
                 text = (home / "Feed" / "PCS" / script).read_text(encoding="utf-8")
                 self.assertIn("tblSetup", text)

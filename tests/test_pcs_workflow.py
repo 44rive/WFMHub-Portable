@@ -28,7 +28,7 @@ class PCSWorkflowTests(unittest.TestCase):
             template_version=version,
             setup_state="YES" if installed else "NO",
             connection_mode="LOCAL",
-            query_parts=4 if installed else 0,
+            query_parts=5 if installed else 0,
             has_connections=installed,
             problem=problem,
         )

@@ -26,6 +26,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ResultsQueryPath,
 
+    [Parameter(Mandatory = $true)]
+    [string]$ScopeQueryPath,
+
     [switch]$OpenAfter
 )
 
@@ -220,7 +223,7 @@ try {
     }
 
     if ($Action -eq "Install") {
-        foreach ($path in @($DataQueryPath, $CoachingQueryPath, $LobQueryPath, $ResultsQueryPath)) {
+        foreach ($path in @($DataQueryPath, $CoachingQueryPath, $LobQueryPath, $ResultsQueryPath, $ScopeQueryPath)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
                 throw "Power Query definition not found: $path"
             }
@@ -229,13 +232,16 @@ try {
         Remove-WorkbookQuery "COACHING_QUEUE"
         Remove-WorkbookQuery "PCS_LOB"
         Remove-WorkbookQuery "PCS_RESULTS"
-        Remove-StarterTable "OVERVIEW" "tblPcsLob" 34 19
+        Remove-WorkbookQuery "PCS_SCOPE"
+        Remove-StarterTable "_PCS_LOB" "tblPcsLob" 4 19
+        Remove-StarterTable "_PCS_SCOPE" "tblPcsScope" 4 7
         Remove-StarterTable "RESULTS" "tblResults" 4 21
-        Remove-StarterTable "COACHING_QUEUE" "tblCoachingQueue" 4 13
+        Remove-StarterTable "COACHING_QUEUE" "tblCoachingQueue" 4 14
         Remove-StarterTable "PCS_DATA" "tblPcsData" 4 26
         Set-SetupValue "Connection Mode" $Mode
         Set-SetupValue "Local Feed Folder" ([System.IO.Path]::GetFullPath($FeedFolder))
-        Add-QueryTable "PCS_LOB" ([System.IO.File]::ReadAllText($LobQueryPath)) "OVERVIEW" "tblPcsLob" "A34"
+        Add-QueryTable "PCS_LOB" ([System.IO.File]::ReadAllText($LobQueryPath)) "_PCS_LOB" "tblPcsLob" "A4"
+        Add-QueryTable "PCS_SCOPE" ([System.IO.File]::ReadAllText($ScopeQueryPath)) "_PCS_SCOPE" "tblPcsScope" "A4"
         Add-QueryTable "PCS_RESULTS" ([System.IO.File]::ReadAllText($ResultsQueryPath)) "RESULTS" "tblResults" "A4"
         Add-QueryTable "COACHING_QUEUE" ([System.IO.File]::ReadAllText($CoachingQueryPath)) "COACHING_QUEUE" "tblCoachingQueue" "A4"
         Add-QueryTable "PCS_DATA" ([System.IO.File]::ReadAllText($DataQueryPath)) "PCS_DATA" "tblPcsData" "A4"

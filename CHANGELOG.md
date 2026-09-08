@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.23.1 — 2026-09-08
+
+- Rebuilds the permanent PCS landing page on the approved measured V2 grid:
+  four equal selector modules, four equal KPI cards, two equal native charts and
+  a compact team action table without a Power Query table on the dashboard.
+- Adds a fifth governed PCS scope feed and hidden `tblPcsScope` destination so
+  LOB, Team Leader and Agent selectors cascade after ordinary Power Query refresh.
+- Adds the source Call ID beside the permanent Coaching Key in `COACHING`. It is
+  populated automatically from Call-by-Call and remains read-only for coaches.
+- Moves the LOB query destination to hidden staging, preserves coaching history
+  during the one-time template upgrade, and bumps `WFMHUB-DESIGN` to `2.0.0`.
+
 ## 0.23.0 — 2026-09-08
 
 - Applies the approved `WFMHUB-DESIGN 1.0.0` compact report system to PCS,

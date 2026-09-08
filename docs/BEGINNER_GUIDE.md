@@ -273,7 +273,7 @@ The stable inputs include `PCS_LOB_SCORECARD_CURRENT.csv`,
 `PCS_RESULTS_CURRENT.csv`, `PCS_AGENT_DAY_CURRENT.csv`, and
 `PCS_COACHING_OPPORTUNITY_CURRENT.csv`. Agent ID is the employee key; Agent
 Selector is only `Name [ID]`; Coaching Key identifies the exact call. The first
-**Update PCS now** installs all four governed queries automatically using Windows
+**Update PCS now** installs all five governed queries automatically using Windows
 desktop Excel. Everybody else works in the permanent workbook; the owner can
 update it with WFMHub or **Data > Refresh All**.
 

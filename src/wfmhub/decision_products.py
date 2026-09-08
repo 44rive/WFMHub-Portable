@@ -12,6 +12,19 @@ from openpyxl import load_workbook
 
 from .config import Config
 from .database import DatabaseConnection
+from .excel_layout import (
+    ACTION_FIRST_ROW,
+    ACTION_HEADER_ROW,
+    ACTION_VISIBLE_ROWS,
+    configure_v2_cell_canvas,
+    insert_v2_charts,
+    make_v2_formats,
+    style_v2_chart,
+    write_v2_filters,
+    write_v2_header,
+    write_v2_kpis,
+    write_v2_section,
+)
 from .mapping import load_queue_mapping
 from .metrics import MetricCatalog, evaluate_metric, load_metric_catalog
 from .pcs_excel import PCSExcelError, PCS_TEMPLATE_VERSION
@@ -220,6 +233,7 @@ def _pcs_coaching_rows(
                    c.{primary_score} AS q1_score,
                    c.question_3 AS customer_comment,
                    c.call_reference_number,
+                   c.call_id,
                    coalesce(d.language,c.language) AS language,
                    c.call_key AS coaching_key,
                    'Pending' AS coaching_status,
@@ -1158,6 +1172,312 @@ def _add_pcs_stable_overview(
     ws.set_column("R:S", 20)
 
 
+def _pcs_v2_sum_formula(
+    value_column: str,
+    *,
+    from_ref: str = "PCS_From",
+    to_ref: str = "PCS_To",
+    lob_cell: str | None = None,
+    team_cell: str | None = None,
+) -> str:
+    """Return a classic, bounded PCS sum used by the permanent dashboard."""
+
+    criteria = [
+        f"--(PCS_DATA!$F$5:$F$100004>={from_ref})",
+        f"--(PCS_DATA!$F$5:$F$100004<={to_ref})",
+        (
+            f"--(PCS_DATA!$A$5:$A$100004={lob_cell})"
+            if lob_cell else
+            'IF(OVERVIEW!$J$2="All",1,--(PCS_DATA!$A$5:$A$100004=OVERVIEW!$J$2))'
+        ),
+        (
+            f"--(PCS_DATA!$B$5:$B$100004={team_cell})"
+            if team_cell else
+            'IF(OVERVIEW!$Q$2="All",1,--(PCS_DATA!$B$5:$B$100004=OVERVIEW!$Q$2))'
+        ),
+        'IF(OVERVIEW!$X$2="All",1,--(PCS_DATA!$C$5:$C$100004=OVERVIEW!$X$2))',
+        f"N(PCS_DATA!${value_column}$5:${value_column}$100004)",
+    ]
+    return f"SUMPRODUCT({','.join(criteria)})"
+
+
+def _write_pcs_v2_value(
+    ws,
+    row: int,
+    start: int,
+    end: int,
+    value: Any,
+    fmt: Any,
+    cached: Any = "",
+) -> None:
+    ws.merge_range(row, start, row, end, "", fmt)
+    if isinstance(value, str) and value.startswith("="):
+        ws.write_formula(row, start, value, fmt, cached)
+    else:
+        ws.write(row, start, value, fmt)
+
+
+def _add_pcs_v2_overview(
+    book: DecisionWorkbook,
+    status: str,
+    latest: date,
+    lob_rows: Sequence[Sequence[Any]],
+    scope_rows: Sequence[Sequence[Any]],
+    target: float | None,
+) -> None:
+    """Build the approved compact PCS V2 management surface."""
+
+    wb = book.report.workbook
+    ws = wb.add_worksheet("OVERVIEW")
+    formats = make_v2_formats(wb)
+    configure_v2_cell_canvas(ws, formats, zoom=85)
+    ws.hide_row_col_headers()
+    ws.freeze_panes(2, 0)
+    ws.set_tab_color(COLORS["gold"])
+    display_status = "DATA FRESH" if status in {"LIVE", "FINAL"} else "CHECK DATA"
+    write_v2_header(
+        ws, formats, "PCS OPERATIONS", status=display_status,
+        status_kind=status,
+    )
+
+    wb.define_name("PCS_PERIOD_LIST", "='_PCS_CALC'!$J$2:$J$5")
+    wb.define_name(
+        "PCS_LOB_LIST",
+        "=OFFSET('_PCS_SCOPE'!$C$4,MATCH(\"LOB|All\",'_PCS_SCOPE'!$A$5:$A$100004,0),0,"
+        "COUNTIF('_PCS_SCOPE'!$A$5:$A$100004,\"LOB|All\"),1)",
+    )
+    wb.define_name(
+        "PCS_TEAM_LIST",
+        "=OFFSET('_PCS_SCOPE'!$C$4,MATCH(\"TL|\"&OVERVIEW!$J$2,'_PCS_SCOPE'!$A$5:$A$100004,0),0,"
+        "COUNTIF('_PCS_SCOPE'!$A$5:$A$100004,\"TL|\"&OVERVIEW!$J$2),1)",
+    )
+    wb.define_name(
+        "PCS_AGENT_LIST",
+        "=OFFSET('_PCS_SCOPE'!$C$4,MATCH(\"AGENT|\"&OVERVIEW!$J$2&\"|\"&OVERVIEW!$Q$2,"
+        "'_PCS_SCOPE'!$A$5:$A$100004,0),0,COUNTIF('_PCS_SCOPE'!$A$5:$A$100004,"
+        "\"AGENT|\"&OVERVIEW!$J$2&\"|\"&OVERVIEW!$Q$2),1)",
+    )
+    wb.define_name(
+        "PCS_Latest",
+        f"=IF(MAX(PCS_DATA!$F$5:$F$100004)=0,DATE({latest.year},{latest.month},{latest.day}),"
+        "MAX(PCS_DATA!$F$5:$F$100004))",
+    )
+    wb.define_name(
+        "PCS_From",
+        '=IF(OVERVIEW!$C$2="Latest day",PCS_Latest,'
+        'IF(OVERVIEW!$C$2="Current week",PCS_Latest-WEEKDAY(PCS_Latest,2)+1,'
+        'IF(OVERVIEW!$C$2="Current MTD",EOMONTH(PCS_Latest,-1)+1,EOMONTH(PCS_Latest,-2)+1)))',
+    )
+    wb.define_name(
+        "PCS_To",
+        '=IF(OVERVIEW!$C$2="Previous full month",EOMONTH(PCS_Latest,-1),PCS_Latest)',
+    )
+    wb.define_name(
+        "PCS_Prior_From",
+        '=IF(OVERVIEW!$C$2="Latest day",PCS_From-1,'
+        'IF(OVERVIEW!$C$2="Current week",PCS_From-7,EDATE(PCS_From,-1)))',
+    )
+    wb.define_name(
+        "PCS_Prior_To",
+        '=IF(OVERVIEW!$C$2="Latest day",PCS_To-1,'
+        'IF(OVERVIEW!$C$2="Current week",PCS_To-7,EDATE(PCS_To,-1)))',
+    )
+    write_v2_filters(ws, formats, (
+        ("Period", "Current MTD", {"validate": "list", "source": "=PCS_PERIOD_LIST"}),
+        ("LOB", "All", {"validate": "list", "source": "=PCS_LOB_LIST"}),
+        ("Team Leader", "All", {"validate": "list", "source": "=PCS_TEAM_LIST"}),
+        ("Agent", "All", {"validate": "list", "source": "=PCS_AGENT_LIST"}),
+    ))
+
+    all_row = next((list(row) for row in lob_rows if str(row[0]) == "ALL"), [None] * 19)
+    score = _pcs_v2_sum_formula("M")
+    valid = _pcs_v2_sum_formula("L")
+    nonblank = _pcs_v2_sum_formula("K")
+    eligible = _pcs_v2_sum_formula("J")
+    prior_score = _pcs_v2_sum_formula("M", from_ref="PCS_Prior_From", to_ref="PCS_Prior_To")
+    prior_valid = _pcs_v2_sum_formula("L", from_ref="PCS_Prior_From", to_ref="PCS_Prior_To")
+    current_formula = f'=IFERROR({score}/{valid},"")'
+    prior_formula = f'=IFERROR({prior_score}/{prior_valid},"")'
+    write_v2_kpis(ws, formats, (
+        ("CURRENT PCS", current_formula, "decimal", all_row[5]),
+        ("PARTICIPATION", f'=IFERROR({nonblank}/{eligible},"")', "percent", all_row[8]),
+        ("PRIOR PCS", prior_formula, "decimal", all_row[6]),
+        ("CHANGE", f'=IFERROR(({score}/{valid})-({prior_score}/{prior_valid}),"")', "decimal", all_row[7]),
+    ))
+
+    lob_chart = wb.add_chart({"type": "bar"})
+    lob_chart.add_series({
+        "name": "Current period", "categories": "='_PCS_CALC'!$A$2:$A$13",
+        "values": "='_PCS_CALC'!$B$2:$B$13",
+        "fill": {"color": COLORS["teal"]}, "border": {"none": True},
+        "data_labels": {"value": True, "num_format": "0.00"},
+    })
+    lob_chart.add_series({
+        "name": "Prior comparable", "categories": "='_PCS_CALC'!$A$2:$A$13",
+        "values": "='_PCS_CALC'!$C$2:$C$13",
+        "fill": {"color": COLORS["muted"]}, "border": {"none": True},
+        "data_labels": {"value": True, "num_format": "0.00"},
+    })
+    target_text = f" · TARGET {target:.2f}" if target is not None else ""
+    style_v2_chart(lob_chart, title=f"PCS BY LOB{target_text}", kind="bar")
+    lob_chart.set_x_axis({
+        "min": 1, "max": 5, "major_unit": 1,
+        "major_gridlines": {"visible": True, "line": {"color": COLORS["line"]}},
+    })
+    lob_chart.set_y_axis({"reverse": True, "major_gridlines": {"visible": False}})
+
+    trend_chart = wb.add_chart({"type": "line"})
+    for label, column, color in (
+        ("Current period", "F", COLORS["teal"]),
+        ("Prior comparable", "G", COLORS["muted"]),
+    ):
+        trend_chart.add_series({
+            "name": label, "categories": "='_PCS_CALC'!$E$2:$E$32",
+            "values": f"='_PCS_CALC'!${column}$2:${column}$32",
+            "line": {"color": color, "width": 2.25},
+            "marker": {"type": "circle", "size": 4,
+                       "border": {"color": color}, "fill": {"color": color}},
+        })
+    style_v2_chart(trend_chart, title="DAILY PCS TREND")
+    trend_chart.set_y_axis({
+        "min": 2, "max": 5, "major_unit": .5,
+        "major_gridlines": {"visible": True, "line": {"color": COLORS["line"]}},
+    })
+    trend_chart.set_x_axis({"date_axis": True, "num_format": "d-mmm"})
+    insert_v2_charts(ws, lob_chart, trend_chart)
+
+    write_v2_section(ws, formats, "TEAM PERFORMANCE & ACTIONS")
+    action_headers = (
+        "TEAM LEADER", "PCS AGENTS", "PARTICIPATION", "CURRENT PCS",
+        "PRIOR PCS", "CHANGE", "COACHING DUE",
+    )
+    for index, header in enumerate(action_headers):
+        ws.merge_range(
+            ACTION_HEADER_ROW, index * 4, ACTION_HEADER_ROW, index * 4 + 3,
+            header, formats.table_header,
+        )
+    team_values = [
+        str(row[2]) for row in scope_rows
+        if str(row[0]) == "TL|All" and str(row[2]) != "All"
+    ]
+    for offset in range(ACTION_VISIBLE_ROWS):
+        row_index = ACTION_FIRST_ROW + offset
+        excel_row = row_index + 1
+        team_cell = f"$A${excel_row}"
+        cached_team = team_values[offset] if offset < len(team_values) else ""
+        team_formula = (
+            f'=IF($X$2<>"All",IF(ROW(A{offset + 1})=1,$Q$2,""),'
+            f'IF($Q$2<>"All",IF(ROW(A{offset + 1})=1,$Q$2,""),'
+            f'IFERROR(INDEX(PCS_TEAM_LIST,{offset + 2}),"")))'
+        )
+        _write_pcs_v2_value(ws, row_index, 0, 3, team_formula, formats.table_text, cached_team)
+        team_score = _pcs_v2_sum_formula("M", team_cell=team_cell)
+        team_valid = _pcs_v2_sum_formula("L", team_cell=team_cell)
+        team_nonblank = _pcs_v2_sum_formula("K", team_cell=team_cell)
+        team_eligible = _pcs_v2_sum_formula("J", team_cell=team_cell)
+        team_prior_score = _pcs_v2_sum_formula(
+            "M", from_ref="PCS_Prior_From", to_ref="PCS_Prior_To", team_cell=team_cell,
+        )
+        team_prior_valid = _pcs_v2_sum_formula(
+            "L", from_ref="PCS_Prior_From", to_ref="PCS_Prior_To", team_cell=team_cell,
+        )
+        current_pcs = f'=IF({team_cell}="","",IFERROR({team_score}/{team_valid},""))'
+        prior_pcs = f'=IF({team_cell}="","",IFERROR({team_prior_score}/{team_prior_valid},""))'
+        completed = (
+            f'COUNTIFS(COACHING!$D$5:$D$1004,{team_cell},COACHING!$H$5:$H$1004,">="&PCS_From,'
+            'COACHING!$H$5:$H$1004,"<="&PCS_To,COACHING!$N$5:$N$1004,"Completed")'
+        )
+        values = (
+            (f'=IF({team_cell}="","",MAX(0,COUNTIF(\'_PCS_SCOPE\'!$A$5:$A$100004,'
+             f'"AGENT|"&$J$2&"|"&{team_cell})-1))', formats.table_integer),
+            (f'=IF({team_cell}="","",IFERROR({team_nonblank}/{team_eligible},""))', formats.table_percent),
+            (current_pcs, formats.table_decimal),
+            (prior_pcs, formats.table_decimal),
+            (f'=IF({team_cell}="","",IFERROR(({team_score}/{team_valid})-({team_prior_score}/{team_prior_valid}),""))', formats.table_decimal),
+            (f'=IF({team_cell}="","",MAX(0,{_pcs_v2_sum_formula("P", team_cell=team_cell)}-{completed}))', formats.due),
+        )
+        for value_index, (formula, fmt) in enumerate(values, 1):
+            start_col = value_index * 4
+            _write_pcs_v2_value(ws, row_index, start_col, start_col + 3, formula, fmt)
+    ws.set_footer("&LPrepared by Anass ASSRI | WFM&RPage &P of &N")
+
+
+def _add_pcs_v2_calc(
+    book: DecisionWorkbook,
+    lob_rows: Sequence[Sequence[Any]],
+    scope_rows: Sequence[Sequence[Any]],
+) -> None:
+    """Create hidden chart calculations and selector constants."""
+
+    wb = book.report.workbook
+    ws = wb.add_worksheet("_PCS_CALC")
+    header = wb.add_format({"bold": True, "bg_color": COLORS["navy"], "font_color": COLORS["white"]})
+    decimal = wb.add_format({"num_format": "0.00"})
+    date_format = wb.add_format({"num_format": "d-mmm"})
+    for column, value in enumerate(("LOB", "Current PCS", "Prior PCS", "", "Date", "Current", "Prior", "Prior Date", "", "Period")):
+        ws.write(0, column, value, header)
+    periods = ("Latest day", "Current week", "Current MTD", "Previous full month")
+    for index, label in enumerate(periods, 1):
+        ws.write(index, 9, label)
+
+    lobs = [
+        str(row[2]) for row in scope_rows
+        if str(row[0]) == "LOB|All" and str(row[2]) != "All"
+    ]
+    lob_cache = {str(row[0]): row for row in lob_rows if str(row[0]) != "ALL"}
+    for offset in range(12):
+        row_index = offset + 1
+        excel_row = row_index + 1
+        cached_lob = lobs[offset] if offset < len(lobs) else ""
+        ws.write_formula(
+            row_index, 0, f'=IFERROR(INDEX(PCS_LOB_LIST,{offset + 2}),"")',
+            None, cached_lob,
+        )
+        current_sum = _pcs_v2_sum_formula("M", lob_cell=f"$A${excel_row}")
+        current_valid = _pcs_v2_sum_formula("L", lob_cell=f"$A${excel_row}")
+        prior_sum = _pcs_v2_sum_formula(
+            "M", from_ref="PCS_Prior_From", to_ref="PCS_Prior_To", lob_cell=f"$A${excel_row}",
+        )
+        prior_valid = _pcs_v2_sum_formula(
+            "L", from_ref="PCS_Prior_From", to_ref="PCS_Prior_To", lob_cell=f"$A${excel_row}",
+        )
+        cached_row = lob_cache.get(cached_lob)
+        current_cache = cached_row[5] if cached_row else "#N/A"
+        prior_cache = cached_row[6] if cached_row else "#N/A"
+        wrapper = f'OR($A${excel_row}="",AND(OVERVIEW!$J$2<>"All",OVERVIEW!$J$2<>$A${excel_row}))'
+        ws.write_formula(
+            row_index, 1,
+            f'=IF({wrapper},NA(),IFERROR({current_sum}/{current_valid},NA()))',
+            decimal, current_cache,
+        )
+        ws.write_formula(
+            row_index, 2,
+            f'=IF({wrapper},NA(),IFERROR({prior_sum}/{prior_valid},NA()))',
+            decimal, prior_cache,
+        )
+
+    for offset in range(31):
+        row_index = offset + 1
+        excel_row = row_index + 1
+        ws.write_formula(row_index, 4, f'=PCS_From+{offset}', date_format)
+        ws.write_formula(row_index, 7, f'=PCS_Prior_From+{offset}', date_format)
+        current_sum = _pcs_v2_sum_formula("M", from_ref=f"$E${excel_row}", to_ref=f"$E${excel_row}")
+        current_valid = _pcs_v2_sum_formula("L", from_ref=f"$E${excel_row}", to_ref=f"$E${excel_row}")
+        prior_sum = _pcs_v2_sum_formula("M", from_ref=f"$H${excel_row}", to_ref=f"$H${excel_row}")
+        prior_valid = _pcs_v2_sum_formula("L", from_ref=f"$H${excel_row}", to_ref=f"$H${excel_row}")
+        ws.write_formula(
+            row_index, 5,
+            f'=IF($E${excel_row}>PCS_To,NA(),IFERROR({current_sum}/{current_valid},NA()))',
+            decimal, "#N/A",
+        )
+        ws.write_formula(
+            row_index, 6,
+            f'=IF($H${excel_row}>PCS_Prior_To,NA(),IFERROR({prior_sum}/{prior_valid},NA()))',
+            decimal, "#N/A",
+        )
+    ws.hide()
+
+
 def _add_pcs_stable_coaching(
     book: DecisionWorkbook,
     previous: Sequence[dict[str, Any]],
@@ -1171,15 +1491,16 @@ def _add_pcs_stable_coaching(
     ws.freeze_panes(4, 0)
     ws.set_zoom(85)
     headers = [
-        "Coaching Key", "LOB", "Team Leader", "Agent Selector", "Agent ID",
-        "Agent", "Date", "Call Start", "Q1 Score", "Customer Comment",
-        "Call Reference Number", "Language", "Coaching Status", "Coach",
-        "Coaching Date", "Due Date", "Coaching Comment",
+        "Coaching Key", "Call ID", "LOB", "Team Leader", "Agent Selector",
+        "Agent ID", "Agent", "Date", "Call Start", "Q1 Score",
+        "Customer Comment", "Call Reference Number", "Language",
+        "Coaching Status", "Coach", "Coaching Date", "Due Date",
+        "Coaching Comment",
     ]
-    ws.merge_range("A1:Q1", "PCS  /  COACHING ACTIONS", book.report.title)
+    ws.merge_range("A1:R1", "PCS  /  COACHING ACTIONS", book.report.title)
     ws.merge_range(
-        "A2:Q2",
-        "Filter COACHING_QUEUE, copy its Coaching Key, then paste it in the first blank blue cell here. Identity fields fill automatically.",
+        "A2:R2",
+        "Select a Coaching Key, then use the read-only Call ID to open the exact call. Fill only the blue action fields.",
         book.report.subtitle,
     )
     rows = list(previous) or [{}]
@@ -1196,10 +1517,11 @@ def _add_pcs_stable_coaching(
                 fmt = book.report.editable_date
             ws.write(row_index, column, value, fmt)
     queue_columns = {
-        "LOB": "A", "Team Leader": "B", "Agent Selector": "C",
-        "Agent": "D", "Agent ID": "E", "Date": "G", "Call Start": "H",
-        "Q1 Score": "I", "Customer Comment": "J",
-        "Call Reference Number": "K", "Language": "L",
+        "Call ID": "L", "LOB": "A", "Team Leader": "B",
+        "Agent Selector": "C", "Agent": "D", "Agent ID": "E",
+        "Date": "G", "Call Start": "H", "Q1 Score": "I",
+        "Customer Comment": "J", "Call Reference Number": "K",
+        "Language": "M",
     }
     columns = []
     for header in headers:
@@ -1209,7 +1531,7 @@ def _add_pcs_stable_coaching(
             column["formula"] = (
                 '=IF([@[Coaching Key]]="","",IFERROR('
                 f'INDEX(COACHING_QUEUE!${source}$5:${source}$100004,'
-                'MATCH([@[Coaching Key]],COACHING_QUEUE!$M$5:$M$100004,0)),'
+                'MATCH([@[Coaching Key]],COACHING_QUEUE!$N$5:$N$100004,0)),'
                 '"KEY NOT IN CURRENT QUEUE"))'
             )
             if header == "Date":
@@ -1226,35 +1548,36 @@ def _add_pcs_stable_coaching(
     ))
     wb.define_name(
         "PCS_COACHING_KEY_LIST",
-        "=COACHING_QUEUE!$M$5:INDEX(COACHING_QUEUE!$M:$M,MAX(5,COUNTA(COACHING_QUEUE!$M:$M)+3))",
+        "=COACHING_QUEUE!$N$5:INDEX(COACHING_QUEUE!$N:$N,MAX(5,COUNTA(COACHING_QUEUE!$N:$N)+3))",
     )
     ws.data_validation("A5:A1004", {
         "validate": "list", "source": "=PCS_COACHING_KEY_LIST",
         "input_title": "Exact PCS case",
         "input_message": "Paste or select a key from COACHING_QUEUE.",
     })
-    ws.data_validation("M5:M1004", {
+    ws.data_validation("N5:N1004", {
         "validate": "list", "source": ["Pending", "Planned", "Completed", "Not required"],
     })
     ws.conditional_format("A5:A1004", {"type": "duplicate", "format": book.report.error})
     ws.write_url("A3", "internal:'COACHING_QUEUE'!A1", book.report.editable, string="OPEN FILTERABLE OPPORTUNITY QUEUE")
     ws.set_column("A:A", 34)
-    ws.set_column("B:C", 20)
-    ws.set_column("D:D", 30)
-    ws.set_column("E:I", 18)
-    ws.set_column("J:J", 38)
-    ws.set_column("K:P", 20)
-    ws.set_column("Q:Q", 42)
+    ws.set_column("B:B", 24)
+    ws.set_column("C:D", 20)
+    ws.set_column("E:E", 30)
+    ws.set_column("F:J", 18)
+    ws.set_column("K:K", 38)
+    ws.set_column("L:Q", 20)
+    ws.set_column("R:R", 42)
 
 
 def _add_pcs_stable_setup(book: DecisionWorkbook, config: Config) -> None:
     folder = config.feed / "PCS"
     ws = book.table(
         "SETUP", "PCS connection status",
-        "The WFMHub PCS menu installs or refreshes four ordinary Power Query tables. No Data Model is used.",
+        "The WFMHub PCS menu installs or refreshes five ordinary Power Query tables. No Data Model is used.",
         ["Setting", "Value", "Why it exists"],
         [
-            ("Power Query Installed", "NO", "Set automatically after all four query tables refresh"),
+            ("Power Query Installed", "NO", "Set automatically after all five query tables refresh"),
             ("Connection Mode", "LOCAL", "One WFM owner refreshes the locally synced workbook"),
             ("Connection Owner", "Anass ASSRI", "Prevents competing setup changes"),
             ("Local Feed Folder", str(folder), "Fixed clean CSV folder"),
@@ -1264,6 +1587,7 @@ def _add_pcs_stable_setup(book: DecisionWorkbook, config: Config) -> None:
             ("Results Script", str(folder / "POWER_QUERY_PCS_RESULTS_LOCAL.txt"), "Filterable period/team/agent results"),
             ("Coaching Script", str(folder / "POWER_QUERY_COACHING_QUEUE_LOCAL.txt"), "Filterable opportunity queue"),
             ("Data Script", str(folder / "POWER_QUERY_PCS_DATA_LOCAL.txt"), "Clean agent/day table for pivots"),
+            ("Scope Script", str(folder / "POWER_QUERY_PCS_SCOPE_LOCAL.txt"), "Dependent LOB, team and agent selectors"),
             ("Workbook Last Refreshed", "Never", "Written only after all queries complete"),
             ("Last Installer Result", "Not run", "Latest desktop Excel result"),
             ("Template Version", PCS_TEMPLATE_VERSION, "Controls safe workbook upgrades"),
@@ -1486,8 +1810,10 @@ def build_pcs_performance_workbook(
         PCS_COACHING_HEADERS,
         PCS_LOB_SCORECARD_HEADERS,
         PCS_RESULTS_HEADERS,
+        PCS_SCOPE_HEADERS,
         pcs_lob_scorecard_rows,
         pcs_result_rows,
+        pcs_scope_rows,
         publish_pcs_feeds,
     )
 
@@ -1522,9 +1848,9 @@ def build_pcs_performance_workbook(
 
     lob_rows = pcs_lob_scorecard_rows(conn, latest, minimum_sample, book.generated)
     result_rows = pcs_result_rows(conn, latest, minimum_sample, book.generated)
-    _add_pcs_stable_overview(
-        book, status, status_text, latest,
-        list(PCS_LOB_SCORECARD_HEADERS), lob_rows,
+    scope_rows = pcs_scope_rows(conn, data_start, latest)
+    _add_pcs_v2_overview(
+        book, status, latest, lob_rows, scope_rows,
         pcs_method.target if pcs_method is not None else None,
     )
     results_sheet = book.table(
@@ -1548,7 +1874,7 @@ def build_pcs_performance_workbook(
         "Agent": "agent_name", "Agent ID": "agent_id", "Priority": "priority",
         "Date": "business_date", "Call Start": "call_start", "Q1 Score": "q1_score",
         "Customer Comment": "customer_comment", "Call Reference Number": "call_reference_number",
-        "Language": "language", "Coaching Key": "coaching_key",
+        "Call ID": "call_id", "Language": "language", "Coaching Key": "coaching_key",
     }
     queue_rows = [
         tuple(values[indexes[sources[header]]] for header in PCS_COACHING_HEADERS)
@@ -1594,10 +1920,10 @@ def build_pcs_performance_workbook(
         "This design uses ordinary tables and classic formulas to avoid Excel repair prompts.",
         ["Step", "What to do", "Result", "Important"],
         [
-            (1, "Close the workbook, then choose PCS > Update PCS now in WFMHub", "Four clean feeds and four Excel query tables refresh", "Keep one permanent workbook"),
+            (1, "Close the workbook, then choose PCS > Update PCS now in WFMHub", "Five clean query tables refresh", "Keep one permanent workbook"),
             (2, "Open OVERVIEW", "See total and per-LOB latest day, current MTD and prior-MTD PCS and participation", "The ALL row reconciles the headline cards"),
             (3, "Open RESULTS and use its filter arrows", "Choose a period, LOB, team or agent without formulas or technical selectors", "Add slicers to this table if desired"),
-            (4, "Quality filters COACHING_QUEUE and copies one Coaching Key", "Paste the key in the first blank blue COACHING row", "Fill only status, owner, dates and comment"),
+            (4, "Quality filters COACHING_QUEUE and copies one Coaching Key", "COACHING shows the exact Call ID beside the key", "Fill only status, owner, dates and comment"),
             (5, "Save the same shared workbook", "Coaching remains under SharePoint version history", "A template upgrade archives and migrates keyed actions"),
         ],
     )
@@ -1610,6 +1936,19 @@ def build_pcs_performance_workbook(
         ("Low sample", f"Fewer than {minimum_sample} valid responses in the row period", "Interpretation warning", "Use a broader period before concluding"),
     ])
     book.audit(_audit_rows(conn, config, "pcs", start, end, (("Workbook engine", "Compatibility", "No dynamic-array report formulas"),)))
+    lob_sheet = book.table(
+        "_PCS_LOB", "PCS LOB chart staging",
+        "Hidden Power Query destination used by the permanent tracker.",
+        list(PCS_LOB_SCORECARD_HEADERS), lob_rows or [tuple(None for _ in PCS_LOB_SCORECARD_HEADERS)],
+    )
+    lob_sheet.hide()
+    scope_sheet = book.table(
+        "_PCS_SCOPE", "PCS selector staging",
+        "Hidden Power Query destination for dependent LOB, team and agent lists.",
+        list(PCS_SCOPE_HEADERS), scope_rows or [tuple(None for _ in PCS_SCOPE_HEADERS)],
+    )
+    scope_sheet.hide()
+    _add_pcs_v2_calc(book, lob_rows, scope_rows)
     result = _finish(book, partial, target)
     if output is None:
         archive_superseded_reports(config, ("PCS Performance.xlsx",), book.generated)

@@ -3,10 +3,10 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `1.0.0` |
+| Version | `2.0.0` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
-| First compatible Hub version | `0.23.0` |
+| First compatible Hub version | `0.23.1` |
 
 This is the visual contract for every WFMHub workbook. It changes presentation,
 never business calculations, source scope, table keys, or report maturity.
@@ -47,12 +47,12 @@ Titles and KPI values use Aptos Display. Body, table and note text use Aptos.
 
 ## First-screen grid
 
-- Row 1: navy title; small freshness/status badge at the right.
-- Row 2: one teal context sentence with dates and evidence state.
-- Row 4: scope strip. A generated snapshot shows scope values, not fake filters.
-- Rows 6–9: exactly four headline KPI cards.
-- Main area: at most two charts, aligned to the same grid.
-- Lower area: one ordinary Excel Table with native filters.
+- The canonical canvas is 1,456 pixels wide: 28 equal 52-pixel columns.
+- Row 1 is a 56-pixel navy title/owner/status bar.
+- Row 2 is a 52-pixel selector strip with four equal seven-column controls.
+- Rows 4–6 contain four equal seven-column KPI cards.
+- Rows 8–21 contain two equal 728 × 310 pixel native Excel charts.
+- Rows 23–32 contain one compact seven-field action grid.
 - Gridlines hidden; decision surface frozen; landscape print layout.
 - Footer: `Prepared by Anass ASSRI | WFM` plus page count and confidentiality.
 
@@ -65,12 +65,14 @@ defines a target; WFMHub never invents the pictured PCS target.
 
 ### PCS Operational Tracker
 
-- `OVERVIEW`: Current MTD PCS, participation, prior comparable MTD PCS, change;
-  PCS by LOB; daily current-versus-prior trend; visible per-LOB table.
+- `OVERVIEW`: four working dependent selectors; current-period PCS,
+  participation, prior comparable PCS and change; two equal charts; team action
+  grid. Query tables are never placed on this presentation surface.
 - `RESULTS`: the actual linked Period View, Scope Level, LOB, Team Leader and
   Agent filters. Filter the table from left to right.
 - `COACHING_QUEUE`: current exact low-score opportunities.
-- `COACHING`: permanent blue action fields; never a Power Query target.
+- `COACHING`: permanent blue action fields plus a read-only source `Call ID`
+  beside the internal Coaching Key; never a Power Query target.
 - `PCS_DATA`: refreshable agent-day counters for pivots or reconciliation.
 - No dynamic-array report formulas. Power Query is transport only.
 
@@ -114,7 +116,7 @@ and decision workflow must pass their own production review first.
 ## Interaction and persistence
 
 - Generated RTM and Attendance workbooks are dated decision snapshots.
-- PCS is one permanent shared workbook. A normal update replaces only the four
+- PCS is one permanent shared workbook. A normal update replaces only the five
   query tables and preserves `tblCoaching` byte-for-byte.
 - Power Query never loads into `tblCoaching` or a permanent action ledger.
 - Blue cells are editable. White, grey and calculated cells are not.
@@ -134,5 +136,7 @@ Every design change requires:
 
 ## Change log
 
+- `2.0.0`: measured 28-column operational grid, equal cards/charts, real PCS
+  selectors, hidden query staging and coaching Call ID.
 - `1.0.0`: approved compact operational system for PCS, RTM/LOB Service Flash,
   and Attendance Review; canonical palette moved to `src/wfmhub/design.py`.

@@ -7,6 +7,19 @@ from pathlib import Path
 import xlsxwriter
 
 from wfmhub.design import COLORS, REPORT_DESIGN_ID, REPORT_DESIGN_VERSION
+from wfmhub.excel_layout import (
+    ACTION_FIRST_ROW,
+    ACTION_HEADER_ROW,
+    ACTION_VISIBLE_ROWS,
+    configure_v2_cell_canvas,
+    insert_v2_charts,
+    make_v2_formats,
+    style_v2_chart,
+    write_v2_filters,
+    write_v2_header,
+    write_v2_kpis,
+    write_v2_section,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,22 +111,92 @@ def blueprint_sheet(workbook, fmt, kind: str) -> None:
     ws.hide_gridlines(2)
     ws.set_zoom(85)
     ws.set_tab_color(COLORS["gold"])
-    ws.set_column("A:N", 12)
     if kind == "PCS":
-        header(ws, fmt, "PCS PERFORMANCE", "Illustrative layout only · governed data replaces every example")
-        scope(ws, fmt, (("Period", "Current MTD"), ("LOB", "All"),
-                        ("Team Leader", "RESULTS filter"), ("Agent", "RESULTS filter")))
-        cards(ws, fmt, (("CURRENT MTD PCS", "4.54", "Weighted valid Q1"),
-                        ("PARTICIPATION", "26.8%", "Q1 nonblank / status 1"),
-                        ("PRIOR MTD PCS", "4.42", "Same days"),
-                        ("CHANGE", "+0.12", "Current minus prior")))
-        ws.merge_range("A11:N11", "PCS BY LOB · DAILY TREND · LOB PERFORMANCE TABLE", fmt["section"])
-        table(ws, fmt, 12, ("LOB", "Current MTD", "Prior MTD", "Participation", "Responses", "Sample"),
-              (("RSA NL", 4.62, 4.51, "28.1%", 412, "OK"),
-               ("RSA BE", 4.38, 4.31, "24.7%", 286, "OK"),
-               ("FORD NL", 4.71, 4.66, "28.9%", 398, "OK"),
-               ("OEM FR", 4.55, 4.48, "26.1%", 312, "OK")))
-    elif kind == "RTM":
+        v2 = make_v2_formats(workbook)
+        configure_v2_cell_canvas(ws, v2, zoom=85)
+        ws.hide_row_col_headers()
+        write_v2_header(ws, v2, "PCS OPERATIONS", status="DATA FRESH")
+        write_v2_filters(ws, v2, (
+            ("Period", "Current MTD", None),
+            ("LOB", "All", None),
+            ("Team Leader", "All", None),
+            ("Agent", "All", None),
+        ))
+        write_v2_kpis(ws, v2, (
+            ("CURRENT PCS", 4.54, "decimal", None),
+            ("PARTICIPATION", .268, "percent", None),
+            ("PRIOR PCS", 4.42, "decimal", None),
+            ("CHANGE", .12, "decimal", None),
+        ))
+        lobs = ("RSA NL", "RSA BE", "FORD NL", "OEM")
+        current = (4.62, 4.38, 4.71, 4.55)
+        prior = (4.51, 4.31, 4.66, 4.48)
+        for row, values in enumerate(zip(lobs, current, prior), 1):
+            ws.write_row(row, 29, values)
+        for offset in range(8):
+            ws.write(offset + 1, 33, offset + 1)
+            ws.write(offset + 1, 34, 4.25 + offset * .04)
+            ws.write(offset + 1, 35, 4.18 + offset * .035)
+        lob_chart = workbook.add_chart({"type": "bar"})
+        for label, column, color in (
+            ("Current period", "AE", COLORS["teal"]),
+            ("Prior comparable", "AF", COLORS["muted"]),
+        ):
+            lob_chart.add_series({
+                "name": label, "categories": "=PCS!$AD$2:$AD$5",
+                "values": f"=PCS!${column}$2:${column}$5",
+                "fill": {"color": color}, "border": {"none": True},
+                "data_labels": {"value": True, "num_format": "0.00"},
+            })
+        style_v2_chart(lob_chart, title="PCS BY LOB", kind="bar")
+        lob_chart.set_x_axis({"min": 1, "max": 5, "major_unit": 1})
+        trend_chart = workbook.add_chart({"type": "line"})
+        for label, column, color in (
+            ("Current period", "AI", COLORS["teal"]),
+            ("Prior comparable", "AJ", COLORS["muted"]),
+        ):
+            trend_chart.add_series({
+                "name": label, "categories": "=PCS!$AH$2:$AH$9",
+                "values": f"=PCS!${column}$2:${column}$9",
+                "line": {"color": color, "width": 2.25},
+            })
+        style_v2_chart(trend_chart, title="DAILY PCS TREND")
+        trend_chart.set_y_axis({"min": 2, "max": 5, "major_unit": .5})
+        insert_v2_charts(ws, lob_chart, trend_chart)
+        write_v2_section(ws, v2, "TEAM PERFORMANCE & ACTIONS")
+        action_headers = (
+            "TEAM LEADER", "PCS AGENTS", "PARTICIPATION", "CURRENT PCS",
+            "PRIOR PCS", "CHANGE", "COACHING DUE",
+        )
+        teams = (
+            ("Sophie Martin", 12, .29, 4.62, 4.51, .11, 2),
+            ("Karim Belkacem", 10, .25, 3.92, 4.08, -.16, 5),
+            ("Elena Rossi", 11, .27, 4.38, 4.31, .07, 1),
+            ("Daniel Weber", 9, .31, 4.71, 4.66, .05, 0),
+        )
+        for index, value in enumerate(action_headers):
+            ws.merge_range(ACTION_HEADER_ROW, index * 4, ACTION_HEADER_ROW, index * 4 + 3, value, v2.table_header)
+        for offset in range(ACTION_VISIBLE_ROWS):
+            values = teams[offset] if offset < len(teams) else ("", "", "", "", "", "", "")
+            for index, value in enumerate(values):
+                cell_format = v2.table_text if index == 0 else v2.table_integer
+                if index == 2:
+                    cell_format = v2.table_percent
+                elif index in {3, 4}:
+                    cell_format = v2.table_decimal
+                elif index == 5:
+                    cell_format = v2.positive if isinstance(value, (int, float)) and value >= 0 else v2.negative
+                elif index == 6:
+                    cell_format = v2.due if value else v2.clear
+                ws.merge_range(
+                    ACTION_FIRST_ROW + offset, index * 4,
+                    ACTION_FIRST_ROW + offset, index * 4 + 3,
+                    value, cell_format,
+                )
+        ws.set_column(29, 35, None, None, {"hidden": True})
+        return
+    ws.set_column("A:N", 12)
+    if kind == "RTM":
         header(ws, fmt, "RTM DAILY CONTROL", "Combined service, attendance pulse and exact call actions")
         scope(ws, fmt, (("Date", "08 Sep 2026"), ("Snapshot", "Through 17:59"),
                         ("LOB", "All operational"), ("Attendance", "17:45")))
