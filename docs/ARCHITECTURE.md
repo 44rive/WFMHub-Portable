@@ -128,6 +128,12 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `absence` | `Reports/Final Absenteeism.xlsx` | Reviewed attendance-decision absence/shrinkage ledger |
 
 Products share the same visual identity but use purpose-specific layouts.
+The approved identity is versioned as `WFMHUB-DESIGN` in
+`docs/REPORT_DESIGN_SYSTEM.md`; its code tokens live only in
+`src/wfmhub/design.py`. Operational first screens use a compact title/status
+header, an honest scope strip, four headline cards, at most two decision charts,
+and one filterable action or reconciliation table. Generated snapshots never
+display fake selectors.
 The PCS operational update is deliberately domain-scoped: FTE and Call-by-Call
 are ingested, only the employee dimension and PCS mart are rebuilt, and only PCS
 feeds are published. The permanent Excel tracker is refreshed afterward and is

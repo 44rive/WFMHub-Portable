@@ -4,8 +4,11 @@ WFMHub writes clean exports here when you choose "Export clean data".
 Each requested dataset gets its own folder and a manifest.
 
 Every source refresh also updates fixed-name collaboration feeds:
+  Feed\PCS\PCS_LOB_SCORECARD_CURRENT.csv
+  Feed\PCS\PCS_RESULTS_CURRENT.csv
   Feed\PCS\PCS_AGENT_DAY_CURRENT.csv
   Feed\PCS\PCS_COACHING_OPPORTUNITY_CURRENT.csv
+Auxiliary scope feed (not a workbook query target):
   Feed\PCS\PCS_SCOPE_CURRENT.csv
   Feed\Absenteeism\ABSENCE_AGENT_DAY_CURRENT.csv
   Feed\Absenteeism\ABSENCE_COMPONENT_CURRENT.csv
@@ -19,6 +22,7 @@ The original FTE, Storm, and Verint extracts are never moved or changed.
 Agent ID and Case/Coaching Key are the matching fields. Display names are not
 used as keys.
 
-For a permanent shared workbook, Power Query may replace the PCS data and
-opportunity tables or the Absenteeism data, review-queue, and activity-detail
-tables. It must never load into the editable COACHING or ACTIONS tables.
+For the permanent PCS workbook, Power Query may replace only tblPcsLob,
+tblResults, tblCoachingQueue and tblPcsData. Absenteeism connections may replace
+their declared data/review/activity tables. Power Query must never load into the
+editable COACHING or ACTIONS tables.

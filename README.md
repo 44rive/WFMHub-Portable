@@ -97,6 +97,11 @@ See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
 [Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the automated PCS Power
 Query workflow and the manual shared-Absenteeism setup.
 
+The approved visual contract is in the
+[report design system](docs/REPORT_DESIGN_SYSTEM.md), with a data-free
+[Excel design reference](<docs/WFMHub Report Design Reference.xlsx>). Future
+developers and assistants must start with [AI_CONTEXT.md](AI_CONTEXT.md).
+
 ## RTM Daily Control
 
 `Reports\RTM Daily Control.xlsx` is the single same-day operating file. It
@@ -122,8 +127,10 @@ and AHT are weighted by volume. Routed Rate is
 entered - lost calls from 5 to 30 seconds)`; AHT is weighted handled seconds per
 routed queue entry. The threshold clock is total queue wait plus ringing.
 
-Every LOB displays the full 00:00-23:00 day. Headline controls show TSL, Routed
-Rate, Actual, Forecast, `No Show HC`, `Offline Now`, and Call Now. `No Show HC`
+Every LOB displays the full 00:00-23:00 day. Headline controls show TSL, offered
+volume, volume variance, and `No Show HC`; the hourly table retains Forecast,
+Routed Rate and AHT, while the attendance section retains Offline Now and Call
+Now. `No Show HC`
 means the agent has no observed presence at all and agent-specific evidence
 proves the no-show. Late agents, early leavers, and agents who went offline
 after attending remain present. `Unknown HC` is a possible no-show or data
@@ -260,6 +267,8 @@ python3 -m unittest discover -s tests -v
 
 For implementation details in the portable package, see
 `_system\docs\ARCHITECTURE.md`,
+`_system\docs\AI_CONTEXT.md`,
+`_system\docs\REPORT_DESIGN_SYSTEM.md`,
 `_system\docs\ATTENDANCE_DECISION_LEDGER.md`,
 `_system\docs\SERVICE_KPI_REFERENCE.md`, and
 `_system\docs\METRIC_CATALOG_GUIDE.md`.

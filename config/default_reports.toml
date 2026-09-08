@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.21"
+version = "2026.09.22"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]

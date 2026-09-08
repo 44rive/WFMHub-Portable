@@ -327,8 +327,7 @@ class CallServiceModelTests(unittest.TestCase):
             {"no_show_hc": 1, "offline_now": 2},
         )
         self.assertEqual([card[0] for card in cards], [
-            "TSL", "Routed Rate", "Actual", "Forecast", "No Show HC",
-            "Offline Now", "Call Now",
+            "TSL", "Offered", "Volume Variance", "No Show HC",
         ])
         ford_cards = _flash_cards(
             ford_nl,
@@ -340,8 +339,7 @@ class CallServiceModelTests(unittest.TestCase):
             {"no_show_hc": 1, "offline_now": 2},
         )
         self.assertEqual([card[0] for card in ford_cards], [
-            "TSL", "Routed Rate", "Actual", "Forecast", "No Show HC",
-            "Offline Now", "Call Now",
+            "TSL", "Offered", "Volume Variance", "No Show HC",
         ])
 
     def test_forecast_only_hour_has_no_attainment_instead_of_crashing(self):

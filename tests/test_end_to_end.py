@@ -1034,7 +1034,7 @@ class EndToEndTests(unittest.TestCase):
                 ])
             finally:
                 workbook.close()
-            corrections_book = load_workbook(corrections_report, read_only=True, data_only=True)
+            corrections_book = load_workbook(corrections_report, read_only=False, data_only=True)
             try:
                 self.assertEqual(corrections_book.sheetnames, [
                     "CONTROL", "REVIEW BOARD", "BREAK & MEAL",
@@ -1042,6 +1042,15 @@ class EndToEndTests(unittest.TestCase):
                     "_AUDIT",
                 ])
                 self.assertIn("2026-08-01 to 2026-08-02", corrections_book["CONTROL"]["A2"].value)
+                self.assertEqual(
+                    [corrections_book["CONTROL"][cell].value for cell in ("A6", "F6", "K6", "P6")],
+                    ["REVIEW GAPS", "GAP HOURS", "OPEN DECISIONS", "MISSING EVIDENCE"],
+                )
+                self.assertIn(
+                    "tblAttendanceReviewSummary",
+                    corrections_book["CONTROL"].tables,
+                )
+                self.assertGreaterEqual(len(corrections_book["CONTROL"]._charts), 1)
                 review = corrections_book["REVIEW BOARD"]
                 review_headers = [cell.value for cell in review[4]]
                 self.assertIn("Exact Start", review_headers)
@@ -1107,6 +1116,12 @@ class EndToEndTests(unittest.TestCase):
                     "PCS_DATA", "SETUP", "HELP", "DEFINITIONS", "_AUDIT",
                 ])
                 self.assertGreaterEqual(len(focused_pcs_book["OVERVIEW"]._charts), 2)
+                self.assertEqual(
+                    [focused_pcs_book["OVERVIEW"][cell].value for cell in ("A6", "F6", "K6", "P6")],
+                    ["CURRENT MTD PCS", "PARTICIPATION", "PRIOR MTD PCS", "CHANGE"],
+                )
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["A4"].value, "PERIOD")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["K4"].value, "TEAM LEADER")
                 self.assertIn("tblPcsLob", focused_pcs_book["OVERVIEW"].tables)
                 self.assertIn("tblResults", focused_pcs_book["RESULTS"].tables)
                 self.assertIn("tblPcsData", focused_pcs_book["PCS_DATA"].tables)
@@ -1174,7 +1189,11 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(service_book["CONTROL"]["A1"].value, "RTM DAILY CONTROL")
                 self.assertIn(
                     "PTO / Away HC",
-                    [cell.value for cell in service_book["CONTROL"][5]],
+                    [cell.value for cell in service_book["CONTROL"][11]],
+                )
+                self.assertEqual(
+                    [service_book["CONTROL"][cell].value for cell in ("A6", "E6", "I6", "L6")],
+                    ["LOBS ON TARGET", "DEMAND VARIANCE", "NO SHOW HC", "CALL NOW"],
                 )
                 self.assertEqual(
                     [cell.value for cell in service_book["OEM"][11]][:15],
@@ -1198,6 +1217,10 @@ class EndToEndTests(unittest.TestCase):
                 self.assertGreaterEqual(len(service_book["CONTROL"]._charts), 1)
                 for sheet_name in ("RSA NL", "RSA BE", "FORD NL", "OEM"):
                     self.assertGreaterEqual(len(service_book[sheet_name]._charts), 1)
+                    self.assertEqual(
+                        [service_book[sheet_name][cell].value for cell in ("A5", "E5", "I5", "M5")],
+                        ["TSL", "OFFERED", "VOLUME VARIANCE", "NO SHOW HC"],
+                    )
                     table_names = set(service_book[sheet_name].tables)
                     self.assertTrue(any(name.startswith("tblRtm") for name in table_names))
                     visible_values = {

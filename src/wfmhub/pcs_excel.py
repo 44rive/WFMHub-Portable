@@ -22,7 +22,7 @@ from openpyxl import load_workbook
 from .config import Config
 
 
-PCS_TEMPLATE_VERSION = "2026.09.21"
+PCS_TEMPLATE_VERSION = "2026.09.22"
 
 
 class PCSExcelError(RuntimeError):

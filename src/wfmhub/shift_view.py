@@ -47,7 +47,7 @@ def add_shift_view(
     """Show a compact 15-minute visual; exact times stay in DECISIONS."""
 
     ws = report.workbook.add_worksheet("SHIFT_VIEW")
-    ws.set_tab_color(COLORS["purple"])
+    ws.set_tab_color(COLORS["gold"])
     ws.hide_gridlines(2)
     ws.set_zoom(75)
     ws.merge_range("A1:X1", "ATTENDANCE REVIEW  /  SHIFT VIEW", report.title)
@@ -215,7 +215,7 @@ def add_review_board(
     """Place the scheduled band directly above actual evidence for each gap."""
 
     ws = report.workbook.add_worksheet("REVIEW BOARD")
-    ws.set_tab_color(COLORS["purple"])
+    ws.set_tab_color(COLORS["gold"])
     ws.hide_gridlines(2)
     ws.set_zoom(70)
 
@@ -254,7 +254,17 @@ def add_review_board(
     band_column = len(display_headers)
     timeline_start = band_column + 1
     last_column = max(timeline_start + len(slots) - 1, len(display_headers) - 1)
-    ws.merge_range(0, 0, 0, last_column, "ATTENDANCE REVIEW  /  VISUAL DECISION BOARD", report.title)
+    review_badge = report.workbook.add_format({
+        "font_name": "Aptos", "font_size": 10, "bold": True,
+        "font_color": COLORS["white"], "bg_color": COLORS["green"],
+        "align": "center", "valign": "vcenter",
+    })
+    badge_start = max(1, last_column - 2)
+    ws.merge_range(
+        0, 0, 0, badge_start - 1,
+        "ATTENDANCE REVIEW  /  VISUAL DECISION BOARD", report.title,
+    )
+    ws.merge_range(0, badge_start, 0, last_column, "EDIT BLUE CELLS", review_badge)
     ws.merge_range(
         1, 0, 1, last_column,
         f"Completed dates {period_start:%Y-%m-%d} to {period_end:%Y-%m-%d}  |  exact Agent Status/LILO evidence  |  decisions return to WFM Hub",

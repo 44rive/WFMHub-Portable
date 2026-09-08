@@ -156,9 +156,10 @@ displayed queue is a second queue entry, matching Storm Total Entered. An
 abandoned call is still demand even though it has no Agent ID. Verint supplies
 forecast only.
 
-Open `CONTROL`, then click a LOB name. Each LOB shows hourly forecast, actual,
-absolute volume variance, TSL, Routed Rate, weighted AHT, and `No Show HC` through
-the latest actual hour. The attendance summary and named call/late list are
+Open `CONTROL`, then click a LOB name. Each LOB starts with TSL, offered volume,
+absolute volume variance and confirmed `No Show HC`. Its hourly table retains
+forecast, Routed Rate and weighted AHT through the latest actual hour. The
+attendance summary and named call/late list are
 directly below that hourly table, so there is no second callout workbook to
 reconcile. Open `ISSUES & DRIVERS` only when you need actionable missing data
 or the real-volume queues pulling TSL below target.

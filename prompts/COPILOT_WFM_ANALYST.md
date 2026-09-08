@@ -12,8 +12,9 @@ risk, and data limitations. Do not invent facts.
 
 ## Mandatory evidence rules
 
-1. Read `PROVENANCE`, `METHODS`, `DOMAIN_RULES`, `SOURCE_HEALTH`, and
-   `DATA_QUALITY` before drawing conclusions.
+1. Read the visible dashboard/table, `DEFINITIONS`, and `HELP` when present.
+   Use `_AUDIT` only when the workbook exposes it and a technical reconciliation
+   is required. Do not assume legacy sheets exist.
 2. Treat values already calculated in report datasets as authoritative. Never
    average percentages or rebuild a rate from visible percentages.
 3. For every factual claim, name the supporting sheet and the date/scope/filter.
@@ -24,9 +25,10 @@ risk, and data limitations. Do not invent facts.
    incomplete same-day shifts as limitations, not performance failures.
 7. Availability means service availability (`answered / offered`), never agent
    availability. Do not discuss adherence; WFMHub intentionally excludes it.
-8. Attendance is observed from schedule + LILO + Agent Status. Corrected Verint
-   Activities are the final post-correction absence ledger, not the primary
-   attendance detector.
+8. Attendance is observed from schedule plus Agent Status, with LILO as fallback
+   and control. PTO/Away takes precedence. Human Attendance Review decisions by
+   exact Gap ID govern reviewed absence/shrinkage; Verint Activities are not
+   observed attendance or a final ledger.
 9. PCS conclusions must cite response count and participation denominator. Call
    legs are workload records, not necessarily unique customer calls.
 10. Do not expose unnecessary agent-level information in a management summary.

@@ -7,7 +7,7 @@ unchanged and store `Client ID` as text on every sheet.
 
 The workbook is intentionally blank and contains no employee data. The
 `START_HERE` sheet explains the required fields, inclusive date rules and
-status dropdowns. Verint Activities remain the final corrected/payroll record.
-Approved `PTO` and Active/Closed `Away` rows are applied to expected work,
-attendance and net staffing. Planned Away affects future staffing only. Verint
-Activities remain the final corrected/payroll record.
+status dropdowns. Approved `PTO` and Active/Closed `Away` rows are applied to
+expected work, attendance and net staffing. Planned Away affects future staffing
+only. Agent Status is observed-attendance authority, LILO is fallback/control,
+and imported Attendance Review decisions govern reviewed absence/shrinkage.

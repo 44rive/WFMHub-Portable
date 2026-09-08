@@ -1,11 +1,14 @@
 # Developer guide
 
+Read `AI_CONTEXT.md` and `docs/REPORT_DESIGN_SYSTEM.md` before changing source
+roles, calculations, workbook contracts, or presentation.
+
 ## Local checks
 
 ```bash
 python3 -m pip install -e .
 python3 -m wfmhub --home . doctor
-python3 -m unittest discover -s tests -v
+PYTHONPATH=src:. pytest -q
 python3 -m compileall -q src tests packaging
 ```
 

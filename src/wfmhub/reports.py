@@ -11,32 +11,8 @@ import xlsxwriter
 
 from .config import Config
 from .database import DatabaseConnection
+from .design import COLORS
 from .report_packs import report_pack, report_pack_folder
-
-
-COLORS = {
-    "dark": "#0B1F33",
-    "muted": "#536474",
-    "teal": "#007C83",
-    "teal_light": "#DFF3F3",
-    "canvas": "#F4F7F9",
-    "gold": "#D6A84B",
-    "rule": "#9AA6B2",
-    "thin": "#D8E0E6",
-    "blue": "#0563C1",
-    "blue_light": "#E3F0FA",
-    "green": "#1F7A53",
-    "green_light": "#DDF3E8",
-    "amber": "#A65F00",
-    "amber_light": "#FFF1CC",
-    "red": "#B42318",
-    "red_light": "#FDE7E5",
-    "purple": "#6E56CF",
-    "purple_light": "#EEEAFE",
-    "future": "#9AA6B2",
-    "future_light": "#EEF1F4",
-    "white": "#FFFFFF",
-}
 
 
 def _query(conn: DatabaseConnection, sql: str, params: list[Any] | None = None) -> tuple[list[str], list[tuple[Any, ...]]]:

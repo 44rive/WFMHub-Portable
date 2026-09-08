@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.23.0 — 2026-09-08
+
+- Applies the approved `WFMHUB-DESIGN 1.0.0` compact report system to PCS,
+  RTM Daily Control, every LOB Service Flash, and Attendance Review.
+- Rebuilds the permanent PCS `OVERVIEW` with four management cards, a
+  horizontal LOB comparison and current-versus-prior daily trend while keeping
+  the four Power Query target tables and permanent coaching ledger unchanged.
+- Simplifies each LOB Flash to TSL, offered volume, forecast variance and
+  confirmed No Show HC, with the existing full-day hourly and attendance detail.
+- Adds an RTM cross-LOB action dashboard and an Attendance Review by-LOB summary
+  without changing service, no-show, PTO/Away, gap, break or meal calculations.
+- Centralizes visual tokens in `src/wfmhub/design.py` and adds a data-free Excel
+  design reference, approved design specification and canonical `AI_CONTEXT.md`.
+- Corrects stale Copilot/template/feed documentation so Verint Activities and
+  retired AP sources cannot be mistaken for current attendance authorities.
+
 ## 0.22.3 — 2026-09-08
 
 - Removed permanent-workbook generation from the normal PCS update path. The

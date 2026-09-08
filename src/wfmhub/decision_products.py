@@ -985,8 +985,9 @@ def _add_pcs_stable_overview(
     latest: date,
     headers: Sequence[str],
     rows: Sequence[Sequence[Any]],
+    target: float | None,
 ) -> None:
-    """Create a repair-resistant management page with a visible per-LOB table."""
+    """Create the compact, repair-resistant PCS management dashboard."""
 
     wb = book.report.workbook
     ws = wb.add_worksheet("OVERVIEW")
@@ -996,41 +997,58 @@ def _add_pcs_stable_overview(
     ws.set_landscape()
     ws.fit_to_pages(1, 0)
     ws.freeze_panes(34, 0)
-    ws.merge_range("A1:S1", "PCS  /  OPERATIONAL SCORECARD", book.report.title)
-    ws.merge_range(
-        "A2:S2",
-        f"Data through {latest:%Y-%m-%d}  |  latest day and current month versus the comparable previous month  |  prepared by Anass ASSRI",
-        book.report.subtitle,
+    book.compact_header(
+        ws,
+        "PCS PERFORMANCE",
+        f"Simple view  |  current month through {latest:%Y-%m-%d} versus previous month, same days  |  {status_text}",
+        last_col=18,
+        status=status,
+        status_label=f"UPDATED {latest:%d %b %Y}",
     )
-    badge = status if status in book.badge_formats else "INCOMPLETE"
-    ws.merge_range("A4:S4", f"{badge}  /  {status_text}", book.badge_formats[badge])
+    book.scope_strip(
+        ws,
+        (
+            ("Period", "Current MTD"),
+            ("LOB", "All LOBs"),
+            ("Team Leader", "Open RESULTS"),
+            ("Agent", "Open RESULTS"),
+        ),
+        row=3,
+        last_col=18,
+    )
+    ws.write_url(
+        "L4", "internal:'RESULTS'!A1", book.scope_value,
+        string="OPEN RESULTS",
+    )
+    ws.write_url(
+        "Q4", "internal:'RESULTS'!A1", book.scope_value,
+        string="OPEN RESULTS",
+    )
 
     all_values = list(rows[0]) if rows else [None] * len(headers)
     card_specs = (
-        ("LATEST DAY PCS", 2, book.card_decimal, "Latest available business day"),
         ("CURRENT MTD PCS", 5, book.card_decimal, "Weighted valid Q1 score"),
+        ("PARTICIPATION", 8, book.card_percent, "Q1 nonblank / PCS Status 1"),
         ("PRIOR MTD PCS", 6, book.card_decimal, "Previous month, same number of days"),
-        ("MTD MOVEMENT", 7, book.card_decimal, "Current MTD minus prior MTD"),
-        ("MTD PARTICIPATION", 8, book.card_percent, "Q1 nonblank / PCS Status 1"),
-        ("VALID RESPONSES", 10, book.card_integer, "Current MTD sample"),
-        ("SCORE <= 3", 13, book.card_integer, "Current MTD coaching opportunities"),
-        ("INBOUND LEGS", 15, book.card_integer, "Current MTD inbound volume"),
+        ("CHANGE", 7, book.card_decimal, "Current MTD minus prior MTD"),
     )
     for index, (label, source_column, fmt, note) in enumerate(card_specs):
-        row = 5 if index < 4 else 10
-        column = (index % 4) * 4
+        row = 5
+        column = index * 5
         excel_column = chr(ord("A") + source_column)
         formula = (
             f'=IFERROR(INDEX(${excel_column}$35:${excel_column}$234,'
             'MATCH("ALL",$A$35:$A$234,0)),"")'
         )
         cached = all_values[source_column] if source_column < len(all_values) else ""
-        ws.merge_range(row, column, row, column + 2, label, book.report.kpi_label)
-        ws.merge_range(row + 1, column, row + 2, column + 2, "", fmt)
+        ws.merge_range(row, column, row, column + 3, label, book.report.kpi_label)
+        ws.merge_range(row + 1, column, row + 2, column + 3, "", fmt)
         ws.write_formula(row + 1, column, formula, fmt, cached if cached is not None else "")
-        ws.merge_range(row + 3, column, row + 3, column + 2, note, book.card_compare)
+        ws.merge_range(row + 3, column, row + 3, column + 3, note, book.card_compare)
+    ws.set_row(6, 25)
+    ws.set_row(7, 25)
 
-    score_chart = wb.add_chart({"type": "column"})
+    score_chart = wb.add_chart({"type": "bar"})
     for name, column, color in (
         ("Current MTD PCS", 5, COLORS["teal"]),
         ("Prior MTD PCS", 6, COLORS["muted"]),
@@ -1041,32 +1059,74 @@ def _add_pcs_stable_overview(
             "values": ["OVERVIEW", 35, column, 64, column],
             "fill": {"color": color}, "border": {"none": True},
         })
-    score_chart.set_title({"name": "PCS by LOB — current MTD vs prior MTD"})
-    score_chart.set_y_axis({"min": 1, "max": 5, "major_unit": 1, "major_gridlines": {"visible": False}})
+    target_text = f"target {target:.2f}" if target is not None else "no target configured"
+    score_chart.set_title({"name": f"PCS BY LOB — {target_text}"})
+    score_chart.set_x_axis({
+        "min": 1, "max": 5, "major_unit": 1,
+        "major_gridlines": {"visible": True, "line": {"color": COLORS["thin"]}},
+    })
+    score_chart.set_y_axis({"reverse": True, "major_gridlines": {"visible": False}})
     score_chart.set_legend({"position": "bottom"})
     score_chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
     score_chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-    ws.insert_chart("A16", score_chart, {"x_scale": 1.2, "y_scale": 1.0})
+    ws.insert_chart("A11", score_chart, {"x_scale": 1.15, "y_scale": 0.95})
 
-    participation_chart = wb.add_chart({"type": "column"})
-    for name, column, color in (
-        ("Current MTD participation", 8, COLORS["gold"]),
-        ("Prior MTD participation", 9, COLORS["muted"]),
+    # Classic formulas only: the line chart recalculates after Power Query
+    # replaces tblPcsData, without using FILTER/UNIQUE or spilled ranges.
+    helper_headers = ("Current date", "Current PCS", "Prior date", "Prior PCS")
+    for column, label in enumerate(helper_headers, 20):
+        ws.write(0, column, label)
+    for offset in range(31):
+        row_index = offset + 1
+        excel_row = row_index + 1
+        ws.write_formula(
+            row_index, 20,
+            f'=EOMONTH(MAX(tblPcsData[Date]),-1)+{offset + 1}',
+            book.report.date,
+        )
+        ws.write_formula(
+            row_index, 21,
+            f'=IF($U${excel_row}>MAX(tblPcsData[Date]),NA(),IFERROR('
+            f'SUMIFS(tblPcsData[Q1 Score Sum],tblPcsData[Date],$U${excel_row})/'
+            f'SUMIFS(tblPcsData[Valid Q1],tblPcsData[Date],$U${excel_row}),NA()))',
+        )
+        ws.write_formula(row_index, 22, f'=EDATE($U${excel_row},-1)', book.report.date)
+        ws.write_formula(
+            row_index, 23,
+            f'=IFERROR(SUMIFS(tblPcsData[Q1 Score Sum],tblPcsData[Date],$W${excel_row})/'
+            f'SUMIFS(tblPcsData[Valid Q1],tblPcsData[Date],$W${excel_row}),NA())',
+        )
+    trend_chart = wb.add_chart({"type": "line"})
+    for name, column, color, dash in (
+        ("Current month", 21, COLORS["teal"], "solid"),
+        ("Previous month", 23, COLORS["muted"], "dash"),
     ):
-        participation_chart.add_series({
+        trend_chart.add_series({
             "name": name,
-            "categories": ["OVERVIEW", 35, 0, 64, 0],
-            "values": ["OVERVIEW", 35, column, 64, column],
-            "fill": {"color": color}, "border": {"none": True},
+            "categories": ["OVERVIEW", 1, 20, 31, 20],
+            "values": ["OVERVIEW", 1, column, 31, column],
+            "line": {"color": color, "width": 2.25, "dash_type": dash},
+            "marker": {"type": "circle", "size": 4,
+                       "border": {"color": color}, "fill": {"color": color}},
         })
-    participation_chart.set_title({"name": "Participation by LOB"})
-    participation_chart.set_y_axis({"min": 0, "max": 1, "major_unit": 0.2, "num_format": "0%", "major_gridlines": {"visible": False}})
-    participation_chart.set_legend({"position": "bottom"})
-    participation_chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-    participation_chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
-    ws.insert_chart("J16", participation_chart, {"x_scale": 1.2, "y_scale": 1.0})
+    trend_chart.set_title({"name": "DAILY TREND"})
+    trend_chart.set_x_axis({"date_axis": True, "num_format": "d mmm", "label_position": "low"})
+    trend_chart.set_y_axis({
+        "min": 1, "max": 5, "major_unit": 1,
+        "major_gridlines": {"visible": True, "line": {"color": COLORS["thin"]}},
+    })
+    trend_chart.set_legend({"position": "bottom"})
+    trend_chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    trend_chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+    trend_chart.show_hidden_data()
+    ws.insert_chart("K11", trend_chart, {"x_scale": 1.05, "y_scale": 0.95})
+    ws.set_column("U:X", None, None, {"hidden": True})
 
-    ws.merge_range("A32:S32", "PER-LOB PCS RECONCILIATION", book.report.section)
+    ws.merge_range(
+        "A32:S32",
+        "LOB PERFORMANCE  /  use RESULTS for linked Period, LOB, Team Leader and Agent filters",
+        book.report.section,
+    )
     display_headers = list(headers)
     table_rows = list(rows) or [tuple(None for _ in headers)]
     for row_index, values in enumerate(table_rows, 34):
@@ -1465,6 +1525,7 @@ def build_pcs_performance_workbook(
     _add_pcs_stable_overview(
         book, status, status_text, latest,
         list(PCS_LOB_SCORECARD_HEADERS), lob_rows,
+        pcs_method.target if pcs_method is not None else None,
     )
     results_sheet = book.table(
         "RESULTS", "PCS team and agent results",
@@ -3392,6 +3453,127 @@ def _break_meal_control_rows(
     return headers, output
 
 
+def _add_attendance_review_control(
+    book: DecisionWorkbook,
+    status: str,
+    status_text: str,
+    start: date,
+    end: date,
+    completed_through: date,
+    gap_count: int,
+    gap_minutes: int,
+    open_count: int,
+    missing: int,
+    lob_rows: Sequence[Sequence[Any]],
+) -> None:
+    """Create the approved first-screen action summary without changing decisions."""
+
+    wb = book.report.workbook
+    ws = wb.add_worksheet("CONTROL")
+    ws.hide_gridlines(2)
+    ws.set_tab_color(COLORS["gold"])
+    ws.set_zoom(86)
+    ws.set_landscape()
+    ws.fit_to_pages(1, 1)
+    book.compact_header(
+        ws,
+        "ATTENDANCE REVIEW",
+        f"Completed dates {start:%Y-%m-%d} to {end:%Y-%m-%d}  |  exact schedule-versus-observed decisions  |  {status_text}",
+        last_col=18,
+        status=status,
+        status_label="REVIEW READY" if status != "INCOMPLETE" else "ACTION REQUIRED",
+    )
+    book.scope_strip(
+        ws,
+        (
+            ("Period", f"{start:%d %b} – {end:%d %b %Y}"),
+            ("Completed through", completed_through.isoformat()),
+            ("Evidence", "Agent Status + LILO"),
+            ("Decision", "Open REVIEW BOARD"),
+        ),
+        row=3,
+        last_col=18,
+    )
+    ws.write_url(
+        "Q4", "internal:'REVIEW BOARD'!A1", book.scope_value,
+        string="OPEN REVIEW BOARD",
+    )
+    book.four_card_row(
+        ws,
+        (
+            KpiCard("Review gaps", gap_count, "integer", "Exact completed-day intervals"),
+            KpiCard("Gap hours", gap_minutes / 60 if gap_minutes else 0, "decimal", "Exact minutes / 60"),
+            KpiCard("Open decisions", open_count, "integer", "Awaiting human review"),
+            KpiCard("Missing evidence", missing, "integer", "Never converted to no-show or zero"),
+        ),
+        row=5,
+        starts=(0, 5, 10, 15),
+        width=4,
+    )
+
+    summary_headers = (
+        "LOB", "Exact Gaps", "Gap Hours", "Agents", "Open", "Approved",
+        "Dismissed",
+    )
+    ws.merge_range("A11:G11", "BY-LOB ACTION SUMMARY", book.report.section)
+    table_row = 11
+    for column, header in enumerate(summary_headers):
+        ws.write(table_row, column, header, book.report.header)
+    display_rows = list(lob_rows) or [("No review gaps", 0, 0, 0, 0, 0, 0)]
+    for row_index, values in enumerate(display_rows, table_row + 1):
+        for column, value in enumerate(values):
+            fmt = book.report.decimal if column == 2 else (
+                book.report.integer if column > 0 else book.report.body
+            )
+            ws.write(row_index, column, value, fmt)
+    ws.add_table(
+        table_row, 0, table_row + len(display_rows), len(summary_headers) - 1,
+        {
+            "name": "tblAttendanceReviewSummary",
+            "style": "Table Style Light 9",
+            "columns": [
+                {"header": header, "header_format": book.report.header}
+                for header in summary_headers
+            ],
+        },
+    )
+    book.tables.append(ModelTable("CONTROL", summary_headers, display_rows))
+    if lob_rows:
+        chart = wb.add_chart({"type": "bar"})
+        chart.add_series({
+            "name": "Gap hours",
+            "categories": ["CONTROL", table_row + 1, 0, table_row + len(lob_rows), 0],
+            "values": ["CONTROL", table_row + 1, 2, table_row + len(lob_rows), 2],
+            "fill": {"color": COLORS["teal"]},
+            "border": {"none": True},
+        })
+        chart.set_title({"name": "GAP HOURS BY LOB"})
+        chart.set_legend({"none": True})
+        chart.set_x_axis({
+            "min": 0,
+            "major_gridlines": {"visible": True, "line": {"color": COLORS["thin"]}},
+        })
+        chart.set_y_axis({"reverse": True, "major_gridlines": {"visible": False}})
+        chart.set_chartarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+        chart.set_plotarea({"border": {"none": True}, "fill": {"color": COLORS["white"]}})
+        ws.insert_chart("I11", chart, {"x_scale": 1.2, "y_scale": 1.05})
+
+    notes_row = max(28, table_row + len(display_rows) + 3)
+    ws.merge_range(notes_row, 0, notes_row, 18, "OPERATING NOTES", book.report.section)
+    for offset, note in enumerate((
+        "Open REVIEW BOARD: each case keeps SCHEDULE directly above ACTUAL; edit only the five blue ACTUAL cells.",
+        "Agent Status is primary evidence. LILO fills uncovered time; PTO/Away remains planned time and is never a no-show.",
+        "Save and import this same workbook to store decisions by immutable Gap ID, then rebuild the reviewed results.",
+    ), 1):
+        ws.merge_range(notes_row + offset, 0, notes_row + offset, 18, note, book.report.note)
+        ws.set_row(notes_row + offset, 22)
+    ws.set_column("A:A", 20)
+    ws.set_column("B:G", 14)
+    ws.set_column("H:H", 3)
+    ws.set_column("I:S", 12)
+    ws.freeze_panes(table_row + 1, 0)
+
+
 def build_attendance_corrections_workbook(
     conn: DatabaseConnection,
     config: Config,
@@ -3441,33 +3623,24 @@ def build_attendance_corrections_workbook(
             f"{open_count:,} exact gap(s) await a decision; "
             f"{missing:,} scheduled row(s) lack complete evidence"
         )
-    book.dashboard(
-        [
-            KpiCard("Exact gaps", gap_count, "integer"),
-            KpiCard("Gap hours", gap_minutes / 60 if gap_minutes else 0, "decimal"),
-            KpiCard("Agents", agents, "integer"),
-            KpiCard("Open decisions", open_count, "integer"),
-            KpiCard("Approved", approved, "integer"),
-            KpiCard("Dismissed", dismissed, "integer"),
-            KpiCard("Missing evidence", missing, "integer"),
-        ],
-        status,
-        status_text,
-        ["Measure", "Value"],
-        [
-            ("Exact gaps", gap_count), ("Gap hours", gap_minutes / 60 if gap_minutes else 0),
-            ("Open", open_count), ("Approved", approved), ("Dismissed", dismissed),
-        ],
-        [
-            f"Every completed date from {start:%Y-%m-%d} through {completed_through:%Y-%m-%d} is included; today is excluded.",
-            "Agent Status is the primary evidence. LILO fills missing coverage and acts as a control; extracts are never edited.",
-            "Each Gap ID owns one exact interval. SCHEDULE sits above ACTUAL; edit only the five blue cells on the ACTUAL row.",
-            "Approved uses the selected rulebook category; Dismissed counts as no loss; Open remains unverified.",
-            "Import this same workbook from the Attendance Review menu to recalculate absence and shrinkage.",
-            "Teal is scheduled work. Dark red is this ACTUAL row's exact gap; light red is another gap; grey is inside tolerance.",
-            "BREAK & MEAL totals completed-shift Agent Status spells and judges overruns only when coverage is sufficient.",
-        ],
-        sheet_name="CONTROL",
+    lob_rows = conn.execute(
+        """SELECT coalesce(lob,'UNMAPPED') AS lob,
+                  count(*) AS exact_gaps,
+                  coalesce(sum(gap_minutes),0)/60.0 AS gap_hours,
+                  count(DISTINCT agent_id) AS agents,
+                  coalesce(sum(CASE WHEN validation_status='Open' THEN 1 ELSE 0 END),0) AS open_count,
+                  coalesce(sum(CASE WHEN validation_status='Approved' THEN 1 ELSE 0 END),0) AS approved_count,
+                  coalesce(sum(CASE WHEN validation_status='Dismissed' THEN 1 ELSE 0 END),0) AS dismissed_count
+           FROM mart.correction_candidate
+           WHERE business_date BETWEEN ? AND ? AND business_date<?
+             AND gap_start IS NOT NULL AND gap_end IS NOT NULL
+           GROUP BY coalesce(lob,'UNMAPPED')
+           ORDER BY gap_hours DESC, lob""",
+        [start, end, today],
+    ).fetchall()
+    _add_attendance_review_control(
+        book, status, status_text, start, end, completed_through,
+        gap_count, gap_minutes, open_count, missing, lob_rows,
     )
     headers, rows = _query(
         conn,

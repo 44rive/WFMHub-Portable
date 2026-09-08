@@ -10,6 +10,9 @@ from unittest.mock import patch
 
 from wfmhub.cli import SOURCE_GROUPS
 from wfmhub.config import ConfigError, load_config
+from wfmhub.design import COLORS, REPORT_DESIGN_ID, REPORT_DESIGN_VERSION
+from wfmhub.reports import COLORS as REPORT_COLORS
+from wfmhub.shared_reports import COLORS as SHARED_REPORT_COLORS
 from wfmhub.report_packs import (
     IMPLEMENTED_REPORT_PACK_KEYS,
     REPORT_PACKS,
@@ -22,6 +25,26 @@ from wfmhub.report_packs import (
 
 
 class ReportPackTests(unittest.TestCase):
+    def test_report_design_has_one_palette_and_a_data_free_reference(self):
+        repo = Path(__file__).resolve().parents[1]
+        self.assertIs(REPORT_COLORS, COLORS)
+        self.assertIs(SHARED_REPORT_COLORS, COLORS)
+        self.assertEqual((REPORT_DESIGN_ID, REPORT_DESIGN_VERSION), (
+            "WFMHUB-DESIGN", "1.0.0",
+        ))
+        reference = repo / "docs" / "WFMHub Report Design Reference.xlsx"
+        self.assertTrue(reference.is_file())
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(reference, read_only=True, data_only=False)
+        try:
+            self.assertEqual(workbook.sheetnames, [
+                "DESIGN SYSTEM", "PCS", "RTM", "ATTENDANCE",
+            ])
+            self.assertEqual(workbook["DESIGN SYSTEM"]["A1"].value, "WFMHUB REPORT SYSTEM")
+        finally:
+            workbook.close()
+
     def test_pcs_tracker_window_is_configured_and_validated(self):
         repo = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as folder:

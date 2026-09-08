@@ -210,7 +210,7 @@ def _schedule_variant_sheet(report: ExcelReport, conn: DatabaseConnection) -> No
     )
     ws = report.add_table_sheet(
         "SCHEDULE_SOURCES", "Verint schedule source roles",
-        "START_END drives shifts. ACTIVITIES is the corrected final ledger; neither may silently replace the other.",
+        "START_END drives shifts. ACTIVITIES may supply a Shift Assignment boundary fallback only; it is not observed attendance or a final ledger.",
         headers, rows,
     )
     _color_statuses(report, ws, headers, rows, "status", {"SUCCESS": "good", "ERROR": "bad"})
@@ -223,7 +223,7 @@ def build_daily_operations_workbook(
     end: date,
     output: Path | None = None,
 ) -> Path:
-    """Build the single-day call list, staffing gaps and APDE SL workbook."""
+    """Build the retired daily-operations compatibility workbook."""
     generated = datetime.now()
     report_day = end
     output = _output_path(config, "operations", report_day, report_day, generated, output)
@@ -275,7 +275,7 @@ def build_daily_operations_workbook(
             [
                 "ATTENDANCE_CALLS is the calling queue. CALL_NOT_SEEN_NOW is provisional; CALL_NO_SHOW is final only after the shift has completed.",
                 "STAFFING_GAPS uses roster LOB/language and 15-minute agent-seconds. DATA_MISSING is unknown—not a zero and not a staffing shortage.",
-                "SERVICE_LEVEL contains APDE only. Service availability means answered / offered; service level is recalculated from summed counters.",
+                "SERVICE_LEVEL is a retired APDE compatibility surface. Use RTM Daily Control for current service decisions.",
                 "This workbook reads prepared WFM data. Original extracts are not edited.",
             ],
             badge=coverage_badge,
@@ -746,12 +746,12 @@ def build_final_absence_workbook(
                 ("Absence agent-days", absence_days, "integer"),
             ],
             [
-                "This workbook reads only mart.verint_final_absence_*: corrected Verint Activities are the final ledger. LILO and Agent Status do not create these metrics.",
+                "This is a legacy compatibility projection. Current reviewed absence originates from schedule, Agent Status, LILO fallback, PTO/Away, and imported Gap-ID decisions.",
                 f"Daily planned net and every classified numerator are capped at {rulebook.standard_day_hours:g} hours. Overlapping Activities are unioned before daily totals.",
                 f"Vacation: {vacation / 60:,.2f} h  |  unpaid: {unpaid / 60:,.2f} h  |  unmapped review: {unmapped / 60:,.2f} h.",
                 "Event rows are audit evidence and may overlap across categories. Use AGENT_DAY or LOB_MONTH for totals; do not sum ACTIVITY_EVENTS into a headline KPI.",
             ],
-            badge="FINAL  /  VERINT ACTIVITIES ONLY  /  OVERLAP-SAFE DAILY TOTALS",
+            badge="LEGACY COMPATIBILITY  /  USE THE CURRENT ABSENCE PRODUCT",
         )
         add_findings_sheet(report, conn, spec, start, end)
 

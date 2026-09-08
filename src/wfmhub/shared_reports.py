@@ -16,26 +16,7 @@ from typing import Any, Iterable
 import xlsxwriter
 from openpyxl import load_workbook
 
-
-COLORS = {
-    "navy": "#0B1F33",
-    "teal": "#007C83",
-    "teal_light": "#DFF3F3",
-    "gold": "#D6A84B",
-    "canvas": "#F4F7F9",
-    "ink": "#1F2933",
-    "muted": "#536474",
-    "line": "#D8E0E6",
-    "blue": "#0563C1",
-    "blue_light": "#E3F0FA",
-    "green": "#1F7A53",
-    "green_light": "#DDF3E8",
-    "amber": "#A65F00",
-    "amber_light": "#FFF1CC",
-    "red": "#B42318",
-    "red_light": "#FDE7E5",
-    "white": "#FFFFFF",
-}
+from .design import COLORS
 
 
 def _clean(value: Any) -> str:

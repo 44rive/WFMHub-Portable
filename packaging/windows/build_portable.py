@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.22.3"
+DEFAULT_VERSION = "0.23.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -187,6 +187,7 @@ def build(args) -> Path:
     copy_tree(ROOT / "src" / "wfmhub", stage / "_system" / "app" / "wfmhub")
     copy_tree(ROOT / "sql", stage / "_system" / "app" / "sql")
     copy_tree(ROOT / "docs", stage / "_system" / "docs")
+    shutil.copy2(ROOT / "AI_CONTEXT.md", stage / "_system" / "docs" / "AI_CONTEXT.md")
     copy_tree(ROOT / "prompts", stage / "_system" / "prompts")
     copy_tree(ROOT / "templates", stage / "_system" / "templates")
     # Excel-authored masters are local user assets and can contain refreshed

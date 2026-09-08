@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .config import Config
+from .design import REPORT_DESIGN_ID, REPORT_DESIGN_VERSION
 from .reports import COLORS, ExcelReport
 
 
@@ -47,6 +48,9 @@ class DecisionWorkbook:
         self.end = end
         self.generated = generated
         self.report = ExcelReport(path)
+        self.report.workbook.set_custom_property(
+            "WFMHub Report Design", f"{REPORT_DESIGN_ID} {REPORT_DESIGN_VERSION}",
+        )
         self.tables: list[ModelTable] = []
         add = self.report.workbook.add_format
         self.card_percent = add({
@@ -78,12 +82,112 @@ class DecisionWorkbook:
             "bg_color": COLORS["canvas"], "align": "center", "valign": "vcenter",
             "border": 1, "border_color": COLORS["thin"],
         })
+        self.card_text = add({
+            "font_name": "Aptos Display", "font_size": 18, "bold": True,
+            "font_color": COLORS["dark"], "bg_color": COLORS["white"],
+            "align": "center", "valign": "vcenter",
+            "border": 1, "border_color": COLORS["thin"],
+        })
+        self.scope_label = add({
+            "font_name": "Aptos", "font_size": 8, "bold": True,
+            "font_color": COLORS["muted"], "bg_color": COLORS["canvas"],
+            "align": "left", "valign": "vcenter", "indent": 1,
+            "top": 1, "bottom": 1, "left": 1,
+            "top_color": COLORS["thin"], "bottom_color": COLORS["thin"],
+            "left_color": COLORS["thin"],
+        })
+        self.scope_value = add({
+            "font_name": "Aptos", "font_size": 10, "bold": True,
+            "font_color": COLORS["dark"], "bg_color": COLORS["white"],
+            "align": "left", "valign": "vcenter", "indent": 1,
+            "top": 1, "bottom": 1, "right": 1,
+            "top_color": COLORS["thin"], "bottom_color": COLORS["thin"],
+            "right_color": COLORS["thin"],
+        })
         self.badge_formats = {
             "FINAL": add({"font_name": "Aptos", "font_size": 10, "bold": True, "font_color": COLORS["white"], "bg_color": COLORS["green"], "align": "center", "valign": "vcenter"}),
             "LIVE": add({"font_name": "Aptos", "font_size": 10, "bold": True, "font_color": COLORS["white"], "bg_color": COLORS["teal"], "align": "center", "valign": "vcenter"}),
             "PROVISIONAL": add({"font_name": "Aptos", "font_size": 10, "bold": True, "font_color": COLORS["dark"], "bg_color": COLORS["amber_light"], "align": "center", "valign": "vcenter"}),
             "INCOMPLETE": add({"font_name": "Aptos", "font_size": 10, "bold": True, "font_color": COLORS["white"], "bg_color": COLORS["red"], "align": "center", "valign": "vcenter"}),
         }
+
+    def compact_header(
+        self,
+        ws,
+        title: str,
+        subtitle: str,
+        *,
+        last_col: int,
+        status: str = "LIVE",
+        status_label: str = "UPDATED",
+    ) -> None:
+        """Write the approved compact title, freshness badge, and context band."""
+
+        badge = status if status in self.badge_formats else "INCOMPLETE"
+        badge_start = max(1, last_col - 2)
+        if badge_start > 0:
+            ws.merge_range(0, 0, 0, badge_start - 1, title, self.report.title)
+        else:
+            ws.write(0, 0, title, self.report.title)
+        ws.merge_range(0, badge_start, 0, last_col, status_label, self.badge_formats[badge])
+        ws.merge_range(1, 0, 1, last_col, subtitle, self.report.subtitle)
+        ws.set_row(0, 34)
+        ws.set_row(1, 21)
+
+    def scope_strip(
+        self,
+        ws,
+        entries: Sequence[tuple[str, Any]],
+        *,
+        row: int = 3,
+        last_col: int = 13,
+    ) -> None:
+        """Show compact, honest report scope fields below the header."""
+
+        if not entries:
+            return
+        columns = last_col + 1
+        base = columns // len(entries)
+        remainder = columns % len(entries)
+        start = 0
+        for index, (label, value) in enumerate(entries):
+            width = base + (1 if index < remainder else 0)
+            end = min(last_col, start + width - 1)
+            ws.write(row, start, label.upper(), self.scope_label)
+            if end > start + 1:
+                ws.merge_range(row, start + 1, row, end, value, self.scope_value)
+            elif end == start + 1:
+                ws.write(row, end, value, self.scope_value)
+            start = end + 1
+        ws.set_row(row, 24)
+
+    def four_card_row(
+        self,
+        ws,
+        cards: Sequence[KpiCard],
+        *,
+        row: int = 5,
+        starts: Sequence[int] = (0, 4, 8, 12),
+        width: int = 3,
+    ) -> None:
+        """Render the first four decision KPIs with one consistent geometry."""
+
+        for start, card in zip(starts, cards[:4]):
+            end = start + width - 1
+            ws.merge_range(row, start, row, end, card.label.upper(), self.report.kpi_label)
+            fmt = {
+                "percent": self.card_percent,
+                "decimal": self.card_decimal,
+                "money": self.card_money,
+                "text": self.card_text,
+            }.get(card.kind, self.card_integer)
+            ws.merge_range(row + 1, start, row + 2, end, card.value, fmt)
+            ws.merge_range(
+                row + 3, start, row + 3, end,
+                card.comparison or " ", self.card_compare,
+            )
+        ws.set_row(row + 1, 25)
+        ws.set_row(row + 2, 25)
 
     def dashboard(
         self,
@@ -207,12 +311,18 @@ class DecisionWorkbook:
         )
 
     def audit(self, rows: Sequence[Sequence[Any]]) -> None:
+        audit_rows = list(rows)
+        audit_rows.append((
+            "Report design",
+            f"{REPORT_DESIGN_ID} {REPORT_DESIGN_VERSION}",
+            "Canonical tokens and layout are documented in docs/REPORT_DESIGN_SYSTEM.md",
+        ))
         ws = self.table(
             "_AUDIT",
             "Report controls",
             "Technical details for reconciliation. This sheet is hidden by default.",
             ["Item", "Value", "Evidence"],
-            rows,
+            audit_rows,
         )
         ws.hide()
 
