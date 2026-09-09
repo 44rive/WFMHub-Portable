@@ -3,10 +3,10 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `2.3.0` |
+| Version | `2.3.1` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
-| First compatible Hub version | `0.25.1` |
+| First compatible Hub version | `0.25.2` |
 
 This is the visual contract for every WFMHub workbook. It changes presentation,
 never business calculations, source scope, table keys, or report maturity.
@@ -147,6 +147,9 @@ Every design change requires:
 
 ## Change log
 
+- `2.3.1`: replaces the PCS dashboard's array ranking formula with Python-
+  pre-ranked view rows and direct `MATCH`/`INDEX` lookups so filtered charts and
+  tables populate reliably in desktop Excel.
 - `2.3.0`: restores cascading PCS Period/LOB/Team/Agent controls using only
   classic lookups over Python-precalculated results; standardizes visible date
   and datetime formats.

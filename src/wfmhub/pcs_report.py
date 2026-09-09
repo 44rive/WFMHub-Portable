@@ -39,7 +39,7 @@ from .template_reports import DecisionWorkbook
 PCS_COACHING_LOG_FILENAME = "PCS Coaching Log.xlsx"
 PCS_REPORT_PREFIX = "PCS Operational Report - "
 PCS_REPORT_GLOB = f"{PCS_REPORT_PREFIX}*.xlsx"
-PCS_SNAPSHOT_VERSION = "2026.09.27"
+PCS_SNAPSHOT_VERSION = "2026.09.28"
 PCS_SNAPSHOT_RESULTS_HEADERS = tuple(
     "Report Generated At" if header == "Feed Refreshed At" else header
     for header in PCS_RESULTS_HEADERS
@@ -71,6 +71,11 @@ DASHBOARD_HEADERS = (
     "Agent Selector", "Display Scope", "PCS Agents", "PCS Average",
     "Prior PCS", "Change", "Participation", "Prior Participation",
     "Valid Q1", "Score <= 3", "Coaching Due",
+)
+DASHBOARD_VIEW_HEADERS = (
+    "View Key", "Parent Selection Key", "Rank", "Display Scope", "LOB",
+    "Team Leader", "PCS Agents", "Participation", "PCS Average",
+    "Prior PCS", "Prior Participation", "Coaching Due",
 )
 
 
@@ -411,6 +416,42 @@ def _dashboard_rows(
     return output
 
 
+def _dashboard_view_rows(
+    rows: Sequence[Sequence[Any]],
+) -> list[tuple[Any, ...]]:
+    """Pre-rank the eight visible child scopes for every valid selection."""
+
+    lobs_by_period: defaultdict[str, list[Sequence[Any]]] = defaultdict(list)
+    teams_by_parent: defaultdict[tuple[str, str], list[Sequence[Any]]] = defaultdict(list)
+    agents_by_parent: defaultdict[tuple[str, str, str], list[Sequence[Any]]] = defaultdict(list)
+    for row in rows:
+        level = str(row[2])
+        if level == "LOB":
+            lobs_by_period[str(row[1])].append(row)
+        elif level == "TEAM":
+            teams_by_parent[(str(row[1]), str(row[3]))].append(row)
+        elif level == "AGENT":
+            agents_by_parent[(str(row[1]), str(row[3]), str(row[4]))].append(row)
+    output: list[tuple[Any, ...]] = []
+    for parent in rows:
+        period, level, lob, leader = map(str, (parent[1], parent[2], parent[3], parent[4]))
+        if level == "ALL":
+            children = lobs_by_period[period]
+        elif level == "LOB":
+            children = teams_by_parent[(period, lob)]
+        elif level == "TEAM":
+            children = agents_by_parent[(period, lob, leader)]
+        else:
+            children = [parent]
+        for rank, child in enumerate(children[:8], 1):
+            output.append((
+                f"{parent[0]}|{rank}", parent[0], rank,
+                child[6], child[3], child[4], child[7], child[11],
+                child[8], child[9], child[12], child[15],
+            ))
+    return output
+
+
 def _coaching_action_map(
     rows: Sequence[Mapping[str, Any]],
 ) -> dict[str, Mapping[str, Any]]:
@@ -464,6 +505,7 @@ def _add_dashboard_interactivity(
     workbook = book.report.workbook
     periods = [item[0] for item in _dashboard_periods(book.end)]
     lobs, teams, agents = _dashboard_choices(rows)
+    view_rows = _dashboard_view_rows(rows)
 
     # All support data stays in hidden columns on OVERVIEW. There is no hidden
     # calculation sheet and no external connection.
@@ -561,6 +603,23 @@ def _add_dashboard_interactivity(
             workbook, name, dashboard_start_column + offset, 1, last_dashboard_row,
         )
 
+    view_start_column = dashboard_start_column + len(DASHBOARD_HEADERS)
+    for column, header in enumerate(DASHBOARD_VIEW_HEADERS, view_start_column):
+        worksheet.write(0, column, header)
+    for row_number, values in enumerate(view_rows, 1):
+        for column, value in enumerate(values, view_start_column):
+            worksheet.write(row_number, column, value)
+    view_names = {
+        "PCS_VIEW_KEY": 0, "PCS_VIEW_DISPLAY": 3, "PCS_VIEW_LOB": 4,
+        "PCS_VIEW_TL": 5, "PCS_VIEW_AGENT_COUNT": 6, "PCS_VIEW_PART": 7,
+        "PCS_VIEW_PCS": 8, "PCS_VIEW_PRIOR_PCS": 9,
+        "PCS_VIEW_PRIOR_PART": 10, "PCS_VIEW_DUE": 11,
+    }
+    for name, offset in view_names.items():
+        _define_range(
+            workbook, name, view_start_column + offset, 1, len(view_rows),
+        )
+
     selected_index_column = 39
     current_key = "Current MTD|All|All|All"
     selected_index = next(
@@ -585,39 +644,34 @@ def _add_dashboard_interactivity(
             fmt, "" if cached is None else cached,
         )
 
-    desired_level = 'IF(PCS_Agent<>"All","AGENT",IF(PCS_TL<>"All","AGENT",IF(PCS_LOB<>"All","TEAM","LOB")))'
     action_index_column = 38
+    initial_view_key = "Current MTD|All|All|All"
     initial_indexes = [
-        index for index, row in enumerate(rows, 1)
-        if row[1] == "Current MTD" and row[2] == "LOB"
+        index for index, row in enumerate(view_rows, 1)
+        if row[1] == initial_view_key
     ][:8]
     field_specs = (
-        ("PCS_DASH_DISPLAY", 6, "text"),
-        ("PCS_DASH_LOB", 3, "text"),
-        ("PCS_DASH_TL", 4, "text"),
-        ("PCS_DASH_AGENT_COUNT", 7, "integer"),
-        ("PCS_DASH_PART", 11, "percent"),
-        ("PCS_DASH_PCS", 8, "decimal"),
-        ("PCS_DASH_DUE", 15, "alert"),
+        ("PCS_VIEW_DISPLAY", 3, "text"),
+        ("PCS_VIEW_LOB", 4, "text"),
+        ("PCS_VIEW_TL", 5, "text"),
+        ("PCS_VIEW_AGENT_COUNT", 6, "integer"),
+        ("PCS_VIEW_PART", 7, "percent"),
+        ("PCS_VIEW_PCS", 8, "decimal"),
+        ("PCS_VIEW_DUE", 11, "alert"),
     )
     for offset in range(8):
         helper_row = 1 + offset
         visible_row = 24 + offset
         cached_index = initial_indexes[offset] if offset < len(initial_indexes) else ""
-        rank = offset + 1
         index_formula = (
-            '=IFERROR(AGGREGATE(15,6,(ROW(PCS_DASH_PERIOD)-MIN(ROW(PCS_DASH_PERIOD))+1)/'
-            f'((PCS_DASH_PERIOD=PCS_Period)*(PCS_DASH_LEVEL={desired_level})*'
-            '(IF(PCS_LOB="All",1,--(PCS_DASH_LOB=PCS_LOB)))*'
-            '(IF(PCS_TL="All",1,--(PCS_DASH_TL=PCS_TL)))*'
-            '(IF(PCS_Agent="All",1,--(PCS_DASH_AGENT=PCS_Agent)))), '
-            f'{rank}),"")'
+            '=IFERROR(MATCH(PCS_Period&"|"&PCS_LOB&"|"&PCS_TL&"|"&PCS_Agent&'
+            f'"|{offset + 1}",PCS_VIEW_KEY,0),"")'
         )
         worksheet.write_formula(
             helper_row, action_index_column, index_formula, None, cached_index,
         )
         helper_ref = f"${xl_col_to_name(action_index_column)}${helper_row + 1}"
-        cached_row = rows[cached_index - 1] if isinstance(cached_index, int) else None
+        cached_row = view_rows[cached_index - 1] if isinstance(cached_index, int) else None
         for field, (name, source_index, kind) in enumerate(field_specs):
             cached = cached_row[source_index] if cached_row is not None else ""
             value_format = {
@@ -633,12 +687,12 @@ def _add_dashboard_interactivity(
             )
         # Both charts use the same selected-scope ranking as the action grid.
         for column, name, source_index in (
-            (29, "PCS_DASH_DISPLAY", 6),
-            (30, "PCS_DASH_PCS", 8),
-            (31, "PCS_DASH_PRIOR_PCS", 9),
-            (35, "PCS_DASH_DISPLAY", 6),
-            (36, "PCS_DASH_PART", 11),
-            (37, "PCS_DASH_PRIOR_PART", 12),
+            (29, "PCS_VIEW_DISPLAY", 3),
+            (30, "PCS_VIEW_PCS", 8),
+            (31, "PCS_VIEW_PRIOR_PCS", 9),
+            (35, "PCS_VIEW_DISPLAY", 3),
+            (36, "PCS_VIEW_PART", 7),
+            (37, "PCS_VIEW_PRIOR_PART", 10),
         ):
             cached = cached_row[source_index] if cached_row is not None else ""
             worksheet.write_formula(
@@ -649,7 +703,10 @@ def _add_dashboard_interactivity(
     worksheet.conditional_format(24, 24, 31, 24, {
         "type": "cell", "criteria": ">", "value": 0, "format": formats.due,
     })
-    worksheet.set_column(29, dashboard_start_column + len(DASHBOARD_HEADERS) - 1, None, None, {"hidden": True})
+    worksheet.set_column(
+        29, view_start_column + len(DASHBOARD_VIEW_HEADERS) - 1,
+        None, None, {"hidden": True},
+    )
 
 
 def _add_overview(

@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.3.1`
-Applies to: WFMHub `0.25.1` and later
+Context version: `1.3.2`
+Applies to: WFMHub `0.25.2` and later
 Last reviewed: `2026-09-09`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -141,8 +141,9 @@ save, then import the same workbook. Decisions persist by immutable Gap ID.
 PCS has two files with different ownership. Each build creates a new timestamped
 `PCS Operational Report - YYYY-MM-DD HHMMSS.xlsx` containing final values,
 native tables and charts. It has no Power Query, Data Model, Excel automation,
-or Excel KPI arithmetic. Four classic dropdowns use lookup-only formulas over
-Python-precalculated Period/LOB/Team/Agent results. `PCS Coaching Log.xlsx` is created once. Quality copies
+or Excel KPI arithmetic. Four classic dropdowns use direct `MATCH`/`INDEX`
+lookups over Python-precalculated, pre-ranked Period/LOB/Team/Agent results;
+there is no array `AGGREGATE` selection. `PCS Coaching Log.xlsx` is created once. Quality copies
 columns A:M from `COACHING_QUEUE` into that log and edits only its action fields.
 The Hub reads keyed actions into the next snapshot but never replaces the log.
 The fast build option reads the current database and coaching log without

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.25.2 — 2026-09-09
+
+- Fixes blank PCS comparison charts and selected-scope table rows after changing
+  Period, LOB, Team Leader or Agent.
+- Replaces Excel `AGGREGATE` array ranking with Python-pre-ranked view rows and
+  simple direct `MATCH`/`INDEX` lookups while keeping all KPI arithmetic in Python.
+- Keeps the permanent `PCS Coaching Log.xlsx` untouched and advances the PCS
+  catalog contract to `2026.09.28` and report design contract to `2.3.1`.
+
 ## 0.25.1 — 2026-09-09
 
 - Restores four responsive PCS dashboard filters: Period, LOB, Team Leader and

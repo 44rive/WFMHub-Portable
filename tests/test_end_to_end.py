@@ -1179,6 +1179,8 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn(b"<f>", overview_xml)
                 self.assertNotIn(b"SUMIFS", overview_xml)
                 self.assertNotIn(b"SUMPRODUCT", overview_xml)
+                self.assertNotIn(b"AGGREGATE", overview_xml)
+                self.assertIn(b"PCS_VIEW_KEY", overview_xml)
             focused_pcs_values = load_workbook(
                 focused_pcs_report, read_only=False, data_only=True,
             )
