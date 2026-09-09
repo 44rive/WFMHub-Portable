@@ -1214,7 +1214,7 @@ def _write_pcs_v2_value(
 ) -> None:
     ws.merge_range(row, start, row, end, "", fmt)
     if isinstance(value, str) and value.startswith("="):
-        ws.write_formula(row, start, value, fmt, cached)
+        ws.write_formula(row, start, value, fmt, "" if cached is None else cached)
     else:
         ws.write(row, start, value, fmt)
 
@@ -1444,8 +1444,18 @@ def _add_pcs_v2_calc(
             "L", from_ref="PCS_Prior_From", to_ref="PCS_Prior_To", lob_cell=f"$A${excel_row}",
         )
         cached_row = lob_cache.get(cached_lob)
-        current_cache = cached_row[5] if cached_row else "#N/A"
-        prior_cache = cached_row[6] if cached_row else "#N/A"
+        # XlsxWriter treats an explicit ``None`` formula cache as the literal
+        # XML value ``<v>None</v>``. Excel correctly rejects that as invalid
+        # numeric cell information and repairs the hidden calculation sheet on
+        # open. Missing chart points must be cached as a real Excel error.
+        current_cache = (
+            cached_row[5]
+            if cached_row and cached_row[5] is not None else "#N/A"
+        )
+        prior_cache = (
+            cached_row[6]
+            if cached_row and cached_row[6] is not None else "#N/A"
+        )
         wrapper = f'OR($A${excel_row}="",AND(OVERVIEW!$J$2<>"All",OVERVIEW!$J$2<>$A${excel_row}))'
         ws.write_formula(
             row_index, 1,

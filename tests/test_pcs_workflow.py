@@ -2,18 +2,39 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import zipfile
 from contextlib import nullcontext
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import xlsxwriter
+
 from wfmhub.cli import _update_pcs_now, refresh
+from wfmhub.decision_products import _add_pcs_v2_calc
 from wfmhub.models import ModelSummary
 from wfmhub.pcs_excel import PCSExcelError, PCSTrackerState, PCS_TEMPLATE_VERSION
 
 
 class PCSWorkflowTests(unittest.TestCase):
+    def test_missing_pcs_chart_cache_is_a_valid_excel_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "pcs-calc.xlsx"
+            workbook = xlsxwriter.Workbook(path)
+            book = SimpleNamespace(report=SimpleNamespace(workbook=workbook))
+            _add_pcs_v2_calc(
+                book,
+                [("RSA NL", None, None, None, None, None, None)],
+                [("LOB|All", "LOB", "RSA NL")],
+            )
+            workbook.close()
+            with zipfile.ZipFile(path) as archive:
+                xml = archive.read("xl/worksheets/sheet1.xml")
+            self.assertNotIn(b"<v>None</v>", xml)
+            self.assertIn(b'<c r="B2" s="2" t="e">', xml)
+            self.assertIn(b"<v>#N/A</v>", xml)
+
     def _state(
         self,
         workbook: Path,

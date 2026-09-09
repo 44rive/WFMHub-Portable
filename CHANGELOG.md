@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.24.1 — 2026-09-09
+
+- Fixes an Excel repair prompt in `PCS Operational Tracker.xlsx`: missing
+  chart-cache values on hidden `_PCS_CALC` were serialized as invalid
+  `<v>None</v>` numeric cells. They are now valid `#N/A` error cells, which
+  preserve chart gaps without Excel repairing `sheet12.xml`.
+- Normalizes missing cached PCS overview formula results to blank strings and
+  adds package-level regression checks that reject literal `None` worksheet
+  values.
+- Bumps the PCS template version so the explicit repair/rebuild action replaces
+  affected trackers while carrying forward the permanent coaching ledger.
+
 ## 0.24.0 — 2026-09-09
 
 - Migrates RTM Daily Control, every LOB Service Flash, Attendance Review,

@@ -1180,6 +1180,7 @@ class EndToEndTests(unittest.TestCase):
                     if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
                 )
                 self.assertNotIn(b"_xlfn._xlws", worksheet_xml)
+                self.assertNotIn(b"<v>None</v>", worksheet_xml)
             pcs_state = inspect_pcs_tracker(
                 focused_pcs_report, home / "Feed" / "PCS",
             )
