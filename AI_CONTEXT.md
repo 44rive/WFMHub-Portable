@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.2.0`
-Applies to: WFMHub `0.24.0` and later
+Context version: `1.3.0`
+Applies to: WFMHub `0.25.0` and later
 Last reviewed: `2026-09-09`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -13,8 +13,9 @@ old conversations, filenames, archived workbooks, or code that is not dispatched
 WFMHub is a portable, deterministic Workforce Management hub for a restricted
 Windows work machine. Python and SQLite ingest untouched Excel/CSV/TXT extracts,
 scope them to the governed FTE roster, calculate auditable marts, and create
-focused Excel decision products. Excel Power Query is transport for permanent
-collaboration workbooks, not the KPI calculation engine.
+focused Excel decision products. PCS is a Python-only snapshot workflow. Power
+Query remains optional transport for the separate permanent Absenteeism file;
+it is never the KPI calculation engine.
 
 Non-goals:
 
@@ -53,8 +54,8 @@ Operational:
   same-day call list.
 - **Attendance Review**: completed-day exact gaps, schedule-versus-observed
   review, break/meal control, and human decisions.
-- **PCS Operational Tracker**: permanent shared performance and coaching file
-  refreshed from five governed CSV feeds through Power Query.
+- **PCS Report & Coaching**: timestamped Python-only performance reports plus
+  one permanent human-owned coaching log.
 
 In development:
 
@@ -137,28 +138,24 @@ Attendance Review is regenerated for the selected completed period. REVIEW
 BOARD keeps its exact header on Excel row 4. Users edit five blue ACTUAL fields,
 save, then import the same workbook. Decisions persist by immutable Gap ID.
 
-PCS is one permanent shared workbook. Python/SQLite atomically publish:
-
-- `PCS_LOB_SCORECARD_CURRENT.csv`
-- `PCS_RESULTS_CURRENT.csv`
-- `PCS_COACHING_OPPORTUNITY_CURRENT.csv`
-- `PCS_AGENT_DAY_CURRENT.csv`
-- `PCS_SCOPE_CURRENT.csv`
-
-Power Query replaces only `tblPcsLob`, `tblResults`, `tblCoachingQueue`,
-`tblPcsData` and `tblPcsScope`. It never targets `tblCoaching`. Normal PCS update never rebuilds
-or replaces the workbook. Repair/rebuild is explicit, versioned, archives the
-old copy and migrates readable keyed coaching actions.
+PCS has two files with different ownership. Each build creates a new timestamped
+`PCS Operational Report - YYYY-MM-DD HHMMSS.xlsx` containing final values,
+native tables and charts. It has no Power Query, Data Model, dashboard formulas
+or Excel automation. `PCS Coaching Log.xlsx` is created once. Quality copies
+columns A:M from `COACHING_QUEUE` into that log and edits only its action fields.
+The Hub reads keyed actions into the next snapshot but never replaces the log.
+The fast build option reads the current database and coaching log without
+rescanning source extracts.
 
 Every current report first screen uses the measured grid in
 `src/wfmhub/excel_layout.py`: 28 equal 52-pixel columns, four equal KPI cards,
 two equal 728 × 310 charts and a compact seven-field action grid. RTM and
 Attendance remain Operational; visual consistency does not promote Staffing,
-Realisations, Absenteeism/Shrinkage, or Bonus from In Development. PCS query
-tables live in detail or hidden staging sheets, never on the dashboard.
-Period → LOB → Team Leader → Agent selectors come from
-`tblPcsScope`. `COACHING` shows the exact source Call ID beside the permanent
-Coaching Key; Call ID is calculated and is not typed by Quality.
+Realisations, Absenteeism/Shrinkage, or Bonus from In Development. PCS detail
+sheets are ordinary filterable tables. `COACHING_QUEUE` shows the exact source
+Call ID beside the Coaching Key; Call ID is calculated and is not typed by
+Quality. The report's `COACHING` sheet is a read-only action snapshot; all
+permanent edits belong only in `PCS Coaching Log.xlsx`.
 
 Generated reports use `WFMHUB-DESIGN`; see `docs/REPORT_DESIGN_SYSTEM.md`.
 They contain no AI branding or generated-by-AI language.
@@ -182,9 +179,9 @@ Implementation:
 - `metrics.py`: versioned KPI methods
 - `report_packs.py`: current report lifecycle and dispatch
 - `service_flash.py`: RTM and LOB Service Flash
-- `decision_products.py`: PCS, Attendance Review and development products
-- `shared_feeds.py`: atomic collaboration feeds and Power Query text
-- `pcs_excel.py` plus `Install-PCSWorkbook.ps1`: permanent Excel connection
+- `pcs_report.py`: authoritative Python-only PCS report and coaching-log lifecycle
+- `decision_products.py`: Attendance Review and development products
+- `shared_feeds.py`: Absenteeism collaboration feeds and Power Query text
 - `actions.py`: Attendance Review decision import
 - `design.py`, `reports.py`, `template_reports.py`: visual contract
 - `bonus.py`: governed Bonus Matrix import/report
@@ -207,8 +204,9 @@ Documentation:
 4. Add or update focused tests and the end-to-end fixture.
 5. Reopen every generated XLSX, inspect ZIP/XML for `#REF!` and unsupported
    formula metadata, and run the full suite.
-6. For PCS, run Windows Excel install -> refresh -> calculate -> save -> reopen.
-7. Bump the workbook template version only for an explicit design migration.
+6. For PCS, verify static cards/charts, no query connections or dashboard
+   formulas, unique timestamped output, and byte preservation of the coaching log.
+7. Bump the snapshot/report contract only for an explicit design migration.
 8. Update this context and the design specification when architecture changes.
 
 ## Anti-hallucination checklist
@@ -220,8 +218,9 @@ Documentation:
 - Never mark today’s unfinished shift as Early Leave.
 - Never average rates or invent a target.
 - Never rename stable sheets, tables, Agent ID, Gap ID or Coaching Key.
-- Never overwrite PCS during normal refresh.
-- Never load Power Query into COACHING or a permanent action table.
+- Never overwrite `PCS Coaching Log.xlsx` after its initial creation.
+- Never add Power Query, Excel automation or a Data Model back to PCS without an
+  explicit product decision.
 - Never edit or relocate source extracts.
 - Never describe an in-development report as payroll-ready.
 - If evidence is insufficient, say what is unknown and inspect the source or

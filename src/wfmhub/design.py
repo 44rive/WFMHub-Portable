@@ -8,7 +8,7 @@ from __future__ import annotations
 
 
 REPORT_DESIGN_ID = "WFMHUB-DESIGN"
-REPORT_DESIGN_VERSION = "2.1.0"
+REPORT_DESIGN_VERSION = "2.2.0"
 
 TITLE_FONT = "Aptos Display"
 BODY_FONT = "Aptos"

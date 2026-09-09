@@ -75,17 +75,18 @@ Reports\Realisations.xlsx
 Reports\Attendance Review.xlsx
 Reports\Final Absenteeism.xlsx
 Reports\Bonus Management.xlsx
-Reports\PCS Operational Tracker.xlsx
+Reports\PCS Operational Report - YYYY-MM-DD HHMMSS.xlsx
+Reports\PCS Coaching Log.xlsx
 Reports\Analysis\...xlsx
 ```
 
-When a normal report is replaced, WFMHub first saves its previous version in
-`Reports\Archive`. PCS is different: its operational tracker is preserved on
-normal updates. Only a declared design upgrade archives and rebuilds it, after
-first carrying its keyed coaching actions forward.
+When a normal fixed-name report is replaced, WFMHub first saves its previous
+version in `Reports\Archive`. PCS reports are timestamped snapshots, so the Hub
+never replaces an open file. `PCS Coaching Log.xlsx` is the only permanent
+human-edited PCS file and the Hub never overwrites it.
 
-`Feed` is separate from `Reports`: each successful refresh updates the fixed
-PCS and Absenteeism CSV feeds there. Any other clean CSV/XLSX export appears
+`Feed` is separate from `Reports`: shared Absenteeism feeds live there. PCS no
+longer uses feed files or Power Query. Any other clean CSV/XLSX export appears
 only when you explicitly request it.
 
 ## Choosing dates
@@ -239,21 +240,17 @@ WFMHub hashes and reads the source without changing it. Scenario Payout remains
 separate from Released Payout. Absence must have one financial consequence—not
 an absence KPI plus a second hidden penalty.
 
-## PCS Operational Tracker
+## PCS Report & Coaching
 
-Choose **PCS Operational Tracker**, then **Update PCS now**. Close the tracker
-before you start. The Hub loads FTE and Call by Call, updates the fixed clean
-feeds, installs or refreshes Power Query through desktop Excel, and opens the
-same permanent workbook. Put that workbook in the agreed synced
-SharePoint/Teams location. A normal update does not rebuild the workbook or
-erase coaching. It updates only PCS data; attendance, RTM, staffing, service,
-forecast, and absence are left as they were.
+Choose **PCS Report & Coaching**, then **Build latest PCS report**. You do not
+need to close Excel. The Hub loads only FTE and Call by Call and creates a new
+timestamped report containing final values and charts. Attendance, RTM,
+staffing, service, forecast and absence remain unchanged.
 
-Open `OVERVIEW` for the total and per-LOB management view. Open `RESULTS` for
-detail. Use its normal filter arrows in this order: Period View, Scope Level,
-LOB, Team Leader, then Agent. `LOB` gives one line per LOB, `TEAM` gives team
-lines, and `AGENT` gives agent lines. New dates and agents appear after Refresh
-All; no formula selector is involved.
+Open `OVERVIEW` for the management view. Open `RESULTS` and use its ordinary
+filter arrows in this order: Period View, Scope Level, LOB, Team Leader, then
+Agent. `LOB` gives one row per LOB, `TEAM` gives team rows, and `AGENT` gives
+agent rows. No refresh or recalculation is required in Excel.
 
 PCS formulas:
 
@@ -264,31 +261,19 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-For coaching, filter `COACHING_QUEUE` by LOB, Team Leader, Agent, or date. Copy
-the exact Coaching Key. Open `COACHING`, paste it in the first blank blue row,
-then fill status, coach, coaching date, due date, and comment. The identity
-fields fill automatically with a classic lookup. Save normally.
+For coaching, filter `COACHING_QUEUE` by LOB, Team Leader, Agent or date. Copy
+columns A:M for the selected call and paste them into the first empty row of
+`PCS Coaching Log.xlsx`. Complete Coaching Status, Coach, Coaching Date, Due
+Date and Coaching Comment, then save. Coaching Key identifies the exact call;
+Call ID helps the coach open it directly.
 
-The stable inputs include `PCS_LOB_SCORECARD_CURRENT.csv`,
-`PCS_RESULTS_CURRENT.csv`, `PCS_AGENT_DAY_CURRENT.csv`, and
-`PCS_COACHING_OPPORTUNITY_CURRENT.csv`. Agent ID is the employee key; Agent
-Selector is only `Name [ID]`; Coaching Key identifies the exact call. The first
-**Update PCS now** installs all five governed queries automatically using Windows
-desktop Excel. Everybody else works in the permanent workbook; the owner can
-update it with WFMHub or **Data > Refresh All**.
+After Quality updates the log, choose **Build again from current database**.
+That fast action does not scan the source folder. It creates a new report with
+the latest coaching status and leaves both earlier reports and the permanent log
+untouched.
 
-Use **Repair/rebuild tracker and connection** only when the PCS status says the
-template is old/damaged or the four queries need reinstalling. Close Excel
-first. The old workbook is archived and readable keyed coaching actions are
-carried forward. If the Hub says the feeds updated but Excel could not save,
-close the tracker and choose **Refresh Excel only**—do not spend time loading
-the extracts again.
-
-Follow [EXCEL_REFRESH_GUIDE.md](EXCEL_REFRESH_GUIDE.md) for every click in the
-one-time PCS and Absenteeism setup.
-
-If you prefer native slicers, click inside `RESULTS`, `PCS_DATA`, or `COACHING` and choose
-**Table Design > Insert Slicer**.
+If you prefer native slicers, add them to `RESULTS`, `PCS_DATA`, or
+`COACHING_QUEUE`. They filter static Excel Tables; they do not trigger a refresh.
 
 ## Analysis and clean data
 
@@ -306,8 +291,9 @@ Use CSV for large Call by Call data.
 - **No Time zone found:** the portable package was incompletely extracted.
 - **Required columns missing:** read the named source file in the error/log.
 - **Empty report:** check source health and date coverage in System tools.
-- **PCS workbook access denied:** close the tracker, wait for OneDrive to stop
-  syncing, then use Refresh Excel only if the message says feeds already updated.
+- **PCS report does not build:** confirm FTE and Call by Call contain in-scope
+  dates and agents, then read the named error in the latest log. No Excel file
+  needs to be closed for PCS.
 - **Red INCOMPLETE badge:** fix the missing or stale source; do not replace the
   blank with zero.
 

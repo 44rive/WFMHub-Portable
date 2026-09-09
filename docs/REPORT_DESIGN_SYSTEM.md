@@ -3,10 +3,10 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `2.1.0` |
+| Version | `2.2.0` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
-| First compatible Hub version | `0.24.0` |
+| First compatible Hub version | `0.25.0` |
 
 This is the visual contract for every WFMHub workbook. It changes presentation,
 never business calculations, source scope, table keys, or report maturity.
@@ -66,18 +66,21 @@ defines a target; WFMHub never invents the pictured PCS target.
 
 ## Report blueprints
 
-### PCS Operational Tracker
+### PCS Report & Coaching
 
-- `OVERVIEW`: four working dependent selectors; current-period PCS,
-  participation, prior comparable PCS and change; two equal charts; team action
-  grid. Query tables are never placed on this presentation surface.
-- `RESULTS`: the actual linked Period View, Scope Level, LOB, Team Leader and
-  Agent filters. Filter the table from left to right.
-- `COACHING_QUEUE`: current exact low-score opportunities.
-- `COACHING`: permanent blue action fields plus a read-only source `Call ID`
-  beside the internal Coaching Key; never a Power Query target.
-- `PCS_DATA`: refreshable agent-day counters for pivots or reconciliation.
-- No dynamic-array report formulas. Power Query is transport only.
+- `OVERVIEW`: honest static scope strip; current MTD PCS, participation, prior
+  comparable PCS and change; two equal native charts; team action grid.
+- `LOB_SUMMARY` and `DAILY_TREND`: the exact final values plotted in the charts.
+- `RESULTS`: ordinary Period View, Scope Level, LOB, Team Leader and Agent table
+  filters. Filter the table from left to right.
+- `COACHING_QUEUE`: current exact low-score opportunities, including Call ID and
+  the action state read from the permanent coaching log.
+- `COACHING`: read-only snapshot of saved keyed actions.
+- `PCS_DATA`: static agent-day counters for pivots or reconciliation.
+- `PCS Coaching Log.xlsx`: separate permanent human-owned action ledger. Copy
+  A:M from `COACHING_QUEUE`, then edit the blue action fields.
+- No Power Query, Data Model, Excel automation, dynamic arrays or dashboard
+  formulas. Every timestamped report opens with final calculated values.
 
 ### RTM Daily Control
 
@@ -120,9 +123,8 @@ their calculations and decision workflows still require production review.
 ## Interaction and persistence
 
 - Generated RTM and Attendance workbooks are dated decision snapshots.
-- PCS is one permanent shared workbook. A normal update replaces only the five
-  query tables and preserves `tblCoaching` byte-for-byte.
-- Power Query never loads into `tblCoaching` or a permanent action ledger.
+- Every PCS report is a new timestamped snapshot; old reports remain untouched.
+- `PCS Coaching Log.xlsx` is created once, read by the Hub and never replaced.
 - Blue cells are editable. White, grey and calculated cells are not.
 - Sheet names, table names, Agent ID, Gap ID and Coaching Key are contracts.
 
@@ -133,13 +135,17 @@ Every design change requires:
 1. sheet order and fixed table-anchor tests;
 2. formula inspection for `#REF!` and unsupported dynamic-array metadata;
 3. ZIP integrity and reopen checks with `openpyxl`;
-4. a Windows desktop Excel install/refresh/save/reopen smoke test for PCS;
-5. verification that normal PCS update never rebuilds the permanent workbook;
+4. verification that PCS contains no query connections, query tables, Data
+   Model, or dashboard formulas and reopens without repair;
+5. verification that each PCS build creates a new file and does not change the
+   bytes of the permanent coaching log;
 6. verification that attendance decisions still import from Excel row 4;
-7. a version bump when a permanent workbook must be rebuilt.
+7. a version bump when the report contract changes.
 
 ## Change log
 
+- `2.2.0`: PCS becomes a Python-only timestamped report plus a separate
+  permanent coaching log; all presentation values and chart series are embedded.
 - `2.1.0`: the measured V2 dashboard renderer is shared by RTM, every LOB
   Flash, Attendance Review, Staffing, Realisations, Absenteeism/Shrinkage and
   Bonus while their calculations, table names and editable ledgers remain

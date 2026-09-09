@@ -1,7 +1,9 @@
-# Excel refresh guide for shared PCS and Absenteeism files
+# Excel refresh guide for the shared Absenteeism file
 
 Use this setup when one workbook must stay in Teams, SharePoint, or OneDrive
-while people add coaching or review notes.
+while people add absence review notes. PCS no longer uses this workflow: its
+reports are complete Python-generated snapshots, and coaching lives in the
+separate permanent `PCS Coaching Log.xlsx`.
 
 The idea is simple:
 
@@ -9,44 +11,8 @@ The idea is simple:
 2. Excel reads that CSV with Power Query.
 3. **Refresh All** replaces report data, not the team’s action table.
 
-Do this once per shared workbook. Make a backup copy before starting.
-
-## PCS: the simple owner workflow
-
-Use one named owner on the WFM work machine:
-
-1. Close `PCS Operational Tracker.xlsx` if it is open.
-2. In WFMHub choose **PCS Operational Tracker**.
-3. Choose **Update PCS now**.
-4. Wait while WFMHub loads FTE and Call by Call, publishes the fixed CSV feeds,
-   installs or refreshes five Power Queries through desktop Excel, and saves.
-5. The same permanent tracker opens when the update succeeds.
-
-The first run automatically replaces four starter tables with refreshable query
-tables: `tblPcsLob` on `OVERVIEW`, `tblResults` on `RESULTS`, `tblPcsData` on
-`PCS_DATA`, and `tblCoachingQueue` on `COACHING_QUEUE`. It does not add any table
-to the Data Model. Later runs refresh the existing connections without rebuilding
-the workbook. If a future WFMHub release changes the template, close Excel and
-choose **Repair/rebuild tracker and connection**. The Hub archives the old
-workbook and carries its readable coaching action ledger into the new design
-before reinstalling the queries.
-
-Keep the permanent workbook in a locally synced SharePoint/Teams folder if the
-team must collaborate in it. Team leaders and Quality do not need WFMHub,
-Python, SQLite, or the source extracts. Only the owner updates the feeds.
-
-Use **Show tracker status** to compare the latest feed timestamp with the feed
-currently loaded in Excel. Use **Repair/rebuild tracker and connection** if the
-queries are missing or the design is old. `LOCAL` mode is the supported simple workflow. The
-SharePoint query scripts remain available for an advanced setup where the CSV
-feeds themselves are also synchronized to SharePoint.
-
-Use `OVERVIEW` for management totals and the per-LOB comparison. In `RESULTS`,
-filter `Period View`, then `Scope Level`, LOB, Team Leader, or Agent. For a
-coaching action, filter `COACHING_QUEUE`, copy its Coaching Key into the first
-blank blue cell in `COACHING`, and fill only the blue action fields. The agent
-and call identity fills with classic `INDEX/MATCH`. Power Query never loads into
-`COACHING`.
+Do this once for the shared Absenteeism workbook. Make a backup copy before
+starting.
 
 ## Absenteeism: connect the clean ledger
 
@@ -96,12 +62,7 @@ correct agent and day.
 ## Normal refresh after setup
 
 1. Put new untouched exports in the normal source folders.
-2. For PCS, use **PCS Operational Tracker > Update PCS now**. It refreshes the
-   targeted PCS data, all five Excel queries, and the permanent workbook in one
-   action. It does not rebuild unrelated WFM models.
-3. Alternatively, after the owner updates the fixed feeds, open the PCS workbook
-   and use **Data > Refresh All**, wait for all queries, then save.
-4. For Absenteeism, **Refresh All** updates `TEAM_VIEW`,
+2. For Absenteeism, **Refresh All** updates `TEAM_VIEW`,
    `COMPONENT_VIEW`, and the review queue. Do not rebuild the shared workbook
    unless WFMHub ships a new workbook design.
 
@@ -111,15 +72,8 @@ correct agent and day.
   manually renamed. Select the fixed `..._CURRENT.csv` file again.
 - **Table name already exists:** convert or rename the old table before naming
   the query table.
-- **A filter appears blank:** clear the preceding table filters, then apply
-  Period View, Scope Level, LOB, Team Leader, and Agent in that order.
+- **A filter appears blank:** clear the current table filters and try again.
 - **Someone is editing:** do not replace the workbook. Refresh only the query,
   and use a personal Sheet View before applying table filters.
-- **Access denied / workbook read-only:** the database and fixed feeds may
-  already be current. If WFMHub says they succeeded, close Excel, wait for
-  OneDrive sync, and choose **Refresh Excel only**. Do not reload the extracts.
-- **A new agent is missing from PCS RESULTS:** clear the filters and choose
-  **Data > Refresh All**. Do not rebuild the tracker.
-- **Excel reports repaired records:** keep the recovered copy closed, use the
-  Hub's **Repair/rebuild tracker and connection** action, and retain the log.
-  The current template contains no dynamic-array report formulas.
+- **Access denied / workbook read-only:** close the Absenteeism workbook, wait
+  for OneDrive sync, then refresh again. Do not reload the extracts.

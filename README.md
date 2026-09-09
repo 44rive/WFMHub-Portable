@@ -34,7 +34,7 @@ Technical files live under `_system`. You normally do not open that folder.
 | Attendance Review | Which exact completed-day gaps need an Approved or Dismissed human decision? |
 | Final Absenteeism | What do the reviewed decisions and PTO/Away registers produce for absence and shrinkage? |
 | Bonus Management | What did Bonus Matrix v1.2 calculate, and is it safe to release? |
-| PCS Operational Tracker | How are PCS, participation, low scores, and coaching moving by date, month, LOB, team, and agent? |
+| PCS Report & Coaching | How are PCS, participation, low scores, and coaching moving by date, month, LOB, team, and agent? |
 
 The products use one visual identity but not one generic layout. RTM combines
 service and its matching LOB attendance list, Attendance Review is an exact-gap
@@ -94,8 +94,8 @@ attendance gaps are classified through the imported Attendance Review ledger.
 7. Open it directly from `Reports`.
 
 See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
-[Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the automated PCS Power
-Query workflow and the manual shared-Absenteeism setup.
+[Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the optional shared-
+Absenteeism Power Query setup. PCS needs no Excel connection setup.
 
 The approved visual contract is in the
 [report design system](docs/REPORT_DESIGN_SYSTEM.md), with a data-free
@@ -152,42 +152,34 @@ Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in
 `config\metric_catalog.toml`.
 
-## PCS Operational Tracker
+## PCS Report & Coaching
 
-PCS is one permanent shared Excel workbook. **PCS Operational Tracker > Update
-PCS now** updates the fixed clean CSV feeds under `Feed\PCS`, installs or
-refreshes five governed Power Queries in desktop Excel, saves, and opens the
-same tracker. A normal update never rebuilds or replaces it. The PCS-only path
-also leaves attendance, RTM, staffing, forecast, service, and absence marts
-untouched. If a design upgrade is needed, close Excel and choose
-**Repair/rebuild tracker and connection**; WFMHub archives the old copy and
-migrates readable coaching actions before installing the connections again.
+PCS is deliberately split into a generated report and one human-owned action
+log. Choose **PCS Report & Coaching > Build latest PCS report**. The Hub loads
+only FTE and Call by Call, updates the PCS mart, and creates a new timestamped
+`Reports\PCS Operational Report - YYYY-MM-DD HHMMSS.xlsx`. It never opens or
+controls Excel, so no workbook needs to be closed and OneDrive cannot block the
+report build.
 
-`Reports\PCS Operational Tracker.xlsx` contains:
+The generated report contains final Python-calculated values:
 
-- an `OVERVIEW` with total KPI cards, two management charts, and a visible
-  current-versus-prior PCS table for every LOB;
-- a filterable `RESULTS` table already calculated for latest day, current week,
-  current MTD, previous MTD same days, and previous full month at LOB, team, and
-  agent levels;
-- a replaceable `COACHING_QUEUE` and permanent collaborative `COACHING` ledger;
-- visible `PCS_DATA` at agent/day grain for optional pivots or custom analysis;
-- plain `SETUP`, `HELP`, `DEFINITIONS`, and audit sheets.
+- `OVERVIEW`: current MTD cards, LOB comparison, daily trend, and team actions;
+- `LOB_SUMMARY` and `DAILY_TREND`: the exact visible chart values;
+- `RESULTS`: filterable latest-day, week, MTD and prior-period results at LOB,
+  team and agent levels;
+- `COACHING_QUEUE`: exact low-score calls, Call ID and current action status;
+- `COACHING`: a read-only snapshot of saved actions;
+- `PCS_DATA`: one row per agent/day for filters or optional pivots.
 
-There are no spill-formula dashboards and no Data Model. Team leaders use the
-ordinary filter arrows or add native slicers to `RESULTS`. For coaching, filter
-`COACHING_QUEUE`, copy its exact Coaching Key into the first blank blue row in
-`COACHING`, complete the blue action columns, and save. Use a personal Sheet
-View before filtering a workbook shared with other people.
+There is no Power Query, Excel automation, Data Model, hidden calculation sheet,
+or dashboard formula. Cards and charts work immediately because their values
+are embedded before Excel opens.
 
-The Hub performs the one-time Local Power Query installation through Windows
-desktop Excel. After that, the owner may use the same **Update PCS now** action
-or Excel **Data > Refresh All**. Power Query replaces `OVERVIEW`'s LOB table,
-`RESULTS`, `PCS_DATA`, and `COACHING_QUEUE`; it never loads into `COACHING`. No
-Data Model, ODBC driver, or daily workbook generation is involved. `SETUP`,
-`HELP`, and the PCS status page show connection and freshness separately.
-If Excel or OneDrive locks the workbook after the feeds update, do not repeat
-the source refresh: close Excel and choose **Refresh Excel only**.
+`Reports\PCS Coaching Log.xlsx` is created once and is never replaced by the
+Hub. Quality filters `COACHING_QUEUE`, copies columns A:M into the Coaching Log,
+then completes the blue status, coach, date, due-date and comment fields. Choose
+**Build again from current database** to create a fast new report reflecting
+those saved actions without rescanning source extracts.
 
 ## Attendance decisions and shared absenteeism
 
@@ -242,10 +234,11 @@ use ratios of summed components; WFMHub never averages agent percentages.
 forecast, staffing, attendance, final absence, or bonus. Every finding includes
 its metric, comparison, and evidence filter.
 
-Every successful refresh updates the fixed PCS and Absenteeism CSV feeds under
-`Feed`. **Export clean data** produces any additional CSV or XLSX dataset you
-request for a selected period. Large call datasets should use CSV. The original
-extract is unchanged.
+Attendance/absence refreshes update the fixed Absenteeism CSV feeds under
+`Feed`. PCS embeds final data directly in each timestamped report and publishes
+no collaboration feed. **Export clean data** produces any additional CSV or
+XLSX dataset you request for a selected period. Large call datasets should use
+CSV. The original extract is unchanged.
 
 The optional prompt under `prompts` can be used manually with an approved
 Microsoft Copilot account after attaching only an approved finished report.

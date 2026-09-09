@@ -120,33 +120,23 @@ The menu exposes only `pcs`, `bonus`, `service`, `realisations`, `staffing`,
 `attendance`, `corrections`, and `absence`. `operations` and `quality_pcs`
 remain compatibility API keys, not current product contracts.
 
-Current products publish fixed names directly into `Reports`; the previous
-current copy is archived only after a complete replacement workbook exists. A
-builder must create the exact ordered sheets declared in
-`default_reports.toml` and keep `_AUDIT` hidden. Do not add raw extract tables
-to workbooks.
+Most current products publish fixed names directly into `Reports`; the previous
+copy is archived only after a complete replacement workbook exists. PCS is the
+exception: every build publishes a new timestamped snapshot. A builder must
+create the exact ordered sheets declared in `default_reports.toml` and keep
+`_AUDIT` hidden. Do not add raw source extracts to workbooks.
 
-PCS is a versioned permanent operational tracker. The default builder always
-publishes the fixed feeds first. It returns a tracker with the current template
-version without changing a byte; an older template is archived and rebuilt only
-after the keyed `COACHING` action ledger is read for migration. An explicit
-output path remains a diagnostic snapshot. Keep `OVERVIEW`'s LOB table,
-`RESULTS`, `PCS_DATA`, `COACHING_QUEUE`, `COACHING`, and `SETUP` as real Excel
-Tables. Power Query may replace the first four data tables, while `COACHING` is
-the permanent collaborative record. Do not require a Data Model or ODBC driver.
+`pcs_report.py` is the PCS lifecycle authority. It generates all cards, charts
+and tables from final Python/SQLite values and creates `PCS Coaching Log.xlsx`
+only when that file does not exist. Generated `COACHING` is a read-only snapshot;
+the separate log is the permanent collaborative record. Do not add Power Query,
+Excel automation, Data Model, ODBC, or report formulas to this path.
 
-Desktop Excel owns Power Query's OOXML/mashup parts. The Windows helper under
-`_system/scripts` installs the four generated M definitions at their existing
-table anchors, refreshes synchronously, and saves only on success. It does not
-capture or rewrite report formulas. Linux
-tests validate the generated workbook and helper contract; they cannot replace
-an end-to-end Windows Excel COM test.
-
-The PCS agent/day feed schema and copy-ready M scripts are centralized in
-`shared_feeds.py`. Schema changes require a feed-schema increment, workbook
-template-version and report-contract migration, documentation, and a
-preservation test. Python/SQLite presentation grains must calculate ratios from
-summed counters, not from averaged daily ratios.
+PCS schema or lifecycle changes require a snapshot-contract increment,
+documentation, a no-connections/no-formulas OOXML test, and a preservation test
+proving that a normal build does not alter an existing Coaching Log. All
+presentation grains calculate ratios from summed counters, never averaged daily
+ratios.
 
 Call-by-call uses a stable deterministic leg key. Full-history extracts may
 overlap, so `core.clean_call_leg` chooses the newest active row at that key.

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.25.0 — 2026-09-09
+
+- Replaces the PCS Power Query/Excel-automation lifecycle with a Python-only
+  timestamped report. Cards, charts and tables contain final values when opened.
+- Adds one separate permanent `PCS Coaching Log.xlsx`; WFMHub creates it once,
+  reads unique keyed actions into later snapshots, and never overwrites it.
+- Adds a fast report rebuild from the current SQLite mart after coaching updates,
+  without rescanning extracts or rebuilding unrelated WFM domains.
+- Removes PCS collaboration feeds and the Excel connection installer from the
+  shipped workflow, eliminating open-workbook and OneDrive replacement errors.
+- Adds static LOB and daily trend data, filterable results, exact low-score Call
+  IDs, a coaching queue aligned A:M with the permanent log, and lifecycle/OOXML
+  preservation tests.
+- Advances the workbook presentation contract to `WFMHUB-DESIGN 2.2.0` and the
+  report catalog contract to `2026.09.26`.
+
 ## 0.24.2 — 2026-09-09
 
 - Fixes blank PCS cards and charts after a successful Power Query refresh.

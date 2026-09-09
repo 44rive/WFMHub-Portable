@@ -1,15 +1,15 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.09.24"
+version = "2026.09.26"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
 key = "pcs"
 title = "PCS OPERATIONAL TRACKER"
-purpose = "Permanent Power Query-fed daily, MTD and historical PCS score, participation, and coaching."
+purpose = "Python-only PCS snapshot with final values and a separate permanent coaching log."
 finding_domains = ["pcs", "data_quality"]
-sheets = ["OVERVIEW", "RESULTS", "COACHING_QUEUE", "COACHING", "PCS_DATA", "SETUP", "HELP", "DEFINITIONS", "_AUDIT", "_PCS_LOB", "_PCS_SCOPE", "_PCS_CALC"]
+sheets = ["OVERVIEW", "LOB_SUMMARY", "DAILY_TREND", "RESULTS", "COACHING_QUEUE", "COACHING", "PCS_DATA", "HELP", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "bonus"
@@ -71,6 +71,6 @@ sheets = ["DAILY_SUMMARY", "FINDINGS", "ATTENDANCE_CALLS", "STAFFING_GAPS", "SER
 [[packs]]
 key = "quality_pcs"
 title = "WFM HUB  /  LEGACY EXACT AGENT PCS"
-purpose = "Compatibility-only PCS workbook; superseded by PCS Operational Tracker."
+purpose = "Compatibility-only PCS workbook; superseded by PCS Report & Coaching."
 finding_domains = ["pcs", "data_quality"]
 sheets = ["PCS_SUMMARY", "FINDINGS", "AGENT_DAY", "TEAM_DAY", "AGENT_MONTH", "RESPONSE_DETAIL", "DATA_QUALITY", "SOURCE_HEALTH", "DOMAIN_RULES", "METHODS", "PROVENANCE"]

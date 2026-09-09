@@ -61,11 +61,11 @@ pcs = true
 absence = true
 
 [pcs_tracker]
-# The permanent shared tracker keeps this many complete calendar months in its
-# refreshable agent/day feed. Two months is the minimum for MTD comparison.
+# Timestamped PCS reports retain this many complete calendar months in their
+# static agent/day detail. Two months is the minimum for MTD comparison.
 history_months = 13
-# Dashboard trend length. This limits Excel formula work without limiting the
-# selectable history retained in PCS_DATA.
+# Compatibility setting retained for existing configs. The Python dashboard
+# currently plots all available current-month days.
 trend_days = 90
 
 [report]

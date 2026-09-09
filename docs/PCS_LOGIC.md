@@ -38,14 +38,14 @@ external link:
 - every valid inbound Q1 `<=3` creates one coaching opportunity;
 - each opportunity is identified by the stable deduplicated call-leg key;
 - `Actions Rate = unique completed Coaching Keys / all coaching opportunities`;
-- the TL fills Status, Coach, Coaching Date, Due Date and Comment in Excel;
-- the shared tracker is permanent and its coaching table is not regenerated
-  during normal PCS refreshes;
-- Power Query refreshes the separate opportunity queue; a reviewer chooses its
-  Coaching Key in the first blank permanent coaching row, and the identity fields
-  populate with classic `INDEX/MATCH`;
-- a template upgrade archives the previous file and migrates each unique keyed
-  coaching action before the Power Query connections are reinstalled;
+- the generated report exposes exact calls in `COACHING_QUEUE`;
+- a reviewer copies columns A:M into the first blank row of the separate
+  permanent `PCS Coaching Log.xlsx`, then fills Status, Coach, Coaching Date,
+  Due Date and Comment;
+- WFMHub creates that coaching log only once, reads each unique keyed action on
+  later builds, and never replaces the human-owned file;
+- every generated report contains a read-only `COACHING` snapshot and the
+  current action state beside each queue case;
 - coaching decisions are never imported into SQLite.
 
 `Not required` remains in the denominator and is not counted as completed.
@@ -55,13 +55,12 @@ Low sample is an interpretation warning, not a coaching opportunity by itself.
 At team and month level, counters are summed first and the ratios are then
 recalculated. Agent averages and percentages are never averaged together.
 
-The permanent tracker consumes five fixed feeds. `PCS_LOB_SCORECARD_CURRENT.csv`
-drives the management cards, LOB charts, and visible LOB reconciliation table.
-`PCS_RESULTS_CURRENT.csv` contains the standard period results at LOB, team, and
-agent grain. `PCS_AGENT_DAY_CURRENT.csv` remains available for custom pivots,
-`PCS_COACHING_OPPORTUNITY_CURRENT.csv` is the replaceable case queue, and
-`PCS_SCOPE_CURRENT.csv` supplies the governed dependent selector values. Excel
-does not recalculate those grains with spill formulas.
+Python/SQLite calculate the complete report before Excel opens. Each build writes
+a new timestamped workbook containing the management cards, LOB summary, daily
+trend, standard period results, exact coaching queue, saved-action snapshot and
+agent-day counters. The workbook has no fixed PCS feed, Power Query, Data Model,
+Excel automation, spill formula or hidden calculation sheet. The fast rebuild
+option reads the current database and coaching log without rescanning extracts.
 
 ## Reference reconciliation
 
