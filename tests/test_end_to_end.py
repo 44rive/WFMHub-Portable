@@ -24,7 +24,14 @@ from wfmhub.models import (
     resolve_period,
 )
 from wfmhub.on_demand_analysis import build_analysis_workbook
-from wfmhub.pcs_tracker import PCS_INPUT_HEADERS, PCS_TRACKER_FILENAME
+from wfmhub.pcs_tracker import PCS_TRACKER_FILENAME
+from wfmhub.shared_feeds import (
+    PCS_AGENT_SCORECARD_HEADERS,
+    PCS_COACHING_HEADERS,
+    PCS_DAILY_SCORECARD_HEADERS,
+    PCS_LOB_SCORECARD_HEADERS,
+    PCS_RESULTS_HEADERS,
+)
 from wfmhub.exports import export_dataset
 from wfmhub.report_packs import build_report_pack
 from wfmhub.reports import build_report
@@ -979,25 +986,27 @@ class EndToEndTests(unittest.TestCase):
                     filtered.close()
 
                 # Quality edits the permanent action log inside the live tracker.
-                # Re-preparing paste data must never replace those edits.
+                # Updating the external CSV feeds must never replace those edits.
                 self.assertEqual(focused_pcs_report.name, PCS_TRACKER_FILENAME)
                 tracker_book = load_workbook(focused_pcs_report)
-                data_sheet = tracker_book["DATA"]
-                data_headers = {cell.value: cell.column for cell in data_sheet[4]}
-                low_row = next(
-                    row for row in data_sheet.iter_rows(min_row=5, values_only=True)
-                    if row[data_headers["Score <= 3"] - 1] == 1
-                )
-                coaching_key = low_row[data_headers["Coaching Key"] - 1]
-                call_id = low_row[data_headers["Call ID"] - 1]
-                self.assertTrue(coaching_key)
                 coaching_sheet = tracker_book["COACHING"]
-                coaching_sheet["L10"] = coaching_key
-                coaching_sheet["M10"] = call_id
-                coaching_sheet["N10"] = "Completed"
-                coaching_sheet["O10"] = "TL 1"
-                coaching_sheet["P10"] = date(2026, 8, 2)
-                coaching_sheet["R10"] = "Reviewed"
+                queue_headers = {
+                    cell.value: cell.column for cell in coaching_sheet[4][:10]
+                    if cell.value in PCS_COACHING_HEADERS
+                }
+                low_row = next(
+                    row for row in coaching_sheet.iter_rows(min_row=5, values_only=True)
+                    if row[queue_headers["Coaching Key"] - 1]
+                )
+                coaching_key = low_row[queue_headers["Coaching Key"] - 1]
+                call_id = low_row[queue_headers["Call ID"] - 1]
+                self.assertTrue(coaching_key)
+                coaching_sheet["L5"] = coaching_key
+                coaching_sheet["M5"] = call_id
+                coaching_sheet["N5"] = "Completed"
+                coaching_sheet["O5"] = "TL 1"
+                coaching_sheet["P5"] = date(2026, 8, 2)
+                coaching_sheet["R5"] = "Reviewed"
                 tracker_book.save(focused_pcs_report)
                 tracker_book.close()
                 saved_tracker = focused_pcs_report.read_bytes()
@@ -1007,18 +1016,17 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertEqual(refreshed_snapshot, focused_pcs_report)
                 self.assertEqual(focused_pcs_report.read_bytes(), saved_tracker)
-                paste_files = sorted((home / "Reports").glob("PCS Paste Data - *.xlsx"))
-                self.assertEqual(len(paste_files), 2)
-                paste_book = load_workbook(paste_files[-1], read_only=False, data_only=True)
-                try:
-                    self.assertEqual(paste_book.sheetnames, ["DATA"])
-                    self.assertIn("tblData", paste_book["DATA"].tables)
-                    self.assertEqual(
-                        tuple(cell.value for cell in paste_book["DATA"][4]),
-                        PCS_INPUT_HEADERS,
-                    )
-                finally:
-                    paste_book.close()
+                self.assertFalse(list((home / "Reports").glob("PCS Paste Data - *.xlsx")))
+                pcs_feed = home / "Feed" / "PCS"
+                for filename, headers in (
+                    ("PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS),
+                    ("PCS_AGENT_SCORECARD_CURRENT.csv", PCS_AGENT_SCORECARD_HEADERS),
+                    ("PCS_DAILY_SCORECARD_CURRENT.csv", PCS_DAILY_SCORECARD_HEADERS),
+                    ("PCS_RESULTS_CURRENT.csv", PCS_RESULTS_HEADERS),
+                    ("PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS),
+                ):
+                    with (pcs_feed / filename).open(encoding="utf-8-sig", newline="") as handle:
+                        self.assertEqual(tuple(next(csv.reader(handle))), headers)
 
             self.assertTrue(report.exists())
             workbook = load_workbook(report, read_only=True, data_only=True)
@@ -1109,58 +1117,47 @@ class EndToEndTests(unittest.TestCase):
             try:
                 self.assertEqual(focused_pcs_report.name, PCS_TRACKER_FILENAME)
                 self.assertEqual(focused_pcs_book.sheetnames, [
-                    "OVERVIEW", "COACHING", "DATA", "HELP", "_LISTS", "_AUDIT",
+                    "OVERVIEW", "PERFORMANCE", "COACHING", "SETUP", "HELP",
+                    "_PCS_LOB", "_PCS_AGENT", "_PCS_DAILY", "_AUDIT",
                 ])
-                self.assertEqual(len(focused_pcs_book["OVERVIEW"]._charts), 1)
+                self.assertNotIn("DATA", focused_pcs_book.sheetnames)
+                self.assertEqual(len(focused_pcs_book["OVERVIEW"]._charts), 2)
                 self.assertEqual(
                     [focused_pcs_book["OVERVIEW"][cell].value for cell in ("A5", "H5", "O5", "V5")],
-                    ["CURRENT PCS", "PARTICIPATION", "PRIOR PCS", "CHANGE"],
+                    ["CURRENT MTD PCS", "PARTICIPATION", "PRIOR MTD PCS", "CHANGE"],
                 )
-                self.assertTrue(focused_pcs_book["OVERVIEW"]["A6"].value.startswith("=IFERROR("))
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["A2"].value, "PERIOD")
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["H2"].value, "LOB")
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["O2"].value, "TEAM LEADER")
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["V2"].value, "AGENT")
-                self.assertEqual(len(focused_pcs_book["OVERVIEW"].data_validations.dataValidation), 4)
-                self.assertIn("PCS_OV_Period", focused_pcs_book.defined_names)
-                self.assertIn("PCS_OV_TL_LIST", focused_pcs_book.defined_names)
-                self.assertNotIn("PCS_COACH_TL", focused_pcs_book.defined_names)
-                self.assertNotIn("PCS_COACH_Agent", focused_pcs_book.defined_names)
-                self.assertEqual(len(focused_pcs_book["COACHING"].data_validations.dataValidation), 3)
-                self.assertIn("tblData", focused_pcs_book["DATA"].tables)
+                self.assertTrue(focused_pcs_book["OVERVIEW"]["A6"].value.startswith("=IF("))
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["A2"].value, "DATA THROUGH")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["H2"].value, "REFRESH")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["O2"].value, "INTERACTION")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["V2"].value, "SCOPE")
+                self.assertEqual(len(focused_pcs_book["OVERVIEW"].data_validations.dataValidation), 0)
+                self.assertIn("tblPcsPerformance", focused_pcs_book["PERFORMANCE"].tables)
+                self.assertIn("tblCoachingQueue", focused_pcs_book["COACHING"].tables)
                 self.assertIn("tblCoachingActions", focused_pcs_book["COACHING"].tables)
                 self.assertEqual(
-                    [focused_pcs_book["COACHING"][cell].value for cell in ("A9", "B9", "C9", "D9")],
-                    ["DATE", "LOB", "TEAM LEADER", "AGENT"],
+                    [focused_pcs_book["COACHING"][cell].value for cell in ("A4", "B4", "C4", "D4")],
+                    ["Date", "LOB", "Team Leader", "Agent"],
                 )
                 coaching_headers = [
-                    focused_pcs_book["COACHING"].cell(9, column).value
+                    focused_pcs_book["COACHING"].cell(4, column).value
                     for column in range(12, 19)
                 ]
                 self.assertEqual(coaching_headers[:2], ["Coaching Key", "Call ID"])
-                self.assertIn("AGGREGATE", focused_pcs_book["COACHING"]["S10"].value)
-                self.assertNotIn("FILTER", focused_pcs_book["COACHING"]["A10"].value)
-                pcs_table_headers = [cell.value for cell in focused_pcs_book["DATA"][4]]
                 coaching_values = {
                     row[0]: row for row in focused_pcs_book["COACHING"].iter_rows(
-                        min_row=10, min_col=12, max_col=18, values_only=True,
+                        min_row=5, min_col=12, max_col=18, values_only=True,
                     ) if row[0]
                 }
                 self.assertEqual(coaching_values[coaching_key][2], "Completed")
                 self.assertEqual(coaching_values[coaching_key][3], "TL 1")
-                self.assertEqual(pcs_table_headers[:6], [
-                    "Date", "LOB", "Team Leader", "Agent", "Agent ID", "Language",
-                ])
-                data_columns = {cell.value: cell.column for cell in focused_pcs_book["DATA"][4]}
                 self.assertEqual(
-                    focused_pcs_book["DATA"].cell(5, data_columns["Date"]).number_format,
+                    focused_pcs_book["COACHING"]["A5"].number_format,
                     "yyyy-mm-dd",
                 )
-                self.assertEqual(
-                    focused_pcs_book["DATA"].cell(5, data_columns["Call Start"]).number_format,
-                    "yyyy-mm-dd hh:mm:ss",
-                )
-                self.assertEqual(focused_pcs_book["_LISTS"].sheet_state, "hidden")
+                self.assertEqual(focused_pcs_book["_PCS_LOB"].sheet_state, "hidden")
+                self.assertEqual(focused_pcs_book["_PCS_AGENT"].sheet_state, "hidden")
+                self.assertEqual(focused_pcs_book["_PCS_DAILY"].sheet_state, "hidden")
             finally:
                 focused_pcs_book.close()
             with zipfile.ZipFile(focused_pcs_report) as archive:
@@ -1179,11 +1176,13 @@ class EndToEndTests(unittest.TestCase):
                 self.assertNotIn(b"_xlfn", worksheet_xml)
                 self.assertNotIn(b"FILTER(", worksheet_xml)
                 self.assertNotIn(b"HSTACK(", worksheet_xml)
+                self.assertNotIn(b"AGGREGATE", worksheet_xml)
+                self.assertNotIn(b"SUMPRODUCT", worksheet_xml)
                 overview_xml = archive.read("xl/worksheets/sheet1.xml")
                 self.assertIn(b"<f>", overview_xml)
                 self.assertNotIn(b"SUMPRODUCT", overview_xml)
-                self.assertIn(b"AGGREGATE", overview_xml)
-                self.assertIn(b"SUMIFS", overview_xml)
+                self.assertNotIn(b"AGGREGATE", overview_xml)
+                self.assertNotIn(b"SUMIFS", overview_xml)
             service_book = load_workbook(service_report, read_only=False, data_only=False)
             try:
                 self.assertEqual(service_report, home / "Reports" / "RTM Daily Control.xlsx")
@@ -1275,7 +1274,7 @@ class EndToEndTests(unittest.TestCase):
                 absence_book.close()
             self.assertTrue((home / "Feed").is_dir())
             absence_feed = home / "Feed" / "Absenteeism" / "ABSENCE_AGENT_DAY_CURRENT.csv"
-            self.assertFalse((home / "Feed" / "PCS").exists())
+            self.assertTrue((home / "Feed" / "PCS").is_dir())
             self.assertTrue(absence_feed.is_file())
             with absence_feed.open("r", encoding="utf-8-sig", newline="") as handle:
                 self.assertEqual(

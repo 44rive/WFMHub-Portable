@@ -17,23 +17,12 @@ from typing import Any, Iterable, Sequence
 from .config import Config
 from .database import DatabaseConnection
 from .metrics import load_metric_catalog
-from .rules import load_rulebook
 
 
-PCS_FEED_SCHEMA_VERSION = "4"
-PCS_AGENT_DAY_HEADERS = (
-    "LOB", "Team Leader", "Agent Selector", "Agent ID", "Agent", "Date",
-    "Ops Manager", "Language", "Inbound Call Legs", "PCS Status 1",
-    "Q1 Nonblank", "Valid Q1", "Q1 Score Sum", "PCS Average",
-    "Participation Rate", "Score <= 3", "Score > 3", "Invalid Q1",
-    "Sample State", "Agent Day Key", "Data Through", "Feed Refreshed At",
-    "PCS Rule Version", "PCS Rule SHA-256", "Metric Catalog Version",
-    "Metric Catalog SHA-256",
-)
+PCS_FEED_SCHEMA_VERSION = "5"
 PCS_COACHING_HEADERS = (
-    "LOB", "Team Leader", "Agent Selector", "Agent", "Agent ID",
-    "Priority", "Date", "Call Start", "Q1 Score", "Customer Comment",
-    "Call Reference Number", "Call ID", "Language", "Coaching Key",
+    "Date", "LOB", "Team Leader", "Agent", "Agent ID", "Q1 Score",
+    "Priority", "Call ID", "Customer Comment", "Coaching Key",
 )
 PCS_LOB_SCORECARD_HEADERS = (
     "LOB", "As Of Date", "Latest Day PCS", "Latest Day Participation",
@@ -51,9 +40,16 @@ PCS_RESULTS_HEADERS = (
     "Q1 Nonblank", "Score <= 3", "Score > 3", "Inbound Call Legs",
     "Sample State", "Data Through", "Feed Refreshed At",
 )
-PCS_SCOPE_HEADERS = (
-    "List Key", "Sort Order", "Value", "LOB", "Team Leader",
-    "Agent ID", "Agent",
+PCS_AGENT_SCORECARD_HEADERS = (
+    "Agent", "Agent ID", "LOB", "Team Leader", "Current MTD PCS",
+    "Prior MTD PCS", "MTD Change", "Current MTD Participation",
+    "Current MTD Valid Q1", "Current MTD Score <= 3", "Sample State",
+    "Data Through", "Feed Refreshed At",
+)
+PCS_DAILY_SCORECARD_HEADERS = (
+    "Date", "PCS Average", "Participation Rate", "Valid Q1",
+    "PCS Status 1", "Q1 Nonblank", "Score <= 3", "Score > 3",
+    "Inbound Call Legs", "Data Through", "Feed Refreshed At",
 )
 
 
@@ -81,66 +77,6 @@ def _cell(value: Any) -> Any:
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
     return value
-
-
-def pcs_scope_rows(
-    conn: DatabaseConnection,
-    start: date,
-    end: date,
-) -> list[tuple[Any, ...]]:
-    """Return stable dependent-selector rows for the permanent PCS workbook."""
-
-    _headers, source = _rows(
-        conn,
-        """SELECT DISTINCT coalesce(lob,'Unmapped'),
-                  coalesce(team_leader,'Unassigned'), agent_id,
-                  coalesce(agent_name,'Agent'),
-                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']'
-           FROM mart.agent_pcs_day
-           WHERE business_date BETWEEN ? AND ?
-           ORDER BY 1, 2, 4, 3""",
-        (start, end),
-    )
-    records = [
-        tuple(str(value or "") for value in row)
-        for row in source
-        if str(row[2] or "").strip()
-    ]
-    lobs = sorted({row[0] for row in records}, key=str.casefold)
-    rows: list[tuple[Any, ...]] = []
-
-    def append_group(
-        key: str,
-        values: Sequence[tuple[str, str, str, str, str]],
-    ) -> None:
-        rows.append((key, 0, "All", "", "", "", ""))
-        seen: set[str] = set()
-        order = 1
-        for lob, leader, agent_id, agent, value in values:
-            if value in seen:
-                continue
-            rows.append((key, order, value, lob, leader, agent_id, agent))
-            seen.add(value)
-            order += 1
-
-    append_group(
-        "LOB|All",
-        [(lob, "", "", "", lob) for lob in lobs],
-    )
-    for lob_filter in ("All", *lobs):
-        filtered = [row for row in records if lob_filter == "All" or row[0] == lob_filter]
-        leaders = sorted({row[1] for row in filtered}, key=str.casefold)
-        append_group(
-            f"TL|{lob_filter}",
-            [(lob_filter, leader, "", "", leader) for leader in leaders],
-        )
-        for leader_filter in ("All", *leaders):
-            agents = [
-                row for row in filtered
-                if leader_filter == "All" or row[1] == leader_filter
-            ]
-            append_group(f"AGENT|{lob_filter}|{leader_filter}", agents)
-    return rows
 
 
 def _atomic_csv(path: Path, headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> int:
@@ -413,6 +349,118 @@ def pcs_lob_scorecard_rows(
     return rows
 
 
+def pcs_agent_scorecard_rows(
+    conn: DatabaseConnection,
+    as_of: date,
+    minimum_sample: int,
+    refreshed: datetime,
+) -> list[tuple[Any, ...]]:
+    """Build the compact current/prior MTD agent table used on Overview."""
+
+    periods = {
+        label: (start, end)
+        for label, start, end in _pcs_reporting_periods(as_of)
+    }
+    current = {
+        str(row["agent_id"]): row
+        for row in _pcs_scope_aggregates(
+            conn, *periods["Current MTD"], "AGENT",
+        )
+        if str(row["agent_id"] or "").strip()
+    }
+    prior = {
+        str(row["agent_id"]): row
+        for row in _pcs_scope_aggregates(
+            conn, *periods["Previous MTD same days"], "AGENT",
+        )
+        if str(row["agent_id"] or "").strip()
+    }
+    rows: list[tuple[Any, ...]] = []
+    for agent_id, item in sorted(
+        current.items(),
+        key=lambda pair: (
+            str(pair[1]["lob"]).casefold(),
+            str(pair[1]["team_leader"]).casefold(),
+            str(pair[1]["agent"]).casefold(),
+            pair[0],
+        ),
+    ):
+        previous = prior.get(agent_id, {})
+        current_score = item.get("pcs_average")
+        prior_score = previous.get("pcs_average")
+        valid = int(item.get("valid_q1") or 0)
+        rows.append((
+            item.get("agent") or "Agent",
+            agent_id,
+            item.get("lob") or "Unassigned",
+            item.get("team_leader") or "Unassigned",
+            current_score,
+            prior_score,
+            (
+                current_score - prior_score
+                if current_score is not None and prior_score is not None
+                else None
+            ),
+            item.get("participation_rate"),
+            valid,
+            int(item.get("low_scores") or 0),
+            "LOW SAMPLE" if valid < minimum_sample else "OK",
+            as_of,
+            refreshed,
+        ))
+    return rows
+
+
+def pcs_daily_scorecard_rows(
+    conn: DatabaseConnection,
+    start: date,
+    end: date,
+    refreshed: datetime,
+) -> list[tuple[Any, ...]]:
+    """Build one ratio-of-sums PCS trend row per available business date."""
+
+    cursor = conn.execute(
+        """SELECT business_date,
+                  coalesce(sum(pcs_score_sum),0),
+                  coalesce(sum(survey_responses),0),
+                  coalesce(sum(pcs_participation_responses),0),
+                  coalesce(sum(pcs_status_calls),0),
+                  coalesce(sum(low_score_responses),0),
+                  coalesce(sum(top_box_responses),0),
+                  coalesce(sum(inbound_calls),0)
+           FROM mart.agent_pcs_day
+           WHERE business_date BETWEEN ? AND ?
+           GROUP BY business_date
+           ORDER BY business_date""",
+        (start, end),
+    )
+    rows: list[tuple[Any, ...]] = []
+    for (
+        business_date,
+        score_sum,
+        valid,
+        q1_nonblank,
+        eligible,
+        low,
+        positive,
+        inbound,
+    ) in cursor.fetchall():
+        rows.append((
+            business_date,
+            float(score_sum) / float(valid) if valid else None,
+            float(q1_nonblank) / float(eligible) if eligible else None,
+            int(valid or 0),
+            int(eligible or 0),
+            int(q1_nonblank or 0),
+            int(low or 0),
+            int(positive or 0),
+            int(inbound or 0),
+            end,
+            refreshed,
+        ))
+    return rows
+
+
 def pcs_result_rows(
     conn: DatabaseConnection,
     as_of: date,
@@ -441,29 +489,13 @@ def pcs_result_rows(
 
 
 def _publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
-    data_types = (
-        ("LOB", "type text"), ("Team Leader", "type text"),
-        ("Agent Selector", "type text"), ("Agent ID", "type text"),
-        ("Agent", "type text"), ("Date", "type date"),
-        ("Ops Manager", "type text"), ("Language", "type text"),
-        ("Inbound Call Legs", "Int64.Type"), ("PCS Status 1", "Int64.Type"),
-        ("Q1 Nonblank", "Int64.Type"), ("Valid Q1", "Int64.Type"),
-        ("Q1 Score Sum", "type number"), ("PCS Average", "type number"),
-        ("Participation Rate", "type number"), ("Score <= 3", "Int64.Type"),
-        ("Score > 3", "Int64.Type"), ("Invalid Q1", "Int64.Type"),
-        ("Sample State", "type text"), ("Agent Day Key", "type text"),
-        ("Data Through", "type date"), ("Feed Refreshed At", "type datetime"),
-        ("PCS Rule Version", "type text"), ("PCS Rule SHA-256", "type text"),
-        ("Metric Catalog Version", "type text"), ("Metric Catalog SHA-256", "type text"),
-    )
     queue_types = (
-        ("LOB", "type text"), ("Team Leader", "type text"),
-        ("Agent Selector", "type text"), ("Agent", "type text"),
-        ("Agent ID", "type text"), ("Priority", "type text"),
-        ("Date", "type date"), ("Call Start", "type datetime"),
+        ("Date", "type date"), ("LOB", "type text"),
+        ("Team Leader", "type text"), ("Agent", "type text"),
+        ("Agent ID", "type text"),
         ("Q1 Score", "type number"), ("Customer Comment", "type text"),
-        ("Call Reference Number", "type text"), ("Call ID", "type text"),
-        ("Language", "type text"), ("Coaching Key", "type text"),
+        ("Priority", "type text"), ("Call ID", "type text"),
+        ("Coaching Key", "type text"),
     )
     lob_types = (
         ("LOB", "type text"), ("As Of Date", "type date"),
@@ -496,23 +528,36 @@ def _publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
         ("Sample State", "type text"), ("Data Through", "type date"),
         ("Feed Refreshed At", "type datetime"),
     )
-    scope_types = (
-        ("List Key", "type text"), ("Sort Order", "Int64.Type"),
-        ("Value", "type text"), ("LOB", "type text"),
-        ("Team Leader", "type text"), ("Agent ID", "type text"),
-        ("Agent", "type text"),
+    agent_types = (
+        ("Agent", "type text"), ("Agent ID", "type text"),
+        ("LOB", "type text"), ("Team Leader", "type text"),
+        ("Current MTD PCS", "type number"),
+        ("Prior MTD PCS", "type number"), ("MTD Change", "type number"),
+        ("Current MTD Participation", "type number"),
+        ("Current MTD Valid Q1", "Int64.Type"),
+        ("Current MTD Score <= 3", "Int64.Type"),
+        ("Sample State", "type text"), ("Data Through", "type date"),
+        ("Feed Refreshed At", "type datetime"),
+    )
+    daily_types = (
+        ("Date", "type date"), ("PCS Average", "type number"),
+        ("Participation Rate", "type number"), ("Valid Q1", "Int64.Type"),
+        ("PCS Status 1", "Int64.Type"), ("Q1 Nonblank", "Int64.Type"),
+        ("Score <= 3", "Int64.Type"), ("Score > 3", "Int64.Type"),
+        ("Inbound Call Legs", "Int64.Type"), ("Data Through", "type date"),
+        ("Feed Refreshed At", "type datetime"),
     )
     specifications = (
-        ("POWER_QUERY_PCS_DATA_SHAREPOINT.txt", "PCS_AGENT_DAY_CURRENT.csv", PCS_AGENT_DAY_HEADERS, data_types, True),
         ("POWER_QUERY_COACHING_QUEUE_SHAREPOINT.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types, True),
         ("POWER_QUERY_PCS_LOB_SHAREPOINT.txt", "PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS, lob_types, True),
+        ("POWER_QUERY_PCS_AGENT_SHAREPOINT.txt", "PCS_AGENT_SCORECARD_CURRENT.csv", PCS_AGENT_SCORECARD_HEADERS, agent_types, True),
+        ("POWER_QUERY_PCS_DAILY_SHAREPOINT.txt", "PCS_DAILY_SCORECARD_CURRENT.csv", PCS_DAILY_SCORECARD_HEADERS, daily_types, True),
         ("POWER_QUERY_PCS_RESULTS_SHAREPOINT.txt", "PCS_RESULTS_CURRENT.csv", PCS_RESULTS_HEADERS, result_types, True),
-        ("POWER_QUERY_PCS_SCOPE_SHAREPOINT.txt", "PCS_SCOPE_CURRENT.csv", PCS_SCOPE_HEADERS, scope_types, True),
-        ("POWER_QUERY_PCS_DATA_LOCAL.txt", "PCS_AGENT_DAY_CURRENT.csv", PCS_AGENT_DAY_HEADERS, data_types, False),
         ("POWER_QUERY_COACHING_QUEUE_LOCAL.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types, False),
         ("POWER_QUERY_PCS_LOB_LOCAL.txt", "PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS, lob_types, False),
+        ("POWER_QUERY_PCS_AGENT_LOCAL.txt", "PCS_AGENT_SCORECARD_CURRENT.csv", PCS_AGENT_SCORECARD_HEADERS, agent_types, False),
+        ("POWER_QUERY_PCS_DAILY_LOCAL.txt", "PCS_DAILY_SCORECARD_CURRENT.csv", PCS_DAILY_SCORECARD_HEADERS, daily_types, False),
         ("POWER_QUERY_PCS_RESULTS_LOCAL.txt", "PCS_RESULTS_CURRENT.csv", PCS_RESULTS_HEADERS, result_types, False),
-        ("POWER_QUERY_PCS_SCOPE_LOCAL.txt", "PCS_SCOPE_CURRENT.csv", PCS_SCOPE_HEADERS, scope_types, False),
     )
     paths = []
     for script_name, filename, headers, types, sharepoint in specifications:
@@ -530,7 +575,7 @@ def publish_pcs_feeds(
     fallback_start: date,
     fallback_end: date,
 ) -> SharedFeedResult:
-    """Publish agent/day, coaching-opportunity and selector feeds for PCS."""
+    """Publish lightweight, direct-CSV PCS report and coaching feeds."""
 
     start, end = _available_period(
         conn, "mart.agent_pcs_day", fallback_start, fallback_end,
@@ -540,36 +585,25 @@ def publish_pcs_feeds(
     counts: list[tuple[str, int]] = []
 
     metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
-    rulebook = load_rulebook(config.home, config.business_rules)
     method = metric_catalog.method_for("pcs_average", end, {})
     minimum_sample = int(method.minimum_sample) if method is not None else 1
     refreshed = datetime.now()
-    _query_headers, rows = _rows(
-        conn,
-        """SELECT lob, team_leader,
-                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']',
-                  agent_id, agent_name, business_date, ops_manager, language,
-                  inbound_calls, pcs_status_calls, pcs_participation_responses,
-                  survey_responses, pcs_score_sum, pcs_average,
-                  pcs_participation_rate, low_score_responses,
-                  top_box_responses, pcs_invalid_responses,
-                  CASE WHEN survey_responses<? THEN 'LOW_SAMPLE' ELSE 'OK' END,
-                  agent_id || '|' || business_date, ?, ?, ?, ?, ?, ?
-           FROM mart.agent_pcs_day
-           WHERE business_date BETWEEN ? AND ?
-           ORDER BY business_date, lob, team_leader, agent_name, agent_id""",
-        (
-            minimum_sample, end, refreshed, rulebook.version, rulebook.sha256,
-            metric_catalog.version, metric_catalog.sha256, start, end,
-        ),
-    )
-    path = folder / "PCS_AGENT_DAY_CURRENT.csv"
-    counts.append((path.name, _atomic_csv(path, PCS_AGENT_DAY_HEADERS, rows)))
-    files.append(path)
 
     lob_rows = pcs_lob_scorecard_rows(conn, end, minimum_sample, refreshed)
     path = folder / "PCS_LOB_SCORECARD_CURRENT.csv"
     counts.append((path.name, _atomic_csv(path, PCS_LOB_SCORECARD_HEADERS, lob_rows)))
+    files.append(path)
+
+    agent_rows = pcs_agent_scorecard_rows(conn, end, minimum_sample, refreshed)
+    path = folder / "PCS_AGENT_SCORECARD_CURRENT.csv"
+    counts.append((path.name, _atomic_csv(path, PCS_AGENT_SCORECARD_HEADERS, agent_rows)))
+    files.append(path)
+
+    daily_rows = pcs_daily_scorecard_rows(
+        conn, end.replace(day=1), end, refreshed,
+    )
+    path = folder / "PCS_DAILY_SCORECARD_CURRENT.csv"
+    counts.append((path.name, _atomic_csv(path, PCS_DAILY_SCORECARD_HEADERS, daily_rows)))
     files.append(path)
 
     result_rows = pcs_result_rows(conn, end, minimum_sample, refreshed)
@@ -582,13 +616,11 @@ def publish_pcs_feeds(
     allowed_scores = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
     _query_headers, rows = _rows(
         conn,
-        f"""SELECT coalesce(d.lob,c.lob), d.team_leader,
-                   coalesce(d.canonical_name,c.agent_name,'Agent') || ' [' || c.agent_id || ']',
+        f"""SELECT c.business_date, coalesce(d.lob,c.lob), d.team_leader,
                    coalesce(d.canonical_name,c.agent_name), c.agent_id,
+                   c.{primary_score},
                    CASE WHEN c.{primary_score}<=2 THEN 'High' ELSE 'Normal' END,
-                   c.business_date, c.call_start, c.{primary_score}, c.question_3,
-                   c.call_reference_number, c.call_id,
-                   coalesce(d.language,c.language), c.call_key
+                   c.call_id, c.question_3, c.call_key
             FROM core.clean_call_leg c
             LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
             WHERE c.business_date BETWEEN ? AND ?
@@ -602,18 +634,13 @@ def publish_pcs_feeds(
     path = folder / "PCS_COACHING_OPPORTUNITY_CURRENT.csv"
     counts.append((path.name, _atomic_csv(path, PCS_COACHING_HEADERS, rows)))
     files.append(path)
-
-    rows = pcs_scope_rows(conn, start, end)
-    path = folder / "PCS_SCOPE_CURRENT.csv"
-    counts.append((path.name, _atomic_csv(path, PCS_SCOPE_HEADERS, rows)))
-    files.append(path)
     files.extend(_publish_pcs_power_query_scripts(folder))
     files.append(_manifest(
         folder, "PCS", start, end, counts,
         schema_version=PCS_FEED_SCHEMA_VERSION,
         extra=(
-            ("PCS rule version", rulebook.version, rulebook.sha256),
             ("Metric catalog version", metric_catalog.version, metric_catalog.sha256),
+            ("Workbook load", "Lightweight tables only", "No raw PCS data worksheet"),
         ),
     ))
     return SharedFeedResult("PCS", tuple(files), sum(count for _, count in counts))
@@ -718,6 +745,6 @@ def publish_shared_feeds(
 ) -> tuple[SharedFeedResult, ...]:
     """Refresh every stable collaboration feed after the Hub models finish."""
 
-    # PCS uses an explicit manual-paste workbook prepared by its report builder.
-    # Only Absenteeism still uses the generic collaboration-feed workflow.
+    # PCS publishes its five focused feeds inside its targeted report builder.
+    # Only Absenteeism uses the generic collaboration-feed workflow.
     return (publish_absence_feeds(conn, config, start, end),)

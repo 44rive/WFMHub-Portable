@@ -1823,8 +1823,15 @@ def build_pcs_performance_workbook(
     *,
     force_rebuild: bool = False,
 ) -> Path:
-    """Create the permanent tracker without replacing it during normal updates."""
+    """Compatibility entry point for the current lightweight PCS tracker."""
 
+    from .pcs_tracker import build_pcs_live_tracker
+
+    del force_rebuild
+    return build_pcs_live_tracker(conn, config, start, end, output)
+
+    # Historical implementation retained temporarily for source archaeology.
+    # Report dispatch and this compatibility entry point return above.
     from .shared_feeds import (
         PCS_AGENT_DAY_HEADERS,
         PCS_COACHING_HEADERS,

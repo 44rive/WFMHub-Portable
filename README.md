@@ -94,8 +94,8 @@ attendance gaps are classified through the imported Attendance Review ledger.
 7. Open it directly from `Reports`.
 
 See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
-[Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the optional shared-
-Absenteeism Power Query setup. PCS needs no Excel connection setup.
+[Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the one-time PCS Power
+Query installation and the optional shared-Absenteeism setup.
 
 The approved visual contract is in the
 [report design system](docs/REPORT_DESIGN_SYSTEM.md), with a data-free
@@ -154,28 +154,32 @@ Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 
 ## PCS Report & Coaching
 
-PCS is one permanent collaborative workbook. Choose **PCS Report & Coaching >
-Prepare latest PCS data**. The Hub loads only FTE and Call by Call, updates the
-PCS mart, and creates a new `Reports\PCS Paste Data - YYYY-MM-DD HHMMSS.xlsx`.
-It also creates `Reports\PCS Live Tracker.xlsx` the first time only.
+PCS is one permanent collaborative workbook backed by five small, fixed-name
+CSV feeds. It contains no raw Call-by-Call worksheet. Python/SQLite calculate
+the governed scorecards first; Power Query only transports those finished
+results into Excel.
 
-Normal use is intentionally manual and predictable:
+Run **PCS Report & Coaching > Install/repair Power Query** once after this
+upgrade. Normal use is then:
 
-1. Open the newest PCS Paste Data file and copy its rows below the header.
-2. In `PCS Live Tracker.xlsx`, clear the old body of `DATA!tblData` and use
-   **Paste Values** for the new rows in `A5`.
-3. Use Period, LOB, Team Leader and Agent on `OVERVIEW`; use only Period and
-   LOB on the compact `COACHING` workspace.
+1. Choose **Update latest PCS data**. The Hub loads only FTE and Call by Call,
+   updates the PCS mart, and atomically replaces the CSV feeds under
+   `Feed\PCS`.
+2. Open `Reports\PCS Live Tracker.xlsx` and choose **Data > Refresh All**.
+3. Use the filter arrows on `PERFORMANCE` and `COACHING`, or click inside a
+   table and choose **Table Design > Insert Slicer** for Period, LOB, Team
+   Leader, Agent, or another native table field.
 
-`OVERVIEW` keeps the four KPI cards, LOB comparison/chart and filterable agent
-results together. `COACHING` automatically loads the matching low-score calls,
-Call ID and permanent editable coaching-action table using only two selectors.
+`OVERVIEW` keeps four current-MTD cards, the current/prior LOB comparison, the
+daily trend, and a compact agent scorecard below it. `PERFORMANCE` is the full
+native-filter/slicer-ready result table across standard periods and grains.
+`COACHING` places the exact low-score call queue beside one permanent editable
+action table. Copy Coaching Key and Call ID across before recording the action.
 
-There is no Power Query, Data Model, macro, external connection, or Hub-driven
-Excel refresh. Excel recalculates the formulas and charts after the paste. The
-The Hub does not rewrite the tracker during normal prepares. A versioned repair
-may rebuild it once, archives the previous copy, and carries saved coaching
-actions forward. Quality and Team Leaders otherwise keep one shared file.
+The Hub never needs to open Excel during a normal PCS update and never rewrites
+the same-version tracker. A versioned design migration archives the old copy
+and carries keyed coaching actions forward. There is no Data Model, Power
+Pivot, macro, raw-data sheet, or dynamic-array formula dependency.
 
 ## Attendance decisions and shared absenteeism
 
@@ -231,8 +235,8 @@ forecast, staffing, attendance, final absence, or bonus. Every finding includes
 its metric, comparison, and evidence filter.
 
 Attendance/absence refreshes update the fixed Absenteeism CSV feeds under
-`Feed`. PCS embeds final data directly in each timestamped report and publishes
-no collaboration feed. **Export clean data** produces any additional CSV or
+`Feed`. PCS updates its own five lightweight fixed CSV feeds under `Feed\PCS`.
+**Export clean data** produces any additional CSV or
 XLSX dataset you request for a selected period. Large call datasets should use
 CSV. The original extract is unchanged.
 

@@ -23,9 +23,9 @@ from .models import refresh_models, refresh_pcs_models
 from .mapping import load_queue_mapping
 from .metrics import diff_metric_catalogs, evaluate_metric, load_metric_catalog, validate_metric_catalog
 from .on_demand_analysis import ANALYSIS_DOMAINS, COMPARISON_MODES, build_analysis_workbook
+from .pcs_excel import run_pcs_excel_action
 from .pcs_tracker import (
     latest_pcs_report,
-    latest_pcs_paste,
     open_workbook,
 )
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
@@ -175,8 +175,8 @@ def refresh(
                     )
                 )
                 bar.update(0.85, "Updating shared report data")
-                # PCS prepares one clean manual-paste workbook. The permanent
-                # live tracker is never replaced by the refresh workflow.
+                # PCS publishes its focused CSV feeds inside its report builder.
+                # Desktop Excel is never opened by the refresh workflow.
                 shared_feeds = () if pcs_only else publish_shared_feeds(
                     conn, config, model.start, model.end,
                 )
@@ -223,7 +223,7 @@ def refresh(
         )
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
     if pcs_only:
-        print("Excel layer : One clean paste file; permanent tracker is unchanged")
+        print("Excel layer : Fixed CSV feeds updated; Power Query refresh remains in Excel")
     else:
         print(f"Shared data : {sum(item.rows for item in shared_feeds):,} feed rows updated")
     if pcs_only:
@@ -799,10 +799,10 @@ def _pcs_mart_period(conn, config) -> tuple[date, date]:
 
 
 def _build_latest_pcs_report(home: Path) -> None:
-    """Load new PCS sources and prepare one clean manual-paste file."""
+    """Load new PCS sources and publish the fixed lightweight CSV feeds."""
 
-    print("\nPREPARE LATEST PCS DATA")
-    print("WFMHub prepares clean data. Your permanent tracker is never replaced.")
+    print("\nUPDATE PCS DATA")
+    print("WFMHub refreshes SQLite and fixed CSV feeds. Excel stays untouched.")
     result = refresh(home, None, None, ("pcs",), "pcs", False)
     if result:
         raise RuntimeError(
@@ -813,32 +813,46 @@ def _build_latest_pcs_report(home: Path) -> None:
     report = latest_pcs_report(config)
     if report is None:
         raise RuntimeError("PCS processing finished but no tracker was created")
-    paste = latest_pcs_paste(config)
     print(f"PCS tracker   : {report}")
-    print(f"Paste data    : {paste}")
-    print("Next          : Copy DATA rows, then Paste Values into tracker DATA!A5")
+    print(f"PCS CSV feeds : {config.feed / 'PCS'}")
+    print("Next          : Open the tracker and choose Data > Refresh All")
 
 
 def _build_pcs_from_database(home: Path) -> Path:
-    """Prepare a clean paste file without rescanning source extracts."""
+    """Publish fixed PCS CSV feeds without rescanning source extracts."""
 
-    print("\nPREPARE PCS DATA FROM CURRENT DATABASE")
+    print("\nUPDATE PCS FROM CURRENT DATABASE")
     config = load_config(home)
     with write_session(config) as conn:
         start, end = _pcs_mart_period(conn, config)
         report = build_report_pack("pcs", conn, config, start, end)
     print(f"PCS tracker   : {report}")
-    print(f"Paste data    : {latest_pcs_paste(config)}")
-    print("Next          : Copy DATA rows, then Paste Values into tracker DATA!A5")
+    print(f"PCS CSV feeds : {config.feed / 'PCS'}")
+    print("Next          : Open the tracker and choose Data > Refresh All")
     return report
+
+
+def _install_pcs_power_query(home: Path) -> None:
+    """Install or repair the five lightweight direct-CSV query tables."""
+
+    config = load_config(home)
+    report = latest_pcs_report(config)
+    if report is None:
+        raise FileNotFoundError(
+            "No PCS Live Tracker exists. Choose Update PCS data first."
+        )
+    print("\nINSTALL / REPAIR PCS POWER QUERY")
+    print("Close PCS Live Tracker.xlsx before continuing.")
+    print(run_pcs_excel_action(config, report, "Install", "LOCAL"))
+    print("Ready         : Open the tracker; future updates use Data > Refresh All")
 
 
 def _pcs_menu(home: Path) -> None:
     print("\nPCS LIVE TRACKER")
-    print("1. Prepare latest PCS data (load new FTE + Call-by-Call)")
-    print("2. Prepare data from current database (fast)")
-    print("3. Open permanent PCS Live Tracker")
-    print("4. Open latest PCS Paste Data")
+    print("1. Update PCS data (load new FTE + Call-by-Call)")
+    print("2. Update CSV feeds from current database (fast)")
+    print("3. Install / repair Power Query (one time; close Excel)")
+    print("4. Open permanent PCS Live Tracker")
     print("5. Back")
     choice = input("Choose 1-5: ").strip()
     if choice == "1":
@@ -846,17 +860,13 @@ def _pcs_menu(home: Path) -> None:
     elif choice == "2":
         _build_pcs_from_database(home)
     elif choice == "3":
+        _install_pcs_power_query(home)
+    elif choice == "4":
         config = load_config(home)
         report = latest_pcs_report(config)
         if report is None:
             raise FileNotFoundError("No PCS Live Tracker exists. Choose option 1 first.")
         open_workbook(report)
-    elif choice == "4":
-        config = load_config(home)
-        paste = latest_pcs_paste(config)
-        if paste is None:
-            raise FileNotFoundError("No PCS Paste Data exists. Choose option 1 first.")
-        open_workbook(paste)
     elif choice != "5":
         raise ValueError("Please choose a number from 1 to 5")
 
@@ -1021,10 +1031,10 @@ def parser() -> argparse.ArgumentParser:
     )
     decisions_p.add_argument("workbook", type=Path)
     pcs_p = commands.add_parser(
-        "pcs", help="Prepare clean PCS paste data or open the permanent tracker",
+        "pcs", help="Update PCS CSV feeds, install Power Query, or open the permanent tracker",
     )
     pcs_p.add_argument(
-        "action", choices=("build", "rebuild", "open-tracker", "open-data"),
+        "action", choices=("build", "rebuild", "install", "open-tracker"),
     )
     analysis_p = commands.add_parser("analyze", help="Run on-demand period analysis")
     analysis_p.add_argument("domain", choices=ANALYSIS_DOMAINS)
@@ -1067,18 +1077,14 @@ def main(argv: list[str] | None = None) -> int:
                 _build_latest_pcs_report(home)
             elif args.action == "rebuild":
                 _build_pcs_from_database(home)
+            elif args.action == "install":
+                _install_pcs_power_query(home)
             elif args.action == "open-tracker":
                 config = load_config(home)
                 report = latest_pcs_report(config)
                 if report is None:
                     raise FileNotFoundError("No PCS Live Tracker exists")
                 open_workbook(report)
-            else:
-                config = load_config(home)
-                paste = latest_pcs_paste(config)
-                if paste is None:
-                    raise FileNotFoundError("No PCS Paste Data exists")
-                open_workbook(paste)
             return 0
         if args.command == "analyze":
             return analyze_period(home, args.domain, args.start, args.end, args.comparison, args.output)

@@ -11,10 +11,14 @@ from unittest.mock import MagicMock, patch
 
 from openpyxl import load_workbook
 
-from wfmhub.cli import _build_latest_pcs_report, _build_pcs_from_database, refresh
+from wfmhub.cli import (
+    _build_latest_pcs_report,
+    _build_pcs_from_database,
+    _install_pcs_power_query,
+    refresh,
+)
 from wfmhub.models import ModelSummary
 from wfmhub.pcs_tracker import (
-    PCS_INPUT_HEADERS,
     PCS_TRACKER_FILENAME,
     PCS_TRACKER_VERSION,
     _as_date,
@@ -22,109 +26,148 @@ from wfmhub.pcs_tracker import (
     ensure_pcs_tracker,
     latest_pcs_report,
 )
+from wfmhub.shared_feeds import (
+    PCS_AGENT_SCORECARD_HEADERS,
+    PCS_COACHING_HEADERS,
+    PCS_DAILY_SCORECARD_HEADERS,
+    PCS_LOB_SCORECARD_HEADERS,
+    PCS_RESULTS_HEADERS,
+)
+
+
+def _rows() -> dict[str, list[tuple[object, ...]]]:
+    refreshed = datetime(2026, 9, 8, 18, 0)
+    lob = (
+        "ALL", date(2026, 9, 8), 4.2, .14, 4, 4.3, 4.1, .2,
+        .15, .13, 20, 100, 15, 3, 17, 250, "OK", date(2026, 9, 8), refreshed,
+    )
+    agent = (
+        "Agent One", "001", "RSA NL", "TL 1", 4.3, 4.0, .3, .15,
+        10, 2, "OK", date(2026, 9, 8), refreshed,
+    )
+    daily = (
+        date(2026, 9, 8), 4.3, .15, 10, 60, 9, 2, 8, 120,
+        date(2026, 9, 8), refreshed,
+    )
+    result = (
+        "Current MTD", date(2026, 9, 1), date(2026, 9, 8), "AGENT",
+        "RSA NL", "TL 1", "Agent One [001]", "001", "Agent One", "NL",
+        4.3, .15, 10, 60, 9, 2, 8, 120, "OK", date(2026, 9, 8), refreshed,
+    )
+    coaching = (
+        date(2026, 9, 8), "RSA NL", "TL 1", "Agent One", "001", 2,
+        "High", "call-1", "Review the explanation", "key-1",
+    )
+    return {
+        "lob_rows": [lob],
+        "agent_rows": [agent],
+        "daily_rows": [daily],
+        "result_rows": [result],
+        "coaching_rows": [coaching],
+    }
 
 
 class PCSWorkflowTests(unittest.TestCase):
     def test_text_business_dates_are_parsed_for_sqlite_rows(self):
         self.assertEqual(_as_date("2026-09-08 17:00:00"), date(2026, 9, 8))
 
-    def test_live_tracker_is_created_once_and_never_replaced(self):
+    def test_live_tracker_is_lightweight_and_created_once(self):
         with tempfile.TemporaryDirectory() as folder:
-            reports = Path(folder) / "Reports"
-            config = SimpleNamespace(reports=reports)
-            path = ensure_pcs_tracker(config)
+            root = Path(folder)
+            config = SimpleNamespace(
+                reports=root / "Reports",
+                feed=root / "Feed",
+            )
+            path = ensure_pcs_tracker(config, **_rows())
             self.assertEqual(path.name, PCS_TRACKER_FILENAME)
+            self.assertEqual(_tracker_contract_version(path), PCS_TRACKER_VERSION)
             with zipfile.ZipFile(path) as archive:
                 self.assertIsNone(archive.testzip())
                 self.assertNotIn("xl/metadata.xml", archive.namelist())
+                self.assertNotIn("xl/connections.xml", archive.namelist())
                 worksheet_xml = b"".join(
                     archive.read(name) for name in archive.namelist()
                     if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
                 )
                 self.assertNotIn(b"_xlfn", worksheet_xml)
                 self.assertNotIn(b"FILTER(", worksheet_xml)
-                self.assertNotIn(b"HSTACK(", worksheet_xml)
-                self.assertIn(b"AGGREGATE", worksheet_xml)
+                self.assertNotIn(b"AGGREGATE", worksheet_xml)
+                self.assertNotIn(b"SUMPRODUCT", worksheet_xml)
                 self.assertNotIn(b"#REF!", worksheet_xml)
-            self.assertEqual(_tracker_contract_version(path), PCS_TRACKER_VERSION)
 
-            workbook = load_workbook(path)
-            sheet = workbook["COACHING"]
-            sheet["L10"] = "call-key-1"
-            sheet["N10"] = "Completed"
-            workbook.save(path)
-            workbook.close()
-            saved = path.read_bytes()
-
-            self.assertEqual(ensure_pcs_tracker(config), path)
-            self.assertEqual(path.read_bytes(), saved)
-
-    def test_old_tracker_is_archived_and_actions_survive_one_time_migration(self):
-        with tempfile.TemporaryDirectory() as folder:
-            reports = Path(folder) / "Reports"
-            config = SimpleNamespace(reports=reports)
-            with patch("wfmhub.pcs_tracker.PCS_TRACKER_VERSION", "2026.10.1"):
-                path = ensure_pcs_tracker(config)
-            workbook = load_workbook(path)
-            sheet = workbook["COACHING"]
-            sheet["L10"] = "call-key-migrate"
-            sheet["M10"] = "call-id-migrate"
-            sheet["N10"] = "Completed"
-            workbook.save(path)
-            workbook.close()
-
-            self.assertEqual(ensure_pcs_tracker(config), path)
-            self.assertEqual(_tracker_contract_version(path), PCS_TRACKER_VERSION)
-            archives = list((reports / "Archive").rglob("PCS Live Tracker_pre_*.xlsx"))
-            self.assertEqual(len(archives), 1)
-            migrated = load_workbook(path, read_only=True, data_only=False)
-            try:
-                self.assertEqual(migrated["COACHING"]["L10"].value, "call-key-migrate")
-                self.assertEqual(migrated["COACHING"]["M10"].value, "call-id-migrate")
-                self.assertEqual(migrated["COACHING"]["N10"].value, "Completed")
-            finally:
-                migrated.close()
-
-    def test_coaching_queue_is_cached_and_uses_only_period_and_lob_filters(self):
-        with tempfile.TemporaryDirectory() as folder:
-            values = {header: None for header in PCS_INPUT_HEADERS}
-            values.update({
-                "Date": date(2026, 9, 8), "LOB": "RSA NL", "Team Leader": "TL 1",
-                "Agent": "Agent 1 [001]", "Agent ID": "001", "Call ID": "call-1",
-                "Score <= 3": 1, "Q1 Score": 2, "Coaching Key": "key-1",
-                "Priority": "HIGH", "Customer Comment": None,
-                "LOB List Flag": 1, "Team Leader List Flag": 1,
-                "Agent List Flag": 1,
-            })
-            row = tuple(values[header] for header in PCS_INPUT_HEADERS)
-            path = ensure_pcs_tracker(
-                SimpleNamespace(reports=Path(folder) / "Reports"), [row],
-            )
-            with zipfile.ZipFile(path) as archive:
-                worksheet_xml = b"".join(
-                    archive.read(name) for name in archive.namelist()
-                    if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
-                )
-                self.assertNotIn(b"<v>None</v>", worksheet_xml)
-            cached = load_workbook(path, read_only=True, data_only=True)
-            try:
-                self.assertEqual(cached["COACHING"]["A10"].value, datetime(2026, 9, 8))
-                self.assertEqual(cached["COACHING"]["D10"].value, "Agent 1 [001]")
-                self.assertEqual(cached["COACHING"]["G10"].value, "call-1")
-                self.assertEqual(cached["COACHING"]["I10"].value, "key-1")
-                self.assertEqual(cached["COACHING"]["J10"].value, "Pending")
-            finally:
-                cached.close()
             workbook = load_workbook(path, read_only=False, data_only=False)
             try:
-                self.assertEqual(workbook["COACHING"]["A2"].value, "PERIOD")
-                self.assertEqual(workbook["COACHING"]["O2"].value, "LOB")
-                self.assertNotIn("PCS_COACH_TL", workbook.defined_names)
-                self.assertNotIn("PCS_COACH_Agent", workbook.defined_names)
-                self.assertEqual(len(workbook["COACHING"].data_validations.dataValidation), 3)
-                self.assertIn("AGGREGATE", workbook["COACHING"]["S10"].value)
+                self.assertEqual(workbook.sheetnames, [
+                    "OVERVIEW", "PERFORMANCE", "COACHING", "SETUP", "HELP",
+                    "_PCS_LOB", "_PCS_AGENT", "_PCS_DAILY", "_AUDIT",
+                ])
+                self.assertNotIn("DATA", workbook.sheetnames)
+                self.assertEqual(len(workbook["OVERVIEW"]._charts), 2)
+                self.assertEqual(workbook["OVERVIEW"]["A39"].value,
+                                 "AGENT PERFORMANCE · FULL FILTERABLE VIEW IS ON PERFORMANCE")
+                self.assertIn("tblPcsPerformance", workbook["PERFORMANCE"].tables)
+                self.assertIn("tblCoachingQueue", workbook["COACHING"].tables)
+                self.assertIn("tblCoachingActions", workbook["COACHING"].tables)
+                self.assertIn("tblPcsLob", workbook["_PCS_LOB"].tables)
+                self.assertIn("tblPcsAgent", workbook["_PCS_AGENT"].tables)
+                self.assertIn("tblPcsDaily", workbook["_PCS_DAILY"].tables)
+                self.assertEqual(
+                    tuple(cell.value for cell in workbook["_PCS_LOB"][4]),
+                    PCS_LOB_SCORECARD_HEADERS,
+                )
+                self.assertEqual(
+                    tuple(cell.value for cell in workbook["_PCS_AGENT"][4]),
+                    PCS_AGENT_SCORECARD_HEADERS,
+                )
+                self.assertEqual(
+                    tuple(cell.value for cell in workbook["_PCS_DAILY"][4]),
+                    PCS_DAILY_SCORECARD_HEADERS,
+                )
+                self.assertEqual(
+                    tuple(cell.value for cell in workbook["PERFORMANCE"][4]),
+                    PCS_RESULTS_HEADERS,
+                )
+                self.assertEqual(
+                    tuple(cell.value for cell in workbook["COACHING"][4][:10]),
+                    PCS_COACHING_HEADERS,
+                )
             finally:
                 workbook.close()
+
+            saved = path.read_bytes()
+            self.assertEqual(ensure_pcs_tracker(config, **_rows()), path)
+            self.assertEqual(path.read_bytes(), saved)
+
+    def test_version_migration_preserves_keyed_actions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = SimpleNamespace(
+                reports=root / "Reports",
+                feed=root / "Feed",
+            )
+            with patch("wfmhub.pcs_tracker.PCS_TRACKER_VERSION", "2026.10.9"):
+                path = ensure_pcs_tracker(config, **_rows())
+            workbook = load_workbook(path)
+            sheet = workbook["COACHING"]
+            sheet["L5"] = "key-migrate"
+            sheet["M5"] = "call-migrate"
+            sheet["N5"] = "Completed"
+            sheet["O5"] = "TL 1"
+            workbook.save(path)
+            workbook.close()
+
+            self.assertEqual(ensure_pcs_tracker(config, **_rows()), path)
+            self.assertEqual(_tracker_contract_version(path), PCS_TRACKER_VERSION)
+            archives = list((config.reports / "Archive").rglob("PCS Live Tracker_pre_*.xlsx"))
+            self.assertEqual(len(archives), 1)
+            migrated = load_workbook(path, read_only=True, data_only=True)
+            try:
+                self.assertEqual(migrated["COACHING"]["L5"].value, "key-migrate")
+                self.assertEqual(migrated["COACHING"]["M5"].value, "call-migrate")
+                self.assertEqual(migrated["COACHING"]["N5"].value, "Completed")
+                self.assertEqual(migrated["COACHING"]["O5"].value, "TL 1")
+            finally:
+                migrated.close()
 
     def test_latest_report_is_the_fixed_permanent_tracker(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -134,27 +177,26 @@ class PCSWorkflowTests(unittest.TestCase):
             tracker.write_bytes(b"tracker")
             self.assertEqual(latest_pcs_report(config), tracker)
 
-    def test_latest_build_loads_only_pcs_sources_and_prepares_paste_data(self):
+    def test_latest_update_loads_only_pcs_sources_and_publishes_csv(self):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder)
             report = home / "Reports" / PCS_TRACKER_FILENAME
             report.parent.mkdir()
             report.write_bytes(b"tracker")
-            config = SimpleNamespace(reports=report.parent)
+            config = SimpleNamespace(reports=report.parent, feed=home / "Feed")
             with (
                 patch("wfmhub.cli.refresh", return_value=0) as run,
                 patch("wfmhub.cli.load_config", return_value=config),
                 patch("wfmhub.cli.latest_pcs_report", return_value=report),
-                patch("wfmhub.cli.latest_pcs_paste", return_value=report.parent / "PCS Paste Data.xlsx"),
             ):
                 _build_latest_pcs_report(home)
             run.assert_called_once_with(home, None, None, ("pcs",), "pcs", False)
 
-    def test_fast_rebuild_uses_current_database_without_source_ingestion(self):
+    def test_fast_update_uses_current_database_without_source_ingestion(self):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder)
             report = home / "Reports" / PCS_TRACKER_FILENAME
-            config = SimpleNamespace(reports=report.parent)
+            config = SimpleNamespace(reports=report.parent, feed=home / "Feed")
             conn = MagicMock()
             with (
                 patch("wfmhub.cli.load_config", return_value=config),
@@ -164,14 +206,28 @@ class PCSWorkflowTests(unittest.TestCase):
                     return_value=(date(2026, 8, 1), date(2026, 9, 8)),
                 ),
                 patch("wfmhub.cli.build_report_pack", return_value=report) as build,
-                patch("wfmhub.cli.latest_pcs_paste", return_value=report.parent / "PCS Paste Data.xlsx"),
             ):
                 self.assertEqual(_build_pcs_from_database(home), report)
             build.assert_called_once_with(
                 "pcs", conn, config, date(2026, 8, 1), date(2026, 9, 8),
             )
 
-    def test_pcs_refresh_uses_targeted_model_without_feeds_or_excel(self):
+    def test_install_uses_desktop_excel_helper_once(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            report = home / "Reports" / PCS_TRACKER_FILENAME
+            report.parent.mkdir()
+            report.write_bytes(b"tracker")
+            config = SimpleNamespace(reports=report.parent)
+            with (
+                patch("wfmhub.cli.load_config", return_value=config),
+                patch("wfmhub.cli.latest_pcs_report", return_value=report),
+                patch("wfmhub.cli.run_pcs_excel_action", return_value="ready") as run,
+            ):
+                _install_pcs_power_query(home)
+            run.assert_called_once_with(config, report, "Install", "LOCAL")
+
+    def test_pcs_refresh_uses_targeted_model_without_all_shared_feeds(self):
         home = Path("/test/wfmhub")
         config = SimpleNamespace(
             business_rules=Path("rules.toml"),

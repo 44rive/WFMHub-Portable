@@ -39,12 +39,14 @@ when StartEndTimes is missing.
 | `mart.forecast_hour` | Date/hour/mapped scope | Flash and Realisations comparison |
 | `mart.agent_pcs_day` | Agent/day | PCS result and participation |
 
-The current PCS collaboration input is `Reports\PCS Paste Data -
-YYYY-MM-DD HHMMSS.xlsx` at one FTE-scoped inbound call-leg per row. It carries
-the additive score and participation counters, exact Call ID/Coaching Key, and
-three 0/1 list flags used only to refresh LOB, Team Leader and Agent choices
-without spill formulas. The user pastes values into `PCS Live Tracker.xlsx >
-DATA!tblData`; there is no PCS Power Query feed.
+The PCS collaboration boundary is five fixed UTF-8 CSV products under
+`Feed\PCS`: LOB scorecard, agent scorecard, daily scorecard, standard-period
+results, and exact low-score coaching opportunities. These feeds contain only
+governed result grains required by the workbook; the raw/deduplicated call-leg
+table remains in SQLite unless explicitly exported. Power Query transports the
+fixed schemas to `_PCS_LOB`, `_PCS_AGENT`, `_PCS_DAILY`, `PERFORMANCE`, and the
+left-hand queue on `COACHING`. The permanent `tblCoachingActions` table is not a
+feed destination.
 
 Legacy-named exports remain callable so existing jobs do not break.
 `yesterday_gap_actions` covers the entire selected completed period, not only

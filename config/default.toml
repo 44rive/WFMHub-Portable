@@ -61,11 +61,11 @@ pcs = true
 absence = true
 
 [pcs_tracker]
-# Timestamped PCS reports retain this many complete calendar months in their
-# static agent/day detail. Two months is the minimum for MTD comparison.
+# The PCS mart retains this many complete calendar months so fixed report feeds
+# can provide current/prior comparisons. Two months is the minimum.
 history_months = 13
-# Compatibility setting retained for existing configs. The Python dashboard
-# currently plots all available current-month days.
+# Compatibility setting retained for existing configs. Overview plots the
+# available current-month daily feed.
 trend_days = 90
 
 [report]

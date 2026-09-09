@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.4.1`
-Applies to: WFMHub `0.26.1` and later
+Context version: `1.5.0`
+Applies to: WFMHub `0.27.0` and later
 Last reviewed: `2026-09-09`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -13,9 +13,10 @@ old conversations, filenames, archived workbooks, or code that is not dispatched
 WFMHub is a portable, deterministic Workforce Management hub for a restricted
 Windows work machine. Python and SQLite ingest untouched Excel/CSV/TXT extracts,
 scope them to the governed FTE roster, calculate auditable marts, and create
-focused Excel decision products. PCS uses one permanent manual-paste tracker. Power
-Query remains optional transport for the separate permanent Absenteeism file;
-it is never the KPI calculation engine.
+focused Excel decision products. PCS uses one permanent lightweight tracker
+fed by fixed CSVs through Power Query. Power Query is transport only; Python,
+SQLite, the effective rules, and the metric catalog remain the calculation
+authority.
 
 Non-goals:
 
@@ -54,8 +55,8 @@ Operational:
   same-day call list.
 - **Attendance Review**: completed-day exact gaps, schedule-versus-observed
   review, break/meal control, and human decisions.
-- **PCS Report & Coaching**: one permanent manual-paste performance and
-  coaching tracker.
+- **PCS Report & Coaching**: one permanent direct-CSV Power Query performance
+  and coaching tracker.
 
 In development:
 
@@ -138,17 +139,19 @@ Attendance Review is regenerated for the selected completed period. REVIEW
 BOARD keeps its exact header on Excel row 4. Users edit five blue ACTUAL fields,
 save, then import the same workbook. Decisions persist by immutable Gap ID.
 
-PCS has one permanent collaboration workbook and a disposable inbound file.
-`PCS Live Tracker.xlsx` is permanent during normal use. Each PCS
-prepare creates `PCS Paste Data - YYYY-MM-DD HHMMSS.xlsx`, containing one clean,
-FTE-scoped inbound call leg per row. The user replaces only the body of
-`DATA!tblData` in the permanent tracker. `OVERVIEW` and `COACHING` recalculate
-inside Excel from additive counters. Overview uses Period, LOB, Team Leader and
-Agent; compact Coaching uses only Period and LOB. Coaching actions remain in
-`tblCoachingActions` inside the permanent tracker. There is no Power Query,
-Data Model, macro, external connection, Hub-driven refresh, spill formula or
-dynamic-array metadata. A versioned contract repair may rebuild the tracker
-once, archives the prior file, and carries its keyed actions forward.
+PCS has one permanent collaboration workbook and five small fixed-name CSV
+feeds: LOB scorecard, agent scorecard, daily trend, full filter-ready results,
+and low-score coaching opportunities. No raw call-leg table is loaded into a
+worksheet. The targeted Hub update ingests FTE/Call by Call, refreshes the PCS
+mart, and atomically replaces the feeds. Desktop Excel then uses **Data >
+Refresh All**. `OVERVIEW` reads three hidden lightweight staging tables;
+`PERFORMANCE` and the left side of `COACHING` are native Excel query tables.
+Users may add native table slicers. The action log `tblCoachingActions` on the
+right of `COACHING` is human-owned and is never a query target. Power Query is
+installed or repaired once by desktop Excel automation. There is no Data
+Model, Power Pivot, macro, raw-data sheet, spill formula or dynamic-array
+metadata. A versioned contract migration archives the prior tracker and carries
+keyed actions forward; same-version Hub updates preserve tracker bytes.
 
 Every current report first screen uses the measured grid in
 `src/wfmhub/excel_layout.py`: 28 equal 52-pixel columns, four equal KPI cards,
@@ -181,9 +184,10 @@ Implementation:
 - `metrics.py`: versioned KPI methods
 - `report_packs.py`: current report lifecycle and dispatch
 - `service_flash.py`: RTM and LOB Service Flash
-- `pcs_tracker.py`: authoritative PCS clean-paste and permanent-tracker lifecycle
+- `pcs_tracker.py`: authoritative lightweight PCS Power Query tracker lifecycle
+- `pcs_excel.py`: tracker inspection and Windows Excel install/refresh bridge
 - `decision_products.py`: Attendance Review and development products
-- `shared_feeds.py`: Absenteeism collaboration feeds and Power Query text
+- `shared_feeds.py`: PCS/Absenteeism fixed feeds and Power Query definitions
 - `actions.py`: Attendance Review decision import
 - `design.py`, `reports.py`, `template_reports.py`: visual contract
 - `bonus.py`: governed Bonus Matrix import/report
@@ -206,9 +210,10 @@ Documentation:
 4. Add or update focused tests and the end-to-end fixture.
 5. Reopen every generated XLSX, inspect ZIP/XML for `#REF!` and unsupported
    formula metadata, and run the full suite.
-6. For PCS, verify populated initial caches, absence of dynamic-array metadata,
-   no query connections, the clean paste schema, one-time migration/action
-   preservation, and byte preservation during later same-version prepares.
+6. For PCS, verify populated initial caches, valid OOXML, no raw `DATA` sheet,
+   all five fixed feed schemas, one-time Power Query installation, native table
+   destinations, migration/action preservation, and byte preservation during
+   later same-version Hub updates.
 7. Bump the snapshot/report contract only for an explicit design migration.
 8. Update this context and the design specification when architecture changes.
 
@@ -223,8 +228,9 @@ Documentation:
 - Never rename stable sheets, tables, Agent ID, Gap ID or Coaching Key.
 - Never overwrite `PCS Live Tracker.xlsx` except for an explicit versioned
   repair that archives the prior file and preserves keyed actions.
-- Never add Power Query, Excel automation, macros or a Data Model to PCS without an
-  explicit product decision.
+- Never point a PCS query at `tblCoachingActions`, and never turn Power Query
+  into a KPI calculation layer.
+- Never add macros, a Data Model, Power Pivot, or a raw call-leg worksheet to PCS.
 - Never edit or relocate source extracts.
 - Never describe an in-development report as payroll-ready.
 - If evidence is insufficient, say what is unknown and inspect the source or

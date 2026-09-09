@@ -67,7 +67,7 @@ REPORT_PACKS = {
         default_folder="pcs",
         filename_prefix="WFMHub_PCS_Live_Tracker",
         current_filename="PCS Live Tracker.xlsx",
-        purpose="Permanent one-paste PCS tracker with one combined coaching workspace.",
+        purpose="Permanent direct-CSV Power Query PCS tracker with one combined coaching workspace.",
     ),
     "bonus": ReportPack(
         key="bonus",

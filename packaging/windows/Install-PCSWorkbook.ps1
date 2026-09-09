@@ -15,7 +15,7 @@ param(
     [string]$FeedFolder,
 
     [Parameter(Mandatory = $true)]
-    [string]$DataQueryPath,
+    [string]$AgentQueryPath,
 
     [Parameter(Mandatory = $true)]
     [string]$CoachingQueryPath,
@@ -27,7 +27,7 @@ param(
     [string]$ResultsQueryPath,
 
     [Parameter(Mandatory = $true)]
-    [string]$ScopeQueryPath,
+    [string]$DailyQueryPath,
 
     [switch]$OpenAfter
 )
@@ -116,7 +116,7 @@ function Remove-StarterTable {
     try {
         try {
             $table = $sheet.ListObjects.Item($TableName)
-            $table.Unlist()
+            $table.Delete()
             Release-ComObject $table
         }
         catch {
@@ -133,7 +133,7 @@ function Remove-StarterTable {
         $first = $sheet.Cells.Item($FirstRow, 1)
         $last = $sheet.Cells.Item($lastRow, $LastColumn)
         $range = $sheet.Range($first, $last)
-        try { $range.Clear() } finally {
+        try { $range.ClearContents() } finally {
             Release-ComObject $range
             Release-ComObject $first
             Release-ComObject $last
@@ -142,6 +142,32 @@ function Remove-StarterTable {
     finally {
         Release-ComObject $sheet
     }
+}
+
+function Set-TableColumnFormat {
+    param(
+        [string]$SheetName,
+        [string]$TableName,
+        [string]$ColumnName,
+        [string]$NumberFormat
+    )
+    $sheet = $script:Workbook.Worksheets.Item($SheetName)
+    try {
+        $table = $sheet.ListObjects.Item($TableName)
+        try {
+            $column = $table.ListColumns.Item($ColumnName)
+            try {
+                $range = $column.DataBodyRange
+                if ($null -ne $range) {
+                    try { $range.NumberFormat = $NumberFormat }
+                    finally { Release-ComObject $range }
+                }
+            }
+            finally { Release-ComObject $column }
+        }
+        finally { Release-ComObject $table }
+    }
+    finally { Release-ComObject $sheet }
 }
 
 function Add-QueryTable {
@@ -223,34 +249,53 @@ try {
     }
 
     if ($Action -eq "Install") {
-        foreach ($path in @($DataQueryPath, $CoachingQueryPath, $LobQueryPath, $ResultsQueryPath, $ScopeQueryPath)) {
+        foreach ($path in @($AgentQueryPath, $CoachingQueryPath, $LobQueryPath, $ResultsQueryPath, $DailyQueryPath)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
                 throw "Power Query definition not found: $path"
             }
         }
+        Remove-StarterTable "_PCS_LOB" "tblPcsLob" 4 19
+        Remove-StarterTable "_PCS_AGENT" "tblPcsAgent" 4 13
+        Remove-StarterTable "_PCS_DAILY" "tblPcsDaily" 4 11
+        Remove-StarterTable "PERFORMANCE" "tblPcsPerformance" 4 21
+        Remove-StarterTable "COACHING" "tblCoachingQueue" 4 10
         Remove-WorkbookQuery "PCS_DATA"
         Remove-WorkbookQuery "COACHING_QUEUE"
         Remove-WorkbookQuery "PCS_LOB"
+        Remove-WorkbookQuery "PCS_AGENT"
+        Remove-WorkbookQuery "PCS_DAILY"
         Remove-WorkbookQuery "PCS_RESULTS"
         Remove-WorkbookQuery "PCS_SCOPE"
-        Remove-StarterTable "_PCS_LOB" "tblPcsLob" 4 19
-        Remove-StarterTable "_PCS_SCOPE" "tblPcsScope" 4 7
-        Remove-StarterTable "RESULTS" "tblResults" 4 21
-        Remove-StarterTable "COACHING_QUEUE" "tblCoachingQueue" 4 14
-        Remove-StarterTable "PCS_DATA" "tblPcsData" 4 26
         Set-SetupValue "Connection Mode" $Mode
         Set-SetupValue "Local Feed Folder" ([System.IO.Path]::GetFullPath($FeedFolder))
         Add-QueryTable "PCS_LOB" ([System.IO.File]::ReadAllText($LobQueryPath)) "_PCS_LOB" "tblPcsLob" "A4"
-        Add-QueryTable "PCS_SCOPE" ([System.IO.File]::ReadAllText($ScopeQueryPath)) "_PCS_SCOPE" "tblPcsScope" "A4"
-        Add-QueryTable "PCS_RESULTS" ([System.IO.File]::ReadAllText($ResultsQueryPath)) "RESULTS" "tblResults" "A4"
-        Add-QueryTable "COACHING_QUEUE" ([System.IO.File]::ReadAllText($CoachingQueryPath)) "COACHING_QUEUE" "tblCoachingQueue" "A4"
-        Add-QueryTable "PCS_DATA" ([System.IO.File]::ReadAllText($DataQueryPath)) "PCS_DATA" "tblPcsData" "A4"
+        Add-QueryTable "PCS_AGENT" ([System.IO.File]::ReadAllText($AgentQueryPath)) "_PCS_AGENT" "tblPcsAgent" "A4"
+        Add-QueryTable "PCS_DAILY" ([System.IO.File]::ReadAllText($DailyQueryPath)) "_PCS_DAILY" "tblPcsDaily" "A4"
+        Add-QueryTable "PCS_RESULTS" ([System.IO.File]::ReadAllText($ResultsQueryPath)) "PERFORMANCE" "tblPcsPerformance" "A4"
+        Add-QueryTable "COACHING_QUEUE" ([System.IO.File]::ReadAllText($CoachingQueryPath)) "COACHING" "tblCoachingQueue" "A4"
         Set-SetupValue "Power Query Installed" "YES"
         Set-SetupValue "Last Installer Result" "Installed successfully"
     }
 
     $script:Workbook.RefreshAll()
     Wait-ForRefresh
+    foreach ($format in @(
+        @("_PCS_LOB", "tblPcsLob", "As Of Date", "yyyy-mm-dd"),
+        @("_PCS_LOB", "tblPcsLob", "Data Through", "yyyy-mm-dd"),
+        @("_PCS_LOB", "tblPcsLob", "Feed Refreshed At", "yyyy-mm-dd hh:mm"),
+        @("_PCS_AGENT", "tblPcsAgent", "Data Through", "yyyy-mm-dd"),
+        @("_PCS_AGENT", "tblPcsAgent", "Feed Refreshed At", "yyyy-mm-dd hh:mm"),
+        @("_PCS_DAILY", "tblPcsDaily", "Date", "yyyy-mm-dd"),
+        @("_PCS_DAILY", "tblPcsDaily", "Data Through", "yyyy-mm-dd"),
+        @("_PCS_DAILY", "tblPcsDaily", "Feed Refreshed At", "yyyy-mm-dd hh:mm"),
+        @("PERFORMANCE", "tblPcsPerformance", "Period Start", "yyyy-mm-dd"),
+        @("PERFORMANCE", "tblPcsPerformance", "Period End", "yyyy-mm-dd"),
+        @("PERFORMANCE", "tblPcsPerformance", "Data Through", "yyyy-mm-dd"),
+        @("PERFORMANCE", "tblPcsPerformance", "Feed Refreshed At", "yyyy-mm-dd hh:mm"),
+        @("COACHING", "tblCoachingQueue", "Date", "yyyy-mm-dd")
+    )) {
+        Set-TableColumnFormat $format[0] $format[1] $format[2] $format[3]
+    }
     $script:Excel.CalculateFullRebuild()
     Set-SetupValue "Workbook Last Refreshed" ([DateTime]::Now.ToString("yyyy-MM-dd HH:mm:ss"))
     Set-SetupValue "Last Installer Result" "Refresh completed"

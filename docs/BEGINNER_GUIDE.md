@@ -76,18 +76,18 @@ Reports\Attendance Review.xlsx
 Reports\Final Absenteeism.xlsx
 Reports\Bonus Management.xlsx
 Reports\PCS Live Tracker.xlsx
-Reports\PCS Paste Data - YYYY-MM-DD HHMMSS.xlsx
 Reports\Analysis\...xlsx
 ```
 
 When a normal fixed-name report is replaced, WFMHub first saves its previous
-version in `Reports\Archive`. PCS is different: normal prepares never replace
-the permanent tracker. Only a versioned repair rebuilds it, after archiving the
-old copy and carrying its coaching actions forward. Paste-data files are timestamped.
+version in `Reports\Archive`. PCS is different: normal updates replace only its
+fixed CSV feeds. They never replace the permanent tracker. Only a versioned
+design migration rebuilds it, after archiving the old copy and carrying its
+coaching actions forward.
 
-`Feed` is separate from `Reports`: shared Absenteeism feeds live there. PCS no
-longer uses feed files or Power Query. Any other clean CSV/XLSX export appears
-only when you explicitly request it.
+`Feed` is separate from `Reports`: fixed PCS and shared Absenteeism feeds live
+there. Any other clean CSV/XLSX export appears only when you explicitly request
+it.
 
 ## Choosing dates
 
@@ -242,23 +242,22 @@ an absence KPI plus a second hidden penalty.
 
 ## PCS Report & Coaching
 
-Choose **PCS Report & Coaching**, then **Prepare latest PCS data**. The Hub loads
-only FTE and Call by Call and creates a new timestamped `PCS Paste Data` file.
-The first prepare also creates the permanent `PCS Live Tracker.xlsx`.
+After installing this release, choose **PCS Report & Coaching > Install/repair
+Power Query** once. Close `PCS Live Tracker.xlsx` before this one-time setup.
+The installer connects five small report tables to the fixed CSVs under
+`Feed\PCS`; there is no raw call-data sheet.
 
-Open the paste-data file, copy the rows below its header, then open the tracker.
-On `DATA`, clear the old table body and use **Paste Values** in `A5`. Do not
-rename or replace the headers. Excel expands `tblData` and recalculates the
-views; there is no Refresh All step.
+Your normal PCS routine is then only:
 
-Open `OVERVIEW` for the management view. Use the four dropdowns from left to
-right: Period, LOB, Team Leader, Agent. Changing LOB narrows the Team Leader and
-Agent choices; changing Team Leader narrows Agent choices. Cards, charts and the
-eight-row performance panel follow the selection. If you change a parent after
-choosing a child, reset the child to `All` and continue left to right.
-
-The LOB comparison sits at the top of `OVERVIEW`; the filtered agent list sits
-below it. Both respond to Period, LOB, Team Leader and Agent.
+1. Choose **Update latest PCS data** in WFMHub. This loads FTE and Call by Call,
+   refreshes the PCS database, and replaces the five CSV feeds.
+2. Open `PCS Live Tracker.xlsx`.
+3. Choose **Data > Refresh All** and wait for Excel to finish.
+4. Use `OVERVIEW` to present the all-scope current month and prior comparable
+   view. LOB is shown first and the agent scorecard is directly below it.
+5. Use the filter arrows on `PERFORMANCE` for Period View, Scope Level, LOB,
+   Team Leader, Agent, or another field. To add a slicer, click inside the table
+   and choose **Table Design > Insert Slicer**.
 
 PCS formulas:
 
@@ -269,11 +268,12 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-For coaching, choose only Period and LOB on `COACHING`. The left side loads the
-matching exact low-score calls automatically. Copy Coaching Key and Call ID into the blue action table
-on the same sheet, then complete Coaching Status, Coach, Coaching Date, Due Date
-and Coaching Comment. Call ID takes the coach directly to the call. Save this
-same tracker and share it; later data pastes do not replace the action table.
+On `COACHING`, the left table refreshes to the exact low-score calls. Filter it
+by Date or LOB with the table arrows, or add native Date/LOB slicers. Copy the
+Coaching Key and Call ID into the compact blue action table on the right, then
+complete Coaching Status, Coach, Coaching Date, Due Date, and Comment. Call ID
+takes the coach directly to the call. Save and share this same tracker; later
+CSV refreshes never replace the action table.
 
 ## Analysis and clean data
 
@@ -291,9 +291,11 @@ Use CSV for large Call by Call data.
 - **No Time zone found:** the portable package was incompletely extracted.
 - **Required columns missing:** read the named source file in the error/log.
 - **Empty report:** check source health and date coverage in System tools.
-- **PCS report does not build:** confirm FTE and Call by Call contain in-scope
-  dates and agents, then read the named error in the latest log. No Excel file
-  needs to be closed for PCS.
+- **PCS data does not update:** confirm FTE and Call by Call contain in-scope
+  dates and agents, then read the latest log. The workbook may stay open while
+  the Hub updates CSVs; use **Data > Refresh All** afterward.
+- **PCS Power Query setup fails:** close the tracker, wait for OneDrive sync,
+  then run **Install/repair Power Query** again.
 - **Red INCOMPLETE badge:** fix the missing or stale source; do not replace the
   blank with zero.
 

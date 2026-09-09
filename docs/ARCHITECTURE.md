@@ -118,7 +118,7 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 
 | Pack | Current file | Scope |
 |---|---|---|
-| `pcs` | `Reports/PCS Live Tracker.xlsx` | Permanent manual-paste performance and coaching tracker |
+| `pcs` | `Reports/PCS Live Tracker.xlsx` | Permanent direct-CSV Power Query performance and coaching tracker |
 | `bonus` | `Reports/Bonus Management.xlsx` | Imported Bonus Matrix result and release controls |
 | `service` | `Reports/RTM Daily Control.xlsx` | Same-day service, attendance call actions, and queue drivers for RSA NL/BE and Ford NL/OEM |
 | `realisations` | `Reports/Realisations.xlsx` | All mapped LOB actual/forecast, service, staffing, absence and shrinkage results |
@@ -136,8 +136,9 @@ and one filterable action or reconciliation table. Generated snapshots never
 display fake selectors.
 The PCS operational update is deliberately domain-scoped: FTE and Call-by-Call
 are ingested, then only the employee dimension and PCS mart are rebuilt. Python
-writes a timestamped clean call-leg paste file and creates the permanent tracker
-only if it does not exist. It never opens or replaces that tracker.
+writes five fixed, lightweight CSV feeds and creates the permanent tracker only
+when it is missing or its versioned contract changes. It never opens Excel
+during a normal update and never replaces a same-version tracker.
 
 RTM Daily Control begins with `CONTROL`, then provides four purpose-built LOB
 sheets. Each LOB combines the validated hourly service view with its own
@@ -153,16 +154,17 @@ spells and never revives adherence. Standalone Attendance Callout, legacy
 `operations`, and legacy `quality_pcs` remain callable under
 `_system/legacy_reports` but are absent from the menu.
 
-PCS has a deliberate one-paste lifecycle. SQLite and Python calculate additive
-call-leg counters across the retained history and write `PCS Paste Data -
-YYYY-MM-DD HHMMSS.xlsx`. The user replaces the body of `DATA!tblData` in
-`PCS Live Tracker.xlsx`. Excel calculates each ratio from those additive sums.
-`OVERVIEW` contains the LOB comparison/chart and filtered agent list;
-`COACHING` contains the filtered low-score queue and permanent action table.
-Overview uses Period/LOB/Team/Agent; Coaching intentionally uses only Period and
-LOB. Fixed classic formulas and Hub-prepared list flags replace spill arrays.
-There is no Power Query, Excel automation, Data Model, ODBC driver, macro,
-dynamic-array metadata, or external connection.
+PCS has a deliberate lightweight-feed lifecycle. SQLite and Python calculate
+all ratios from additive call-leg counters, then atomically replace LOB, agent,
+daily, period/scope, and coaching-opportunity CSV products. Power Query only
+validates columns/types and transports those products to native Excel tables.
+`OVERVIEW` contains fixed all-scope current-MTD cards, LOB comparison, daily
+trend and agent scorecard. `PERFORMANCE` is the full period/scope table for
+native filters or slicers. `COACHING` contains the queried exact-call queue and
+the separate permanent human-owned action table. There is no raw `DATA`
+worksheet, Data Model, Power Pivot, ODBC driver, macro, or dynamic-array
+metadata. Desktop Excel automation is used only for the explicit one-time
+query installation/repair command.
 
 Final Absenteeism uses the same collaboration boundary. Power Query may replace
 `tblAbsenceData`, `tblActionQueue`, and `tblActivityDetail` from stable CSVs;

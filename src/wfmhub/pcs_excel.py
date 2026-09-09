@@ -22,7 +22,7 @@ from openpyxl import load_workbook
 from .config import Config
 
 
-PCS_TEMPLATE_VERSION = "2026.09.25"
+PCS_TEMPLATE_VERSION = "2026.11.0"
 
 
 class PCSExcelError(RuntimeError):
@@ -90,9 +90,9 @@ def _setup_values(workbook) -> dict[str, str]:
 
 
 def _pcs_data_freshness(workbook) -> tuple[str | None, str | None]:
-    if "PCS_DATA" not in workbook.sheetnames:
+    if "_PCS_LOB" not in workbook.sheetnames:
         return None, None
-    sheet = workbook["PCS_DATA"]
+    sheet = workbook["_PCS_LOB"]
     headers = {
         str(cell.value).strip(): cell.column
         for cell in sheet[4]
@@ -217,11 +217,11 @@ def run_pcs_excel_action(
         "-Mode", normalized_mode,
         "-WorkbookPath", str(workbook.resolve()),
         "-FeedFolder", str(folder.resolve()),
-        "-DataQueryPath", str(folder / f"POWER_QUERY_PCS_DATA_{suffix}.txt"),
+        "-AgentQueryPath", str(folder / f"POWER_QUERY_PCS_AGENT_{suffix}.txt"),
         "-CoachingQueryPath", str(folder / f"POWER_QUERY_COACHING_QUEUE_{suffix}.txt"),
         "-LobQueryPath", str(folder / f"POWER_QUERY_PCS_LOB_{suffix}.txt"),
         "-ResultsQueryPath", str(folder / f"POWER_QUERY_PCS_RESULTS_{suffix}.txt"),
-        "-ScopeQueryPath", str(folder / f"POWER_QUERY_PCS_SCOPE_{suffix}.txt"),
+        "-DailyQueryPath", str(folder / f"POWER_QUERY_PCS_DAILY_{suffix}.txt"),
     ]
     if open_after:
         command.append("-OpenAfter")

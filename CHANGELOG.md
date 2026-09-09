@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.27.0 — 2026-09-09
+
+- Rebuilds PCS around one permanent lightweight tracker and five fixed CSV
+  feeds; the raw Call-by-Call dataset is no longer loaded into a worksheet.
+- Adds the approved compact Overview with current/prior LOB performance, daily
+  trend, and agent performance directly below the LOB section.
+- Adds native filter/slicer-ready `PERFORMANCE` and coaching queue tables while
+  keeping the human-owned coaching action log separate and permanent.
+- Adds a one-time Windows desktop Excel command that installs or repairs the
+  five Power Query connections. Normal Hub updates touch only SQLite and CSVs;
+  the user finishes with Excel **Data > Refresh All**.
+- Preserves date formatting after query refresh, removes complex selector and
+  dynamic-array formulas, and strengthens workbook ZIP/XML integrity tests.
+- Optimizes same-version PCS updates, migrates the report catalog to
+  `2026.11.0`, and advances the visual contract to `WFMHUB-DESIGN 3.1.0`.
+
 ## 0.26.1 — 2026-09-09
 
 - Removes every PCS spill formula, `_xlfn` function and dynamic-array metadata

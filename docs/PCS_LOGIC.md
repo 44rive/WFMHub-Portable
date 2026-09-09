@@ -1,18 +1,20 @@
-# PCS calculation logic
+# PCS calculation and workbook logic
 
 The official calculation is reproduced from `TOLEARN/PCS Report.xlsx`,
-especially `OverView!O15:R15` and the embedded `RDATA` query.
+especially `OverView!O15:R15` and the embedded `RDATA` query. The workbook is a
+presentation and collaboration surface; Python/SQLite own the arithmetic.
 
 ## What a call leg is
 
 A call may pass through a queue, transfer, or agent more than once. Each such
-record is a call leg. WFMHub keeps the source leg grain and deduplicates
-overlapping extracts by a stable call key. `transferred_legs` is descriptive;
-it does not change the PCS formula.
+record is a call leg. WFMHub keeps that source grain and deduplicates overlapping
+extracts by a stable call key. `transferred_legs` is descriptive and does not
+change the PCS formula.
 
 ## Exact formula
 
-Only inbound legs with an in-scope Agent ID enter the official PCS counters.
+Only inbound legs with an effective-dated in-scope Agent ID enter official PCS
+agent counters.
 
 - A valid score is raw Q1 parsed to exactly one configured value. The default
   set is `1, 2, 3, 4, 5`; `4.5`, `0`, `555`, `*`, `No_Response`, and similar
@@ -26,54 +28,78 @@ Only inbound legs with an in-scope Agent ID enter the official PCS counters.
 - `PCS participation % = raw-Q1 nonblank / PCSStatus=1`.
 
 Q2 does not affect the official score. `PostCallSurveyMode=2` is retained as a
-diagnostic count but is not the participation denominator.
+diagnostic count but is not the participation denominator. At team, LOB, day,
+week, and month level, additive counters are summed first and the ratio is
+calculated once. Agent averages and percentages are never averaged together.
 
 ## Coaching and Actions Rate
 
 The original `OverView!S15` formula counted completed briefing rows from an
-external personal workbook and divided them by the agent/date count of valid
-Q1 scores `<=3`. WFMHub keeps that business meaning but removes the broken
-external link:
+external personal workbook and divided them by the agent/date count of valid Q1
+scores `<=3`. WFMHub preserves the business meaning without the broken link:
 
 - every valid inbound Q1 `<=3` creates one coaching opportunity;
-- each opportunity is identified by the stable deduplicated call-leg key;
+- each opportunity is identified by the stable Coaching Key and exact Call ID;
 - `Actions Rate = unique completed Coaching Keys / all coaching opportunities`;
-- `PCS Live Tracker.xlsx > COACHING` exposes the exact filtered calls;
-- a reviewer copies Coaching Key and Call ID into the blue action table on that
-  same sheet, then fills Status, Coach, Coaching Date, Due Date and Comment;
-- normal prepares never replace the tracker; an explicit contract repair
-  archives the prior file and carries keyed actions into its replacement;
-- later DATA pastes update the queue while saved keyed actions remain in place;
-- coaching decisions are never imported into SQLite.
+- the query table on `COACHING` exposes the low-score calls;
+- the reviewer copies Coaching Key and Call ID to `tblCoachingActions`, then
+  records status, coach, dates, and comment;
+- `tblCoachingActions` is permanent and never a Power Query destination;
+- `Not required` remains in the denominator and is not Completed;
+- duplicate Coaching Keys are highlighted and cannot increase a completed
+  count.
 
-`Not required` remains in the denominator and is not counted as completed.
-Duplicate Coaching Keys are highlighted and cannot increase the completed count.
 Low sample is an interpretation warning, not a coaching opportunity by itself.
 
-At team and month level, counters are summed first and the ratios are then
-recalculated. Agent averages and percentages are never averaged together.
+## PCS data pipeline
 
-Python/SQLite prepare one clean, additive call-leg table. Each prepare writes a
-timestamped `PCS Paste Data` workbook. The user replaces the body of
-`PCS Live Tracker.xlsx > DATA!tblData`; Excel then calculates cards, LOB and
-agent results, and the coaching queue from sums of the additive counters. The
-tracker has no Power Query, Data Model, macro, external connection or Hub-driven
-refresh. Fixed classic formulas use the Hub-prepared list flags to populate the
-selectors and filtered views. There are no spill formulas or dynamic-array
-metadata. The permanent coaching-action table is never a formula target or
-replaced by the paste.
+```text
+untouched FTE + Call by Call
+          -> targeted PCS ingestion and effective-dated roster scope
+          -> deduplicated clean call legs
+          -> additive agent/day PCS mart
+          -> five small governed CSV feeds
+          -> Power Query transport
+          -> permanent PCS Live Tracker.xlsx
+```
+
+The fixed files under `Feed\PCS` are:
+
+| File | Workbook destination | Purpose |
+|---|---|---|
+| `PCS_LOB_SCORECARD_CURRENT.csv` | hidden `_PCS_LOB` | KPI cards and LOB comparison |
+| `PCS_AGENT_SCORECARD_CURRENT.csv` | hidden `_PCS_AGENT` | agent section on Overview |
+| `PCS_DAILY_SCORECARD_CURRENT.csv` | hidden `_PCS_DAILY` | current-month daily trend |
+| `PCS_RESULTS_CURRENT.csv` | `PERFORMANCE` | period/scope table for native filters and slicers |
+| `PCS_COACHING_OPPORTUNITY_CURRENT.csv` | left of `COACHING` | exact low-score call queue |
+
+CSV replacement is atomic. A failed Hub calculation leaves the previous
+complete feed in place. Power Query performs no KPI arithmetic; it checks the
+required schema, applies types, and loads the corresponding Excel table.
+
+## Workbook lifecycle
+
+`PCS Live Tracker.xlsx` is created or migrated only when its versioned contract
+changes. That migration archives the prior workbook and carries keyed coaching
+actions forward. Once the current version exists, a normal Hub PCS update does
+not open, replace, or modify it. The user opens the workbook and chooses **Data
+> Refresh All** after the CSV feeds are updated.
+
+There is no raw `DATA` worksheet, Data Model, Power Pivot, macro, ODBC driver,
+spill formula, or dynamic-array metadata. `PERFORMANCE` and `COACHING` are
+native Excel tables, so users can filter immediately or add standard Excel
+slicers with **Table Design > Insert Slicer**.
 
 ## Reference reconciliation
 
-The supplied full reference workbook contains 39,982 inbound legs, 937 valid
-Q1 scores totaling 4,121, an average of 4.398078975, 143 scores `<=3`, and 794
+The supplied full reference workbook contains 39,982 inbound legs, 937 valid Q1
+scores totaling 4,121, an average of 4.398078975, 143 scores `<=3`, and 794
 scores `>3`. Its participation is 1,351 nonblank raw-Q1 legs divided by 9,661
 `PCSStatus=1` legs, or 13.9840596%. The 414 invalid/non-score raw Q1 values are
 kept in participation but excluded from the average.
 
-The editable settings live in `config\wfm_rules.toml` under `[pcs]`. Changing
-them requires a new `rulebook.version`, validation, and a refresh.
-
-The low-sample threshold and any future PCS/participation targets live in
+Editable parsing settings live in `config\wfm_rules.toml` under `[pcs]`.
+Changing them requires a new `rulebook.version`, validation, and a refresh. The
+low-sample threshold and any future PCS/participation targets live in
 `config\metric_catalog.toml`. The workbook never invents a target when none is
 configured.

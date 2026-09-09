@@ -1,9 +1,7 @@
-# Excel refresh guide for the shared Absenteeism file
+# Excel refresh guide for PCS and shared Absenteeism
 
-Use this setup when one workbook must stay in Teams, SharePoint, or OneDrive
-while people add absence review notes. PCS does not use this workflow: its
-permanent tracker is updated by replacing one plain DATA table from the newest
-Hub-generated paste workbook.
+Use these setups when one permanent workbook must refresh calculated data while
+people keep team-owned action notes.
 
 The idea is simple:
 
@@ -11,8 +9,34 @@ The idea is simple:
 2. Excel reads that CSV with Power Query.
 3. **Refresh All** replaces report data, not the team’s action table.
 
-Do this once for the shared Absenteeism workbook. Make a backup copy before
-starting.
+## PCS: one-time connection setup
+
+1. Install or upgrade WFMHub and run **Update latest PCS data** once.
+2. Close `Reports\PCS Live Tracker.xlsx` and wait for OneDrive sync.
+3. Choose **PCS Report & Coaching > Install/repair Power Query**.
+4. WFMHub asks desktop Excel to connect five query tables to the fixed CSVs in
+   `Feed\PCS`, refresh them, save, and close the workbook.
+5. Open the tracker. `SETUP` should show `Power Query Installed = YES`.
+
+The query destinations are `_PCS_LOB`, `_PCS_AGENT`, `_PCS_DAILY`,
+`PERFORMANCE!tblPcsPerformance`, and `COACHING!tblCoachingQueue`. Never connect
+Power Query to the blue `tblCoachingActions` table.
+
+## PCS: normal refresh
+
+1. Put new untouched FTE/Call-by-Call extracts in their normal folders.
+2. In WFMHub choose **Update latest PCS data**. The tracker can remain closed or
+   open because the Hub changes only external CSV feeds.
+3. In Excel choose **Data > Refresh All**.
+4. Use native table filters. For slicers, click inside `PERFORMANCE` or the
+   coaching queue and choose **Table Design > Insert Slicer**.
+
+Do not rebuild or replace the tracker for a normal update. Power Query is only
+transport; it does not calculate PCS.
+
+## Absenteeism: one-time connection setup
+
+Make a backup copy before starting.
 
 ## Absenteeism: connect the clean ledger
 
@@ -77,3 +101,6 @@ correct agent and day.
   and use a personal Sheet View before applying table filters.
 - **Access denied / workbook read-only:** close the Absenteeism workbook, wait
   for OneDrive sync, then refresh again. Do not reload the extracts.
+- **PCS shows old values:** run the Hub PCS update first, then Excel **Data >
+  Refresh All**. Check `Feed\PCS\PCS_MANIFEST_CURRENT.csv` for the data-through
+  and refresh timestamps.
