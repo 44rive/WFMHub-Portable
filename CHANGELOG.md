@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.26.0 — 2026-09-09
+
+- Replaces timestamped PCS reports with one permanent collaborative
+  `PCS Live Tracker.xlsx` that WFMHub creates once and never overwrites.
+- Adds one timestamped clean `PCS Paste Data` workbook at the governed inbound
+  call-leg grain. Replacing the tracker DATA table updates Excel automatically.
+- Simplifies the visible tracker to `OVERVIEW`, one combined `COACHING` sheet,
+  `DATA`, and `HELP`; the calculation lists and audit contract remain hidden.
+- Moves filtered agent results directly below the LOB view on `OVERVIEW` and
+  gives OVERVIEW and COACHING the same Period/LOB/Team Leader/Agent controls.
+- Keeps coaching actions inside the shared tracker in a seven-column editable
+  log and imports existing keyed actions on first creation.
+- Advances the report catalog to `2026.10.1` and the visual contract to
+  `WFMHUB-DESIGN 3.0.0`.
+
 ## 0.25.2 — 2026-09-09
 
 - Fixes blank PCS comparison charts and selected-scope table rows after changing

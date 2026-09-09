@@ -75,15 +75,14 @@ Reports\Realisations.xlsx
 Reports\Attendance Review.xlsx
 Reports\Final Absenteeism.xlsx
 Reports\Bonus Management.xlsx
-Reports\PCS Operational Report - YYYY-MM-DD HHMMSS.xlsx
-Reports\PCS Coaching Log.xlsx
+Reports\PCS Live Tracker.xlsx
+Reports\PCS Paste Data - YYYY-MM-DD HHMMSS.xlsx
 Reports\Analysis\...xlsx
 ```
 
 When a normal fixed-name report is replaced, WFMHub first saves its previous
-version in `Reports\Archive`. PCS reports are timestamped snapshots, so the Hub
-never replaces an open file. `PCS Coaching Log.xlsx` is the only permanent
-human-edited PCS file and the Hub never overwrites it.
+version in `Reports\Archive`. PCS is different: the tracker is permanent and the
+Hub never replaces it. Only the paste-data file is timestamped.
 
 `Feed` is separate from `Reports`: shared Absenteeism feeds live there. PCS no
 longer uses feed files or Power Query. Any other clean CSV/XLSX export appears
@@ -242,10 +241,14 @@ an absence KPI plus a second hidden penalty.
 
 ## PCS Report & Coaching
 
-Choose **PCS Report & Coaching**, then **Build latest PCS report**. You do not
-need to close Excel. The Hub loads only FTE and Call by Call and creates a new
-timestamped report containing final values and charts. Attendance, RTM,
-staffing, service, forecast and absence remain unchanged.
+Choose **PCS Report & Coaching**, then **Prepare latest PCS data**. The Hub loads
+only FTE and Call by Call and creates a new timestamped `PCS Paste Data` file.
+The first prepare also creates the permanent `PCS Live Tracker.xlsx`.
+
+Open the paste-data file, copy the rows below its header, then open the tracker.
+On `DATA`, clear the old table body and use **Paste Values** in `A5`. Do not
+rename or replace the headers. Excel expands `tblData` and recalculates the
+views; there is no Refresh All step.
 
 Open `OVERVIEW` for the management view. Use the four dropdowns from left to
 right: Period, LOB, Team Leader, Agent. Changing LOB narrows the Team Leader and
@@ -253,10 +256,8 @@ Agent choices; changing Team Leader narrows Agent choices. Cards, charts and the
 eight-row performance panel follow the selection. If you change a parent after
 choosing a child, reset the child to `All` and continue left to right.
 
-Open `RESULTS` for the complete result list and use its ordinary filter arrows:
-Period View, Scope Level, LOB, Team Leader, then Agent. `LOB` gives one row per
-LOB, `TEAM` gives team rows, and `AGENT` gives agent rows. No data refresh is
-required in Excel.
+The LOB comparison sits at the top of `OVERVIEW`; the filtered agent list sits
+below it. Both respond to the same four selectors.
 
 PCS formulas:
 
@@ -267,19 +268,11 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-For coaching, filter `COACHING_QUEUE` by LOB, Team Leader, Agent or date. Copy
-columns A:M for the selected call and paste them into the first empty row of
-`PCS Coaching Log.xlsx`. Complete Coaching Status, Coach, Coaching Date, Due
-Date and Coaching Comment, then save. Coaching Key identifies the exact call;
-Call ID helps the coach open it directly.
-
-After Quality updates the log, choose **Build again from current database**.
-That fast action does not scan the source folder. It creates a new report with
-the latest coaching status and leaves both earlier reports and the permanent log
-untouched.
-
-If you prefer native slicers, add them to `RESULTS`, `PCS_DATA`, or
-`COACHING_QUEUE`. They filter static Excel Tables; they do not trigger a refresh.
+For coaching, use the same four selectors on `COACHING`. The left side shows
+exact low-score calls. Copy Coaching Key and Call ID into the blue action table
+on the same sheet, then complete Coaching Status, Coach, Coaching Date, Due Date
+and Coaching Comment. Call ID takes the coach directly to the call. Save this
+same tracker and share it; later data pastes do not replace the action table.
 
 ## Analysis and clean data
 

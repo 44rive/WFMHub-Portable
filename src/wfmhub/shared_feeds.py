@@ -718,6 +718,6 @@ def publish_shared_feeds(
 ) -> tuple[SharedFeedResult, ...]:
     """Refresh every stable collaboration feed after the Hub models finish."""
 
-    # PCS is now a self-contained Python snapshot plus a separate permanent
-    # Coaching Log. Only Absenteeism still uses collaboration feeds.
+    # PCS uses an explicit manual-paste workbook prepared by its report builder.
+    # Only Absenteeism still uses the generic collaboration-feed workflow.
     return (publish_absence_feeds(conn, config, start, end),)

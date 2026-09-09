@@ -65,9 +65,9 @@ REPORT_PACKS = {
     "pcs": ReportPack(
         key="pcs",
         default_folder="pcs",
-        filename_prefix="WFMHub_PCS_Operational_Report",
-        current_filename="PCS Operational Report.xlsx",
-        purpose="Python-only PCS performance snapshot backed by a separate permanent coaching log.",
+        filename_prefix="WFMHub_PCS_Live_Tracker",
+        current_filename="PCS Live Tracker.xlsx",
+        purpose="Permanent one-paste PCS tracker with one combined coaching workspace.",
     ),
     "bonus": ReportPack(
         key="bonus",
@@ -224,9 +224,9 @@ def build_report_pack(
 
         return build_exact_pcs_workbook(conn, config, start, end, output)
     if key == "pcs":
-        from .pcs_report import build_pcs_snapshot_workbook
+        from .pcs_tracker import build_pcs_live_tracker
 
-        return build_pcs_snapshot_workbook(conn, config, start, end, output)
+        return build_pcs_live_tracker(conn, config, start, end, output)
     if key == "bonus":
         from .bonus import build_bonus_performance_workbook
 

@@ -30,7 +30,7 @@ class ReportPackTests(unittest.TestCase):
         self.assertIs(REPORT_COLORS, COLORS)
         self.assertIs(SHARED_REPORT_COLORS, COLORS)
         self.assertEqual((REPORT_DESIGN_ID, REPORT_DESIGN_VERSION), (
-            "WFMHUB-DESIGN", "2.3.1",
+            "WFMHUB-DESIGN", "3.0.0",
         ))
         reference = repo / "docs" / "WFMHub Report Design Reference.xlsx"
         self.assertTrue(reference.is_file())
@@ -90,7 +90,7 @@ class ReportPackTests(unittest.TestCase):
         self.assertTrue(all(REPORT_PACKS[key].implemented for key in IMPLEMENTED_REPORT_PACK_KEYS))
         self.assertFalse(REPORT_PACKS["intraday"].implemented)
         self.assertEqual(REPORT_PACKS["pcs"].default_folder, "pcs")
-        self.assertEqual(REPORT_PACKS["pcs"].current_filename, "PCS Operational Report.xlsx")
+        self.assertEqual(REPORT_PACKS["pcs"].current_filename, "PCS Live Tracker.xlsx")
         self.assertEqual(REPORT_PACKS["service"].default_folder, "service")
         self.assertEqual(REPORT_PACKS["realisations"].default_folder, "realisations")
         self.assertEqual(REPORT_PACKS["attendance"].default_folder, "attendance")

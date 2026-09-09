@@ -154,33 +154,27 @@ Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 
 ## PCS Report & Coaching
 
-PCS is deliberately split into a generated report and one human-owned action
-log. Choose **PCS Report & Coaching > Build latest PCS report**. The Hub loads
-only FTE and Call by Call, updates the PCS mart, and creates a new timestamped
-`Reports\PCS Operational Report - YYYY-MM-DD HHMMSS.xlsx`. It never opens or
-controls Excel, so no workbook needs to be closed and OneDrive cannot block the
-report build.
+PCS is one permanent collaborative workbook. Choose **PCS Report & Coaching >
+Prepare latest PCS data**. The Hub loads only FTE and Call by Call, updates the
+PCS mart, and creates a new `Reports\PCS Paste Data - YYYY-MM-DD HHMMSS.xlsx`.
+It also creates `Reports\PCS Live Tracker.xlsx` the first time only.
 
-The generated report contains final Python-calculated values:
+Normal use is intentionally manual and predictable:
 
-- `OVERVIEW`: cascading Period, LOB, Team Leader and Agent dropdowns, responsive
-  cards, two current-versus-prior charts, and the selected-scope action panel;
-- `LOB_SUMMARY` and `DAILY_TREND`: the exact visible chart values;
-- `RESULTS`: filterable latest-day, week, MTD and prior-period results at LOB,
-  team and agent levels;
-- `COACHING_QUEUE`: exact low-score calls, Call ID and current action status;
-- `COACHING`: a read-only snapshot of saved actions;
-- `PCS_DATA`: one row per agent/day for filters or optional pivots.
+1. Open the newest PCS Paste Data file and copy its rows below the header.
+2. In `PCS Live Tracker.xlsx`, clear the old body of `DATA!tblData` and use
+   **Paste Values** for the new rows in `A5`.
+3. Use Period, LOB, Team Leader and Agent on `OVERVIEW` or `COACHING`.
 
-There is no Power Query, Excel automation, Data Model, hidden calculation sheet,
-or Excel KPI arithmetic. Python precalculates every selectable result; classic
-Excel lookups switch the view. Cards and charts are populated immediately.
+`OVERVIEW` keeps the four KPI cards, LOB comparison/chart and filterable agent
+results together. `COACHING` keeps the filtered low-score calls, Call ID and the
+permanent editable coaching-action table together. The same four cascading
+selectors exist on both sheets.
 
-`Reports\PCS Coaching Log.xlsx` is created once and is never replaced by the
-Hub. Quality filters `COACHING_QUEUE`, copies columns A:M into the Coaching Log,
-then completes the blue status, coach, date, due-date and comment fields. Choose
-**Build again from current database** to create a fast new report reflecting
-those saved actions without rescanning source extracts.
+There is no Power Query, Data Model, macro, external connection, or Hub-driven
+Excel refresh. Excel recalculates the formulas and charts after the paste. The
+Hub never rewrites `PCS Live Tracker.xlsx`, so Quality and Team Leaders keep one
+shared file and their coaching actions survive future data updates.
 
 ## Attendance decisions and shared absenteeism
 

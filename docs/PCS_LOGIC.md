@@ -38,14 +38,11 @@ external link:
 - every valid inbound Q1 `<=3` creates one coaching opportunity;
 - each opportunity is identified by the stable deduplicated call-leg key;
 - `Actions Rate = unique completed Coaching Keys / all coaching opportunities`;
-- the generated report exposes exact calls in `COACHING_QUEUE`;
-- a reviewer copies columns A:M into the first blank row of the separate
-  permanent `PCS Coaching Log.xlsx`, then fills Status, Coach, Coaching Date,
-  Due Date and Comment;
-- WFMHub creates that coaching log only once, reads each unique keyed action on
-  later builds, and never replaces the human-owned file;
-- every generated report contains a read-only `COACHING` snapshot and the
-  current action state beside each queue case;
+- `PCS Live Tracker.xlsx > COACHING` exposes the exact filtered calls;
+- a reviewer copies Coaching Key and Call ID into the blue action table on that
+  same sheet, then fills Status, Coach, Coaching Date, Due Date and Comment;
+- WFMHub creates the tracker only once and never replaces the human-owned file;
+- later DATA pastes update the queue while saved keyed actions remain in place;
 - coaching decisions are never imported into SQLite.
 
 `Not required` remains in the denominator and is not counted as completed.
@@ -55,15 +52,14 @@ Low sample is an interpretation warning, not a coaching opportunity by itself.
 At team and month level, counters are summed first and the ratios are then
 recalculated. Agent averages and percentages are never averaged together.
 
-Python/SQLite calculate the complete report before Excel opens. Each build writes
-a new timestamped workbook containing the management cards, LOB summary, daily
-trend, standard period results, exact coaching queue, saved-action snapshot and
-agent-day counters. The workbook has no fixed PCS feed, Power Query, Data Model,
-Excel automation, spill formula, Excel KPI arithmetic or hidden calculation
-sheet. Dashboard dropdowns use direct `MATCH`/`INDEX` lookup formulas over
-Python-pre-ranked final scope/period values calculated by Python. The fast
-rebuild option reads the current database
-and coaching log without rescanning extracts.
+Python/SQLite prepare one clean, additive call-leg table. Each prepare writes a
+timestamped `PCS Paste Data` workbook. The user replaces the body of
+`PCS Live Tracker.xlsx > DATA!tblData`; Excel then calculates cards, LOB and
+agent results, and the coaching queue from sums of the additive counters. The
+tracker has no Power Query, Data Model, macro, external connection or Hub-driven
+refresh. Microsoft 365 dynamic formulas provide the cascading lists and filtered
+views; the permanent coaching-action table is never a formula target or replaced
+by the paste.
 
 ## Reference reconciliation
 

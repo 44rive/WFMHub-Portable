@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.3.2`
-Applies to: WFMHub `0.25.2` and later
+Context version: `1.4.0`
+Applies to: WFMHub `0.26.0` and later
 Last reviewed: `2026-09-09`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -13,7 +13,7 @@ old conversations, filenames, archived workbooks, or code that is not dispatched
 WFMHub is a portable, deterministic Workforce Management hub for a restricted
 Windows work machine. Python and SQLite ingest untouched Excel/CSV/TXT extracts,
 scope them to the governed FTE roster, calculate auditable marts, and create
-focused Excel decision products. PCS is a Python-only snapshot workflow. Power
+focused Excel decision products. PCS uses one permanent manual-paste tracker. Power
 Query remains optional transport for the separate permanent Absenteeism file;
 it is never the KPI calculation engine.
 
@@ -54,8 +54,8 @@ Operational:
   same-day call list.
 - **Attendance Review**: completed-day exact gaps, schedule-versus-observed
   review, break/meal control, and human decisions.
-- **PCS Report & Coaching**: timestamped Python-only performance reports plus
-  one permanent human-owned coaching log.
+- **PCS Report & Coaching**: one permanent manual-paste performance and
+  coaching tracker.
 
 In development:
 
@@ -138,26 +138,24 @@ Attendance Review is regenerated for the selected completed period. REVIEW
 BOARD keeps its exact header on Excel row 4. Users edit five blue ACTUAL fields,
 save, then import the same workbook. Decisions persist by immutable Gap ID.
 
-PCS has two files with different ownership. Each build creates a new timestamped
-`PCS Operational Report - YYYY-MM-DD HHMMSS.xlsx` containing final values,
-native tables and charts. It has no Power Query, Data Model, Excel automation,
-or Excel KPI arithmetic. Four classic dropdowns use direct `MATCH`/`INDEX`
-lookups over Python-precalculated, pre-ranked Period/LOB/Team/Agent results;
-there is no array `AGGREGATE` selection. `PCS Coaching Log.xlsx` is created once. Quality copies
-columns A:M from `COACHING_QUEUE` into that log and edits only its action fields.
-The Hub reads keyed actions into the next snapshot but never replaces the log.
-The fast build option reads the current database and coaching log without
-rescanning source extracts.
+PCS has one permanent collaboration workbook and a disposable inbound file.
+`PCS Live Tracker.xlsx` is created once and never replaced by WFMHub. Each PCS
+prepare creates `PCS Paste Data - YYYY-MM-DD HHMMSS.xlsx`, containing one clean,
+FTE-scoped inbound call leg per row. The user replaces only the body of
+`DATA!tblData` in the permanent tracker. `OVERVIEW` and `COACHING` recalculate
+inside Excel from additive counters. The same Period, LOB, Team Leader and Agent
+selectors control both views. Coaching actions remain in `tblCoachingActions`
+inside the permanent tracker. There is no Power Query, Data Model, macro,
+external connection, Hub-driven refresh, or workbook replacement.
 
 Every current report first screen uses the measured grid in
 `src/wfmhub/excel_layout.py`: 28 equal 52-pixel columns, four equal KPI cards,
 two equal 728 × 310 charts and a compact seven-field action grid. RTM and
 Attendance remain Operational; visual consistency does not promote Staffing,
-Realisations, Absenteeism/Shrinkage, or Bonus from In Development. PCS detail
-sheets are ordinary filterable tables. `COACHING_QUEUE` shows the exact source
-Call ID beside the Coaching Key; Call ID is calculated and is not typed by
-Quality. The report's `COACHING` sheet is a read-only action snapshot; all
-permanent edits belong only in `PCS Coaching Log.xlsx`.
+Realisations, Absenteeism/Shrinkage, or Bonus from In Development. PCS keeps the
+LOB comparison and filtered agent list together on `OVERVIEW`. `COACHING` shows
+the exact source Call ID beside the Coaching Key and contains the permanent
+editable action log on the same sheet.
 
 Generated reports use `WFMHUB-DESIGN`; see `docs/REPORT_DESIGN_SYSTEM.md`.
 They contain no AI branding or generated-by-AI language.
@@ -181,7 +179,7 @@ Implementation:
 - `metrics.py`: versioned KPI methods
 - `report_packs.py`: current report lifecycle and dispatch
 - `service_flash.py`: RTM and LOB Service Flash
-- `pcs_report.py`: authoritative Python-only PCS report and coaching-log lifecycle
+- `pcs_tracker.py`: authoritative PCS clean-paste and permanent-tracker lifecycle
 - `decision_products.py`: Attendance Review and development products
 - `shared_feeds.py`: Absenteeism collaboration feeds and Power Query text
 - `actions.py`: Attendance Review decision import
@@ -206,9 +204,9 @@ Documentation:
 4. Add or update focused tests and the end-to-end fixture.
 5. Reopen every generated XLSX, inspect ZIP/XML for `#REF!` and unsupported
    formula metadata, and run the full suite.
-6. For PCS, verify initial cached cards/charts, only classic lookup formulas, no
-   query connections, unique timestamped output, and byte preservation of the
-   coaching log.
+6. For PCS, verify populated initial caches, valid dynamic-array metadata, no
+   query connections, the clean paste schema, and byte preservation of the
+   permanent tracker during later prepares.
 7. Bump the snapshot/report contract only for an explicit design migration.
 8. Update this context and the design specification when architecture changes.
 
@@ -221,8 +219,8 @@ Documentation:
 - Never mark today’s unfinished shift as Early Leave.
 - Never average rates or invent a target.
 - Never rename stable sheets, tables, Agent ID, Gap ID or Coaching Key.
-- Never overwrite `PCS Coaching Log.xlsx` after its initial creation.
-- Never add Power Query, Excel automation or a Data Model back to PCS without an
+- Never overwrite `PCS Live Tracker.xlsx` after its initial creation.
+- Never add Power Query, Excel automation, macros or a Data Model to PCS without an
   explicit product decision.
 - Never edit or relocate source extracts.
 - Never describe an in-development report as payroll-ready.

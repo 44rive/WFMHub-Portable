@@ -3,10 +3,10 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `2.3.1` |
+| Version | `3.0.0` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
-| First compatible Hub version | `0.25.2` |
+| First compatible Hub version | `0.26.0` |
 
 This is the visual contract for every WFMHub workbook. It changes presentation,
 never business calculations, source scope, table keys, or report maturity.
@@ -68,22 +68,19 @@ defines a target; WFMHub never invents the pictured PCS target.
 
 ### PCS Report & Coaching
 
-- `OVERVIEW`: real Period, LOB, Team Leader and Agent dropdowns; PCS,
-  participation, prior comparable PCS and change; two equal native comparison
-  charts; a selected-scope action grid. LOB cascades to Team Leader and Agent,
-  and Team Leader cascades to Agent.
-- `LOB_SUMMARY` and `DAILY_TREND`: the exact final values plotted in the charts.
-- `RESULTS`: ordinary Period View, Scope Level, LOB, Team Leader and Agent table
-  filters. Filter the table from left to right.
-- `COACHING_QUEUE`: current exact low-score opportunities, including Call ID and
-  the action state read from the permanent coaching log.
-- `COACHING`: read-only snapshot of saved keyed actions.
-- `PCS_DATA`: static agent-day counters for pivots or reconciliation.
-- `PCS Coaching Log.xlsx`: separate permanent human-owned action ledger. Copy
-  A:M from `COACHING_QUEUE`, then edit the blue action fields.
-- No Power Query, Data Model, Excel automation, dynamic arrays or Excel KPI
-  arithmetic. Classic lookup formulas select Python-precalculated results, and
-  every timestamped report opens with populated cached cards and charts.
+- `PCS Live Tracker.xlsx` is the one permanent shared workbook. WFMHub creates
+  it once and never replaces it.
+- `OVERVIEW`: Period, LOB, Team Leader and Agent dropdowns; PCS, participation,
+  prior comparable and change cards; compact LOB comparison/chart; filtered
+  agent results immediately below.
+- `COACHING`: the same four dropdowns; filtered exact low-score calls including
+  Call ID; permanent blue action table on the same sheet.
+- `DATA`: one plain Excel Table at inbound call-leg grain. Users replace only
+  its body with rows from the newest `PCS Paste Data` workbook.
+- `HELP`: the normal update workflow. `_LISTS` and `_AUDIT` are hidden support.
+- No Power Query, Data Model, macro, Excel automation or external connection.
+  Excel formulas divide additive counters after the manual paste; rates are
+  never averaged.
 
 ### RTM Daily Control
 
@@ -126,8 +123,9 @@ their calculations and decision workflows still require production review.
 ## Interaction and persistence
 
 - Generated RTM and Attendance workbooks are dated decision snapshots.
-- Every PCS report is a new timestamped snapshot; old reports remain untouched.
-- `PCS Coaching Log.xlsx` is created once, read by the Hub and never replaced.
+- `PCS Live Tracker.xlsx` is permanent and never replaced by the Hub.
+- Each PCS prepare creates a disposable timestamped clean paste-data workbook.
+- Coaching actions remain in `tblCoachingActions` inside the permanent tracker.
 - Blue cells are editable. White, grey and calculated cells are not.
 - Sheet names, table names, Agent ID, Gap ID and Coaching Key are contracts.
 
@@ -136,17 +134,19 @@ their calculations and decision workflows still require production review.
 Every design change requires:
 
 1. sheet order and fixed table-anchor tests;
-2. formula inspection for `#REF!` and unsupported dynamic-array metadata;
+2. formula inspection for `#REF!` and valid Microsoft 365 dynamic-array metadata;
 3. ZIP integrity and reopen checks with `openpyxl`;
 4. verification that PCS contains no query connections, query tables, Data
-   Model, unsupported formulas or Excel KPI arithmetic and reopens without repair;
-5. verification that each PCS build creates a new file and does not change the
-   bytes of the permanent coaching log;
+   Model, macros or external links and reopens without repair;
+5. verification that each PCS prepare creates a new clean paste file and does
+   not change the bytes of the permanent tracker;
 6. verification that attendance decisions still import from Excel row 4;
 7. a version bump when the report contract changes.
 
 ## Change log
 
+- `3.0.0`: replaces generated PCS snapshots and the separate coaching log with
+  one permanent manual-paste tracker containing Overview, Coaching and DATA.
 - `2.3.1`: replaces the PCS dashboard's array ranking formula with Python-
   pre-ranked view rows and direct `MATCH`/`INDEX` lookups so filtered charts and
   tables populate reliably in desktop Excel.

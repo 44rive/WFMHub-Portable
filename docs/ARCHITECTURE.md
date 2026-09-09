@@ -86,7 +86,7 @@ details remain in one module.
 | `core.clean_call_leg` | Deduplicated active call-leg view by stable Call Key |
 | `core.dim_agent` | One operational Agent ID |
 | `core.correction_action` | Persistent human decision by exact Gap ID |
-| `core.pcs_coaching_action` | Legacy compatibility table; generated PCS coaching stays in Excel |
+| `core.pcs_coaching_action` | Legacy compatibility table; permanent PCS coaching stays in the tracker |
 | `raw.fte_time_off` | One governed PTO/Away register row from the standard FTE workbook |
 | `mart.attendance_agent_day` | One scheduled Agent ID/day |
 | `mart.conformance_agent_day` | Legacy compatibility table; empty in v0.5 |
@@ -118,7 +118,7 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 
 | Pack | Current file | Scope |
 |---|---|---|
-| `pcs` | `Reports/PCS Operational Report - YYYY-MM-DD HHMMSS.xlsx` | Python-only performance snapshot plus separate permanent Coaching Log |
+| `pcs` | `Reports/PCS Live Tracker.xlsx` | Permanent manual-paste performance and coaching tracker |
 | `bonus` | `Reports/Bonus Management.xlsx` | Imported Bonus Matrix result and release controls |
 | `service` | `Reports/RTM Daily Control.xlsx` | Same-day service, attendance call actions, and queue drivers for RSA NL/BE and Ford NL/OEM |
 | `realisations` | `Reports/Realisations.xlsx` | All mapped LOB actual/forecast, service, staffing, absence and shrinkage results |
@@ -136,9 +136,8 @@ and one filterable action or reconciliation table. Generated snapshots never
 display fake selectors.
 The PCS operational update is deliberately domain-scoped: FTE and Call-by-Call
 are ingested, then only the employee dimension and PCS mart are rebuilt. Python
-writes a new timestamped report containing final values. It never opens Excel,
-overwrites an earlier report, or publishes a PCS collaboration feed, so workbook
-locks and OneDrive sync are outside the build path.
+writes a timestamped clean call-leg paste file and creates the permanent tracker
+only if it does not exist. It never opens or replaces that tracker.
 
 RTM Daily Control begins with `CONTROL`, then provides four purpose-built LOB
 sheets. Each LOB combines the validated hourly service view with its own
@@ -154,21 +153,14 @@ spells and never revives adherence. Standalone Attendance Callout, legacy
 `operations`, and legacy `quality_pcs` remain callable under
 `_system/legacy_reports` but are absent from the menu.
 
-PCS has a deliberate split lifecycle. SQLite and Python calculate a configurable
-rolling month history, then generate a self-contained report. `PCS Coaching
-Log.xlsx` is created once as the permanent editable record. Quality copies the
-source columns from the report queue and fills the action columns. Subsequent
-builds read unique Coaching Keys from that log into a read-only report snapshot;
-the log is never replaced.
-
-Python/SQLite sum the additive counters before calculating each LOB, team, or
-agent ratio. `OVERVIEW` uses embedded final values; `LOB_SUMMARY`,
-`DAILY_TREND`, `RESULTS`, `COACHING_QUEUE` and `PCS_DATA` are ordinary static
-filterable tables. Python also precalculates the standard Period/LOB/Team/Agent
-dashboard cube. Four cascading dropdowns use classic lookup formulas to select
-those final results; Excel does not perform KPI arithmetic. There is no Power
-Query, Excel automation, Data Model, ODBC driver, dynamic-array formula, or
-connection setup.
+PCS has a deliberate one-paste lifecycle. SQLite and Python calculate additive
+call-leg counters across the retained history and write `PCS Paste Data -
+YYYY-MM-DD HHMMSS.xlsx`. The user replaces the body of `DATA!tblData` in
+`PCS Live Tracker.xlsx`. Excel calculates each ratio from those additive sums.
+`OVERVIEW` contains the LOB comparison/chart and filtered agent list;
+`COACHING` contains the filtered low-score queue and permanent action table.
+Both use cascading Period/LOB/Team/Agent dropdowns. There is no Power Query,
+Excel automation, Data Model, ODBC driver, macro, or external connection.
 
 Final Absenteeism uses the same collaboration boundary. Power Query may replace
 `tblAbsenceData`, `tblActionQueue`, and `tblActivityDetail` from stable CSVs;
@@ -249,11 +241,11 @@ Counts `<=3` and `>3` remain counts. Participation is `inbound raw-Q1 nonblank /
 inbound PCSStatus=1`; invalid raw answers stay in that numerator and are
 separately counted. Q2 and Mode 2 are diagnostics only. Higher grains always
 sum counters before dividing. A valid inbound Q1 `<=3` is one coaching
-opportunity. Exact calls are published in `COACHING_QUEUE`; reviewers copy A:M
-into the separate permanent Coaching Log and complete its five action fields.
-Actions Rate is unique completed Coaching Keys divided by all low-score
-opportunities. The fields are read into later report snapshots and never enter
-SQLite. The PCS mart rebuild window expands to retain configured history so
+opportunity. Exact calls appear on `COACHING`; reviewers copy Coaching Key and
+Call ID into the editable action table on that same sheet and complete its five
+action fields. Actions Rate is unique completed Coaching Keys divided by all
+low-score opportunities. Coaching decisions remain only in the permanent
+tracker and never enter SQLite. The PCS mart rebuild window expands to retain configured history so
 daily, MTD and prior-period comparisons remain available. See
 [PCS logic](PCS_LOGIC.md).
 

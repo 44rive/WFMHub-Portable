@@ -1,9 +1,9 @@
 # Excel refresh guide for the shared Absenteeism file
 
 Use this setup when one workbook must stay in Teams, SharePoint, or OneDrive
-while people add absence review notes. PCS no longer uses this workflow: its
-reports are complete Python-generated snapshots, and coaching lives in the
-separate permanent `PCS Coaching Log.xlsx`.
+while people add absence review notes. PCS does not use this workflow: its
+permanent tracker is updated by replacing one plain DATA table from the newest
+Hub-generated paste workbook.
 
 The idea is simple:
 

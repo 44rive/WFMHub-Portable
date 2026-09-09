@@ -23,10 +23,9 @@ from .models import refresh_models, refresh_pcs_models
 from .mapping import load_queue_mapping
 from .metrics import diff_metric_catalogs, evaluate_metric, load_metric_catalog, validate_metric_catalog
 from .on_demand_analysis import ANALYSIS_DOMAINS, COMPARISON_MODES, build_analysis_workbook
-from .pcs_report import (
-    coaching_log_path,
-    ensure_coaching_log,
+from .pcs_tracker import (
     latest_pcs_report,
+    latest_pcs_paste,
     open_workbook,
 )
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
@@ -176,8 +175,8 @@ def refresh(
                     )
                 )
                 bar.update(0.85, "Updating shared report data")
-                # PCS snapshots embed final Python-calculated values. They do
-                # not need CSV feeds, Power Query, or desktop Excel automation.
+                # PCS prepares one clean manual-paste workbook. The permanent
+                # live tracker is never replaced by the refresh workflow.
                 shared_feeds = () if pcs_only else publish_shared_feeds(
                     conn, config, model.start, model.end,
                 )
@@ -224,7 +223,7 @@ def refresh(
         )
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
     if pcs_only:
-        print("Excel layer : Python snapshot; no Power Query or Excel refresh")
+        print("Excel layer : One clean paste file; permanent tracker is unchanged")
     else:
         print(f"Shared data : {sum(item.rows for item in shared_feeds):,} feed rows updated")
     if pcs_only:
@@ -800,10 +799,10 @@ def _pcs_mart_period(conn, config) -> tuple[date, date]:
 
 
 def _build_latest_pcs_report(home: Path) -> None:
-    """Load new PCS sources and create a new, self-contained report."""
+    """Load new PCS sources and prepare one clean manual-paste file."""
 
-    print("\nBUILD LATEST PCS REPORT")
-    print("You do not need to close Excel. WFMHub will create a new file.")
+    print("\nPREPARE LATEST PCS DATA")
+    print("WFMHub prepares clean data. Your permanent tracker is never replaced.")
     result = refresh(home, None, None, ("pcs",), "pcs", False)
     if result:
         raise RuntimeError(
@@ -813,30 +812,33 @@ def _build_latest_pcs_report(home: Path) -> None:
     config = load_config(home)
     report = latest_pcs_report(config)
     if report is None:
-        raise RuntimeError("PCS processing finished but no report was created")
-    print(f"PCS report    : {report}")
-    print(f"Coaching log : {coaching_log_path(config)}")
+        raise RuntimeError("PCS processing finished but no tracker was created")
+    paste = latest_pcs_paste(config)
+    print(f"PCS tracker   : {report}")
+    print(f"Paste data    : {paste}")
+    print("Next          : Copy DATA rows, then Paste Values into tracker DATA!A5")
 
 
 def _build_pcs_from_database(home: Path) -> Path:
-    """Create a fresh report without rescanning the source extracts."""
+    """Prepare a clean paste file without rescanning source extracts."""
 
-    print("\nBUILD PCS REPORT FROM CURRENT DATABASE")
+    print("\nPREPARE PCS DATA FROM CURRENT DATABASE")
     config = load_config(home)
     with write_session(config) as conn:
         start, end = _pcs_mart_period(conn, config)
         report = build_report_pack("pcs", conn, config, start, end)
-    print(f"PCS report    : {report}")
-    print(f"Coaching log : {coaching_log_path(config)}")
+    print(f"PCS tracker   : {report}")
+    print(f"Paste data    : {latest_pcs_paste(config)}")
+    print("Next          : Copy DATA rows, then Paste Values into tracker DATA!A5")
     return report
 
 
 def _pcs_menu(home: Path) -> None:
-    print("\nPCS REPORT & COACHING")
-    print("1. Build latest PCS report (load new FTE + Call-by-Call)")
-    print("2. Build again from current database (fast)")
-    print("3. Open latest PCS report")
-    print("4. Open permanent PCS Coaching Log")
+    print("\nPCS LIVE TRACKER")
+    print("1. Prepare latest PCS data (load new FTE + Call-by-Call)")
+    print("2. Prepare data from current database (fast)")
+    print("3. Open permanent PCS Live Tracker")
+    print("4. Open latest PCS Paste Data")
     print("5. Back")
     choice = input("Choose 1-5: ").strip()
     if choice == "1":
@@ -847,11 +849,14 @@ def _pcs_menu(home: Path) -> None:
         config = load_config(home)
         report = latest_pcs_report(config)
         if report is None:
-            raise FileNotFoundError("No generated PCS report exists. Choose option 1 first.")
+            raise FileNotFoundError("No PCS Live Tracker exists. Choose option 1 first.")
         open_workbook(report)
     elif choice == "4":
         config = load_config(home)
-        open_workbook(ensure_coaching_log(config))
+        paste = latest_pcs_paste(config)
+        if paste is None:
+            raise FileNotFoundError("No PCS Paste Data exists. Choose option 1 first.")
+        open_workbook(paste)
     elif choice != "5":
         raise ValueError("Please choose a number from 1 to 5")
 
@@ -1016,10 +1021,10 @@ def parser() -> argparse.ArgumentParser:
     )
     decisions_p.add_argument("workbook", type=Path)
     pcs_p = commands.add_parser(
-        "pcs", help="Build or open the Python-only PCS report and coaching log",
+        "pcs", help="Prepare clean PCS paste data or open the permanent tracker",
     )
     pcs_p.add_argument(
-        "action", choices=("build", "rebuild", "open-report", "open-coaching"),
+        "action", choices=("build", "rebuild", "open-tracker", "open-data"),
     )
     analysis_p = commands.add_parser("analyze", help="Run on-demand period analysis")
     analysis_p.add_argument("domain", choices=ANALYSIS_DOMAINS)
@@ -1062,15 +1067,18 @@ def main(argv: list[str] | None = None) -> int:
                 _build_latest_pcs_report(home)
             elif args.action == "rebuild":
                 _build_pcs_from_database(home)
-            elif args.action == "open-report":
+            elif args.action == "open-tracker":
                 config = load_config(home)
                 report = latest_pcs_report(config)
                 if report is None:
-                    raise FileNotFoundError("No generated PCS report exists")
+                    raise FileNotFoundError("No PCS Live Tracker exists")
                 open_workbook(report)
             else:
                 config = load_config(home)
-                open_workbook(ensure_coaching_log(config))
+                paste = latest_pcs_paste(config)
+                if paste is None:
+                    raise FileNotFoundError("No PCS Paste Data exists")
+                open_workbook(paste)
             return 0
         if args.command == "analyze":
             return analyze_period(home, args.domain, args.start, args.end, args.comparison, args.output)
