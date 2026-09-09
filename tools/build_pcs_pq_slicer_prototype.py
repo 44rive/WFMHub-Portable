@@ -82,7 +82,11 @@ def _dummy_call_rows() -> list[dict[str, Any]]:
     }
     teams = [(lob, leader) for lob in LOBS for leader in TEAMS[lob]]
     call_number = 920000
-    for month_start, day_count in ((date(2026, 8, 1), 31), (date(2026, 9, 1), 8)):
+    for month_start, day_count in (
+        (date(2026, 7, 1), 31),
+        (date(2026, 8, 1), 31),
+        (date(2026, 9, 1), 8),
+    ):
         for day_offset in range(day_count):
             business_date = month_start + timedelta(days=day_offset)
             if business_date.weekday() >= 5:
@@ -194,13 +198,13 @@ def _add_native_table(
             cell_format = None
             if header in editable:
                 cell_format = editable_date if "Date" in header else editable_text
-            elif header in {"Date", "From", "To", "Call Date"}:
+            elif header in {"Date", "From", "To", "Prior From", "Prior To", "Call Date"}:
                 cell_format = date_format
             elif header in {"Call Start"}:
                 cell_format = datetime_format
             elif header in {"PCS", "Prior PCS", "Change", "Q1 Score"}:
                 cell_format = decimal_format
-            elif header in {"Participation"}:
+            elif header.endswith("Participation"):
                 cell_format = percent_format
             elif header in {"Agent ID", "Call ID", "Coaching Key"}:
                 cell_format = text_format

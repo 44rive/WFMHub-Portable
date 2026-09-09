@@ -18,12 +18,22 @@ class LauncherTests(unittest.TestCase):
             self.assertIn("title wfmhub portable", text)
             self.assertIn("if not defined no_color color 0b", text)
 
-    def test_pcs_no_longer_packages_excel_or_power_query_automation(self):
+    def test_pcs_packages_the_reviewed_power_query_installer(self):
         text = (
             REPO / "packaging" / "windows" / "build_portable.py"
         ).read_text(encoding="utf-8")
-        self.assertNotIn("Install-PCSWorkbook.ps1", text)
+        self.assertIn(
+            'stage / "_system" / "scripts" / "Install-PCSWorkbook.ps1"',
+            text,
+        )
+        installer = (
+            REPO / "packaging" / "windows" / "Install-PCSWorkbook.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn('ValidateSet("Install", "Refresh")', installer)
+        self.assertIn('"tblCoachingQueue"', installer)
+        self.assertNotIn('"tblCoachingActions"', installer)
         self.assertNotIn("/home/founder", text)
+        self.assertNotIn("/home/founder", installer)
 
 
 if __name__ == "__main__":
