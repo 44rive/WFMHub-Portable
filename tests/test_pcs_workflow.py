@@ -4,7 +4,7 @@ import tempfile
 import unittest
 import zipfile
 from contextlib import nullcontext
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -14,13 +14,20 @@ from openpyxl import load_workbook
 from wfmhub.cli import _build_latest_pcs_report, _build_pcs_from_database, refresh
 from wfmhub.models import ModelSummary
 from wfmhub.pcs_tracker import (
+    PCS_INPUT_HEADERS,
     PCS_TRACKER_FILENAME,
+    PCS_TRACKER_VERSION,
+    _as_date,
+    _tracker_contract_version,
     ensure_pcs_tracker,
     latest_pcs_report,
 )
 
 
 class PCSWorkflowTests(unittest.TestCase):
+    def test_text_business_dates_are_parsed_for_sqlite_rows(self):
+        self.assertEqual(_as_date("2026-09-08 17:00:00"), date(2026, 9, 8))
+
     def test_live_tracker_is_created_once_and_never_replaced(self):
         with tempfile.TemporaryDirectory() as folder:
             reports = Path(folder) / "Reports"
@@ -29,13 +36,17 @@ class PCSWorkflowTests(unittest.TestCase):
             self.assertEqual(path.name, PCS_TRACKER_FILENAME)
             with zipfile.ZipFile(path) as archive:
                 self.assertIsNone(archive.testzip())
-                self.assertIn("xl/metadata.xml", archive.namelist())
+                self.assertNotIn("xl/metadata.xml", archive.namelist())
                 worksheet_xml = b"".join(
                     archive.read(name) for name in archive.namelist()
                     if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
                 )
-                self.assertIn(b"_xlfn._xlws.FILTER", worksheet_xml)
+                self.assertNotIn(b"_xlfn", worksheet_xml)
+                self.assertNotIn(b"FILTER(", worksheet_xml)
+                self.assertNotIn(b"HSTACK(", worksheet_xml)
+                self.assertIn(b"AGGREGATE", worksheet_xml)
                 self.assertNotIn(b"#REF!", worksheet_xml)
+            self.assertEqual(_tracker_contract_version(path), PCS_TRACKER_VERSION)
 
             workbook = load_workbook(path)
             sheet = workbook["COACHING"]
@@ -47,6 +58,73 @@ class PCSWorkflowTests(unittest.TestCase):
 
             self.assertEqual(ensure_pcs_tracker(config), path)
             self.assertEqual(path.read_bytes(), saved)
+
+    def test_old_tracker_is_archived_and_actions_survive_one_time_migration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            reports = Path(folder) / "Reports"
+            config = SimpleNamespace(reports=reports)
+            with patch("wfmhub.pcs_tracker.PCS_TRACKER_VERSION", "2026.10.1"):
+                path = ensure_pcs_tracker(config)
+            workbook = load_workbook(path)
+            sheet = workbook["COACHING"]
+            sheet["L10"] = "call-key-migrate"
+            sheet["M10"] = "call-id-migrate"
+            sheet["N10"] = "Completed"
+            workbook.save(path)
+            workbook.close()
+
+            self.assertEqual(ensure_pcs_tracker(config), path)
+            self.assertEqual(_tracker_contract_version(path), PCS_TRACKER_VERSION)
+            archives = list((reports / "Archive").rglob("PCS Live Tracker_pre_*.xlsx"))
+            self.assertEqual(len(archives), 1)
+            migrated = load_workbook(path, read_only=True, data_only=False)
+            try:
+                self.assertEqual(migrated["COACHING"]["L10"].value, "call-key-migrate")
+                self.assertEqual(migrated["COACHING"]["M10"].value, "call-id-migrate")
+                self.assertEqual(migrated["COACHING"]["N10"].value, "Completed")
+            finally:
+                migrated.close()
+
+    def test_coaching_queue_is_cached_and_uses_only_period_and_lob_filters(self):
+        with tempfile.TemporaryDirectory() as folder:
+            values = {header: None for header in PCS_INPUT_HEADERS}
+            values.update({
+                "Date": date(2026, 9, 8), "LOB": "RSA NL", "Team Leader": "TL 1",
+                "Agent": "Agent 1 [001]", "Agent ID": "001", "Call ID": "call-1",
+                "Score <= 3": 1, "Q1 Score": 2, "Coaching Key": "key-1",
+                "Priority": "HIGH", "Customer Comment": None,
+                "LOB List Flag": 1, "Team Leader List Flag": 1,
+                "Agent List Flag": 1,
+            })
+            row = tuple(values[header] for header in PCS_INPUT_HEADERS)
+            path = ensure_pcs_tracker(
+                SimpleNamespace(reports=Path(folder) / "Reports"), [row],
+            )
+            with zipfile.ZipFile(path) as archive:
+                worksheet_xml = b"".join(
+                    archive.read(name) for name in archive.namelist()
+                    if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+                )
+                self.assertNotIn(b"<v>None</v>", worksheet_xml)
+            cached = load_workbook(path, read_only=True, data_only=True)
+            try:
+                self.assertEqual(cached["COACHING"]["A10"].value, datetime(2026, 9, 8))
+                self.assertEqual(cached["COACHING"]["D10"].value, "Agent 1 [001]")
+                self.assertEqual(cached["COACHING"]["G10"].value, "call-1")
+                self.assertEqual(cached["COACHING"]["I10"].value, "key-1")
+                self.assertEqual(cached["COACHING"]["J10"].value, "Pending")
+            finally:
+                cached.close()
+            workbook = load_workbook(path, read_only=False, data_only=False)
+            try:
+                self.assertEqual(workbook["COACHING"]["A2"].value, "PERIOD")
+                self.assertEqual(workbook["COACHING"]["O2"].value, "LOB")
+                self.assertNotIn("PCS_COACH_TL", workbook.defined_names)
+                self.assertNotIn("PCS_COACH_Agent", workbook.defined_names)
+                self.assertEqual(len(workbook["COACHING"].data_validations.dataValidation), 3)
+                self.assertIn("AGGREGATE", workbook["COACHING"]["S10"].value)
+            finally:
+                workbook.close()
 
     def test_latest_report_is_the_fixed_permanent_tracker(self):
         with tempfile.TemporaryDirectory() as folder:

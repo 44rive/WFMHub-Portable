@@ -13,7 +13,8 @@ PCS Paste Data - ....xlsx Disposable clean input prepared by WFMHub
 PCS Live Tracker.xlsx contains OVERVIEW, COACHING, DATA and HELP. Clear the old
 tblData body and Paste Values for the newest clean rows into DATA!A5. The views recalculate
 automatically. There is no Power Query or Refresh All step, and WFMHub never
-replaces this permanent shared workbook.
+replaces this permanent shared workbook during normal prepares. OVERVIEW uses
+Period/LOB/Team Leader/Agent; compact COACHING uses only Period/LOB.
 
 Final Absenteeism.xlsx includes selector-driven agent/case and component views,
 exact reviewed intervals, and a permanent ACTIONS table. Use a personal

@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.4.0`
-Applies to: WFMHub `0.26.0` and later
+Context version: `1.4.1`
+Applies to: WFMHub `0.26.1` and later
 Last reviewed: `2026-09-09`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -139,14 +139,16 @@ BOARD keeps its exact header on Excel row 4. Users edit five blue ACTUAL fields,
 save, then import the same workbook. Decisions persist by immutable Gap ID.
 
 PCS has one permanent collaboration workbook and a disposable inbound file.
-`PCS Live Tracker.xlsx` is created once and never replaced by WFMHub. Each PCS
+`PCS Live Tracker.xlsx` is permanent during normal use. Each PCS
 prepare creates `PCS Paste Data - YYYY-MM-DD HHMMSS.xlsx`, containing one clean,
 FTE-scoped inbound call leg per row. The user replaces only the body of
 `DATA!tblData` in the permanent tracker. `OVERVIEW` and `COACHING` recalculate
-inside Excel from additive counters. The same Period, LOB, Team Leader and Agent
-selectors control both views. Coaching actions remain in `tblCoachingActions`
-inside the permanent tracker. There is no Power Query, Data Model, macro,
-external connection, Hub-driven refresh, or workbook replacement.
+inside Excel from additive counters. Overview uses Period, LOB, Team Leader and
+Agent; compact Coaching uses only Period and LOB. Coaching actions remain in
+`tblCoachingActions` inside the permanent tracker. There is no Power Query,
+Data Model, macro, external connection, Hub-driven refresh, spill formula or
+dynamic-array metadata. A versioned contract repair may rebuild the tracker
+once, archives the prior file, and carries its keyed actions forward.
 
 Every current report first screen uses the measured grid in
 `src/wfmhub/excel_layout.py`: 28 equal 52-pixel columns, four equal KPI cards,
@@ -204,9 +206,9 @@ Documentation:
 4. Add or update focused tests and the end-to-end fixture.
 5. Reopen every generated XLSX, inspect ZIP/XML for `#REF!` and unsupported
    formula metadata, and run the full suite.
-6. For PCS, verify populated initial caches, valid dynamic-array metadata, no
-   query connections, the clean paste schema, and byte preservation of the
-   permanent tracker during later prepares.
+6. For PCS, verify populated initial caches, absence of dynamic-array metadata,
+   no query connections, the clean paste schema, one-time migration/action
+   preservation, and byte preservation during later same-version prepares.
 7. Bump the snapshot/report contract only for an explicit design migration.
 8. Update this context and the design specification when architecture changes.
 
@@ -219,7 +221,8 @@ Documentation:
 - Never mark today’s unfinished shift as Early Leave.
 - Never average rates or invent a target.
 - Never rename stable sheets, tables, Agent ID, Gap ID or Coaching Key.
-- Never overwrite `PCS Live Tracker.xlsx` after its initial creation.
+- Never overwrite `PCS Live Tracker.xlsx` except for an explicit versioned
+  repair that archives the prior file and preserves keyed actions.
 - Never add Power Query, Excel automation, macros or a Data Model to PCS without an
   explicit product decision.
 - Never edit or relocate source extracts.

@@ -164,17 +164,18 @@ Normal use is intentionally manual and predictable:
 1. Open the newest PCS Paste Data file and copy its rows below the header.
 2. In `PCS Live Tracker.xlsx`, clear the old body of `DATA!tblData` and use
    **Paste Values** for the new rows in `A5`.
-3. Use Period, LOB, Team Leader and Agent on `OVERVIEW` or `COACHING`.
+3. Use Period, LOB, Team Leader and Agent on `OVERVIEW`; use only Period and
+   LOB on the compact `COACHING` workspace.
 
 `OVERVIEW` keeps the four KPI cards, LOB comparison/chart and filterable agent
-results together. `COACHING` keeps the filtered low-score calls, Call ID and the
-permanent editable coaching-action table together. The same four cascading
-selectors exist on both sheets.
+results together. `COACHING` automatically loads the matching low-score calls,
+Call ID and permanent editable coaching-action table using only two selectors.
 
 There is no Power Query, Data Model, macro, external connection, or Hub-driven
 Excel refresh. Excel recalculates the formulas and charts after the paste. The
-Hub never rewrites `PCS Live Tracker.xlsx`, so Quality and Team Leaders keep one
-shared file and their coaching actions survive future data updates.
+The Hub does not rewrite the tracker during normal prepares. A versioned repair
+may rebuild it once, archives the previous copy, and carries saved coaching
+actions forward. Quality and Team Leaders otherwise keep one shared file.
 
 ## Attendance decisions and shared absenteeism
 

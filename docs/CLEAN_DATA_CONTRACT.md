@@ -39,12 +39,12 @@ when StartEndTimes is missing.
 | `mart.forecast_hour` | Date/hour/mapped scope | Flash and Realisations comparison |
 | `mart.agent_pcs_day` | Agent/day | PCS result and participation |
 
-The stable PCS sharing contract is `Feed\PCS\PCS_AGENT_DAY_CURRENT.csv` at one
-row per Agent ID/day plus `PCS_COACHING_OPPORTUNITY_CURRENT.csv` at one row per
-low-score call. Feed schema 2 includes Agent Day Key, data-through and refresh
-timestamps, and rule/metric-catalog version plus SHA-256 lineage. Files are
-written to a partial path and renamed only when complete. Power Query may move
-these rows into Excel; it does not calculate the KPI.
+The current PCS collaboration input is `Reports\PCS Paste Data -
+YYYY-MM-DD HHMMSS.xlsx` at one FTE-scoped inbound call-leg per row. It carries
+the additive score and participation counters, exact Call ID/Coaching Key, and
+three 0/1 list flags used only to refresh LOB, Team Leader and Agent choices
+without spill formulas. The user pastes values into `PCS Live Tracker.xlsx >
+DATA!tblData`; there is no PCS Power Query feed.
 
 Legacy-named exports remain callable so existing jobs do not break.
 `yesterday_gap_actions` covers the entire selected completed period, not only

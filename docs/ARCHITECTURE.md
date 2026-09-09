@@ -159,8 +159,10 @@ YYYY-MM-DD HHMMSS.xlsx`. The user replaces the body of `DATA!tblData` in
 `PCS Live Tracker.xlsx`. Excel calculates each ratio from those additive sums.
 `OVERVIEW` contains the LOB comparison/chart and filtered agent list;
 `COACHING` contains the filtered low-score queue and permanent action table.
-Both use cascading Period/LOB/Team/Agent dropdowns. There is no Power Query,
-Excel automation, Data Model, ODBC driver, macro, or external connection.
+Overview uses Period/LOB/Team/Agent; Coaching intentionally uses only Period and
+LOB. Fixed classic formulas and Hub-prepared list flags replace spill arrays.
+There is no Power Query, Excel automation, Data Model, ODBC driver, macro,
+dynamic-array metadata, or external connection.
 
 Final Absenteeism uses the same collaboration boundary. Power Query may replace
 `tblAbsenceData`, `tblActionQueue`, and `tblActivityDetail` from stable CSVs;

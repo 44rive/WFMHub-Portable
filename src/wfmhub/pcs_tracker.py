@@ -2,15 +2,19 @@
 
 The Hub prepares one clean call-leg table.  Users paste that table into the
 permanent tracker's DATA sheet; Excel formulas, charts and coaching views then
-recalculate locally.  WFMHub creates the tracker once and never overwrites it.
+recalculate locally. WFMHub preserves the tracker after any explicit,
+action-preserving contract migration.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Sequence
+from xml.etree import ElementTree
+from zipfile import BadZipFile, ZipFile
 
 from openpyxl import load_workbook
 
@@ -34,7 +38,7 @@ from .reports import ExcelReport
 PCS_TRACKER_FILENAME = "PCS Live Tracker.xlsx"
 PCS_PASTE_PREFIX = "PCS Paste Data - "
 PCS_PASTE_GLOB = f"{PCS_PASTE_PREFIX}*.xlsx"
-PCS_TRACKER_VERSION = "2026.10.1"
+PCS_TRACKER_VERSION = "2026.10.2"
 
 PCS_INPUT_HEADERS = (
     "Date", "LOB", "Team Leader", "Agent", "Agent ID", "Language",
@@ -42,6 +46,7 @@ PCS_INPUT_HEADERS = (
     "Q1 Nonblank", "Valid Q1", "Q1 Score Sum", "Score <= 3",
     "Score > 3", "Invalid Q1", "Q1 Score", "Raw Q1",
     "Customer Comment", "Coaching Key", "Priority",
+    "LOB List Flag", "Team Leader List Flag", "Agent List Flag",
 )
 COACHING_ACTION_HEADERS = (
     "Coaching Key", "Call ID", "Coaching Status", "Coach",
@@ -86,6 +91,23 @@ def _as_date(value: Any) -> date | None:
         return date.fromisoformat(str(value)[:10])
     except ValueError:
         return None
+
+
+def _excel_formula_cache(value: Any) -> Any:
+    """Return an OOXML-safe cached scalar for an Excel formula cell."""
+
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        day = (value.date() - date(1899, 12, 30)).days
+        seconds = (
+            value.hour * 3600 + value.minute * 60 + value.second
+            + value.microsecond / 1_000_000
+        )
+        return day + seconds / 86_400
+    if isinstance(value, date):
+        return (value - date(1899, 12, 30)).days
+    return value
 
 
 def _month_shift(value: date, months: int) -> date:
@@ -165,7 +187,28 @@ def _pcs_input_rows(
             start, end,
         ],
     )
-    return [tuple(row) for row in cursor.fetchall()]
+    output: list[tuple[Any, ...]] = []
+    seen_lobs: set[str] = set()
+    seen_leaders: set[str] = set()
+    seen_agents: set[str] = set()
+    for raw_row in cursor.fetchall():
+        row = tuple(raw_row)
+        lob = str(row[1] or "").strip()
+        leader = str(row[2] or "").strip()
+        agent = str(row[3] or "").strip()
+        flags = (
+            int(bool(lob) and lob not in seen_lobs),
+            int(bool(leader) and leader not in seen_leaders),
+            int(bool(agent) and agent not in seen_agents),
+        )
+        if lob:
+            seen_lobs.add(lob)
+        if leader:
+            seen_leaders.add(leader)
+        if agent:
+            seen_agents.add(agent)
+        output.append((*row, *flags))
+    return output
 
 
 def _read_actions_from(path: Path) -> list[dict[str, Any]]:
@@ -179,14 +222,21 @@ def _read_actions_from(path: Path) -> list[dict[str, Any]]:
         if "COACHING" not in workbook.sheetnames:
             return []
         sheet = workbook["COACHING"]
-        headers = {
-            str(cell.value or "").strip(): cell.column
-            for cell in sheet[4] if cell.value not in (None, "")
-        }
-        if "Coaching Key" not in headers:
+        header_row = None
+        headers: dict[str, int] = {}
+        for row_number in range(1, min(30, sheet.max_row) + 1):
+            candidate = {
+                str(cell.value or "").strip(): cell.column
+                for cell in sheet[row_number] if cell.value not in (None, "")
+            }
+            if {"Coaching Key", "Coaching Status", "Coach"} <= set(candidate):
+                header_row = row_number
+                headers = candidate
+                break
+        if header_row is None:
             return []
         output: list[dict[str, Any]] = []
-        for values in sheet.iter_rows(min_row=5, values_only=True):
+        for values in sheet.iter_rows(min_row=header_row + 1, values_only=True):
             key_column = headers["Coaching Key"]
             key = values[key_column - 1] if key_column <= len(values) else None
             if not str(key or "").strip():
@@ -199,6 +249,22 @@ def _read_actions_from(path: Path) -> list[dict[str, Any]]:
         return output
     finally:
         workbook.close()
+
+
+def _tracker_contract_version(path: Path) -> str | None:
+    """Read the tracker contract without asking Excel or openpyxl to repair it."""
+
+    try:
+        with ZipFile(path) as archive:
+            root = ElementTree.fromstring(archive.read("docProps/custom.xml"))
+    except (BadZipFile, KeyError, OSError, ElementTree.ParseError):
+        return None
+    for prop in root:
+        if prop.attrib.get("name") != "WFMHub PCS Live Tracker":
+            continue
+        for child in prop:
+            return child.text
+    return None
 
 
 def _legacy_actions(config: Config) -> list[tuple[Any, ...]]:
@@ -224,7 +290,8 @@ def _dynamic_name(workbook, name: str, column: str, maximum_row: int) -> None:
     workbook.define_name(
         name,
         f"='_LISTS'!${column}$2:INDEX('_LISTS'!${column}$2:${column}${maximum_row},"
-        f"MAX(1,COUNTA('_LISTS'!${column}$2:${column}${maximum_row})))",
+        f"MAX(1,LOOKUP(2,1/('_LISTS'!${column}$2:${column}${maximum_row}<>\"\"),"
+        f"ROW('_LISTS'!${column}$2:${column}${maximum_row}))-ROW('_LISTS'!${column}$2)+1))",
     )
 
 
@@ -262,43 +329,65 @@ def _period_bounds_formula(period_ref: str, latest_ref: str) -> tuple[str, str, 
     return start, end, prior_start, prior_end
 
 
-def _add_lists(report: ExcelReport) -> None:
+def _add_lists(report: ExcelReport, rows: Sequence[Sequence[Any]]) -> None:
     workbook = report.workbook
     sheet = workbook.add_worksheet("_LISTS")
+    indexes = {header: index for index, header in enumerate(PCS_INPUT_HEADERS)}
+    lobs = list(dict.fromkeys(
+        str(row[indexes["LOB"]]).strip() for row in rows
+        if str(row[indexes["LOB"]] or "").strip()
+    ))
+    leaders = list(dict.fromkeys(
+        str(row[indexes["Team Leader"]]).strip() for row in rows
+        if str(row[indexes["Team Leader"]] or "").strip()
+    ))
+    agent_dimension = list(dict.fromkeys(
+        (
+            str(row[indexes["Agent"]]).strip(),
+            str(row[indexes["LOB"]] or "").strip(),
+            str(row[indexes["Team Leader"]] or "").strip(),
+        )
+        for row in rows if str(row[indexes["Agent"]] or "").strip()
+    ))
+    sheet.write_row("A1", ("LOB", "Team Leader", "Agent", "Agent LOB", "Agent Team Leader"))
     sheet.write("A2", "All")
-    sheet.write_dynamic_array_formula(
-        "A3", '=SORT(UNIQUE(FILTER(tblData[LOB],tblData[LOB]<>"","")))',
-    )
     sheet.write("B2", "All")
-    sheet.write_dynamic_array_formula(
-        "B3",
-        '=SORT(UNIQUE(FILTER(tblData[Team Leader],(tblData[Team Leader]<>"")*'
-        '(tblData[Date]>=PCS_OV_From)*(tblData[Date]<=PCS_OV_To)*'
-        'IF(OVERVIEW!$J$2="All",1,--(tblData[LOB]=OVERVIEW!$J$2)),"")))',
-    )
     sheet.write("C2", "All")
-    sheet.write_dynamic_array_formula(
-        "C3",
-        '=SORT(UNIQUE(FILTER(tblData[Agent],(tblData[Agent]<>"")*'
-        '(tblData[Date]>=PCS_OV_From)*(tblData[Date]<=PCS_OV_To)*'
-        'IF(OVERVIEW!$J$2="All",1,--(tblData[LOB]=OVERVIEW!$J$2))*'
-        'IF(OVERVIEW!$Q$2="All",1,--(tblData[Team Leader]=OVERVIEW!$Q$2)),"")))',
-    )
-    sheet.write("D2", "All")
-    sheet.write_dynamic_array_formula(
-        "D3",
-        '=SORT(UNIQUE(FILTER(tblData[Team Leader],(tblData[Team Leader]<>"")*'
-        '(tblData[Date]>=PCS_COACH_From)*(tblData[Date]<=PCS_COACH_To)*'
-        'IF(COACHING!$J$2="All",1,--(tblData[LOB]=COACHING!$J$2)),"")))',
-    )
-    sheet.write("E2", "All")
-    sheet.write_dynamic_array_formula(
-        "E3",
-        '=SORT(UNIQUE(FILTER(tblData[Agent],(tblData[Agent]<>"")*'
-        '(tblData[Date]>=PCS_COACH_From)*(tblData[Date]<=PCS_COACH_To)*'
-        'IF(COACHING!$J$2="All",1,--(tblData[LOB]=COACHING!$J$2))*'
-        'IF(COACHING!$Q$2="All",1,--(tblData[Team Leader]=COACHING!$Q$2)),"")))',
-    )
+    capacities = {
+        "LOB": max(20, len(lobs) + 10),
+        "Team Leader": max(100, len(leaders) + 25),
+        "Agent": max(500, len(agent_dimension) + 100),
+    }
+
+    def unique_formula(header: str, flag_header: str, rank: int) -> str:
+        position = (
+            f"ROW(tblData[{header}])-ROW(INDEX(tblData[{header}],1,1))+1"
+        )
+        return (
+            f'=IFERROR(INDEX(tblData[{header}],AGGREGATE(15,6,{position}/'
+            f'(tblData[{flag_header}]=1),{rank})),"")'
+        )
+
+    for rank in range(1, capacities["LOB"] + 1):
+        sheet.write_formula(1 + rank, 0, unique_formula("LOB", "LOB List Flag", rank), None,
+                            lobs[rank - 1] if rank <= len(lobs) else "")
+    for rank in range(1, capacities["Team Leader"] + 1):
+        sheet.write_formula(1 + rank, 1, unique_formula("Team Leader", "Team Leader List Flag", rank), None,
+                            leaders[rank - 1] if rank <= len(leaders) else "")
+    for rank in range(1, capacities["Agent"] + 1):
+        cached = agent_dimension[rank - 1] if rank <= len(agent_dimension) else ("", "", "")
+        sheet.write_formula(1 + rank, 2, unique_formula("Agent", "Agent List Flag", rank), None, cached[0])
+        excel_row = rank + 2
+        sheet.write_formula(
+            1 + rank, 3,
+            f'=IF($C${excel_row}="","",INDEX(tblData[LOB],MATCH($C${excel_row},tblData[Agent],0)))',
+            None, cached[1],
+        )
+        sheet.write_formula(
+            1 + rank, 4,
+            f'=IF($C${excel_row}="","",INDEX(tblData[Team Leader],MATCH($C${excel_row},tblData[Agent],0)))',
+            None, cached[2],
+        )
     for row, value in enumerate(PERIODS, 1):
         sheet.write(row, 7, value)
     sheet.write_formula("J2", "=IFERROR(MAX(tblData[Date]),TODAY())", report.date)
@@ -310,11 +399,9 @@ def _add_lists(report: ExcelReport) -> None:
         sheet.write_formula(3, column, f"={formula}", report.date)
 
     workbook.define_name("PCS_PERIOD_LIST", "='_LISTS'!$H$2:$H$6")
-    _dynamic_name(workbook, "PCS_LOB_LIST", "A", 100)
-    _dynamic_name(workbook, "PCS_OV_TL_LIST", "B", 500)
-    _dynamic_name(workbook, "PCS_OV_AGENT_LIST", "C", 5000)
-    _dynamic_name(workbook, "PCS_COACH_TL_LIST", "D", 500)
-    _dynamic_name(workbook, "PCS_COACH_AGENT_LIST", "E", 5000)
+    _dynamic_name(workbook, "PCS_LOB_LIST", "A", capacities["LOB"] + 2)
+    _dynamic_name(workbook, "PCS_OV_TL_LIST", "B", capacities["Team Leader"] + 2)
+    _dynamic_name(workbook, "PCS_OV_AGENT_LIST", "C", capacities["Agent"] + 2)
     workbook.define_name("PCS_Latest", "='_LISTS'!$J$2")
     workbook.define_name("PCS_OV_From", "='_LISTS'!$J$3")
     workbook.define_name("PCS_OV_To", "='_LISTS'!$K$3")
@@ -401,7 +488,8 @@ def _add_overview(report: ExcelReport, rows: Sequence[Sequence[Any]]) -> None:
     workbook.define_name("PCS_OV_TL", "='OVERVIEW'!$Q$2")
     workbook.define_name("PCS_OV_Agent", "='OVERVIEW'!$X$2")
 
-    latest = max((_as_date(row[0]) for row in rows), default=None) or date.today()
+    available_dates = [value for row in rows if (value := _as_date(row[0])) is not None]
+    latest = max(available_dates, default=date.today())
     current_from, current_to, prior_from, prior_to = _initial_periods(latest)
     current_cache = _metric_cache(rows, current_from, current_to)
     prior_cache = _metric_cache(rows, prior_from, prior_to)
@@ -479,7 +567,12 @@ def _add_overview(report: ExcelReport, rows: Sequence[Sequence[Any]]) -> None:
         agent_cache = agents[offset] if offset < len(agents) else ""
         formula = (
             f'=IF(PCS_OV_Agent<>"All",IF(ROW(A{offset + 1})=1,PCS_OV_Agent,""),'
-            f'IFERROR(INDEX(_LISTS!$C$3:$C$5000,{offset + 1}),""))'
+            'IFERROR(INDEX(_LISTS!$C$3:$C$5000,'
+            'AGGREGATE(15,6,(ROW(_LISTS!$C$3:$C$5000)-ROW(_LISTS!$C$3)+1)/'
+            '((_LISTS!$C$3:$C$5000<>"")*'
+            'IF(PCS_OV_LOB="All",1,--(_LISTS!$D$3:$D$5000=PCS_OV_LOB))*'
+            'IF(PCS_OV_TL="All",1,--(_LISTS!$E$3:$E$5000=PCS_OV_TL)),'
+            f'{offset + 1})),""))'
         )
         _write_merged_formula(ws, row_index, 0, 3, formula, formats.table_text, agent_cache)
         agent_ref = f"$A${excel_row}"
@@ -505,6 +598,7 @@ def _add_overview(report: ExcelReport, rows: Sequence[Sequence[Any]]) -> None:
 def _add_coaching(
     report: ExcelReport,
     actions: Sequence[Sequence[Any]],
+    rows: Sequence[Sequence[Any]],
 ) -> None:
     workbook = report.workbook
     ws = workbook.add_worksheet("COACHING")
@@ -513,59 +607,112 @@ def _add_coaching(
     ws.set_tab_color(COLORS["gold"])
     ws.freeze_panes(9, 0)
     write_v2_header(ws, formats, "PCS COACHING", status="LIVE ACTION LOG", status_kind="LIVE")
-    write_v2_filters(ws, formats, (
-        ("Period", "Current MTD", {"validate": "list", "source": "=PCS_PERIOD_LIST"}),
-        ("LOB", "All", {"validate": "list", "source": "=PCS_LOB_LIST"}),
-        ("Team Leader", "All", {"validate": "list", "source": "=PCS_COACH_TL_LIST"}),
-        ("Agent", "All", {"validate": "list", "source": "=PCS_COACH_AGENT_LIST"}),
-    ))
+    ws.merge_range(1, 0, 1, 1, "PERIOD", formats.filter_label)
+    ws.merge_range(1, 2, 1, 13, "Current MTD", formats.filter_value)
+    ws.data_validation(1, 2, 1, 2, {
+        "validate": "list", "source": "=PCS_PERIOD_LIST",
+    })
+    ws.merge_range(1, 14, 1, 15, "LOB", formats.filter_label)
+    ws.merge_range(1, 16, 1, 27, "All", formats.filter_value)
+    ws.data_validation(1, 16, 1, 16, {
+        "validate": "list", "source": "=PCS_LOB_LIST",
+    })
     workbook.define_name("PCS_COACH_Period", "='COACHING'!$C$2")
-    workbook.define_name("PCS_COACH_LOB", "='COACHING'!$J$2")
-    workbook.define_name("PCS_COACH_TL", "='COACHING'!$Q$2")
-    workbook.define_name("PCS_COACH_Agent", "='COACHING'!$X$2")
-    opportunities = _sumifs("Score <= 3", "PCS_COACH_From", "PCS_COACH_To", lob_ref="PCS_COACH_LOB", leader_ref="PCS_COACH_TL", agent_ref="PCS_COACH_Agent")
+    workbook.define_name("PCS_COACH_LOB", "='COACHING'!$Q$2")
+    opportunities = _sumifs(
+        "Score <= 3", "PCS_COACH_From", "PCS_COACH_To",
+        lob_ref="PCS_COACH_LOB", leader_ref='"All"', agent_ref='"All"',
+    )
     high = (
         'COUNTIFS(tblData[Date],">="&PCS_COACH_From,tblData[Date],"<="&PCS_COACH_To,'
         'tblData[LOB],IF(PCS_COACH_LOB="All","*",PCS_COACH_LOB),'
-        'tblData[Team Leader],IF(PCS_COACH_TL="All","*",PCS_COACH_TL),'
-        'tblData[Agent],IF(PCS_COACH_Agent="All","*",PCS_COACH_Agent),tblData[Priority],"HIGH")'
+        'tblData[Priority],"HIGH")'
+    )
+    indexes = {header: index for index, header in enumerate(PCS_INPUT_HEADERS)}
+    available_dates = [
+        value for row in rows
+        if (value := _as_date(row[indexes["Date"]])) is not None
+    ]
+    latest = max(available_dates, default=date.today())
+    current_from, current_to, _prior_from, _prior_to = _initial_periods(latest)
+    initial_matches = [
+        (source_index, row) for source_index, row in enumerate(rows, 1)
+        if (_as_date(row[indexes["Date"]]) is not None
+            and current_from <= _as_date(row[indexes["Date"]]) <= current_to
+            and int(row[indexes["Score <= 3"]] or 0) == 1)
+    ]
+    actions_by_key = {
+        str(row[0]): tuple(row) for row in actions if str(row[0] or "").strip()
+    }
+    completed_actions = sum(
+        1 for row in actions_by_key.values()
+        if str(row[2] or "").strip().casefold() == "completed"
     )
     write_v2_kpis(ws, formats, (
-        ("Opportunities", f"={opportunities}", "integer", None),
-        ("High priority", f"={high}", "integer", None),
-        ("Actions logged", '=COUNTIF(tblCoachingActions[Coaching Key],"<>")', "integer", None),
-        ("Completed", '=COUNTIF(tblCoachingActions[Coaching Status],"Completed")', "integer", None),
+        ("Opportunities", f"={opportunities}", "integer", len(initial_matches)),
+        ("High priority", f"={high}", "integer", sum(1 for _, row in initial_matches if row[indexes["Priority"]] == "HIGH")),
+        ("All actions logged", '=COUNTIF(tblCoachingActions[Coaching Key],"<>")', "integer", len(actions_by_key)),
+        ("All completed", '=COUNTIF(tblCoachingActions[Coaching Status],"Completed")', "integer", completed_actions),
     ))
     ws.merge_range(7, 0, 7, 9, "FILTERED COACHING QUEUE", formats.section)
     ws.merge_range(7, 11, 7, 17, "EDITABLE ACTION LOG", formats.section)
-    queue_headers = ("DATE", "LOB", "TEAM LEADER", "AGENT", "Q1", "PRIORITY", "STATUS", "CALL ID", "CUSTOMER COMMENT", "COACHING KEY")
+    queue_headers = ("DATE", "LOB", "TEAM LEADER", "AGENT", "Q1", "PRIORITY", "CALL ID", "CUSTOMER COMMENT", "COACHING KEY", "STATUS")
     for column, header in enumerate(queue_headers):
         ws.write(8, column, header, formats.table_header)
-    queue_formula = (
-        '=LET(m,(tblData[Date]>=PCS_COACH_From)*(tblData[Date]<=PCS_COACH_To)*'
-        '(tblData[Score <= 3]=1)*IF(PCS_COACH_LOB="All",1,--(tblData[LOB]=PCS_COACH_LOB))*'
-        'IF(PCS_COACH_TL="All",1,--(tblData[Team Leader]=PCS_COACH_TL))*'
-        'IF(PCS_COACH_Agent="All",1,--(tblData[Agent]=PCS_COACH_Agent)),'
-        'r,FILTER(CHOOSECOLS(tblData,1,2,3,4,17,21,7,19,20),m,""),'
-        'IFERROR(HSTACK(CHOOSECOLS(r,1,2,3,4,5,6),'
-        'XLOOKUP(CHOOSECOLS(r,9),tblCoachingActions[Coaching Key],'
-        'tblCoachingActions[Coaching Status],"Pending"),CHOOSECOLS(r,7,8,9)),""))'
+    queue_sources = (
+        ("Date", report.date), ("LOB", formats.table_text),
+        ("Team Leader", formats.table_text), ("Agent", formats.table_text),
+        ("Q1 Score", formats.table_decimal), ("Priority", formats.table_text),
+        ("Call ID", formats.table_text), ("Customer Comment", formats.table_text),
+        ("Coaching Key", formats.table_text),
     )
-    ws.write_dynamic_array_formula(9, 0, 9, 0, queue_formula, report.date)
+    for offset in range(250):
+        row_index = 9 + offset
+        excel_row = row_index + 1
+        cached_index, cached_row = initial_matches[offset] if offset < len(initial_matches) else ("", None)
+        helper_formula = (
+            '=IFERROR(AGGREGATE(15,6,(ROW(tblData[Date])-'
+            'ROW(INDEX(tblData[Date],1,1))+1)/'
+            '((tblData[Date]>=PCS_COACH_From)*(tblData[Date]<=PCS_COACH_To)*'
+            '(tblData[Score <= 3]=1)*'
+            'IF(PCS_COACH_LOB="All",1,--(tblData[LOB]=PCS_COACH_LOB))),'
+            f'{offset + 1}),"")'
+        )
+        ws.write_formula(row_index, 18, helper_formula, None, cached_index)
+        for column, (source_header, fmt) in enumerate(queue_sources):
+            cached = "" if cached_row is None else _excel_formula_cache(
+                cached_row[indexes[source_header]],
+            )
+            ws.write_formula(
+                row_index, column,
+                f'=IF($S${excel_row}="","",INDEX(tblData[{source_header}],$S${excel_row}))',
+                fmt, cached,
+            )
+        key_cache = "" if cached_row is None else str(cached_row[indexes["Coaching Key"]] or "")
+        action = actions_by_key.get(key_cache)
+        status_cache = "" if not key_cache else str(action[2] or "Pending") if action else "Pending"
+        ws.write_formula(
+            row_index, 9,
+            f'=IF($I${excel_row}="","",IFERROR(INDEX(tblCoachingActions[Coaching Status],'
+            f'MATCH($I${excel_row},tblCoachingActions[Coaching Key],0)),"Pending"))',
+            formats.table_text, status_cache,
+        )
+        ws.set_row_pixels(row_index, 23)
+    ws.set_column(18, 18, None, None, {"hidden": True})
     ws.set_column(0, 0, 12, report.date)
     ws.set_column(1, 1, 14)
     ws.set_column(2, 2, 18)
     ws.set_column(3, 3, 28)
     ws.set_column(4, 4, 12, report.decimal)
     ws.set_column(5, 6, 12)
-    ws.set_column(7, 7, 22)
-    ws.set_column(8, 8, 36)
-    ws.set_column(9, 9, 34)
+    ws.set_column(7, 7, 36)
+    ws.set_column(8, 8, 34)
+    ws.set_column(9, 9, 14)
 
     padded_actions = [tuple(row) for row in actions]
     padded_actions.extend(
         tuple(None for _ in COACHING_ACTION_HEADERS)
-        for _ in range(max(100, 250 - len(padded_actions)))
+        for _ in range(max(25, 100 - len(padded_actions)))
     )
     for column, header in enumerate(COACHING_ACTION_HEADERS, 11):
         ws.write(8, column, header, report.header)
@@ -595,15 +742,16 @@ def _add_coaching(
 
 def _add_help(report: ExcelReport) -> None:
     report.add_table_sheet(
-        "HELP", "PCS — FOUR SIMPLE STEPS",
-        "The tracker is permanent. WFMHub prepares clean data; it never replaces this workbook.",
+        "HELP", "PCS — SIMPLE UPDATE",
+        "The tracker is permanent. Only a versioned repair can rebuild it, and saved coaching actions are carried forward.",
         ["Step", "Action", "Where", "Important"],
         [
             (1, "Run Prepare latest PCS data", "WFMHub", "This creates a new PCS Paste Data file"),
             (2, "Open the paste file and copy DATA rows below the header", "PCS Paste Data", "Do not copy the title or header row"),
             (3, "Clear the old tblData body and paste values into cell A5", "This tracker > DATA", "Use Paste Values; keep the table headers unchanged"),
-            (4, "Use Period, LOB, Team Leader and Agent from left to right", "OVERVIEW / COACHING", "Cards, chart and lists recalculate automatically"),
-            (5, "Paste Coaching Key and Call ID into the blue action log", "COACHING", "Complete status, coach, dates and comment; this remains in the shared file"),
+            (4, "Use Period, LOB, Team Leader and Agent", "OVERVIEW", "Cards, chart and agent list recalculate automatically"),
+            (5, "Use Period and LOB", "COACHING", "The exact low-score calls load automatically"),
+            (6, "Paste Coaching Key and Call ID into the blue action log", "COACHING", "Complete status, coach, dates and comment; this remains in the shared file"),
         ],
     )
 
@@ -628,11 +776,17 @@ def ensure_pcs_tracker(
     config: Config,
     initial_rows: Sequence[Sequence[Any]] = (),
 ) -> Path:
-    """Create the collaborative tracker once; never replace user actions."""
+    """Create or explicitly migrate the tracker while preserving user actions."""
 
     target = tracker_path(config)
-    if target.is_file():
+    existing_version = _tracker_contract_version(target) if target.is_file() else None
+    if existing_version == PCS_TRACKER_VERSION:
         return target
+    migrated_records = _read_actions_from(target) if target.is_file() else []
+    migrated_actions = [
+        tuple(record.get(header) for header in COACHING_ACTION_HEADERS)
+        for record in migrated_records
+    ]
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(f"{target.stem}.partial{target.suffix}")
     generated = datetime.now()
@@ -647,7 +801,7 @@ def ensure_pcs_tracker(
         # Sheet creation order is the user-facing order. Excel formulas can
         # safely refer to tables and defined names that are written later.
         _add_overview(report, data_rows)
-        _add_coaching(report, _legacy_actions(config))
+        _add_coaching(report, migrated_actions or _legacy_actions(config), data_rows)
         data_sheet = report.add_table_sheet(
             "DATA", "PCS DATA — PASTE HERE",
             "Clear the old table body, then paste VALUES from the newest clean PCS file into A5. Keep headers unchanged.",
@@ -656,10 +810,25 @@ def ensure_pcs_tracker(
         )
         data_sheet.set_tab_color(COLORS["blue"])
         _add_help(report)
-        _add_lists(report)
+        _add_lists(report, data_rows)
         _add_audit(report, generated)
         report.close()
+        if target.is_file():
+            archive_dir = target.parent / "Archive" / generated.strftime("%Y-%m-%d")
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archived = archive_dir / (
+                f"{target.stem}_pre_{PCS_TRACKER_VERSION.replace('.', '_')}_"
+                f"{generated:%Y%m%d_%H%M%S_%f}{target.suffix}"
+            )
+            shutil.copy2(target, archived)
         partial.replace(target)
+    except PermissionError as exc:
+        partial.unlink(missing_ok=True)
+        raise RuntimeError(
+            "Close PCS Live Tracker.xlsx, wait for OneDrive to finish syncing, "
+            "then prepare PCS again. This version must repair the tracker once; "
+            "your existing workbook was not deleted."
+        ) from exc
     except Exception:
         partial.unlink(missing_ok=True)
         raise
@@ -684,7 +853,7 @@ def build_pcs_paste_workbook(
     try:
         sheet = report.add_table_sheet(
             "DATA", "PCS CLEAN PASTE DATA",
-            f"Copy rows A5:U{len(rows) + 4} and paste them into {PCS_TRACKER_FILENAME} > DATA!A5.",
+            f"Copy rows A5:X{len(rows) + 4} and paste values into {PCS_TRACKER_FILENAME} > DATA!A5.",
             list(PCS_INPUT_HEADERS), rows,
         )
         sheet.set_tab_color(COLORS["blue"])

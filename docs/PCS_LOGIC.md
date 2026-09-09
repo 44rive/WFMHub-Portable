@@ -41,7 +41,8 @@ external link:
 - `PCS Live Tracker.xlsx > COACHING` exposes the exact filtered calls;
 - a reviewer copies Coaching Key and Call ID into the blue action table on that
   same sheet, then fills Status, Coach, Coaching Date, Due Date and Comment;
-- WFMHub creates the tracker only once and never replaces the human-owned file;
+- normal prepares never replace the tracker; an explicit contract repair
+  archives the prior file and carries keyed actions into its replacement;
 - later DATA pastes update the queue while saved keyed actions remain in place;
 - coaching decisions are never imported into SQLite.
 
@@ -57,9 +58,10 @@ timestamped `PCS Paste Data` workbook. The user replaces the body of
 `PCS Live Tracker.xlsx > DATA!tblData`; Excel then calculates cards, LOB and
 agent results, and the coaching queue from sums of the additive counters. The
 tracker has no Power Query, Data Model, macro, external connection or Hub-driven
-refresh. Microsoft 365 dynamic formulas provide the cascading lists and filtered
-views; the permanent coaching-action table is never a formula target or replaced
-by the paste.
+refresh. Fixed classic formulas use the Hub-prepared list flags to populate the
+selectors and filtered views. There are no spill formulas or dynamic-array
+metadata. The permanent coaching-action table is never a formula target or
+replaced by the paste.
 
 ## Reference reconciliation
 

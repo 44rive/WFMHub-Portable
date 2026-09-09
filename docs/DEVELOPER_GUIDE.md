@@ -122,22 +122,23 @@ remain compatibility API keys, not current product contracts.
 
 Most current products publish fixed names directly into `Reports`; the previous
 copy is archived only after a complete replacement workbook exists. PCS is the
-exception: each prepare writes a timestamped paste-data file but never replaces
-the permanent tracker. A builder must
-create the exact ordered sheets declared in `default_reports.toml` and keep
+exception: each normal prepare writes a timestamped paste-data file without
+replacing the permanent tracker. A builder must create the exact ordered sheets
+declared in `default_reports.toml` and keep
 `_AUDIT` hidden. Do not add raw source extracts to workbooks.
 
 `pcs_tracker.py` is the PCS lifecycle authority. It generates one clean,
-FTE-scoped call-leg paste file and creates `PCS Live Tracker.xlsx` only when
-that file does not exist. The tracker owns both its input table and permanent
-coaching actions. Do not add Power Query, Excel automation, a Data Model, ODBC,
-macros, or external connections to this path.
+FTE-scoped call-leg paste file and creates `PCS Live Tracker.xlsx` when missing.
+A changed tracker contract may rebuild it only after reading its keyed actions
+and archiving the prior workbook. Same-version prepares must preserve its bytes.
+Do not add Power Query, Excel automation, a Data Model, ODBC, macros, spill
+formulas, dynamic-array metadata, or external connections to this path.
 
 PCS schema or lifecycle changes require a snapshot-contract increment,
 documentation, an OOXML integrity test, and a preservation test proving that a
 normal prepare does not alter an existing tracker. Test the clean paste schema,
-dynamic-array metadata and absence of connections. All presentation grains
-calculate ratios from summed counters, never averaged daily ratios.
+absence of dynamic-array metadata and absence of connections. All presentation
+grains calculate ratios from summed counters, never averaged daily ratios.
 
 Call-by-call uses a stable deterministic leg key. Full-history extracts may
 overlap, so `core.clean_call_leg` chooses the newest active row at that key.

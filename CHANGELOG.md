@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.26.1 — 2026-09-09
+
+- Removes every PCS spill formula, `_xlfn` function and dynamic-array metadata
+  after Excel repaired the Coaching worksheet and left its queue blank.
+- Rebuilds the Coaching queue with fixed classic `AGGREGATE`/`INDEX` formulas,
+  populated caches and only two controls: Period and LOB.
+- Adds lightweight Hub-prepared list flags to the clean paste contract so LOB,
+  Team Leader and Agent lists update after a paste without expensive text-array
+  matching.
+- Adds a one-time `2026.10.2` tracker migration: the previous workbook is
+  archived, keyed coaching actions are carried forward, and later normal
+  prepares leave the repaired tracker byte-for-byte unchanged.
+- Advances the visual contract to `WFMHUB-DESIGN 3.0.1`.
+
 ## 0.26.0 — 2026-09-09
 
 - Replaces timestamped PCS reports with one permanent collaborative

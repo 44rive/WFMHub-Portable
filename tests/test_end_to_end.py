@@ -1124,8 +1124,9 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(len(focused_pcs_book["OVERVIEW"].data_validations.dataValidation), 4)
                 self.assertIn("PCS_OV_Period", focused_pcs_book.defined_names)
                 self.assertIn("PCS_OV_TL_LIST", focused_pcs_book.defined_names)
-                self.assertIn("PCS_COACH_AGENT_LIST", focused_pcs_book.defined_names)
-                self.assertEqual(len(focused_pcs_book["COACHING"].data_validations.dataValidation), 5)
+                self.assertNotIn("PCS_COACH_TL", focused_pcs_book.defined_names)
+                self.assertNotIn("PCS_COACH_Agent", focused_pcs_book.defined_names)
+                self.assertEqual(len(focused_pcs_book["COACHING"].data_validations.dataValidation), 3)
                 self.assertIn("tblData", focused_pcs_book["DATA"].tables)
                 self.assertIn("tblCoachingActions", focused_pcs_book["COACHING"].tables)
                 self.assertEqual(
@@ -1137,6 +1138,8 @@ class EndToEndTests(unittest.TestCase):
                     for column in range(12, 19)
                 ]
                 self.assertEqual(coaching_headers[:2], ["Coaching Key", "Call ID"])
+                self.assertIn("AGGREGATE", focused_pcs_book["COACHING"]["S10"].value)
+                self.assertNotIn("FILTER", focused_pcs_book["COACHING"]["A10"].value)
                 pcs_table_headers = [cell.value for cell in focused_pcs_book["DATA"][4]]
                 coaching_values = {
                     row[0]: row for row in focused_pcs_book["COACHING"].iter_rows(
@@ -1162,6 +1165,7 @@ class EndToEndTests(unittest.TestCase):
                 focused_pcs_book.close()
             with zipfile.ZipFile(focused_pcs_report) as archive:
                 self.assertNotIn("xl/connections.xml", archive.namelist())
+                self.assertNotIn("xl/metadata.xml", archive.namelist())
                 self.assertFalse(any(
                     name.startswith("xl/queryTables/") for name in archive.namelist()
                 ))
@@ -1172,10 +1176,13 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertNotIn(b"<v>None</v>", worksheet_xml)
                 self.assertNotIn(b"#REF!", worksheet_xml)
+                self.assertNotIn(b"_xlfn", worksheet_xml)
+                self.assertNotIn(b"FILTER(", worksheet_xml)
+                self.assertNotIn(b"HSTACK(", worksheet_xml)
                 overview_xml = archive.read("xl/worksheets/sheet1.xml")
                 self.assertIn(b"<f>", overview_xml)
                 self.assertNotIn(b"SUMPRODUCT", overview_xml)
-                self.assertNotIn(b"AGGREGATE", overview_xml)
+                self.assertIn(b"AGGREGATE", overview_xml)
                 self.assertIn(b"SUMIFS", overview_xml)
             service_book = load_workbook(service_report, read_only=False, data_only=False)
             try:

@@ -81,8 +81,9 @@ Reports\Analysis\...xlsx
 ```
 
 When a normal fixed-name report is replaced, WFMHub first saves its previous
-version in `Reports\Archive`. PCS is different: the tracker is permanent and the
-Hub never replaces it. Only the paste-data file is timestamped.
+version in `Reports\Archive`. PCS is different: normal prepares never replace
+the permanent tracker. Only a versioned repair rebuilds it, after archiving the
+old copy and carrying its coaching actions forward. Paste-data files are timestamped.
 
 `Feed` is separate from `Reports`: shared Absenteeism feeds live there. PCS no
 longer uses feed files or Power Query. Any other clean CSV/XLSX export appears
@@ -257,7 +258,7 @@ eight-row performance panel follow the selection. If you change a parent after
 choosing a child, reset the child to `All` and continue left to right.
 
 The LOB comparison sits at the top of `OVERVIEW`; the filtered agent list sits
-below it. Both respond to the same four selectors.
+below it. Both respond to Period, LOB, Team Leader and Agent.
 
 PCS formulas:
 
@@ -268,8 +269,8 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-For coaching, use the same four selectors on `COACHING`. The left side shows
-exact low-score calls. Copy Coaching Key and Call ID into the blue action table
+For coaching, choose only Period and LOB on `COACHING`. The left side loads the
+matching exact low-score calls automatically. Copy Coaching Key and Call ID into the blue action table
 on the same sheet, then complete Coaching Status, Coach, Coaching Date, Due Date
 and Coaching Comment. Call ID takes the coach directly to the call. Save this
 same tracker and share it; later data pastes do not replace the action table.
