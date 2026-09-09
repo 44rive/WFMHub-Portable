@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.2 — 2026-09-09
+
+- Fixes blank PCS cards and charts after a successful Power Query refresh.
+  The `All` selector branches supplied scalar values beside row arrays inside
+  `SUMPRODUCT`, causing Excel `#VALUE!` results that `IFERROR` hid as blanks.
+- Keeps every optional LOB, Team Leader and Agent condition row-shaped so the
+  overview cards, LOB comparison and daily trend calculate at the default
+  `All` scope and after dependent selections.
+- Bumps the PCS template version so one explicit repair/rebuild installs the
+  corrected formulas while preserving keyed coaching actions.
+
 ## 0.24.1 — 2026-09-09
 
 - Fixes an Excel repair prompt in `PCS Operational Tracker.xlsx`: missing

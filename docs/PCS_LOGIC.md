@@ -55,11 +55,12 @@ Low sample is an interpretation warning, not a coaching opportunity by itself.
 At team and month level, counters are summed first and the ratios are then
 recalculated. Agent averages and percentages are never averaged together.
 
-The permanent tracker consumes four fixed feeds. `PCS_LOB_SCORECARD_CURRENT.csv`
+The permanent tracker consumes five fixed feeds. `PCS_LOB_SCORECARD_CURRENT.csv`
 drives the management cards, LOB charts, and visible LOB reconciliation table.
 `PCS_RESULTS_CURRENT.csv` contains the standard period results at LOB, team, and
 agent grain. `PCS_AGENT_DAY_CURRENT.csv` remains available for custom pivots,
-and `PCS_COACHING_OPPORTUNITY_CURRENT.csv` is the replaceable case queue. Excel
+`PCS_COACHING_OPPORTUNITY_CURRENT.csv` is the replaceable case queue, and
+`PCS_SCOPE_CURRENT.csv` supplies the governed dependent selector values. Excel
 does not recalculate those grains with spill formulas.
 
 ## Reference reconciliation

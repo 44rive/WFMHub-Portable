@@ -1184,20 +1184,28 @@ def _pcs_v2_sum_formula(
 ) -> str:
     """Return a classic, bounded PCS sum used by the permanent dashboard."""
 
+    def optional_filter(column: str, selector: str) -> str:
+        # SUMPRODUCT requires every comma-separated argument to have identical
+        # dimensions.  Returning the scalar 1 for an "All" selector produces
+        # #VALUE! beside the 100,000-row criteria arrays; the dashboard's
+        # IFERROR then hides that failure as a blank card/chart.  Adding the
+        # scalar selector test to the row comparison always yields a row-shaped
+        # Boolean array while retaining the intended "All" meaning.
+        values = f"PCS_DATA!${column}$5:${column}$100004"
+        return f'--(({selector}="All")+({values}={selector})>0)'
+
     criteria = [
         f"--(PCS_DATA!$F$5:$F$100004>={from_ref})",
         f"--(PCS_DATA!$F$5:$F$100004<={to_ref})",
         (
             f"--(PCS_DATA!$A$5:$A$100004={lob_cell})"
-            if lob_cell else
-            'IF(OVERVIEW!$J$2="All",1,--(PCS_DATA!$A$5:$A$100004=OVERVIEW!$J$2))'
+            if lob_cell else optional_filter("A", "OVERVIEW!$J$2")
         ),
         (
             f"--(PCS_DATA!$B$5:$B$100004={team_cell})"
-            if team_cell else
-            'IF(OVERVIEW!$Q$2="All",1,--(PCS_DATA!$B$5:$B$100004=OVERVIEW!$Q$2))'
+            if team_cell else optional_filter("B", "OVERVIEW!$Q$2")
         ),
-        'IF(OVERVIEW!$X$2="All",1,--(PCS_DATA!$C$5:$C$100004=OVERVIEW!$X$2))',
+        optional_filter("C", "OVERVIEW!$X$2"),
         f"N(PCS_DATA!${value_column}$5:${value_column}$100004)",
     ]
     return f"SUMPRODUCT({','.join(criteria)})"

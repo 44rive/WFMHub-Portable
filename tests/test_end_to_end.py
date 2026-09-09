@@ -1122,6 +1122,13 @@ class EndToEndTests(unittest.TestCase):
                     [focused_pcs_book["OVERVIEW"][cell].value for cell in ("A5", "H5", "O5", "V5")],
                     ["CURRENT PCS", "PARTICIPATION", "PRIOR PCS", "CHANGE"],
                 )
+                overview_formula = str(focused_pcs_book["OVERVIEW"]["A6"].value)
+                calc_formula = str(focused_pcs_book["_PCS_CALC"]["B2"].value)
+                for formula in (overview_formula, calc_formula):
+                    self.assertNotIn('IF(OVERVIEW!$J$2="All",1,', formula)
+                    self.assertNotIn('IF(OVERVIEW!$Q$2="All",1,', formula)
+                    self.assertNotIn('IF(OVERVIEW!$X$2="All",1,', formula)
+                    self.assertIn('(OVERVIEW!$X$2="All")+', formula)
                 self.assertEqual(focused_pcs_book["OVERVIEW"]["A2"].value, "PERIOD")
                 self.assertEqual(focused_pcs_book["OVERVIEW"]["O2"].value, "TEAM LEADER")
                 self.assertIn("tblPcsLob", focused_pcs_book["_PCS_LOB"].tables)

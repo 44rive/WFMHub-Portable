@@ -12,12 +12,34 @@ from unittest.mock import MagicMock, patch
 import xlsxwriter
 
 from wfmhub.cli import _update_pcs_now, refresh
-from wfmhub.decision_products import _add_pcs_v2_calc
+from wfmhub.decision_products import _add_pcs_v2_calc, _pcs_v2_sum_formula
 from wfmhub.models import ModelSummary
 from wfmhub.pcs_excel import PCSExcelError, PCSTrackerState, PCS_TEMPLATE_VERSION
 
 
 class PCSWorkflowTests(unittest.TestCase):
+    def test_all_selectors_remain_row_shaped_inside_sumproduct(self):
+        formula = _pcs_v2_sum_formula("M")
+
+        self.assertNotIn('IF(OVERVIEW!$J$2="All",1,', formula)
+        self.assertNotIn('IF(OVERVIEW!$Q$2="All",1,', formula)
+        self.assertNotIn('IF(OVERVIEW!$X$2="All",1,', formula)
+        self.assertIn(
+            '--((OVERVIEW!$J$2="All")+'
+            '(PCS_DATA!$A$5:$A$100004=OVERVIEW!$J$2)>0)',
+            formula,
+        )
+        self.assertIn(
+            '--((OVERVIEW!$Q$2="All")+'
+            '(PCS_DATA!$B$5:$B$100004=OVERVIEW!$Q$2)>0)',
+            formula,
+        )
+        self.assertIn(
+            '--((OVERVIEW!$X$2="All")+'
+            '(PCS_DATA!$C$5:$C$100004=OVERVIEW!$X$2)>0)',
+            formula,
+        )
+
     def test_missing_pcs_chart_cache_is_a_valid_excel_error(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "pcs-calc.xlsx"
