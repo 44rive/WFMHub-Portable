@@ -30,7 +30,7 @@ class ReportPackTests(unittest.TestCase):
         self.assertIs(REPORT_COLORS, COLORS)
         self.assertIs(SHARED_REPORT_COLORS, COLORS)
         self.assertEqual((REPORT_DESIGN_ID, REPORT_DESIGN_VERSION), (
-            "WFMHUB-DESIGN", "2.2.0",
+            "WFMHUB-DESIGN", "2.3.0",
         ))
         reference = repo / "docs" / "WFMHub Report Design Reference.xlsx"
         self.assertTrue(reference.is_file())

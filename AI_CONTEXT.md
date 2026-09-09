@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.3.0`
-Applies to: WFMHub `0.25.0` and later
+Context version: `1.3.1`
+Applies to: WFMHub `0.25.1` and later
 Last reviewed: `2026-09-09`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -140,8 +140,9 @@ save, then import the same workbook. Decisions persist by immutable Gap ID.
 
 PCS has two files with different ownership. Each build creates a new timestamped
 `PCS Operational Report - YYYY-MM-DD HHMMSS.xlsx` containing final values,
-native tables and charts. It has no Power Query, Data Model, dashboard formulas
-or Excel automation. `PCS Coaching Log.xlsx` is created once. Quality copies
+native tables and charts. It has no Power Query, Data Model, Excel automation,
+or Excel KPI arithmetic. Four classic dropdowns use lookup-only formulas over
+Python-precalculated Period/LOB/Team/Agent results. `PCS Coaching Log.xlsx` is created once. Quality copies
 columns A:M from `COACHING_QUEUE` into that log and edits only its action fields.
 The Hub reads keyed actions into the next snapshot but never replaces the log.
 The fast build option reads the current database and coaching log without
@@ -204,8 +205,9 @@ Documentation:
 4. Add or update focused tests and the end-to-end fixture.
 5. Reopen every generated XLSX, inspect ZIP/XML for `#REF!` and unsupported
    formula metadata, and run the full suite.
-6. For PCS, verify static cards/charts, no query connections or dashboard
-   formulas, unique timestamped output, and byte preservation of the coaching log.
+6. For PCS, verify initial cached cards/charts, only classic lookup formulas, no
+   query connections, unique timestamped output, and byte preservation of the
+   coaching log.
 7. Bump the snapshot/report contract only for an explicit design migration.
 8. Update this context and the design specification when architecture changes.
 

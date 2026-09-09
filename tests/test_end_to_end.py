@@ -1106,9 +1106,15 @@ class EndToEndTests(unittest.TestCase):
                     [focused_pcs_book["OVERVIEW"][cell].value for cell in ("A5", "H5", "O5", "V5")],
                     ["CURRENT PCS", "PARTICIPATION", "PRIOR PCS", "CHANGE"],
                 )
-                self.assertIsInstance(focused_pcs_book["OVERVIEW"]["A6"].value, (int, float))
+                self.assertTrue(focused_pcs_book["OVERVIEW"]["A6"].value.startswith("=IF("))
                 self.assertEqual(focused_pcs_book["OVERVIEW"]["A2"].value, "PERIOD")
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["O2"].value, "SCOPE")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["H2"].value, "LOB")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["O2"].value, "TEAM LEADER")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["V2"].value, "AGENT")
+                self.assertEqual(len(focused_pcs_book["OVERVIEW"].data_validations.dataValidation), 4)
+                self.assertIn("PCS_Period", focused_pcs_book.defined_names)
+                self.assertIn("PCS_SELECTED_TL_LIST", focused_pcs_book.defined_names)
+                self.assertIn("PCS_SELECTED_AGENT_LIST", focused_pcs_book.defined_names)
                 self.assertIn("tblLobSummary", focused_pcs_book["LOB_SUMMARY"].tables)
                 self.assertIn("tblDailyTrend", focused_pcs_book["DAILY_TREND"].tables)
                 self.assertIn("tblResults", focused_pcs_book["RESULTS"].tables)
@@ -1139,6 +1145,21 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("Report Generated At", pcs_table_headers)
                 self.assertNotIn("Feed Refreshed At", pcs_table_headers)
                 self.assertIn("PCS Rule SHA-256", pcs_table_headers)
+                result_date_columns = {
+                    cell.value: cell.column for cell in focused_pcs_book["RESULTS"][4]
+                }
+                self.assertEqual(
+                    focused_pcs_book["RESULTS"].cell(5, result_date_columns["Period Start"]).number_format,
+                    "yyyy-mm-dd",
+                )
+                self.assertEqual(
+                    focused_pcs_book["COACHING_QUEUE"].cell(5, queue_headers.index("Date") + 1).number_format,
+                    "yyyy-mm-dd",
+                )
+                self.assertEqual(
+                    focused_pcs_book["COACHING_QUEUE"].cell(5, queue_headers.index("Call Start") + 1).number_format,
+                    "yyyy-mm-dd hh:mm:ss",
+                )
             finally:
                 focused_pcs_book.close()
             with zipfile.ZipFile(focused_pcs_report) as archive:
@@ -1154,7 +1175,18 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertNotIn(b"_xlfn._xlws", worksheet_xml)
                 self.assertNotIn(b"<v>None</v>", worksheet_xml)
-                self.assertNotIn(b"<f>", archive.read("xl/worksheets/sheet1.xml"))
+                overview_xml = archive.read("xl/worksheets/sheet1.xml")
+                self.assertIn(b"<f>", overview_xml)
+                self.assertNotIn(b"SUMIFS", overview_xml)
+                self.assertNotIn(b"SUMPRODUCT", overview_xml)
+            focused_pcs_values = load_workbook(
+                focused_pcs_report, read_only=False, data_only=True,
+            )
+            try:
+                self.assertIsInstance(focused_pcs_values["OVERVIEW"]["A6"].value, (int, float))
+                self.assertIsInstance(focused_pcs_values["OVERVIEW"]["H6"].value, (int, float))
+            finally:
+                focused_pcs_values.close()
             coaching_log_book = load_workbook(
                 home / "Reports" / PCS_COACHING_LOG_FILENAME,
                 read_only=False, data_only=True,

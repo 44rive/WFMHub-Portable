@@ -78,6 +78,49 @@ def _display_header(name: str) -> str:
     return " ".join(acronyms.get(word, word) for word in title.split())
 
 
+_DATE_HEADERS = {
+    "Date", "As Of Date", "Period Start", "Period End", "Data Through",
+    "Coaching Date", "Due Date", "Reviewed Date", "Injected Date",
+}
+_DATETIME_HEADERS = {
+    "Call Start", "Call End", "Report Generated At", "Feed Refreshed At",
+}
+
+
+def _excel_temporal_value(header: str, value: Any) -> tuple[Any, str | None]:
+    """Normalize ISO-like report dates so Excel never displays raw serials.
+
+    SQLite adapters may return a date, datetime, ISO text, or an Excel serial.
+    The header is the stable report contract, so it is safer than guessing from
+    the runtime value alone.
+    """
+
+    kind = "datetime" if header in _DATETIME_HEADERS else "date" if header in _DATE_HEADERS else None
+    if kind is None:
+        return value, None
+    if isinstance(value, datetime):
+        return (value if kind == "datetime" else value.date()), kind
+    if isinstance(value, date) or isinstance(value, (int, float)):
+        return value, kind
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return value, kind
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+            return (parsed if kind == "datetime" else parsed.date()), kind
+        except ValueError:
+            try:
+                parsed_date = date.fromisoformat(text[:10])
+                return (
+                    datetime.combine(parsed_date, datetime.min.time())
+                    if kind == "datetime" else parsed_date
+                ), kind
+            except ValueError:
+                return value, kind
+    return value, kind
+
+
 class ExcelReport:
     def __init__(self, path: Path):
         self.path = path
@@ -138,8 +181,13 @@ class ExcelReport:
             worksheet.set_row(row_index, 20)
             for column, value in enumerate(values):
                 header = display[column]
+                value, temporal_kind = _excel_temporal_value(header, value)
                 fmt = self.editable_date if header in {"Injected Date", "Coaching Date", "Due Date"} and header in editable_headers else self.editable if header in editable_headers else self.body
-                if isinstance(value, datetime):
+                if temporal_kind == "datetime":
+                    fmt = self.datetime
+                elif temporal_kind == "date":
+                    fmt = self.editable_date if header in editable_headers else self.date
+                elif isinstance(value, datetime):
                     fmt = self.datetime
                 elif isinstance(value, date):
                     fmt = self.editable_date if header in editable_headers else self.date

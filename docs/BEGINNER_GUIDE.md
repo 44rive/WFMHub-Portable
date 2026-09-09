@@ -247,10 +247,16 @@ need to close Excel. The Hub loads only FTE and Call by Call and creates a new
 timestamped report containing final values and charts. Attendance, RTM,
 staffing, service, forecast and absence remain unchanged.
 
-Open `OVERVIEW` for the management view. Open `RESULTS` and use its ordinary
-filter arrows in this order: Period View, Scope Level, LOB, Team Leader, then
-Agent. `LOB` gives one row per LOB, `TEAM` gives team rows, and `AGENT` gives
-agent rows. No refresh or recalculation is required in Excel.
+Open `OVERVIEW` for the management view. Use the four dropdowns from left to
+right: Period, LOB, Team Leader, Agent. Changing LOB narrows the Team Leader and
+Agent choices; changing Team Leader narrows Agent choices. Cards, charts and the
+eight-row performance panel follow the selection. If you change a parent after
+choosing a child, reset the child to `All` and continue left to right.
+
+Open `RESULTS` for the complete result list and use its ordinary filter arrows:
+Period View, Scope Level, LOB, Team Leader, then Agent. `LOB` gives one row per
+LOB, `TEAM` gives team rows, and `AGENT` gives agent rows. No data refresh is
+required in Excel.
 
 PCS formulas:
 

@@ -165,6 +165,10 @@ def ensure_report_catalog(home: Path, target: Path | None = None) -> Path:
             (f"2026.09.{version}", "2026.09.26")
             for version in range(3, 26)
         )
+        known_migrations.update(
+            (f"2026.09.{version}", "2026.09.27")
+            for version in range(3, 27)
+        )
         if (current_version, default_version) in known_migrations:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             safe_version = default_version.replace(".", "_")

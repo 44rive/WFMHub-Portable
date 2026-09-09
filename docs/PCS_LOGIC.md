@@ -59,8 +59,10 @@ Python/SQLite calculate the complete report before Excel opens. Each build write
 a new timestamped workbook containing the management cards, LOB summary, daily
 trend, standard period results, exact coaching queue, saved-action snapshot and
 agent-day counters. The workbook has no fixed PCS feed, Power Query, Data Model,
-Excel automation, spill formula or hidden calculation sheet. The fast rebuild
-option reads the current database and coaching log without rescanning extracts.
+Excel automation, spill formula, Excel KPI arithmetic or hidden calculation
+sheet. Dashboard dropdowns use classic lookup formulas over final scope/period
+values calculated by Python. The fast rebuild option reads the current database
+and coaching log without rescanning extracts.
 
 ## Reference reconciliation
 

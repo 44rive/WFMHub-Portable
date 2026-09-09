@@ -3,10 +3,10 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `2.2.0` |
+| Version | `2.3.0` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
-| First compatible Hub version | `0.25.0` |
+| First compatible Hub version | `0.25.1` |
 
 This is the visual contract for every WFMHub workbook. It changes presentation,
 never business calculations, source scope, table keys, or report maturity.
@@ -68,8 +68,10 @@ defines a target; WFMHub never invents the pictured PCS target.
 
 ### PCS Report & Coaching
 
-- `OVERVIEW`: honest static scope strip; current MTD PCS, participation, prior
-  comparable PCS and change; two equal native charts; team action grid.
+- `OVERVIEW`: real Period, LOB, Team Leader and Agent dropdowns; PCS,
+  participation, prior comparable PCS and change; two equal native comparison
+  charts; a selected-scope action grid. LOB cascades to Team Leader and Agent,
+  and Team Leader cascades to Agent.
 - `LOB_SUMMARY` and `DAILY_TREND`: the exact final values plotted in the charts.
 - `RESULTS`: ordinary Period View, Scope Level, LOB, Team Leader and Agent table
   filters. Filter the table from left to right.
@@ -79,8 +81,9 @@ defines a target; WFMHub never invents the pictured PCS target.
 - `PCS_DATA`: static agent-day counters for pivots or reconciliation.
 - `PCS Coaching Log.xlsx`: separate permanent human-owned action ledger. Copy
   A:M from `COACHING_QUEUE`, then edit the blue action fields.
-- No Power Query, Data Model, Excel automation, dynamic arrays or dashboard
-  formulas. Every timestamped report opens with final calculated values.
+- No Power Query, Data Model, Excel automation, dynamic arrays or Excel KPI
+  arithmetic. Classic lookup formulas select Python-precalculated results, and
+  every timestamped report opens with populated cached cards and charts.
 
 ### RTM Daily Control
 
@@ -136,7 +139,7 @@ Every design change requires:
 2. formula inspection for `#REF!` and unsupported dynamic-array metadata;
 3. ZIP integrity and reopen checks with `openpyxl`;
 4. verification that PCS contains no query connections, query tables, Data
-   Model, or dashboard formulas and reopens without repair;
+   Model, unsupported formulas or Excel KPI arithmetic and reopens without repair;
 5. verification that each PCS build creates a new file and does not change the
    bytes of the permanent coaching log;
 6. verification that attendance decisions still import from Excel row 4;
@@ -144,6 +147,9 @@ Every design change requires:
 
 ## Change log
 
+- `2.3.0`: restores cascading PCS Period/LOB/Team/Agent controls using only
+  classic lookups over Python-precalculated results; standardizes visible date
+  and datetime formats.
 - `2.2.0`: PCS becomes a Python-only timestamped report plus a separate
   permanent coaching log; all presentation values and chart series are embedded.
 - `2.1.0`: the measured V2 dashboard renderer is shared by RTM, every LOB

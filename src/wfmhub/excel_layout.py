@@ -9,6 +9,7 @@ dimensions are testable.  Business calculations must never depend on it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any, Sequence
 
 from .design import BODY_FONT, COLORS, TITLE_FONT
@@ -98,6 +99,8 @@ class V2Formats:
     status_error: Any
     filter_label: Any
     filter_value: Any
+    filter_date: Any
+    filter_datetime: Any
     card_accent_teal: Any
     card_accent_gold: Any
     card_label: Any
@@ -169,6 +172,18 @@ def make_v2_formats(workbook) -> V2Formats:
             "font_name": BODY_FONT, "font_size": 11,
             "font_color": COLORS["navy"], "bg_color": COLORS["white"],
             "align": "left", "valign": "vcenter", "indent": 1, **border,
+        }),
+        filter_date=add({
+            "font_name": BODY_FONT, "font_size": 11,
+            "font_color": COLORS["navy"], "bg_color": COLORS["white"],
+            "align": "left", "valign": "vcenter", "indent": 1,
+            "num_format": "yyyy-mm-dd", **border,
+        }),
+        filter_datetime=add({
+            "font_name": BODY_FONT, "font_size": 11,
+            "font_color": COLORS["navy"], "bg_color": COLORS["white"],
+            "align": "left", "valign": "vcenter", "indent": 1,
+            "num_format": "yyyy-mm-dd hh:mm", **border,
         }),
         card_accent_teal=add({"bg_color": COLORS["teal"]}),
         card_accent_gold=add({"bg_color": COLORS["gold"]}),
@@ -344,13 +359,18 @@ def write_v2_filters(
     for (start, end), (label, value, validation) in zip(
         V2_GEOMETRY.blocks, entries[:4],
     ):
+        value_format = (
+            formats.filter_datetime if isinstance(value, datetime)
+            else formats.filter_date if isinstance(value, date)
+            else formats.filter_value
+        )
         ws.merge_range(
             FILTER_ROW, start, FILTER_ROW, start + 1,
             label.upper(), formats.filter_label,
         )
         ws.merge_range(
             FILTER_ROW, start + 2, FILTER_ROW, end,
-            value, formats.filter_value,
+            value, value_format,
         )
         if validation:
             ws.data_validation(

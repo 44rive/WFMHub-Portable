@@ -163,7 +163,8 @@ report build.
 
 The generated report contains final Python-calculated values:
 
-- `OVERVIEW`: current MTD cards, LOB comparison, daily trend, and team actions;
+- `OVERVIEW`: cascading Period, LOB, Team Leader and Agent dropdowns, responsive
+  cards, two current-versus-prior charts, and the selected-scope action panel;
 - `LOB_SUMMARY` and `DAILY_TREND`: the exact visible chart values;
 - `RESULTS`: filterable latest-day, week, MTD and prior-period results at LOB,
   team and agent levels;
@@ -172,8 +173,8 @@ The generated report contains final Python-calculated values:
 - `PCS_DATA`: one row per agent/day for filters or optional pivots.
 
 There is no Power Query, Excel automation, Data Model, hidden calculation sheet,
-or dashboard formula. Cards and charts work immediately because their values
-are embedded before Excel opens.
+or Excel KPI arithmetic. Python precalculates every selectable result; classic
+Excel lookups switch the view. Cards and charts are populated immediately.
 
 `Reports\PCS Coaching Log.xlsx` is created once and is never replaced by the
 Hub. Quality filters `COACHING_QUEUE`, copies columns A:M into the Coaching Log,

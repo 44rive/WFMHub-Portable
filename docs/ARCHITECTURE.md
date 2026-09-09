@@ -164,8 +164,11 @@ the log is never replaced.
 Python/SQLite sum the additive counters before calculating each LOB, team, or
 agent ratio. `OVERVIEW` uses embedded final values; `LOB_SUMMARY`,
 `DAILY_TREND`, `RESULTS`, `COACHING_QUEUE` and `PCS_DATA` are ordinary static
-filterable tables. There is no Power Query, Excel automation, Data Model, ODBC
-driver, dynamic-array formula, or connection setup.
+filterable tables. Python also precalculates the standard Period/LOB/Team/Agent
+dashboard cube. Four cascading dropdowns use classic lookup formulas to select
+those final results; Excel does not perform KPI arithmetic. There is no Power
+Query, Excel automation, Data Model, ODBC driver, dynamic-array formula, or
+connection setup.
 
 Final Absenteeism uses the same collaboration boundary. Power Query may replace
 `tblAbsenceData`, `tblActionQueue`, and `tblActivityDetail` from stable CSVs;

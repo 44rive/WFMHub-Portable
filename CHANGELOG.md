@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.25.1 — 2026-09-09
+
+- Restores four responsive PCS dashboard filters: Period, LOB, Team Leader and
+  Agent. LOB narrows Team Leader and Agent; Team Leader narrows Agent.
+- Makes both comparison charts, all four KPI cards and the selected-scope panel
+  follow the dropdowns using classic lookup formulas only. Python still performs
+  every PCS and participation calculation.
+- Embeds cached initial values so cards and charts are populated on first open,
+  while retaining the no-Power-Query, no-Excel-automation architecture.
+- Formats PCS dates and datetimes as real `yyyy-mm-dd` / `yyyy-mm-dd hh:mm:ss`
+  values instead of displaying Excel serial numbers.
+- Advances the report design contract to `WFMHUB-DESIGN 2.3.0` and the report
+  catalog contract to `2026.09.27`.
+
 ## 0.25.0 — 2026-09-09
 
 - Replaces the PCS Power Query/Excel-automation lifecycle with a Python-only
