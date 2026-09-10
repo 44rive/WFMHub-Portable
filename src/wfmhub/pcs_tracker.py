@@ -48,7 +48,7 @@ from .shared_feeds import (
 
 
 PCS_TRACKER_FILENAME = "PCS Live Tracker.xlsx"
-PCS_TRACKER_VERSION = "2026.11.1"
+PCS_TRACKER_VERSION = "2026.11.2"
 COACHING_ACTION_HEADERS = (
     "Coaching Key", "Call ID", "Coaching Status", "Coach",
     "Coaching Date", "Due Date", "Coaching Comment",
@@ -328,10 +328,32 @@ def _cache_map(rows: Sequence[Sequence[Any]]) -> dict[str, tuple[Any, ...]]:
     return {str(row[0]): tuple(row) for row in rows}
 
 
+_LOOKUP_DATASETS: dict[str, tuple[str, Sequence[str]]] = {
+    "tblPcsLob": ("PCS_LOB_DATA", PCS_LOB_SCORECARD_HEADERS),
+    "tblPcsAgent": ("PCS_AGENT_DATA", PCS_AGENT_SCORECARD_HEADERS),
+    "tblPcsDaily": ("PCS_DAILY_DATA", PCS_DAILY_SCORECARD_HEADERS),
+    "tblPcsCoachingView": ("PCS_COACH_DATA", PCS_COACHING_HEADERS),
+}
+
+
 def _table_lookup(table: str, header: str, key_expression: str) -> str:
+    """Return a lookup that survives Power Query table replacement.
+
+    Desktop Excel must delete each starter ListObject before it can create the
+    Power Query destination. A structured reference such as
+    ``tblPcsLob[PCS]`` is rewritten to ``#REF!`` at deletion time. The stable
+    workbook names below point to sheet ranges instead, so installation cannot
+    mutate presentation formulas.
+    """
+
+    try:
+        range_name, headers = _LOOKUP_DATASETS[table]
+        column = headers.index(header) + 1
+    except (KeyError, ValueError) as exc:
+        raise ValueError(f"Unsupported PCS lookup {table}[{header}]") from exc
     return (
-        f'=IFERROR(INDEX({table}[{header}],MATCH({key_expression},'
-        f'{table}[View Key],0)),"")'
+        f'=IFERROR(INDEX({range_name},MATCH({key_expression},'
+        f'INDEX({range_name},0,1),0),{column}),"")'
     )
 
 
@@ -368,6 +390,20 @@ def _add_filter_names(workbook) -> None:
         "PCS_AGENT_ACTIVE",
         f'=OFFSET({values},MATCH({agent_group},{keys},0)-1,0,COUNTIF({keys},{agent_group}),1)',
     )
+    # Dynamic sheet-backed ranges deliberately do not reference ListObject
+    # names. Power Query installation replaces the starter tables; these names
+    # and every dependent formula remain valid throughout that operation.
+    for name, sheet, width in (
+        ("PCS_LOB_DATA", "_PCS_LOB", len(PCS_LOB_SCORECARD_HEADERS)),
+        ("PCS_AGENT_DATA", "_PCS_AGENT", len(PCS_AGENT_SCORECARD_HEADERS)),
+        ("PCS_DAILY_DATA", "_PCS_DAILY", len(PCS_DAILY_SCORECARD_HEADERS)),
+        ("PCS_COACH_DATA", "_PCS_COACH", len(PCS_COACHING_HEADERS)),
+    ):
+        workbook.define_name(
+            name,
+            f'=OFFSET(\'{sheet}\'!$A$5,0,0,'
+            f'MAX(1,COUNTA(\'{sheet}\'!$A:$A)-3),{width})',
+        )
 
 
 def _add_overview(

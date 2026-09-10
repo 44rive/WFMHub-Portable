@@ -173,8 +173,8 @@ function Set-TableColumnFormat {
     finally { Release-ComObject $sheet }
 }
 
-function Save-PresentationFormulas {
-    $snapshots = @()
+function Assert-PresentationIntegrity {
+    $problems = @()
     foreach ($sheetName in @("OVERVIEW", "COACHING", "_PCS_CALC")) {
         $sheet = $script:Workbook.Worksheets.Item($sheetName)
         try {
@@ -187,12 +187,11 @@ function Save-PresentationFormulas {
                         foreach ($cell in $formulaCells.Cells) {
                             try {
                                 $formula = [string]$cell.Formula
+                                if ($formula -like "*#REF!*") {
+                                    $problems += "$sheetName!$([string]$cell.Address) contains #REF!"
+                                }
                                 if ($formula -like "*tblPcs*") {
-                                    $snapshots += [PSCustomObject]@{
-                                        SheetName = $sheetName
-                                        Address = [string]$cell.Address
-                                        Formula = $formula
-                                    }
+                                    $problems += "$sheetName!$([string]$cell.Address) still uses a replaceable table reference"
                                 }
                             }
                             finally { Release-ComObject $cell }
@@ -205,19 +204,45 @@ function Save-PresentationFormulas {
         }
         finally { Release-ComObject $sheet }
     }
-    return $snapshots
-}
 
-function Restore-PresentationFormulas {
-    param([object[]]$Snapshots)
-    foreach ($snapshot in $Snapshots) {
-        $sheet = $script:Workbook.Worksheets.Item([string]$snapshot.SheetName)
+    foreach ($requiredName in @("PCS_LOB_DATA", "PCS_AGENT_DATA", "PCS_DAILY_DATA", "PCS_COACH_DATA")) {
+        $definedName = $null
         try {
-            $cell = $sheet.Range([string]$snapshot.Address)
-            try { $cell.Formula = [string]$snapshot.Formula }
+            $definedName = $script:Workbook.Names.Item($requiredName)
+            $refersTo = [string]$definedName.RefersTo
+            if ([string]::IsNullOrWhiteSpace($refersTo) -or $refersTo -like "*#REF!*") {
+                $problems += "$requiredName is broken"
+            }
+        }
+        catch {
+            $problems += "$requiredName is missing"
+        }
+        finally { Release-ComObject $definedName }
+    }
+
+    foreach ($check in @(
+        @("OVERVIEW", "A6", "PCS_LOB_DATA"),
+        @("OVERVIEW", "H6", "PCS_LOB_DATA"),
+        @("_PCS_CALC", "B2", "PCS_LOB_DATA"),
+        @("_PCS_CALC", "E2", "PCS_DAILY_DATA"),
+        @("COACHING", "A5", "PCS_COACH_DATA")
+    )) {
+        $sheet = $script:Workbook.Worksheets.Item($check[0])
+        try {
+            $cell = $sheet.Range($check[1])
+            try {
+                $formula = [string]$cell.Formula
+                if ($formula -notlike "*$($check[2])*") {
+                    $problems += "$($check[0])!$($check[1]) lost its governed lookup formula"
+                }
+            }
             finally { Release-ComObject $cell }
         }
         finally { Release-ComObject $sheet }
+    }
+
+    if ($problems.Count -gt 0) {
+        throw ("PCS presentation integrity failed: " + ($problems -join "; "))
     }
 }
 
@@ -305,7 +330,6 @@ try {
                 throw "Power Query definition not found: $path"
             }
         }
-        $presentation = Save-PresentationFormulas
         Remove-StarterTable "_PCS_FILTERS" "tblPcsFilters" 4 3
         Remove-StarterTable "_PCS_LOB" "tblPcsLob" 4 12
         Remove-StarterTable "_PCS_AGENT" "tblPcsAgent" 4 14
@@ -329,7 +353,6 @@ try {
         Add-QueryTable "PCS_DAILY" ([System.IO.File]::ReadAllText($DailyQueryPath)) "_PCS_DAILY" "tblPcsDaily" "A4"
         Add-QueryTable "PCS_RESULTS" ([System.IO.File]::ReadAllText($ResultsQueryPath)) "PERFORMANCE" "tblPcsPerformance" "A4"
         Add-QueryTable "PCS_COACHING_VIEW" ([System.IO.File]::ReadAllText($CoachingQueryPath)) "_PCS_COACH" "tblPcsCoachingView" "A4"
-        Restore-PresentationFormulas $presentation
         Set-SetupValue "Power Query Installed" "YES"
         Set-SetupValue "Last Installer Result" "Installed successfully"
     }
@@ -355,6 +378,7 @@ try {
         Set-TableColumnFormat $format[0] $format[1] $format[2] $format[3]
     }
     $script:Excel.CalculateFullRebuild()
+    Assert-PresentationIntegrity
     Set-SetupValue "Workbook Last Refreshed" ([DateTime]::Now.ToString("yyyy-MM-dd HH:mm:ss"))
     Set-SetupValue "Last Installer Result" "Refresh completed"
     $script:Workbook.Save()

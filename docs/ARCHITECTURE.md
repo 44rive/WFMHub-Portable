@@ -391,12 +391,14 @@ seconds up to that target; losses below 5 seconds remain in the denominator.
 Daily headline counters reset at midnight, independently of visible operating
 hours.
 Storm Routed Rate is answered divided by every entered queue entry. Queue
-profiles use exact screenshot-derived queue allowlists for the four Flashes.
+profiles use exact reviewed queue allowlists for the four Flashes.
 Provider, language and regional labels never add or remove a queue implicitly.
 All Flash tables display 00:00-23:00. Staffing and absence columns use the
 profile's configured staffing LOB rather than inventing queue-level ownership.
 AHT is weighted from handled seconds divided by answered contacts. Higher-grain
 reports use ratios of summed components, never averages of interval percentages.
+The RTM tables expose the additive answered and answered-within-target counters
+as `Volume Handled` and `Handled in SL` so their relationship to TSL is visible.
 
 ## Agent Status without adherence
 

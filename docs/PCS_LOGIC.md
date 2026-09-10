@@ -92,6 +92,14 @@ classic exact `INDEX/MATCH` lookups. `COACHING` uses Period and LOB dropdowns.
 `PERFORMANCE` remains a native Excel table for detailed filtering or optional
 standard slicers.
 
+The query installer replaces each starter Excel table with a real Power Query
+destination. Excel rewrites formulas that directly reference a deleted table to
+`#REF!`, so every presentation lookup reads through four stable sheet-backed
+workbook names: `PCS_LOB_DATA`, `PCS_AGENT_DATA`, `PCS_DAILY_DATA`, and
+`PCS_COACH_DATA`. The installer validates those names and all formulas on
+`OVERVIEW`, `COACHING`, and `_PCS_CALC` before saving. If integrity fails, it
+closes without saving the damaged state.
+
 Selectable comparisons are fixed and explicit: Latest day versus the previous
 available data day; Current week versus the same weekdays one week earlier;
 Current MTD versus the same day span in the prior month; Previous MTD same days

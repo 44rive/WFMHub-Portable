@@ -57,11 +57,11 @@ allowlists live under `flash_queues` in `config\service_profiles.toml`:
 
 - RSA NL includes all 30 queues displayed in `TOLEARN\RSA NL.png`, including
   its Provider and RSA Ford-labelled rows.
-- RSA BE includes all 36 queues displayed in `TOLEARN\RSA BE.png`, across FR,
-  VL and EN rows, including Provider.
+- RSA BE includes its 36 screenshot-reviewed FR/VL/EN queues plus the six
+  Ford-FR queues transferred by the 2026-09-10 business decision.
 - Ford NL includes the six NL/VL/DE queues displayed for that Flash.
-- OEM includes the four Ford FR activity queues plus the displayed Chery and
-  Toyota/Lexus queues: six physical queues in total.
+- Ford FR/OEM now keeps only
+  `APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR`.
 
 No queue is admitted by substring, suffix, designation or inferred LOB. A
 mapped Call-by-Call queue that is absent from the exact profile allowlist stays
@@ -71,10 +71,14 @@ Every RTM LOB sheet uses `No Show HC` as its absence callout. It counts only a
 scheduled agent who has no observed presence and whose agent-specific evidence
 proves a no-show. An agent who arrived late, left early, or is currently offline
 after attending remains present. `Offline Now` is a separate operational alert.
-`Unknown HC` means possible no-show or missing/stale evidence and is never added
+`Possible No Show HC` means unknown or missing/stale evidence and is never added
 to confirmed No Show HC or the automatic call count. Exact gap treatment remains
 in Attendance Review. `Due HC = Present HC + No Show HC + Unknown HC`, while
 Offline Now is a subset of Present HC.
+
+The hourly and LOB summary tables expose both `Volume Handled` (routed/answered
+queue entries) and `Handled in SL` (routed/answered within the configured SLA
+threshold) beside the TSL result.
 
 The roster side of those joins is explicit: OEM = `OEM FR`, RSA Belgium =
 `RSA FR` + `RSA VL`, Ford Netherlands = `Ford Dutch`, and RSA Netherlands =

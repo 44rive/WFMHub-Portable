@@ -191,6 +191,13 @@ def ensure_report_catalog(home: Path, target: Path | None = None) -> Path:
             ("2026.10.2", "2026.11.0"),
         })
         known_migrations.add(("2026.11.0", "2026.11.1"))
+        known_migrations.update(
+            (version, "2026.11.2")
+            for version in {
+                *(f"2026.09.{item}" for item in range(3, 29)),
+                "2026.10.1", "2026.10.2", "2026.11.0", "2026.11.1",
+            }
+        )
         if (current_version, default_version) in known_migrations:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             safe_version = default_version.replace(".", "_")

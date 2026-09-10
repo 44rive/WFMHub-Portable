@@ -38,6 +38,24 @@ class QueueMappingTests(unittest.TestCase):
         )
         ford_nl = mapping.map_actual("APBE", "APBN_AMS_MOBILITY_Ford_Assistance_NL", None, "FORD")
         self.assertEqual((ford_nl.service_scope, ford_nl.comparison_scope), ("Ford NL", "Ford NL"))
+        self.assertEqual(
+            mapping.map_actual(
+                "STORM", "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR", None, None,
+            ).service_scope,
+            "Ford FR",
+        )
+        for queue in (
+            "APBN_BRU_MOBILITY_Ford_Assistance_FR",
+            "APBN_BRU_MOBILITY_Ford_Dealers_FR",
+            "APBN_LUX_MOBILITY_Ford_Assistance_FR",
+            "APCH_ZRH_RSA_Ford_Assistance_FR",
+            "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
+            "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
+        ):
+            self.assertEqual(
+                mapping.map_actual("STORM", queue, None, None).service_scope,
+                "RSA BE FR",
+            )
         reference_additions = {
             "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL": "RSA NL",
             "APBN_AMS_MOBILITY_NIGHT_NightShift_NL": "RSA NL",
@@ -86,6 +104,34 @@ class QueueMappingTests(unittest.TestCase):
                 "Ford NL",
             )
             self.assertTrue(list((home / "config").glob("queue_mapping_pre_default_merge_*.csv")))
+
+    def test_known_ford_fr_defaults_migrate_without_overwriting_custom_scope(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            (home / "config").mkdir()
+            shipped = home / "config" / "default_queue_mapping.csv"
+            shutil.copy2(REPO / "config" / "default_queue_mapping.csv", shipped)
+            target = home / "config" / "queue_mapping.csv"
+            target.write_text(
+                "mapping_type,source_system,source_value,service_scope,designation\n"
+                "queue,STORM,APBN_BRU_MOBILITY_Ford_Assistance_FR,Ford FR,Ford FR\n"
+                "queue,STORM,APBN_BRU_MOBILITY_Ford_Dealers_FR,CUSTOM,Custom\n",
+                encoding="utf-8",
+            )
+            ensure_queue_mapping(home, target)
+            mapping = load_queue_mapping(target)
+            self.assertEqual(
+                mapping.map_actual(
+                    "STORM", "APBN_BRU_MOBILITY_Ford_Assistance_FR", None, None,
+                ).service_scope,
+                "RSA BE FR",
+            )
+            self.assertEqual(
+                mapping.map_actual(
+                    "STORM", "APBN_BRU_MOBILITY_Ford_Dealers_FR", None, None,
+                ).service_scope,
+                "CUSTOM",
+            )
 
     def test_unlisted_apde_partner_falls_back_to_raw_lob(self):
         mapping = load_queue_mapping(REPO / "config" / "default_queue_mapping.csv")

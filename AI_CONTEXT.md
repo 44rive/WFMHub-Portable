@@ -1,8 +1,8 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.5.0`
-Applies to: WFMHub `0.27.1` and later
-Last reviewed: `2026-09-09`
+Context version: `1.5.1`
+Applies to: WFMHub `0.27.2` and later
+Last reviewed: `2026-09-10`
 
 Read this file before proposing or changing WFMHub. When details are needed,
 follow the authoritative files listed below. Do not reconstruct decisions from
@@ -116,6 +116,11 @@ mapping so abandoned demand is not lost.
 - Service Level follows the documented Storm C/(A+B-D) contract and exact
   screenshot-reviewed queue allowlists. See `docs/SERVICE_KPI_REFERENCE.md`.
 - Never infer a queue from its name, language suffix, country, or apparent LOB.
+- Ford FR/OEM keeps only `APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR`; the other
+  six previously Ford-FR-mapped queues belong to RSA BE from 2026-09-10.
+- Active roster LOBs, including Travel-labelled LOBs, flow automatically into
+  roster-driven Attendance, Staffing, Absence, PCS and Bonus outputs. A Travel
+  service Flash/SL must not be invented without exact queue and forecast maps.
 
 ## Data architecture
 
@@ -155,6 +160,10 @@ installed or repaired once by desktop Excel automation. There is no Data
 Model, Power Pivot, macro, raw-data sheet, spill formula or dynamic-array
 metadata. A versioned contract migration archives the prior tracker and carries
 keyed actions forward; same-version Hub updates preserve tracker bytes.
+Presentation formulas use the stable sheet-backed names `PCS_LOB_DATA`,
+`PCS_AGENT_DATA`, `PCS_DAILY_DATA`, and `PCS_COACH_DATA`. They must never
+directly reference a `tblPcs*` query destination because setup replaces those
+ListObjects and Excel rewrites direct references to `#REF!`.
 
 Every current report first screen uses the measured grid in
 `src/wfmhub/excel_layout.py`: 28 equal 52-pixel columns, four equal KPI cards,

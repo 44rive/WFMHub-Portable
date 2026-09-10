@@ -23,7 +23,7 @@ from .models import refresh_models, refresh_pcs_models
 from .mapping import load_queue_mapping
 from .metrics import diff_metric_catalogs, evaluate_metric, load_metric_catalog, validate_metric_catalog
 from .on_demand_analysis import ANALYSIS_DOMAINS, COMPARISON_MODES, build_analysis_workbook
-from .pcs_excel import run_pcs_excel_action
+from .pcs_excel import inspect_pcs_tracker, run_pcs_excel_action
 from .pcs_tracker import (
     latest_pcs_report,
     open_workbook,
@@ -841,6 +841,16 @@ def _install_pcs_power_query(home: Path) -> None:
         raise FileNotFoundError(
             "No PCS Live Tracker exists. Choose Update PCS data first."
         )
+    state = inspect_pcs_tracker(report, config.feed / "PCS")
+    if not state.current_template or state.problem:
+        print("PCS tracker   : repairing the versioned workbook contract first")
+        report = _build_pcs_from_database(home)
+        state = inspect_pcs_tracker(report, config.feed / "PCS")
+        if not state.current_template or state.problem:
+            raise RuntimeError(
+                "PCS tracker repair did not produce a safe workbook: "
+                f"{state.problem or 'template version is still outdated'}"
+            )
     print("\nINSTALL / REPAIR PCS POWER QUERY")
     print("Close PCS Live Tracker.xlsx before continuing.")
     print(run_pcs_excel_action(config, report, "Install", "LOCAL"))

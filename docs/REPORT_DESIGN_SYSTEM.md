@@ -132,6 +132,9 @@ their calculations and decision workflows still require production review.
   migration may rebuild it; normal Hub updates never do.
 - Each PCS update atomically replaces six fixed governed CSV feeds.
 - Desktop Excel **Data > Refresh All** reloads query tables from those feeds.
+- PCS dashboard and chart formulas read the query sheets through stable
+  sheet-backed workbook names; direct formula references to replaceable
+  `tblPcs*` query destinations are prohibited.
 - Coaching actions remain in `tblCoachingActions` inside the permanent tracker.
 - Blue cells are editable. White, grey and calculated cells are not.
 - Sheet names, table names, Agent ID, Gap ID and Coaching Key are contracts.
@@ -141,7 +144,8 @@ their calculations and decision workflows still require production review.
 Every design change requires:
 
 1. sheet order and fixed table-anchor tests;
-2. formula inspection for `#REF!`, `_xlfn` and dynamic-array metadata;
+2. formula inspection for `#REF!`, `_xlfn`, dynamic-array metadata, and direct
+   `tblPcs*` references from presentation sheets;
 3. ZIP integrity and reopen checks with `openpyxl`;
 4. verification that the pre-install PCS template contains no malformed query
    parts, Data Model, macros or external links and reopens without repair;

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.27.2 — 2026-09-10
+
+- Fixes PCS dashboard `#REF!` errors caused by desktop Excel rewriting direct
+  structured references when the Power Query installer replaces starter tables.
+- Moves Overview, Coaching and chart-bridge lookups to four stable sheet-backed
+  workbook names that survive query-table installation and later refreshes.
+- Makes Install/repair migrate an outdated or damaged tracker before Excel
+  automation while preserving keyed coaching actions and archiving the old file.
+- Adds a pre-save Excel integrity gate that rejects broken presentation formulas,
+  missing names, or new direct references to replaceable PCS query tables.
+- Moves six former Ford-FR queues to RSA BE while keeping only
+  `APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR` in Ford FR/OEM, with a guarded
+  migration for unchanged local queue catalogs.
+- Adds Volume Handled and Handled in SL to RTM service tables and makes
+  unknown/no-evidence cases visible as Possible No Show without counting them
+  as confirmed No Show.
+- Advances the PCS tracker contract to `2026.11.2`; the visual design remains
+  `WFMHUB-DESIGN 3.2.0`.
+
 ## 0.27.1 — 2026-09-10
 
 - Adds reliable cascading Period, LOB, Team Leader and Agent dropdowns to the

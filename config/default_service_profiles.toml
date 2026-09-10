@@ -5,7 +5,7 @@
 # follow Storm and reset at midnight.
 
 [catalog]
-version = "2026.09.10"
+version = "2026.09.11"
 default_profile = "ford_oem_fr"
 description = "Effective-dated service and Book1 Flash profiles for RSA Netherlands, RSA Belgium, Ford Netherlands, and Ford OEM France."
 
@@ -17,31 +17,18 @@ staffing_lobs = ["OEM FR"]
 source_systems = ["CALL_BY_CALL"]
 flash_source_systems = ["CALL_BY_CALL"]
 flash_sheet = "Flash OEM"
-flash_layout = "oem_split"
+flash_layout = "standard"
 operating_start_hour = 0
 operating_end_hour = 23
 display_order = 4
-flash_total_groups = ["Ford", "Chery", "Toyota"]
+flash_total_groups = ["Ford"]
 flash_queues = [
-  "APBN_BRU_MOBILITY_Ford_Assistance_FR",
-  "APBN_BRU_MOBILITY_Ford_Dealers_FR",
-  "APBN_LUX_MOBILITY_Ford_Assistance_FR",
   "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR",
-  "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
-  "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
 ]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"
 aht_metric = "aht_seconds"
 effective_from = 2026-01-01
-
-[[profiles.groups]]
-label = "Toyota"
-queue_contains = ["APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS"]
-
-[[profiles.groups]]
-label = "Chery"
-queue_contains = ["APFR_PAR_RSA_CHERY_ASSISTANCE"]
 
 [[profiles.groups]]
 label = "Ford"
@@ -127,6 +114,12 @@ flash_queues = [
   "APBN_BRU_RSA_PROVIDER_All_VL",
   "APBN_BRU_RSA_VIP_Front_FR",
   "APBN_BRU_RSA_VIP_Front_VL",
+  "APBN_BRU_MOBILITY_Ford_Assistance_FR",
+  "APBN_BRU_MOBILITY_Ford_Dealers_FR",
+  "APBN_LUX_MOBILITY_Ford_Assistance_FR",
+  "APCH_ZRH_RSA_Ford_Assistance_FR",
+  "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
+  "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
 ]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"

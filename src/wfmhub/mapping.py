@@ -16,6 +16,19 @@ class QueueMappingError(RuntimeError):
     pass
 
 
+_SHIPPED_SCOPE_MIGRATIONS = {
+    _queue: ("Ford FR", "RSA BE FR")
+    for _queue in (
+        "APBN_BRU_MOBILITY_Ford_Assistance_FR",
+        "APBN_BRU_MOBILITY_Ford_Dealers_FR",
+        "APBN_LUX_MOBILITY_Ford_Assistance_FR",
+        "APCH_ZRH_RSA_Ford_Assistance_FR",
+        "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
+        "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
+    )
+}
+
+
 @dataclass(frozen=True)
 class MappingResult:
     service_scope: str
@@ -108,9 +121,25 @@ def ensure_queue_mapping(home: Path, target: Path | None = None) -> Path:
                 _key(row.get("source_system")),
                 _key(row.get("source_value")),
             )
+            shipped_by_identity = {identity(row): row for row in shipped}
+            migrated = False
+            for row in current:
+                queue = str(row.get("source_value") or "").strip()
+                migration = _SHIPPED_SCOPE_MIGRATIONS.get(queue)
+                shipped_row = shipped_by_identity.get(identity(row))
+                if (
+                    migration is not None
+                    and shipped_row is not None
+                    and str(row.get("service_scope") or "").strip() == migration[0]
+                    and str(shipped_row.get("service_scope") or "").strip()
+                    == migration[1]
+                ):
+                    row["service_scope"] = shipped_row["service_scope"]
+                    row["designation"] = shipped_row["designation"]
+                    migrated = True
             known = {identity(row) for row in current}
             additions = [row for row in shipped if identity(row) not in known]
-            if additions:
+            if migrated or additions:
                 stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                 shutil.copy2(
                     target,

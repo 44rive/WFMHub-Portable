@@ -249,18 +249,21 @@ class CallServiceModelTests(unittest.TestCase):
                 )
         profile = catalog.select("ford_oem_fr", date(2026, 9, 1))
         self.assertEqual(profile.staffing_lobs, ("OEM FR",))
-        self.assertEqual(len(profile.flash_queues), 6)
-        self.assertEqual(profile.flash_total_groups, ("Ford", "Chery", "Toyota"))
+        self.assertEqual(profile.flash_layout, "standard")
+        self.assertEqual(profile.flash_queues, (
+            "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR",
+        ))
+        self.assertEqual(profile.flash_total_groups, ("Ford",))
         self.assertTrue(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR"},
         ))
-        self.assertTrue(_included_in_flash_total(
+        self.assertFalse(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR"},
         ))
-        self.assertTrue(_included_in_flash_total(
+        self.assertFalse(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CHERY_ASSISTANCE_FR"},
         ))
-        self.assertTrue(_included_in_flash_total(
+        self.assertFalse(_included_in_flash_total(
             profile, {"queue": "APBN_BRU_MOBILITY_Ford_Assistance_FR"},
         ))
         self.assertFalse(_included_in_flash_total(
@@ -293,9 +296,12 @@ class CallServiceModelTests(unittest.TestCase):
         ))
         rsa_be = catalog.select("rsa_be", date(2026, 9, 1))
         self.assertEqual(rsa_be.staffing_lobs, ("RSA FR", "RSA VL"))
-        self.assertEqual(len(rsa_be.flash_queues), 36)
+        self.assertEqual(len(rsa_be.flash_queues), 42)
         self.assertTrue(_included_in_flash_total(
             rsa_be, {"queue": "APBN_BRU_MOBILITY_PROVIDER_Interco_EN"},
+        ))
+        self.assertTrue(_included_in_flash_total(
+            rsa_be, {"queue": "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR"},
         ))
         self.assertFalse(_included_in_flash_total(
             rsa_be, {"queue": "APBN_BRU_MOBILITY_POLICE_OBU_EN"},
@@ -314,10 +320,8 @@ class CallServiceModelTests(unittest.TestCase):
         }
         headers, _, _, _, _ = _flash_columns(profile, [blank])
         self.assertEqual(headers, [
-            "Hour", "Forecast", "Actual", "Variance", "Ford Volume",
-            "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
-            "TSL Chery", "TSL Toyota", "Routed Rate", "AHT", "No Show HC",
-            "Data State",
+            "Hour", "Forecast", "Actual", "Volume Handled", "Handled in SL",
+            "Variance", "TSL", "Routed Rate", "AHT", "No Show HC", "Data State",
         ])
         cards = _flash_cards(
             profile,

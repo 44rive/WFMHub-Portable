@@ -1207,12 +1207,11 @@ class EndToEndTests(unittest.TestCase):
                     ["LOBS ON TARGET", "DEMAND VARIANCE", "NO SHOW HC", "CALL NOW"],
                 )
                 self.assertEqual(
-                    [cell.value for cell in service_book["OEM"][35]][:15],
+                    [cell.value for cell in service_book["OEM"][35]][:11],
                     [
-                        "Hour", "Forecast", "Actual", "Variance", "Ford Volume",
-                        "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
-                        "TSL Chery", "TSL Toyota", "Routed Rate", "AHT",
-                        "No Show HC", "Data State",
+                        "Hour", "Forecast", "Actual", "Volume Handled",
+                        "Handled in SL", "Variance", "TSL", "Routed Rate",
+                        "AHT", "No Show HC", "Data State",
                     ],
                 )
                 self.assertNotIn(

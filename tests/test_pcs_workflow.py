@@ -18,6 +18,7 @@ from wfmhub.cli import (
     refresh,
 )
 from wfmhub.models import ModelSummary
+from wfmhub.pcs_excel import inspect_pcs_tracker
 from wfmhub.pcs_tracker import (
     PCS_TRACKER_FILENAME,
     PCS_TRACKER_VERSION,
@@ -151,6 +152,17 @@ class PCSWorkflowTests(unittest.TestCase):
                                  "AGENT PERFORMANCE · CASCADING LOB → TEAM LEADER → AGENT")
                 self.assertEqual(len(workbook["OVERVIEW"].data_validations.dataValidation), 4)
                 self.assertTrue(workbook["OVERVIEW"]["A6"].value.startswith("=IFERROR(INDEX("))
+                self.assertIn("PCS_LOB_DATA", workbook["OVERVIEW"]["A6"].value)
+                self.assertNotIn("tblPcs", workbook["OVERVIEW"]["A6"].value)
+                self.assertIn("PCS_LOB_DATA", workbook["_PCS_CALC"]["B2"].value)
+                self.assertIn("PCS_DAILY_DATA", workbook["_PCS_CALC"]["E2"].value)
+                self.assertIn("PCS_COACH_DATA", workbook["COACHING"]["A5"].value)
+                for name in (
+                    "PCS_LOB_DATA", "PCS_AGENT_DATA", "PCS_DAILY_DATA",
+                    "PCS_COACH_DATA",
+                ):
+                    self.assertIn(name, workbook.defined_names)
+                    self.assertNotIn("#REF!", workbook.defined_names[name].attr_text)
                 self.assertIn("tblPcsPerformance", workbook["PERFORMANCE"].tables)
                 self.assertIn("tblCoachingQueue", workbook["COACHING"].tables)
                 self.assertIn("tblCoachingActions", workbook["COACHING"].tables)
@@ -197,6 +209,10 @@ class PCSWorkflowTests(unittest.TestCase):
                 self.assertEqual(cached["COACHING"]["A5"].value, datetime(2026, 9, 8))
             finally:
                 cached.close()
+
+            state = inspect_pcs_tracker(path, config.feed / "PCS")
+            self.assertIsNone(state.problem)
+            self.assertTrue(state.current_template)
 
             saved = path.read_bytes()
             self.assertEqual(ensure_pcs_tracker(config, **_rows()), path)
@@ -282,14 +298,43 @@ class PCSWorkflowTests(unittest.TestCase):
             report = home / "Reports" / PCS_TRACKER_FILENAME
             report.parent.mkdir()
             report.write_bytes(b"tracker")
-            config = SimpleNamespace(reports=report.parent)
+            config = SimpleNamespace(reports=report.parent, feed=home / "Feed")
             with (
                 patch("wfmhub.cli.load_config", return_value=config),
                 patch("wfmhub.cli.latest_pcs_report", return_value=report),
+                patch(
+                    "wfmhub.cli.inspect_pcs_tracker",
+                    return_value=SimpleNamespace(current_template=True, problem=None),
+                ),
                 patch("wfmhub.cli.run_pcs_excel_action", return_value="ready") as run,
             ):
                 _install_pcs_power_query(home)
             run.assert_called_once_with(config, report, "Install", "LOCAL")
+
+    def test_install_repairs_an_outdated_tracker_before_excel_automation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            old_report = home / "Reports" / PCS_TRACKER_FILENAME
+            repaired_report = home / "Reports" / PCS_TRACKER_FILENAME
+            config = SimpleNamespace(reports=old_report.parent, feed=home / "Feed")
+            old_state = SimpleNamespace(current_template=False, problem="#REF!")
+            repaired_state = SimpleNamespace(current_template=True, problem=None)
+            with (
+                patch("wfmhub.cli.load_config", return_value=config),
+                patch("wfmhub.cli.latest_pcs_report", return_value=old_report),
+                patch(
+                    "wfmhub.cli.inspect_pcs_tracker",
+                    side_effect=(old_state, repaired_state),
+                ),
+                patch(
+                    "wfmhub.cli._build_pcs_from_database",
+                    return_value=repaired_report,
+                ) as repair,
+                patch("wfmhub.cli.run_pcs_excel_action", return_value="ready") as run,
+            ):
+                _install_pcs_power_query(home)
+            repair.assert_called_once_with(home)
+            run.assert_called_once_with(config, repaired_report, "Install", "LOCAL")
 
     def test_pcs_refresh_uses_targeted_model_without_all_shared_feeds(self):
         home = Path("/test/wfmhub")

@@ -22,7 +22,11 @@ from openpyxl import load_workbook
 from .config import Config
 
 
-PCS_TEMPLATE_VERSION = "2026.11.1"
+PCS_TEMPLATE_VERSION = "2026.11.2"
+PCS_PRESENTATION_SHEETS = ("OVERVIEW", "COACHING", "_PCS_CALC")
+PCS_PRESENTATION_NAMES = (
+    "PCS_LOB_DATA", "PCS_AGENT_DATA", "PCS_DAILY_DATA", "PCS_COACH_DATA",
+)
 
 
 class PCSExcelError(RuntimeError):
@@ -114,6 +118,38 @@ def _pcs_data_freshness(workbook) -> tuple[str | None, str | None]:
     return max(through, default=None), max(refreshed, default=None)
 
 
+def _presentation_problem(workbook) -> str | None:
+    """Detect presentation formulas that Power Query installation could break."""
+
+    problems: list[str] = []
+    for sheet_name in PCS_PRESENTATION_SHEETS:
+        if sheet_name not in workbook.sheetnames:
+            problems.append(f"missing {sheet_name} sheet")
+            continue
+        sheet = workbook[sheet_name]
+        for row in sheet.iter_rows():
+            for cell in row:
+                formula = cell.value
+                if not isinstance(formula, str) or not formula.startswith("="):
+                    continue
+                if "#REF!" in formula:
+                    problems.append(f"{sheet_name}!{cell.coordinate} contains #REF!")
+                if "tblPcs" in formula:
+                    problems.append(
+                        f"{sheet_name}!{cell.coordinate} uses a replaceable PCS table"
+                    )
+                if len(problems) >= 5:
+                    return "; ".join(problems)
+    for name in PCS_PRESENTATION_NAMES:
+        defined_name = workbook.defined_names.get(name)
+        reference = getattr(defined_name, "attr_text", None)
+        if not reference:
+            problems.append(f"missing workbook name {name}")
+        elif "#REF!" in reference:
+            problems.append(f"workbook name {name} contains #REF!")
+    return "; ".join(problems[:5]) or None
+
+
 def inspect_pcs_tracker(path: Path, feed_folder: Path | None = None) -> PCSTrackerState:
     """Return truthful template, connection, and freshness state without editing."""
 
@@ -137,6 +173,7 @@ def inspect_pcs_tracker(path: Path, feed_folder: Path | None = None) -> PCSTrack
         try:
             setup = _setup_values(workbook)
             workbook_through, workbook_feed_refreshed = _pcs_data_freshness(workbook)
+            presentation_problem = _presentation_problem(workbook)
         finally:
             workbook.close()
     except (BadZipFile, OSError, ValueError) as exc:
@@ -163,6 +200,7 @@ def inspect_pcs_tracker(path: Path, feed_folder: Path | None = None) -> PCSTrack
         query_parts=query_parts,
         has_connections=has_connections,
         needs_excel_refresh=needs_refresh,
+        problem=presentation_problem,
     )
 
 

@@ -738,8 +738,8 @@ def _flash_columns(
 ) -> tuple[list[str], list[list[Any]], int, int, int]:
     if profile.flash_layout == "oem_split":
         headers = [
-            "Hour", "Forecast", "Actual", "Variance", "Ford Volume",
-            "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
+            "Hour", "Forecast", "Actual", "Volume Handled", "Handled in SL",
+            "Variance", "Ford Volume", "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
             "TSL Chery", "TSL Toyota", "Routed Rate", "AHT", "No Show HC",
             "Data State",
         ]
@@ -750,23 +750,25 @@ def _flash_columns(
             toyota = row["groups"].get("Toyota") or {}
             rows.append([
                 row["hour_label"], row["forecast"], row["offered"],
+                row.get("answered"), row.get("answered_within_target"),
                 row.get("volume_variance"), ford.get("offered"),
                 chery.get("offered"), toyota.get("offered"), row["service_level"],
                 ford.get("service_level"), chery.get("service_level"),
                 toyota.get("service_level"), row["availability"],
                 row["aht_seconds"], row.get("no_show_hc"), row["data_state"],
             ])
-        return headers, rows, 1, 2, 7
+        return headers, rows, 1, 2, 9
     headers = [
-        "Hour", "Forecast", "Actual", "Variance", "TSL", "Routed Rate",
-        "AHT", "No Show HC", "Data State",
+        "Hour", "Forecast", "Actual", "Volume Handled", "Handled in SL",
+        "Variance", "TSL", "Routed Rate", "AHT", "No Show HC", "Data State",
     ]
     rows = [[
-        row["hour_label"], row["forecast"], row["offered"], row.get("volume_variance"),
+        row["hour_label"], row["forecast"], row["offered"], row.get("answered"),
+        row.get("answered_within_target"), row.get("volume_variance"),
         row["service_level"], row["availability"], row["aht_seconds"],
         row.get("no_show_hc"), row["data_state"],
     ] for row in hourly]
-    return headers, rows, 1, 2, 4
+    return headers, rows, 1, 2, 6
 
 
 def _flash_cards(
@@ -838,8 +840,8 @@ def _add_flash_sheet(
             f"{row.get('agent_name') or 'Agent'} [{row.get('agent_id') or '—'}]",
             shift, row.get("attendance_state") or "UNKNOWN",
             int(bool(row.get("no_show"))),
+            int(str(row.get("attendance_state") or "").startswith("UNKNOWN")),
             int(bool(row.get("late_today"))),
-            int(bool(row.get("early_leave"))),
             action_labels.get(
                 str(row.get("pulse_action") or "NONE"),
                 str(row.get("pulse_action") or "—"),
@@ -877,7 +879,7 @@ def _add_flash_sheet(
             "percent", 0, 1,
         ),
         action_title="Attendance pulse & call list",
-        action_headers=("AGENT", "SHIFT", "STATE NOW", "NO SHOW", "LATE", "EARLY LEAVE", "ACTION"),
+        action_headers=("AGENT", "SHIFT", "STATE NOW", "NO SHOW", "POSSIBLE NS", "LATE", "ACTION"),
         action_rows=action_rows,
         action_kinds=("text", "text", "text", "integer", "integer", "integer", "alert"),
         status=f"UPDATED {book.generated:%H:%M}" if ready else "CHECK DATA",
@@ -915,6 +917,7 @@ def _add_flash_sheet(
         toyota = group_totals.get("Toyota") or {}
         values = [
             total_values.get("forecast"), total_values.get("offered"),
+            total_values.get("answered"), total_values.get("answered_within_target"),
             total_values.get("volume_variance"), ford.get("offered"),
             chery.get("offered"), toyota.get("offered"),
             total_values.get("service_level"), ford.get("service_level"),
@@ -925,6 +928,7 @@ def _add_flash_sheet(
     else:
         values = [
             total_values.get("forecast"), total_values.get("offered"),
+            total_values.get("answered"), total_values.get("answered_within_target"),
             total_values.get("volume_variance"), total_values.get("service_level"),
             total_values.get("availability"), total_values.get("aht_seconds"),
             total_values.get("no_show_hc"),
@@ -963,7 +967,7 @@ def _add_flash_sheet(
     attendance_summary_headers = [
         "Checkpoint", "Due HC", "PTO / Away HC",
         "Present HC", "No Show HC", "Late HC", "Early Leave HC",
-        "Offline Now", "Unknown HC", "Call Now",
+        "Offline Now", "Possible No Show HC", "Call Now",
     ]
     attendance_summary_values = [
         pulse.get("checkpoint"), pulse.get("due_hc"), pulse.get("time_off_hc"),
@@ -1121,21 +1125,21 @@ def _add_control_sheet(
             ),
         ),
         action_title="LOB service & attendance actions",
-        action_headers=("LOB", "TSL", "VAR CALLS", "NO SHOW", "LATE", "EARLY LEAVE", "CALL NOW"),
+        action_headers=("LOB", "TSL", "HANDLED", "NO SHOW", "POSSIBLE NS", "LATE", "CALL NOW"),
         action_rows=tuple((
             profile.label, (total or {}).get("service_level"),
-            (total or {}).get("volume_variance"), pulse.get("no_show_hc"),
-            pulse.get("late_today"), pulse.get("early_leave"), pulse.get("call_now"),
+            (total or {}).get("answered"), pulse.get("no_show_hc"),
+            pulse.get("unknown_hc"), pulse.get("late_today"), pulse.get("call_now"),
         ) for profile, total, _cutoff, pulse in summaries),
-        action_kinds=("text", "percent", "change", "integer", "integer", "integer", "alert"),
+        action_kinds=("text", "percent", "integer", "integer", "integer", "integer", "alert"),
         status=f"UPDATED {book.generated:%H:%M}" if workbook_ready else "CHECK DATA",
         status_kind="LIVE" if workbook_ready else "INCOMPLETE",
         status_note=f"{ready_count}/{len(summaries)} operational LOBs have call and forecast data.",
     )
     headers = [
-        "LOB", "Last Call Hour", "TSL", "Target", "Actual", "Forecast",
-        "Variance", "Routed Rate", "No Show HC", "PTO / Away HC",
-        "Offline Now", "Unknown HC", "Call Now", "Status",
+        "LOB", "Last Call Hour", "TSL", "Target", "Actual", "Volume Handled",
+        "Handled in SL", "Forecast", "Variance", "Routed Rate", "No Show HC",
+        "PTO / Away HC", "Offline Now", "Possible No Show HC", "Call Now", "Status",
     ]
     table_row = 34
     for col, header in enumerate(headers):
@@ -1150,18 +1154,15 @@ def _add_control_sheet(
         row = [
             profile.label, f"{cutoff:02d}:59" if cutoff is not None else None,
             value.get("service_level"), value.get("service_target"),
-            value.get("offered"), value.get("forecast"),
+            value.get("offered"), value.get("answered"),
+            value.get("answered_within_target"), value.get("forecast"),
             value.get("volume_variance"), value.get("availability"),
             pulse.get("no_show_hc"), pulse.get("time_off_hc"),
             pulse.get("offline_now"), pulse.get("unknown_hc"),
             pulse.get("call_now"), status,
         ]
         for col, item in enumerate(row):
-            fmt = (
-                book.report.percent if col in {2, 3, 7}
-                else book.report.integer if col in {4, 5, 6, 8, 9, 10, 11, 12}
-                else book.report.body
-            )
+            fmt = _table_value_format(book, headers[col])
             if item is None:
                 ws.write_blank(offset, col, None, fmt)
             else:
