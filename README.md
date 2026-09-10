@@ -115,9 +115,11 @@ evidence remain in hidden support sheets.
 Actual demand comes from exact queues in `queue_mapping.csv`. WFMHub counts each
 mapped inbound queue entry, matching Storm `Total Entered`; outbound companion
 legs are ignored. A transfer entering another displayed queue is therefore a
-new queue entry. Each Flash uses an exact queue allowlist transcribed from its
-supplied Storm screenshot: RSA NL 30 queues, RSA BE 36 queues, Ford NL six
-queues, and OEM six queues. PCS stays limited to the effective-dated FTE roster.
+new queue entry. Each Flash uses an exact reviewed queue allowlist: RSA NL has
+30 queues, RSA BE has its 36 reviewed queues plus six transferred Ford-FR
+queues, Ford NL has six queues, and Ford FR/OEM now keeps only
+`APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR`. PCS stays limited to the
+effective-dated FTE roster.
 
 Verint Forecast supplies forecast only. New 15-minute exports stay at their
 native grain for Staffing and are rolled into hours for RTM. Hourly
@@ -128,13 +130,13 @@ entered - lost calls from 5 to 30 seconds)`; AHT is weighted handled seconds per
 routed queue entry. The threshold clock is total queue wait plus ringing.
 
 Every LOB displays the full 00:00-23:00 day. Headline controls show TSL, offered
-volume, volume variance, and `No Show HC`; the hourly table retains Forecast,
-Routed Rate and AHT, while the attendance section retains Offline Now and Call
-Now. `No Show HC`
+volume, volume variance, and `No Show HC`; the hourly and LOB tables also retain
+Forecast, Volume Handled, Handled in SL, Routed Rate and AHT, while the
+attendance section retains Offline Now and Call Now. `No Show HC`
 means the agent has no observed presence at all and agent-specific evidence
 proves the no-show. Late agents, early leavers, and agents who went offline
-after attending remain present. `Unknown HC` is a possible no-show or data
-problem and is never added to No Show HC or the automatic call count.
+after attending remain present. `Possible No Show HC` is an unknown/no-evidence
+case and is never added to No Show HC or the automatic call count.
 The attendance strip reconciles `Due HC = Present HC + No Show HC + Unknown HC`;
 Offline Now is a subset of Present HC. `PTO / Away HC` shows scheduled people
 with registered leave that day. Full-day leave is visible but excluded from Due
@@ -151,6 +153,11 @@ evidence is `UNKNOWN — POSSIBLE NO SHOW` and requires a data check.
 Queue membership lives in `config\queue_mapping.csv`; profile scope lives in
 `config\service_profiles.toml`; formulas and targets live in
 `config\metric_catalog.toml`.
+
+Travel-labelled active roster LOBs already flow into Attendance, Staffing,
+Absence, PCS and Bonus whenever those sources contain matching rows. WFMHub does
+not fabricate a Travel service Flash or SL from the LOB name: that requires an
+exact reviewed Travel queue list and forecast-file mapping.
 
 ## PCS Report & Coaching
 
