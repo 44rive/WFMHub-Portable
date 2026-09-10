@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "strict": true,
+    "module": "commonjs",
+    "outDir": "../../../build/office-script-test",
+    "noEmitOnError": true,
+    "skipLibCheck": true
+  },
+  "files": [
+    "excel-script.d.ts",
+    "WFM_Write_Absence.ts",
+    "WFM_Write_Absence.test.ts"
+  ]
+}

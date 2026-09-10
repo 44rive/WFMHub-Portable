@@ -62,7 +62,7 @@ WFM_Submit_Absence
                        WFMHub
 ```
 
-Use one responsive Canvas App. French is the default, with an English toggle. Use
+Use one responsive Canvas App. English is the default, with a French toggle. Use
 auto-layout containers and one compact Operations submission experience. The app
 does not connect directly to Excel; the flow owns workbook access.
 

@@ -68,7 +68,8 @@ In development:
 Utilities include on-demand period analysis, clean exports, health/coverage,
 backup and validated custom read-only analysis. The accepted PTO/Away Power Apps
 architecture is governed by `docs/PTO_AWAY_APP_IMPLEMENTATION.md`; its repo-side
-implementation kit is in progress and Microsoft tenant deployment is pending.
+implementation kit is under `power-platform/wfm-absence-app`, and Microsoft
+tenant construction and deployment are pending.
 
 ## Source roles
 

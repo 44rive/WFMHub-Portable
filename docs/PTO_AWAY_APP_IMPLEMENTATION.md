@@ -1,6 +1,7 @@
 # WFM PTO & Away Submission App — Implementation Plan
 
-Status: implementation kit in progress; Microsoft tenant deployment pending.
+Status: repo implementation kit ready; Microsoft tenant construction and
+deployment pending.
 Owner: Anass ASSRI / WFM
 Approved direction: SharePoint-first request workflow, WFM approval, then
 serialized export to the unchanged FTE workbook.
@@ -63,7 +64,7 @@ publisher prefix `wfm`.
 `WFM PTO & Away`
 
 - responsive tablet/web layout using auto-layout containers;
-- French default and English toggle;
+- English default and French toggle;
 - Operations: Submit and My requests;
 - WFM reviewers: Review queue and request detail;
 - one dynamic request form for PTO or Away;
@@ -183,7 +184,7 @@ confirmed it and when. A future leave-balance integration is a separate project.
 | `wfm_DocumentLibrary` | Library containing the FTE workbook |
 | `wfm_FTEWorkbookPath` | Server-relative path to `FTE Count.xlsx` |
 | `wfm_ReviewerGroup` | WFM reviewer group email or object ID |
-| `wfm_DefaultLanguage` | `fr` |
+| `wfm_DefaultLanguage` | `en` |
 | `wfm_AgentSyncSchedule` | Roster mirror refresh schedule |
 
 ## Delivery phases

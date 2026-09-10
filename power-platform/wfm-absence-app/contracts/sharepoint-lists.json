@@ -1,0 +1,88 @@
+{
+  "contractVersion": "1.0.0",
+  "defaultLanguage": "en",
+  "lists": [
+    {
+      "name": "WFM_Agents",
+      "purpose": "Read-only employee lookup mirror of tblFTEAgents",
+      "titleColumnPurpose": "Employee name",
+      "columns": [
+        {"internalName": "ClientID", "displayName": "Client ID", "type": "Text", "required": false, "indexed": true, "unique": false},
+        {"internalName": "EmployeeName", "displayName": "Employee Name", "type": "Text", "required": true},
+        {"internalName": "EmploymentStatus", "displayName": "Employment Status", "type": "Choice", "choices": ["Active", "Leaver"], "required": true, "indexed": true},
+        {"internalName": "TeamLeader", "displayName": "Team Leader", "type": "Text", "required": false},
+        {"internalName": "OpsManager", "displayName": "Ops Manager", "type": "Text", "required": false},
+        {"internalName": "LOB", "displayName": "LOB", "type": "Text", "required": false, "indexed": true},
+        {"internalName": "Market", "displayName": "Market", "type": "Text", "required": false},
+        {"internalName": "Language", "displayName": "Language", "type": "Text", "required": false},
+        {"internalName": "Location", "displayName": "Location", "type": "Text", "required": false},
+        {"internalName": "City", "displayName": "City", "type": "Text", "required": false},
+        {"internalName": "FTE", "displayName": "FTE", "type": "Number", "required": false},
+        {"internalName": "LeaverEndDate", "displayName": "End date if leaver", "type": "DateOnly", "required": false},
+        {"internalName": "SyncBatchID", "displayName": "Sync Batch ID", "type": "Text", "required": true, "indexed": true},
+        {"internalName": "IsCurrent", "displayName": "Is Current", "type": "Boolean", "required": true, "default": true, "indexed": true},
+        {"internalName": "SourceModifiedUTC", "displayName": "Source Modified UTC", "type": "DateTime", "required": false}
+      ],
+      "views": [
+        {"name": "Current roster", "filter": "IsCurrent equals Yes"},
+        {"name": "Data quality", "filter": "ClientID is empty or EmploymentStatus is empty"}
+      ]
+    },
+    {
+      "name": "WFM_AbsenceRequests",
+      "purpose": "Durable submission, approval and Excel synchronization ledger",
+      "titleColumnPurpose": "Human request reference",
+      "columns": [
+        {"internalName": "RequestID", "displayName": "Request ID", "type": "Text", "required": true, "indexed": true, "unique": true},
+        {"internalName": "Fingerprint", "displayName": "Fingerprint", "type": "Text", "required": true, "indexed": true, "unique": false},
+        {"internalName": "ContractVersion", "displayName": "Contract Version", "type": "Text", "required": true, "default": "1.0.0"},
+        {"internalName": "RequestType", "displayName": "Request Type", "type": "Choice", "choices": ["PTO", "Away"], "required": true, "indexed": true},
+        {"internalName": "ClientID", "displayName": "Client ID", "type": "Text", "required": true, "indexed": true},
+        {"internalName": "EmployeeName", "displayName": "Employee Name", "type": "Text", "required": true},
+        {"internalName": "EmploymentStatus", "displayName": "Employment Status", "type": "Text", "required": true},
+        {"internalName": "TeamLeader", "displayName": "Team Leader", "type": "Text", "required": false},
+        {"internalName": "OpsManager", "displayName": "Ops Manager", "type": "Text", "required": false},
+        {"internalName": "LOB", "displayName": "LOB", "type": "Text", "required": false, "indexed": true},
+        {"internalName": "Market", "displayName": "Market", "type": "Text", "required": false},
+        {"internalName": "Location", "displayName": "Location", "type": "Text", "required": false},
+        {"internalName": "City", "displayName": "City", "type": "Text", "required": false},
+        {"internalName": "StartDate", "displayName": "Start Date", "type": "DateOnly", "required": true, "indexed": true},
+        {"internalName": "EndDate", "displayName": "End Date", "type": "DateOnly", "required": false},
+        {"internalName": "DayCoverage", "displayName": "Day Coverage", "type": "Choice", "choices": ["Full day", "Partial day"], "required": false},
+        {"internalName": "StartTimeText", "displayName": "Start Time", "type": "Text", "required": false},
+        {"internalName": "EndTimeText", "displayName": "End Time", "type": "Text", "required": false},
+        {"internalName": "AwayType", "displayName": "Away Type", "type": "Choice", "choices": ["Long sickness", "Maternity/Parental", "Administrative leave", "Other"], "required": false},
+        {"internalName": "RequestComment", "displayName": "Comment", "type": "Note", "required": false},
+        {"internalName": "ReliquatConfirmed", "displayName": "Leave Balance Confirmed", "type": "Boolean", "required": true, "default": false},
+        {"internalName": "AccuracyConfirmed", "displayName": "Accuracy Confirmed", "type": "Boolean", "required": true, "default": false},
+        {"internalName": "SelectedLanguage", "displayName": "Selected Language", "type": "Choice", "choices": ["EN", "FR"], "required": true, "default": "EN"},
+        {"internalName": "RequesterUPN", "displayName": "Requester UPN", "type": "Text", "required": true, "indexed": true},
+        {"internalName": "RequesterName", "displayName": "Requester Name", "type": "Text", "required": true},
+        {"internalName": "SubmittedUTC", "displayName": "Submitted UTC", "type": "DateTime", "required": true},
+        {"internalName": "RequestStatus", "displayName": "Request Status", "type": "Choice", "choices": ["Submitted", "Approved", "Rejected", "Cancelled"], "required": true, "default": "Submitted", "indexed": true},
+        {"internalName": "ReviewerUPN", "displayName": "Reviewer UPN", "type": "Text", "required": false},
+        {"internalName": "ReviewedUTC", "displayName": "Reviewed UTC", "type": "DateTime", "required": false},
+        {"internalName": "ReviewComment", "displayName": "Review Comment", "type": "Note", "required": false},
+        {"internalName": "SyncStatus", "displayName": "Sync Status", "type": "Choice", "choices": ["Not required", "Pending", "Syncing", "Synced", "Failed"], "required": true, "default": "Not required", "indexed": true},
+        {"internalName": "RetryCount", "displayName": "Retry Count", "type": "Number", "required": true, "default": 0},
+        {"internalName": "LastSyncUTC", "displayName": "Last Sync UTC", "type": "DateTime", "required": false},
+        {"internalName": "LastSyncError", "displayName": "Last Sync Error", "type": "Note", "required": false},
+        {"internalName": "WorkbookAction", "displayName": "Workbook Action", "type": "Text", "required": false},
+        {"internalName": "WorkbookStatus", "displayName": "Workbook Status", "type": "Text", "required": false}
+      ],
+      "views": [
+        {"name": "WFM review queue", "filter": "RequestStatus equals Submitted"},
+        {"name": "Synchronization exceptions", "filter": "SyncStatus equals Failed"},
+        {"name": "Approved and pending", "filter": "RequestStatus equals Approved and SyncStatus equals Pending"}
+      ]
+    }
+  ],
+  "environmentVariables": [
+    {"schemaName": "wfm_SiteUrl", "type": "Text", "required": true},
+    {"schemaName": "wfm_DocumentLibrary", "type": "Text", "required": true},
+    {"schemaName": "wfm_FTEWorkbookPath", "type": "Text", "required": true},
+    {"schemaName": "wfm_ReviewerGroup", "type": "Text", "required": true},
+    {"schemaName": "wfm_DefaultLanguage", "type": "Text", "default": "en", "required": true},
+    {"schemaName": "wfm_AgentSyncSchedule", "type": "Text", "default": "0 5 * * *", "required": true}
+  ]
+}

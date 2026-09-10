@@ -1,0 +1,64 @@
+key,en,fr
+app_title,PTO & long absence requests,Demandes PTO et absences longues
+app_subtitle,Submit an absence request to the WFM team,Soumettre une demande d'absence à l'équipe WFM
+new_request,New request,Nouvelle demande
+new_request_help,"Find the employee, complete the absence details, then review the summary.","Recherchez l'employé, complétez l'absence puis vérifiez le récapitulatif."
+request_type,Request type,Type de demande
+choose_option,Choose one option,Choisissez une option
+pto,Paid time off (PTO),Congé (PTO)
+away,Long absence (Away),Absence longue (Away)
+employee,Employee,Employé
+client_id,Client ID,Client ID
+search,Search,Rechercher
+confirmed_employee,Confirmed employee,Employé confirmé
+status,Status,Statut
+team_leader,Team Leader,Team Leader
+ops_manager,Ops Manager,Ops Manager
+lob_market,LOB / Market,LOB / Marché
+pto_details,PTO details,Détails du congé
+away_details,Away details,Détails de l'absence longue
+required_help,Fields marked * are required,Les champs marqués * sont obligatoires
+start_date,Start date,Date de début
+end_date,End date,Date de fin
+no_end_date,This case currently has no end date,Ce dossier n'a actuellement pas de date de fin
+coverage,Coverage,Couverture
+full_day,Full day,Journée complète
+partial_day,Partial day,Journée partielle
+start_time,Start time,Heure de début
+end_time,End time,Heure de fin
+away_type,Away type,Type d'absence
+long_sickness,Long sickness,Maladie longue
+maternity_parental,Maternity/Parental,Maternité/Parental
+administrative_leave,Administrative leave,Congé administratif
+other,Other,Autre
+comment,Comment,Commentaire
+comment_optional,Additional information (optional),Informations complémentaires (facultatif)
+reliquat_confirm,"I confirm the employee has sufficient remaining leave balance for this request.","Je confirme que l'employé dispose d'un reliquat de congé suffisant pour cette demande."
+summary,Request summary,Récapitulatif
+review_before_submit,Review before submitting,À vérifier avant envoi
+draft,Draft,Brouillon
+pending_wfm,Pending WFM,En attente WFM
+period,Period,Période
+duration,Duration,Durée
+after_submission,After submission,Après envoi
+approval_notice,WFM will review the request. It will affect planning only after approval.,La demande sera contrôlée par WFM. Elle n'affectera le planning qu'après validation.
+accuracy_confirm,I confirm that the Client ID and absence information are accurate.,Je confirme que le Client ID et les informations d'absence sont exacts.
+submit,Submit request,Envoyer la demande
+cancel_clear,Cancel and clear the form,Annuler et effacer le formulaire
+my_requests,My requests,Mes demandes
+review_queue,WFM review queue,File de validation WFM
+approve,Approve,Approuver
+reject,Reject,Rejeter
+cancel_request,Cancel request,Annuler la demande
+retry_sync,Retry synchronization,Relancer la synchronisation
+invalid_id,Client ID was not found.,Client ID introuvable.
+ambiguous_id,This Client ID matches more than one employee. Contact WFM.,Ce Client ID correspond à plusieurs employés. Contactez WFM.
+inactive_employee,The employee is not eligible for the selected dates.,L'employé n'est pas éligible pour les dates sélectionnées.
+duplicate_request,An identical active request already exists.,Une demande active identique existe déjà.
+overlap_request,The requested period overlaps another active absence.,La période demandée chevauche une autre absence active.
+submit_success,Request submitted successfully.,Demande envoyée avec succès.
+submit_failure,The request could not be submitted. No workbook change was made.,La demande n'a pas pu être envoyée. Aucun changement n'a été apporté au classeur.
+required_fields,Complete all required fields.,Complétez tous les champs obligatoires.
+invalid_dates,End date cannot be earlier than Start date.,La date de fin ne peut pas précéder la date de début.
+invalid_times,End time must be later than Start time.,L'heure de fin doit être postérieure à l'heure de début.
+privacy_notice,Restricted WFM access. Every request retains its author date decision and synchronization status.,Accès restreint WFM. Chaque demande conserve l'auteur la date la décision et le statut de synchronisation.

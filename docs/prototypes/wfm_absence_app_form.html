@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WFM PTO & Away — Form prototype</title>
+<title>WFM PTO & Away — English form prototype</title>
 <style>
   :root {
     --navy:#0B1F33; --teal:#007C83; --gold:#D6A84B; --canvas:#F4F7F9;
@@ -102,71 +102,71 @@
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand"><div class="brand-mark">WF</div><div class="brand-copy"><strong>WFM HUB</strong><span>WORKFORCE MANAGEMENT</span></div></div>
-      <div class="title"><strong>Demandes PTO & absences longues</strong><span>Soumettre une demande à l'équipe WFM</span></div>
-      <div class="lang"><span class="active">FR</span><span>EN</span></div>
+      <div class="title"><strong>PTO & long absence requests</strong><span>Submit an absence request to the WFM team</span></div>
+      <div class="lang"><span>FR</span><span class="active">EN</span></div>
       <div class="user"><div class="avatar">AA</div><div><strong style="font-size:12px">Anass Assri</strong><small style="font-size:10px">Operations</small></div></div>
     </div>
   </header>
 
   <main class="shell">
     <div class="intro">
-      <div><h1>Nouvelle demande</h1><p>Recherchez l'employé, complétez l'absence puis vérifiez le récapitulatif.</p></div>
-      <div class="stepper"><div class="step active"><b>1</b>Employé</div><div class="rule"></div><div class="step active"><b>2</b>Absence</div><div class="rule"></div><div class="step"><b>3</b>Confirmation</div></div>
+      <div><h1>New request</h1><p>Find the employee, complete the absence details, then review the summary.</p></div>
+      <div class="stepper"><div class="step active"><b>1</b>Employee</div><div class="rule"></div><div class="step active"><b>2</b>Absence</div><div class="rule"></div><div class="step"><b>3</b>Confirmation</div></div>
     </div>
 
     <div class="layout">
       <section class="stack">
         <div class="card">
-          <div class="card-head"><h2>1. Type de demande</h2><small>Choisissez une option</small></div>
-          <div class="card-body"><div class="type-tabs"><div class="type active"><i></i>Congé (PTO)</div><div class="type"><i></i>Absence longue (Away)</div></div></div>
+          <div class="card-head"><h2>1. Request type</h2><small>Choose one option</small></div>
+          <div class="card-body"><div class="type-tabs"><div class="type active"><i></i>Paid time off (PTO)</div><div class="type"><i></i>Long absence (Away)</div></div></div>
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>2. Employé</h2><small>Identification par Client ID</small></div>
+          <div class="card-head"><h2>2. Employee</h2><small>Identification by Client ID</small></div>
           <div class="card-body">
-            <div class="field full"><label class="required">Client ID</label><div class="search-wrap"><div class="input">001245</div><button class="search">Rechercher</button></div></div>
+            <div class="field full"><label class="required">Client ID</label><div class="search-wrap"><div class="input">001245</div><button class="search">Search</button></div></div>
             <div class="employee">
-              <div><small>Employé confirmé</small><strong>Samira Benali</strong></div>
-              <div><small>Statut</small><strong class="status"><i class="dot"></i>Active</strong></div>
+              <div><small>Confirmed employee</small><strong>Samira Benali</strong></div>
+              <div><small>Status</small><strong class="status"><i class="dot"></i>Active</strong></div>
               <div><small>Team Leader</small><strong>Karim El Mansouri</strong></div>
-              <div><small>LOB / Marché</small><strong>RSA NL · NL</strong></div>
+              <div><small>LOB / Market</small><strong>RSA NL · NL</strong></div>
             </div>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>3. Détails du congé</h2><small>Les champs marqués * sont obligatoires</small></div>
+          <div class="card-head"><h2>3. PTO details</h2><small>Fields marked * are required</small></div>
           <div class="card-body">
             <div class="grid">
-              <div class="field"><label class="required">Date de début</label><div class="input">15/09/2026</div></div>
-              <div class="field"><label class="required">Date de fin</label><div class="input">16/09/2026</div></div>
-              <div class="field full"><label class="required">Couverture</label><div class="type-tabs"><div class="type active"><i></i>Journée complète</div><div class="type"><i></i>Journée partielle</div></div></div>
-              <div class="field full"><label>Commentaire</label><div class="input placeholder" style="height:56px;align-items:flex-start;padding-top:11px">Informations complémentaires (facultatif)</div></div>
-              <div class="field full"><div class="check"><i class="box"></i><span>Je confirme que l'employé dispose d'un reliquat de congé suffisant pour cette demande.</span></div></div>
+              <div class="field"><label class="required">Start date</label><div class="input">15/09/2026</div></div>
+              <div class="field"><label class="required">End date</label><div class="input">16/09/2026</div></div>
+              <div class="field full"><label class="required">Coverage</label><div class="type-tabs"><div class="type active"><i></i>Full day</div><div class="type"><i></i>Partial day</div></div></div>
+              <div class="field full"><label>Comment</label><div class="input placeholder" style="height:56px;align-items:flex-start;padding-top:11px">Additional information (optional)</div></div>
+              <div class="field full"><div class="check"><i class="box"></i><span>I confirm the employee has sufficient remaining leave balance for this request.</span></div></div>
             </div>
           </div>
         </div>
       </section>
 
       <aside class="card summary">
-        <div class="card-head"><div><h2>Récapitulatif</h2><small>À vérifier avant envoi</small></div><span style="font-size:11px;color:#C9D5DF">BROUILLON</span></div>
+        <div class="card-head"><div><h2>Request summary</h2><small>Review before submitting</small></div><span style="font-size:11px;color:#C9D5DF">DRAFT</span></div>
         <div class="summary-body">
-          <div class="summary-title"><div><strong>Demande PTO</strong><span>Journée complète</span></div><div class="pill">En attente WFM</div></div>
+          <div class="summary-title"><div><strong>PTO request</strong><span>Full day</span></div><div class="pill">Pending WFM</div></div>
           <div class="summary-row"><span>Client ID</span><strong>001245</strong></div>
-          <div class="summary-row"><span>Employé</span><strong>Samira Benali</strong></div>
+          <div class="summary-row"><span>Employee</span><strong>Samira Benali</strong></div>
           <div class="summary-row"><span>LOB</span><strong>RSA NL</strong></div>
-          <div class="summary-row"><span>Période</span><strong>15–16 sept. 2026</strong></div>
-          <div class="summary-row"><span>Durée</span><strong>2 jours</strong></div>
-          <div class="notice"><strong>Après envoi</strong><br>La demande sera contrôlée par WFM. Elle n'affectera le planning qu'après validation.</div>
-          <div class="accuracy"><i class="box"></i><span>Je confirme que le Client ID et les informations d'absence sont exacts.</span></div>
-          <button class="submit">Envoyer la demande</button>
-          <div class="cancel">Annuler et effacer le formulaire</div>
+          <div class="summary-row"><span>Period</span><strong>15–16 Sep 2026</strong></div>
+          <div class="summary-row"><span>Duration</span><strong>2 days</strong></div>
+          <div class="notice"><strong>After submission</strong><br>WFM will review the request. It will affect planning only after approval.</div>
+          <div class="accuracy"><i class="box"></i><span>I confirm that the Client ID and absence information are accurate.</span></div>
+          <button class="submit">Submit request</button>
+          <div class="cancel">Cancel and clear the form</div>
         </div>
-        <div class="privacy">Accès restreint WFM. Chaque demande conserve l'auteur, la date, la décision et le statut de synchronisation.</div>
+        <div class="privacy">Restricted WFM access. Every request retains its author, date, decision and synchronisation status.</div>
       </aside>
     </div>
 
-    <div class="footer"><span>Prepared by Anass ASSRI | WFM</span><span>Prototype interface · FR par défaut · Desktop / tablette</span></div>
+    <div class="footer"><span>Prepared by Anass ASSRI | WFM</span><span>Interface prototype · EN default · Desktop / tablet</span></div>
   </main>
 </body>
 </html>
