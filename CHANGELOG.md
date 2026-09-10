@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.27.3 — 2026-09-10
+
+- Removes the PCS presentation cutoff that exposed only five recent reporting
+  windows even when older dates existed in SQLite.
+- Adds `All available` and one `Month YYYY-MM` selector for every calendar
+  month present in the PCS mart while preserving the five operational presets.
+- Adds filter-ready `AGENT DAY` rows for every available PCS business date to
+  PERFORMANCE under the existing CSV and Power Query schema.
+- Keeps the all-history chart cache bounded to its latest 31 calendar days so
+  the permanent tracker remains practical; its cards and tables still use the
+  complete available period.
+- Requires no PCS tracker rebuild and no Power Query reinstall: update the Hub,
+  run **Update PCS data**, then use Excel **Data > Refresh All**.
+
 ## 0.27.2 — 2026-09-10
 
 - Fixes PCS dashboard `#REF!` errors caused by desktop Excel rewriting direct

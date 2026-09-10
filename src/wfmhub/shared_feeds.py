@@ -133,6 +133,28 @@ def _available_period(
     return as_date(minimum, fallback_start), as_date(maximum, fallback_end)
 
 
+def _date_value(value: Any, fallback: date) -> date:
+    if value is None:
+        return fallback
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
+def _pcs_business_dates(
+    conn: DatabaseConnection,
+    as_of: date,
+) -> tuple[date, ...]:
+    rows = conn.execute(
+        """SELECT DISTINCT business_date FROM mart.agent_pcs_day
+           WHERE business_date<=? ORDER BY business_date""",
+        (as_of,),
+    ).fetchall()
+    return tuple(_date_value(value, as_of) for (value,) in rows)
+
+
 def _manifest(
     folder: Path,
     family: str,
@@ -202,22 +224,20 @@ in
     Typed'''
 
 
-def _pcs_reporting_periods(as_of: date) -> tuple[tuple[str, date, date], ...]:
-    """Return the stable novice-facing periods used in the PCS result feed."""
+def _pcs_reporting_periods(
+    as_of: date,
+    available_start: date | None = None,
+    available_months: Sequence[date] | None = None,
+) -> tuple[tuple[str, date, date], ...]:
+    """Return operational presets plus every available PCS calendar month."""
 
-    month_start = as_of.replace(day=1)
-    previous_end = month_start - timedelta(days=1)
-    previous_start = previous_end.replace(day=1)
-    previous_mtd_end = min(
-        previous_end,
-        previous_start + timedelta(days=as_of.day - 1),
-    )
-    return (
-        ("Latest day", as_of, as_of),
-        ("Current week", as_of - timedelta(days=as_of.weekday()), as_of),
-        ("Current MTD", month_start, as_of),
-        ("Previous MTD same days", previous_start, previous_mtd_end),
-        ("Previous full month", previous_start, previous_end),
+    return tuple(
+        (window.label, window.start, window.end)
+        for window in _pcs_reporting_windows(
+            as_of,
+            available_start=available_start,
+            available_months=available_months,
+        )
     )
 
 
@@ -305,6 +325,7 @@ class PCSPeriodWindow:
     end: date
     prior_start: date
     prior_end: date
+    trend_start: date | None = None
 
 
 def _month_before(value: date) -> tuple[date, date]:
@@ -315,8 +336,15 @@ def _month_before(value: date) -> tuple[date, date]:
 def _pcs_reporting_windows(
     as_of: date,
     previous_available: date | None = None,
+    available_start: date | None = None,
+    available_months: Sequence[date] | None = None,
 ) -> tuple[PCSPeriodWindow, ...]:
-    """Return each selectable period and its like-for-like comparison window."""
+    """Return operational presets and complete available-month coverage.
+
+    Dashboard cards and tables use the complete window.  The all-history trend
+    is intentionally limited to its latest 31 calendar days so the permanent
+    tracker remains lightweight; PERFORMANCE carries every agent/day row.
+    """
 
     month_start = as_of.replace(day=1)
     previous_start, previous_end = _month_before(as_of)
@@ -330,7 +358,7 @@ def _pcs_reporting_windows(
     )
     week_start = as_of - timedelta(days=as_of.weekday())
     latest_prior = previous_available or (as_of - timedelta(days=1))
-    return (
+    operational = (
         PCSPeriodWindow("Latest day", as_of, as_of, latest_prior, latest_prior),
         PCSPeriodWindow(
             "Current week", week_start, as_of,
@@ -349,6 +377,65 @@ def _pcs_reporting_windows(
             two_months_start, two_months_end,
         ),
     )
+    if available_start is None:
+        return operational
+
+    first_available = min(available_start, as_of)
+    span_days = (as_of - first_available).days
+    prior_all_end = first_available - timedelta(days=1)
+    all_available = PCSPeriodWindow(
+        "All available",
+        first_available,
+        as_of,
+        prior_all_end - timedelta(days=span_days),
+        prior_all_end,
+        max(first_available, as_of - timedelta(days=30)),
+    )
+
+    first_month = first_available.replace(day=1)
+    if available_months is None:
+        month_values: list[date] = []
+        month = month_start
+        while month >= first_month:
+            month_values.append(month)
+            month = _month_before(month)[0]
+    else:
+        month_values = sorted({
+            value.replace(day=1)
+            for value in available_months
+            if first_month <= value.replace(day=1) <= month_start
+        }, reverse=True)
+
+    months: list[PCSPeriodWindow] = []
+    for month in month_values:
+        next_month = (
+            date(month.year + 1, 1, 1)
+            if month.month == 12
+            else date(month.year, month.month + 1, 1)
+        )
+        month_end = next_month - timedelta(days=1)
+        window_start = max(month, first_available)
+        window_end = min(month_end, as_of)
+        prior_month_start, prior_month_end = _month_before(month)
+        start_offset = (window_start - month).days
+        end_offset = (window_end - month).days
+        comparable_start = min(
+            prior_month_end,
+            prior_month_start + timedelta(days=start_offset),
+        )
+        comparable_end = min(
+            prior_month_end,
+            prior_month_start + timedelta(days=end_offset),
+        )
+        months.append(PCSPeriodWindow(
+            f"Month {month:%Y-%m}",
+            window_start,
+            window_end,
+            comparable_start,
+            comparable_end,
+        ))
+
+    return (*operational, all_available, *months)
 
 
 def _key_part(value: Any) -> str:
@@ -469,17 +556,15 @@ def pcs_dashboard_cache_rows(
 ]:
     """Precompute every valid Overview selection; Excel only performs lookups."""
 
-    available_dates = [
-        value.date() if isinstance(value, datetime) else (
-            value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
-        )
-        for (value,) in conn.execute(
-            "SELECT DISTINCT business_date FROM mart.agent_pcs_day WHERE business_date<=? ORDER BY business_date DESC LIMIT 2",
-            (as_of,),
-        ).fetchall()
-    ]
-    previous = available_dates[1] if len(available_dates) > 1 else None
-    windows = _pcs_reporting_windows(as_of, previous)
+    available_dates = _pcs_business_dates(conn, as_of)
+    available_start = available_dates[0] if available_dates else as_of
+    previous = available_dates[-2] if len(available_dates) > 1 else None
+    windows = _pcs_reporting_windows(
+        as_of,
+        previous,
+        available_start=available_start,
+        available_months=available_dates,
+    )
     earliest = min(window.prior_start for window in windows)
     rows = _pcs_agent_days(conn, earliest, as_of)
     lobs, leaders, agents = _pcs_dimensions(rows)
@@ -602,10 +687,11 @@ def pcs_dashboard_cache_rows(
                     current_agent["participation"], current_agent["valid"],
                     current_agent["low"], as_of, refreshed,
                 ))
+            trend_start = window.trend_start or window.start
             for rank, offset in enumerate(
-                range((window.end - window.start).days + 1), 1,
+                range((window.end - trend_start).days + 1), 1,
             ):
-                business_date = window.start + timedelta(days=offset)
+                business_date = trend_start + timedelta(days=offset)
                 daily = metric(current_days.get((scope, business_date)))
                 daily_cache.append((
                     f"DAILY|{selection}|{rank}", rank, business_date,
@@ -623,8 +709,15 @@ def pcs_result_rows(
 ) -> list[tuple[Any, ...]]:
     """Build filter-ready LOB, team, and agent scorecards for standard periods."""
 
+    available_dates = _pcs_business_dates(conn, as_of)
+    available_start = available_dates[0] if available_dates else as_of
+
     rows: list[tuple[Any, ...]] = []
-    for period_label, period_start, period_end in _pcs_reporting_periods(as_of):
+    for period_label, period_start, period_end in _pcs_reporting_periods(
+        as_of,
+        available_start,
+        available_dates,
+    ):
         for level in ("LOB", "TEAM", "AGENT"):
             for item in _pcs_scope_aggregates(conn, period_start, period_end, level):
                 valid = int(item["valid_q1"] or 0)
@@ -639,6 +732,48 @@ def pcs_result_rows(
                     "LOW SAMPLE" if valid < minimum_sample else "OK",
                     as_of, refreshed,
                 ))
+
+    # PERFORMANCE is the detailed, native-filter surface.  These rows make
+    # every available business date inspectable without exposing raw call legs
+    # or adding a new query/table contract.
+    cursor = conn.execute(
+        """SELECT business_date, coalesce(lob,'Unassigned'),
+                  coalesce(team_leader,'Unassigned'),
+                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']',
+                  agent_id, coalesce(agent_name,'Agent'), coalesce(language,''),
+                  coalesce(pcs_score_sum,0), coalesce(survey_responses,0),
+                  coalesce(pcs_participation_responses,0),
+                  coalesce(pcs_status_calls,0),
+                  coalesce(low_score_responses,0),
+                  coalesce(top_box_responses,0), coalesce(inbound_calls,0)
+           FROM mart.agent_pcs_day
+           WHERE business_date BETWEEN ? AND ?
+             AND trim(coalesce(agent_id,''))<>''
+           ORDER BY business_date DESC, lob, team_leader, agent_name, agent_id""",
+        (available_start, as_of),
+    )
+    for item in cursor.fetchall():
+        business_date = item[0]
+        if isinstance(business_date, datetime):
+            business_date = business_date.date()
+        elif not isinstance(business_date, date):
+            business_date = date.fromisoformat(str(business_date)[:10])
+        (
+            lob, team, selector, agent_id, agent, language,
+            score_sum, valid, q1_nonblank, eligible, low, positive, inbound,
+        ) = item[1:]
+        valid = int(valid or 0)
+        eligible = int(eligible or 0)
+        rows.append((
+            "Daily detail", business_date, business_date, "AGENT DAY",
+            lob, team, selector, agent_id, agent, language,
+            float(score_sum) / valid if valid else None,
+            float(q1_nonblank) / eligible if eligible else None,
+            valid, eligible, int(q1_nonblank or 0), int(low or 0),
+            int(positive or 0), int(inbound or 0),
+            "LOW SAMPLE" if valid < minimum_sample else "OK",
+            as_of, refreshed,
+        ))
     return rows
 
 
@@ -650,17 +785,13 @@ def pcs_coaching_cache_rows(
 ) -> list[tuple[Any, ...]]:
     """Build period/LOB lookup rows for the visible coaching work queue."""
 
-    available_dates = [
-        value.date() if isinstance(value, datetime) else (
-            value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
-        )
-        for (value,) in conn.execute(
-            "SELECT DISTINCT business_date FROM mart.agent_pcs_day WHERE business_date<=? ORDER BY business_date DESC LIMIT 2",
-            (as_of,),
-        ).fetchall()
-    ]
+    available_dates = _pcs_business_dates(conn, as_of)
+    available_start = available_dates[0] if available_dates else as_of
     windows = _pcs_reporting_windows(
-        as_of, available_dates[1] if len(available_dates) > 1 else None,
+        as_of,
+        available_dates[-2] if len(available_dates) > 1 else None,
+        available_start=available_start,
+        available_months=available_dates,
     )
     earliest = min(window.prior_start for window in windows)
     primary_score = f"question_{config.pcs.primary_score_question}_score"

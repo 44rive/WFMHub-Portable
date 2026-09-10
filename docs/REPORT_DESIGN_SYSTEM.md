@@ -71,11 +71,14 @@ defines a target; WFMHub never invents the pictured PCS target.
 - `PCS Live Tracker.xlsx` is the one permanent shared workbook. Normal Hub
   updates replace external CSV feeds, never this file; a versioned migration
   archives the old tracker and preserves keyed actions.
-- `OVERVIEW`: cascading Period, LOB, Team Leader and Agent dropdowns; selected
-  PCS, participation, prior comparable and change cards; responsive LOB chart,
-  daily trend, compact LOB table, then agent performance below.
-- `PERFORMANCE`: lightweight standard-period results at LOB, team and agent
-  grain. Native table filters are built in and native slicers may be added.
+- `OVERVIEW`: cascading Period, LOB, Team Leader and Agent dropdowns; the five
+  operational periods plus all-history and every available calendar month;
+  selected PCS, participation, prior comparable and change cards; responsive
+  LOB chart, compact trend, LOB table, then agent performance below. The
+  all-history trend shows its latest 31 calendar days to keep the tracker light.
+- `PERFORMANCE`: lightweight period results at LOB, team and agent grain plus
+  one `AGENT DAY` row for every available mart date. Native table filters are
+  built in and native slicers may be added.
 - `COACHING`: Period/LOB-filtered exact low-score table including Call ID;
   permanent compact blue `tblCoachingActions` on the right.
 - `_PCS_FILTERS`, `_PCS_LOB`, `_PCS_AGENT`, `_PCS_DAILY`, and `_PCS_COACH` are

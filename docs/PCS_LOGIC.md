@@ -100,12 +100,22 @@ workbook names: `PCS_LOB_DATA`, `PCS_AGENT_DATA`, `PCS_DAILY_DATA`, and
 `OVERVIEW`, `COACHING`, and `_PCS_CALC` before saving. If integrity fails, it
 closes without saving the damaged state.
 
-Selectable comparisons are fixed and explicit: Latest day versus the previous
-available data day; Current week versus the same weekdays one week earlier;
-Current MTD versus the same day span in the prior month; Previous MTD same days
-versus the same span two months earlier; and Previous full month versus the
-month before it. Missing comparison data stays blank and is never converted to
-zero.
+The selector keeps five explicit operational comparisons: Latest day versus
+the previous available data day; Current week versus the same weekdays one week
+earlier; Current MTD versus the same day span in the prior month; Previous MTD
+same days versus the same span two months earlier; and Previous full month
+versus the month before it. It also includes `All available` and one
+`Month YYYY-MM` choice for every calendar month actually present in the mart.
+Each month compares with the equivalent span in its prior month. `All
+available` has no invented comparison; its prior stays blank, and its compact
+trend shows the latest 31 calendar days. `PERFORMANCE` additionally publishes
+an `AGENT DAY` row for every available business date, using Period Start and
+Period End as the exact date. Missing comparison data stays blank and is never
+converted to zero.
+
+This expansion does not change CSV headers, query names, Excel tables, or the
+tracker contract. After installing the updated Hub, run **Update PCS data** and
+then Excel **Data > Refresh All**; Power Query does not need to be reinstalled.
 
 ## Reference reconciliation
 

@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.5.1`
-Applies to: WFMHub `0.27.2` and later
+Context version: `1.5.2`
+Applies to: WFMHub `0.27.3` and later
 Last reviewed: `2026-09-10`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -153,8 +153,11 @@ worksheet. The targeted Hub update ingests FTE/Call by Call, refreshes the PCS
 mart, and atomically replaces the feeds. Desktop Excel then uses **Data >
 Refresh All**. `OVERVIEW` reads four hidden staging tables through classic
 exact lookups; its four dropdowns cascade Period → LOB → Team Leader → Agent.
+Period contains the five operational presets, `All available`, and one
+`Month YYYY-MM` choice for every calendar month present in the PCS mart.
 `COACHING` reads a hidden cache through Period/LOB controls. `PERFORMANCE` is
-the only visible query table and may use native table slicers. The action log
+the only visible query table and may use native table slicers; its `AGENT DAY`
+rows expose every available business date without loading raw call legs. The action log
 `tblCoachingActions` on the right of `COACHING` is human-owned and is never a query target. Power Query is
 installed or repaired once by desktop Excel automation. There is no Data
 Model, Power Pivot, macro, raw-data sheet, spill formula or dynamic-array

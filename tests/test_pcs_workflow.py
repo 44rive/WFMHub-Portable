@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 import zipfile
@@ -18,6 +19,7 @@ from wfmhub.cli import (
     refresh,
 )
 from wfmhub.models import ModelSummary
+from wfmhub.database import DatabaseConnection
 from wfmhub.pcs_excel import inspect_pcs_tracker
 from wfmhub.pcs_tracker import (
     PCS_TRACKER_FILENAME,
@@ -34,6 +36,8 @@ from wfmhub.shared_feeds import (
     PCS_FILTER_HEADERS,
     PCS_LOB_SCORECARD_HEADERS,
     PCS_RESULTS_HEADERS,
+    pcs_dashboard_cache_rows,
+    pcs_result_rows,
     _pcs_reporting_windows,
 )
 
@@ -114,6 +118,86 @@ class PCSWorkflowTests(unittest.TestCase):
             (windows["Current MTD"].prior_start, windows["Current MTD"].prior_end),
             (date(2026, 8, 1), date(2026, 8, 10)),
         )
+        available = _pcs_reporting_windows(
+            date(2026, 9, 10),
+            date(2026, 9, 8),
+            available_start=date(2026, 7, 15),
+            available_months=(date(2026, 7, 15), date(2026, 9, 10)),
+        )
+        labels = {item.label for item in available}
+        self.assertIn("Month 2026-07", labels)
+        self.assertIn("Month 2026-09", labels)
+        self.assertNotIn("Month 2026-08", labels)
+
+    def test_pcs_feeds_cover_all_available_dates_and_calendar_months(self):
+        raw = sqlite3.connect(":memory:")
+        conn = DatabaseConnection(raw)
+        try:
+            conn.execute(
+                """CREATE TABLE mart.agent_pcs_day (
+                       business_date DATE NOT NULL, agent_id TEXT NOT NULL,
+                       agent_name TEXT, team_leader TEXT, lob TEXT, language TEXT,
+                       pcs_score_sum REAL, survey_responses INTEGER,
+                       pcs_participation_responses INTEGER,
+                       pcs_status_calls INTEGER, low_score_responses INTEGER,
+                       top_box_responses INTEGER, inbound_calls INTEGER
+                   )"""
+            )
+            conn.executemany(
+                """INSERT INTO mart.agent_pcs_day VALUES (
+                       ?, '001', 'Agent One', 'TL 1', 'RSA NL', 'NL',
+                       ?, 1, 1, 2, ?, ?, 3
+                   )""",
+                (
+                    (date(2026, 7, 15), 2.0, 1, 0),
+                    (date(2026, 8, 20), 3.0, 1, 0),
+                    (date(2026, 9, 9), 4.0, 0, 1),
+                    (date(2026, 9, 10), 5.0, 0, 1),
+                ),
+            )
+            refreshed = datetime(2026, 9, 10, 18, 0)
+            filter_rows, _lob, _agent, daily = pcs_dashboard_cache_rows(
+                conn, date(2026, 9, 10), refreshed,
+            )
+            periods = [row[2] for row in filter_rows if row[0] == "PERIOD"]
+            self.assertIn("All available", periods)
+            self.assertIn("Month 2026-07", periods)
+            self.assertIn("Month 2026-08", periods)
+            self.assertIn("Month 2026-09", periods)
+
+            # The all-history cards use the full period, while its chart cache
+            # remains bounded to the permanent tracker's 31 plotted points.
+            all_history_daily = [
+                row for row in daily
+                if str(row[0]).startswith("DAILY|All available|All|All|All|")
+            ]
+            self.assertEqual(len(all_history_daily), 31)
+            self.assertEqual(all_history_daily[0][2], date(2026, 8, 11))
+            self.assertEqual(all_history_daily[-1][2], date(2026, 9, 10))
+
+            results = pcs_result_rows(
+                conn, date(2026, 9, 10), 1, refreshed,
+            )
+            daily_dates = {
+                row[1] for row in results
+                if row[0] == "Daily detail" and row[3] == "AGENT DAY"
+            }
+            self.assertEqual(daily_dates, {
+                date(2026, 7, 15), date(2026, 8, 20),
+                date(2026, 9, 9), date(2026, 9, 10),
+            })
+            all_available = next(
+                row for row in results
+                if row[0] == "All available"
+                and row[3] == "AGENT" and row[7] == "001"
+            )
+            self.assertEqual((all_available[1], all_available[2]), (
+                date(2026, 7, 15), date(2026, 9, 10),
+            ))
+            self.assertEqual(all_available[10], 3.5)
+            self.assertEqual(all_available[12], 4)
+        finally:
+            raw.close()
 
     def test_live_tracker_is_lightweight_and_created_once(self):
         with tempfile.TemporaryDirectory() as folder:
