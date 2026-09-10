@@ -1,6 +1,9 @@
-# WFM PTO & Away Submission App — Recorded Feasibility Plan
+# WFM PTO & Away Submission App — Feasibility Decision
 
-Status: recorded for a future project; no implementation has started.
+Status: accepted for implementation on 2026-09-10.
+
+The implementation authority is now `docs/PTO_AWAY_APP_IMPLEMENTATION.md`.
+This document remains the feasibility and original-requirements record.
 
 ## Decision
 

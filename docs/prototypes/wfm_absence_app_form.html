@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WFM PTO & Away — Form prototype</title>
+<style>
+  :root {
+    --navy:#0B1F33; --teal:#007C83; --gold:#D6A84B; --canvas:#F4F7F9;
+    --ink:#1F2933; --muted:#536474; --line:#D8E0E6; --white:#FFFFFF;
+    --blue:#0563C1; --blue-soft:#E3F0FA; --green:#1F7A53; --green-soft:#DDF3E8;
+    --amber:#A65F00; --amber-soft:#FFF1CC; --red:#B42318;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; width:100%; min-height:100%; background:#E9EFF3; color:var(--ink); }
+  body { font-family:Aptos, "Segoe UI", Arial, sans-serif; }
+  .topbar { height:76px; background:var(--navy); color:white; display:flex; align-items:center; }
+  .topbar-inner { width:1280px; max-width:calc(100% - 64px); margin:auto; display:flex; align-items:center; gap:24px; }
+  .brand { display:flex; align-items:center; min-width:210px; }
+  .brand-mark { width:38px; height:38px; border:2px solid var(--gold); display:grid; place-items:center; color:var(--gold); font-weight:800; letter-spacing:-1px; }
+  .brand-copy { margin-left:12px; }
+  .brand-copy strong { display:block; font-size:17px; letter-spacing:.8px; }
+  .brand-copy span { display:block; font-size:11px; color:#C9D5DF; margin-top:2px; letter-spacing:.5px; }
+  .title { padding-left:24px; border-left:1px solid #385069; flex:1; }
+  .title strong { font-size:20px; font-weight:650; }
+  .title span { display:block; color:#C9D5DF; font-size:12px; margin-top:4px; }
+  .lang { display:flex; padding:3px; border:1px solid #50667A; border-radius:7px; background:#132C45; }
+  .lang span { padding:6px 11px; border-radius:5px; font-size:12px; font-weight:700; }
+  .lang .active { color:var(--navy); background:white; }
+  .user { display:flex; align-items:center; gap:10px; }
+  .avatar { width:34px; height:34px; border-radius:50%; background:var(--teal); display:grid; place-items:center; font-weight:700; }
+  .user small { display:block; color:#C9D5DF; margin-top:2px; }
+  .shell { width:1280px; max-width:calc(100% - 64px); margin:26px auto 32px; }
+  .intro { display:flex; align-items:end; justify-content:space-between; margin-bottom:18px; }
+  .intro h1 { margin:0; font-size:25px; font-weight:680; letter-spacing:-.2px; }
+  .intro p { margin:6px 0 0; color:var(--muted); font-size:13px; }
+  .stepper { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; }
+  .step { display:flex; align-items:center; gap:7px; }
+  .step b { width:24px; height:24px; border-radius:50%; display:grid; place-items:center; background:white; border:1px solid var(--line); font-size:11px; }
+  .step.active { color:var(--teal); font-weight:700; }
+  .step.active b { background:var(--teal); color:white; border-color:var(--teal); }
+  .rule { width:28px; height:1px; background:var(--line); }
+  .layout { display:grid; grid-template-columns:minmax(0, 2fr) minmax(330px, .88fr); gap:20px; align-items:start; }
+  .stack { display:grid; gap:16px; }
+  .card { background:white; border:1px solid var(--line); border-radius:10px; box-shadow:0 2px 8px rgba(11,31,51,.04); }
+  .card-head { display:flex; align-items:center; justify-content:space-between; padding:15px 18px 13px; border-bottom:1px solid #E8EDF1; }
+  .card-head h2 { margin:0; font-size:15px; font-weight:700; }
+  .card-head small { color:var(--muted); }
+  .card-body { padding:17px 18px 18px; }
+  .type-tabs { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .type { height:46px; border:1px solid var(--line); border-radius:8px; display:flex; align-items:center; padding:0 14px; color:var(--muted); font-size:13px; font-weight:650; }
+  .type i { width:18px; height:18px; border:1.5px solid #8A9AAA; border-radius:50%; margin-right:10px; position:relative; }
+  .type.active { color:var(--teal); background:#F0FAFA; border-color:var(--teal); }
+  .type.active i { border-color:var(--teal); }
+  .type.active i:after { content:""; width:8px; height:8px; border-radius:50%; background:var(--teal); position:absolute; inset:4px; }
+  .grid { display:grid; grid-template-columns:repeat(12, 1fr); gap:13px 14px; }
+  .field { grid-column:span 6; }
+  .field.third { grid-column:span 4; }
+  .field.full { grid-column:1 / -1; }
+  label { display:block; font-size:11px; font-weight:700; color:#425466; margin-bottom:6px; }
+  .required:after { content:" *"; color:var(--red); }
+  .input { height:39px; border:1px solid #BBC8D2; border-radius:6px; background:white; display:flex; align-items:center; padding:0 11px; color:#263746; font-size:13px; }
+  .input.placeholder { color:#8A9AAA; }
+  .search-wrap { display:grid; grid-template-columns:1fr auto; gap:8px; }
+  .search { height:39px; padding:0 17px; border:0; border-radius:6px; color:white; background:var(--teal); font-weight:700; }
+  .employee { margin-top:14px; display:grid; grid-template-columns:1.3fr repeat(3, 1fr); border:1px solid #B7DED1; background:#F5FBF8; border-radius:8px; overflow:hidden; }
+  .employee > div { padding:11px 13px; border-right:1px solid #D5EAE2; }
+  .employee > div:last-child { border-right:0; }
+  .employee small { display:block; font-size:10px; text-transform:uppercase; letter-spacing:.45px; color:#60756C; margin-bottom:4px; }
+  .employee strong { font-size:12px; }
+  .status { color:var(--green); display:inline-flex; align-items:center; gap:5px; }
+  .dot { width:7px; height:7px; border-radius:50%; background:var(--green); }
+  .check { min-height:44px; border:1px solid #C8D5DF; border-radius:7px; display:flex; align-items:center; gap:10px; padding:10px 12px; font-size:12px; color:#35495A; background:#FBFCFD; }
+  .box { width:17px; height:17px; border:1.5px solid var(--teal); border-radius:3px; background:white; flex:none; }
+  .summary { position:sticky; top:16px; overflow:hidden; }
+  .summary .card-head { background:var(--navy); color:white; border:0; }
+  .summary .card-head small { color:#C9D5DF; }
+  .summary-body { padding:17px 18px; }
+  .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border-radius:20px; background:var(--amber-soft); color:var(--amber); font-size:11px; font-weight:700; }
+  .summary-title { display:flex; align-items:start; justify-content:space-between; margin-bottom:15px; }
+  .summary-title strong { display:block; font-size:15px; }
+  .summary-title span { font-size:12px; color:var(--muted); }
+  .summary-row { display:grid; grid-template-columns:105px 1fr; gap:8px; padding:9px 0; border-bottom:1px solid #EBEFF2; font-size:12px; }
+  .summary-row span { color:var(--muted); }
+  .summary-row strong { text-align:right; font-weight:650; }
+  .notice { margin-top:14px; border-left:3px solid var(--gold); background:#FFFBF1; padding:10px 11px; font-size:11px; line-height:1.45; color:#5E5133; }
+  .accuracy { margin-top:14px; padding:11px; border:1px solid var(--line); border-radius:7px; display:flex; align-items:flex-start; gap:9px; font-size:11px; line-height:1.4; }
+  .submit { width:100%; height:44px; border:0; border-radius:7px; margin-top:14px; background:var(--teal); color:white; font-size:13px; font-weight:750; letter-spacing:.1px; }
+  .cancel { text-align:center; margin-top:11px; color:var(--muted); font-size:11px; }
+  .privacy { padding:13px 18px; background:var(--canvas); border-top:1px solid var(--line); color:var(--muted); font-size:10px; line-height:1.4; }
+  .footer { margin-top:16px; display:flex; justify-content:space-between; color:#6A7B89; font-size:10px; }
+  @media (max-width:900px) {
+    .layout { grid-template-columns:1fr; }
+    .summary { position:static; }
+    .stepper, .user div:last-child { display:none; }
+    .field, .field.third { grid-column:1/-1; }
+    .employee { grid-template-columns:1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><div class="brand-mark">WF</div><div class="brand-copy"><strong>WFM HUB</strong><span>WORKFORCE MANAGEMENT</span></div></div>
+      <div class="title"><strong>Demandes PTO & absences longues</strong><span>Soumettre une demande à l'équipe WFM</span></div>
+      <div class="lang"><span class="active">FR</span><span>EN</span></div>
+      <div class="user"><div class="avatar">AA</div><div><strong style="font-size:12px">Anass Assri</strong><small style="font-size:10px">Operations</small></div></div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <div class="intro">
+      <div><h1>Nouvelle demande</h1><p>Recherchez l'employé, complétez l'absence puis vérifiez le récapitulatif.</p></div>
+      <div class="stepper"><div class="step active"><b>1</b>Employé</div><div class="rule"></div><div class="step active"><b>2</b>Absence</div><div class="rule"></div><div class="step"><b>3</b>Confirmation</div></div>
+    </div>
+
+    <div class="layout">
+      <section class="stack">
+        <div class="card">
+          <div class="card-head"><h2>1. Type de demande</h2><small>Choisissez une option</small></div>
+          <div class="card-body"><div class="type-tabs"><div class="type active"><i></i>Congé (PTO)</div><div class="type"><i></i>Absence longue (Away)</div></div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>2. Employé</h2><small>Identification par Client ID</small></div>
+          <div class="card-body">
+            <div class="field full"><label class="required">Client ID</label><div class="search-wrap"><div class="input">001245</div><button class="search">Rechercher</button></div></div>
+            <div class="employee">
+              <div><small>Employé confirmé</small><strong>Samira Benali</strong></div>
+              <div><small>Statut</small><strong class="status"><i class="dot"></i>Active</strong></div>
+              <div><small>Team Leader</small><strong>Karim El Mansouri</strong></div>
+              <div><small>LOB / Marché</small><strong>RSA NL · NL</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>3. Détails du congé</h2><small>Les champs marqués * sont obligatoires</small></div>
+          <div class="card-body">
+            <div class="grid">
+              <div class="field"><label class="required">Date de début</label><div class="input">15/09/2026</div></div>
+              <div class="field"><label class="required">Date de fin</label><div class="input">16/09/2026</div></div>
+              <div class="field full"><label class="required">Couverture</label><div class="type-tabs"><div class="type active"><i></i>Journée complète</div><div class="type"><i></i>Journée partielle</div></div></div>
+              <div class="field full"><label>Commentaire</label><div class="input placeholder" style="height:56px;align-items:flex-start;padding-top:11px">Informations complémentaires (facultatif)</div></div>
+              <div class="field full"><div class="check"><i class="box"></i><span>Je confirme que l'employé dispose d'un reliquat de congé suffisant pour cette demande.</span></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="card summary">
+        <div class="card-head"><div><h2>Récapitulatif</h2><small>À vérifier avant envoi</small></div><span style="font-size:11px;color:#C9D5DF">BROUILLON</span></div>
+        <div class="summary-body">
+          <div class="summary-title"><div><strong>Demande PTO</strong><span>Journée complète</span></div><div class="pill">En attente WFM</div></div>
+          <div class="summary-row"><span>Client ID</span><strong>001245</strong></div>
+          <div class="summary-row"><span>Employé</span><strong>Samira Benali</strong></div>
+          <div class="summary-row"><span>LOB</span><strong>RSA NL</strong></div>
+          <div class="summary-row"><span>Période</span><strong>15–16 sept. 2026</strong></div>
+          <div class="summary-row"><span>Durée</span><strong>2 jours</strong></div>
+          <div class="notice"><strong>Après envoi</strong><br>La demande sera contrôlée par WFM. Elle n'affectera le planning qu'après validation.</div>
+          <div class="accuracy"><i class="box"></i><span>Je confirme que le Client ID et les informations d'absence sont exacts.</span></div>
+          <button class="submit">Envoyer la demande</button>
+          <div class="cancel">Annuler et effacer le formulaire</div>
+        </div>
+        <div class="privacy">Accès restreint WFM. Chaque demande conserve l'auteur, la date, la décision et le statut de synchronisation.</div>
+      </aside>
+    </div>
+
+    <div class="footer"><span>Prepared by Anass ASSRI | WFM</span><span>Prototype interface · FR par défaut · Desktop / tablette</span></div>
+  </main>
+</body>
+</html>

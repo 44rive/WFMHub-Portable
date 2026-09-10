@@ -66,8 +66,9 @@ In development:
 - Bonus Management
 
 Utilities include on-demand period analysis, clean exports, health/coverage,
-backup and validated custom read-only analysis. The PTO/Away Power Apps project
-is recorded in `docs/PTO_AWAY_APP_FEASIBILITY.md`; it is not implemented here.
+backup and validated custom read-only analysis. The accepted PTO/Away Power Apps
+architecture is governed by `docs/PTO_AWAY_APP_IMPLEMENTATION.md`; its repo-side
+implementation kit is in progress and Microsoft tenant deployment is pending.
 
 ## Source roles
 
