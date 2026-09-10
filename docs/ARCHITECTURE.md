@@ -136,7 +136,7 @@ and one filterable action or reconciliation table. Generated snapshots never
 display fake selectors.
 The PCS operational update is deliberately domain-scoped: FTE and Call-by-Call
 are ingested, then only the employee dimension and PCS mart are rebuilt. Python
-writes five fixed, lightweight CSV feeds and creates the permanent tracker only
+writes six fixed, governed CSV feeds and creates the permanent tracker only
 when it is missing or its versioned contract changes. It never opens Excel
 during a normal update and never replaces a same-version tracker.
 

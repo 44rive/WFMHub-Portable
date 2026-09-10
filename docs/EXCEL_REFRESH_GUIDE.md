@@ -14,13 +14,14 @@ The idea is simple:
 1. Install or upgrade WFMHub and run **Update latest PCS data** once.
 2. Close `Reports\PCS Live Tracker.xlsx` and wait for OneDrive sync.
 3. Choose **PCS Report & Coaching > Install/repair Power Query**.
-4. WFMHub asks desktop Excel to connect five query tables to the fixed CSVs in
+4. WFMHub asks desktop Excel to connect six query tables to the fixed CSVs in
    `Feed\PCS`, refresh them, save, and close the workbook.
 5. Open the tracker. `SETUP` should show `Power Query Installed = YES`.
 
-The query destinations are `_PCS_LOB`, `_PCS_AGENT`, `_PCS_DAILY`,
-`PERFORMANCE!tblPcsPerformance`, and `COACHING!tblCoachingQueue`. Never connect
-Power Query to the blue `tblCoachingActions` table.
+The query destinations are `_PCS_FILTERS`, `_PCS_LOB`, `_PCS_AGENT`,
+`_PCS_DAILY`, `_PCS_COACH`, and `PERFORMANCE!tblPcsPerformance`. The visible
+coaching queue is a lightweight lookup view over `_PCS_COACH`. Never connect
+Power Query to the visible `tblCoachingQueue` or blue `tblCoachingActions`.
 
 ## PCS: normal refresh
 
@@ -28,8 +29,10 @@ Power Query to the blue `tblCoachingActions` table.
 2. In WFMHub choose **Update latest PCS data**. The tracker can remain closed or
    open because the Hub changes only external CSV feeds.
 3. In Excel choose **Data > Refresh All**.
-4. Use native table filters. For slicers, click inside `PERFORMANCE` or the
-   coaching queue and choose **Table Design > Insert Slicer**.
+4. Use the four `OVERVIEW` dropdowns from left to right. Reset Team Leader and
+   Agent to `All` after changing LOB; reset Agent after changing Team Leader.
+5. Use Period and LOB on `COACHING`. Use native filters or optional slicers only
+   on `PERFORMANCE`.
 
 Do not rebuild or replace the tracker for a normal update. Power Query is only
 transport; it does not calculate PCS.

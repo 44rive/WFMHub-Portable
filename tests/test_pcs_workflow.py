@@ -30,23 +30,44 @@ from wfmhub.shared_feeds import (
     PCS_AGENT_SCORECARD_HEADERS,
     PCS_COACHING_HEADERS,
     PCS_DAILY_SCORECARD_HEADERS,
+    PCS_FILTER_HEADERS,
     PCS_LOB_SCORECARD_HEADERS,
     PCS_RESULTS_HEADERS,
+    _pcs_reporting_windows,
 )
 
 
 def _rows() -> dict[str, list[tuple[object, ...]]]:
     refreshed = datetime(2026, 9, 8, 18, 0)
+    selection = "Current MTD|All|All|All"
+    filters = [
+        ("PERIOD", 1, "Current MTD"),
+        ("LOB", 1, "All"), ("LOB", 2, "RSA NL"),
+        ("TL|All", 1, "All"), ("TL|All", 2, "TL 1"),
+        ("AGENT|All|All", 1, "All"),
+        ("AGENT|All|All", 2, "Agent One [001]"),
+        ("AGENT|All|TL 1", 1, "All"),
+        ("AGENT|All|TL 1", 2, "Agent One [001]"),
+        ("TL|RSA NL", 1, "All"), ("TL|RSA NL", 2, "TL 1"),
+        ("AGENT|RSA NL|All", 1, "All"),
+        ("AGENT|RSA NL|All", 2, "Agent One [001]"),
+        ("AGENT|RSA NL|TL 1", 1, "All"),
+        ("AGENT|RSA NL|TL 1", 2, "Agent One [001]"),
+    ]
     lob = (
-        "ALL", date(2026, 9, 8), 4.2, .14, 4, 4.3, 4.1, .2,
-        .15, .13, 20, 100, 15, 3, 17, 250, "OK", date(2026, 9, 8), refreshed,
+        f"KPI|{selection}", "KPI", 0, "All", 20, 4.3, 4.1, .2,
+        .15, 3, date(2026, 9, 8), refreshed,
+    )
+    lob_detail = (
+        f"LOB|{selection}|1", "LOB", 1, "RSA NL", 20, 4.3, 4.1, .2,
+        .15, 3, date(2026, 9, 8), refreshed,
     )
     agent = (
-        "Agent One", "001", "RSA NL", "TL 1", 4.3, 4.0, .3, .15,
-        10, 2, "OK", date(2026, 9, 8), refreshed,
+        f"AGENT|{selection}|1", 1, "Agent One", "001", "RSA NL", "TL 1",
+        4.3, 4.0, .3, .15, 10, 2, date(2026, 9, 8), refreshed,
     )
     daily = (
-        date(2026, 9, 8), 4.3, .15, 10, 60, 9, 2, 8, 120,
+        f"DAILY|{selection}|1", 1, date(2026, 9, 8), 4.3, .15, 10, 2,
         date(2026, 9, 8), refreshed,
     )
     result = (
@@ -55,11 +76,13 @@ def _rows() -> dict[str, list[tuple[object, ...]]]:
         4.3, .15, 10, 60, 9, 2, 8, 120, "OK", date(2026, 9, 8), refreshed,
     )
     coaching = (
-        date(2026, 9, 8), "RSA NL", "TL 1", "Agent One", "001", 2,
-        "High", "call-1", "Review the explanation", "key-1",
+        "COACH|Current MTD|All|1", 1, date(2026, 9, 8), "RSA NL", "TL 1",
+        "Agent One", "001", 2, "High", "call-1", "Review the explanation",
+        "key-1", date(2026, 9, 8), refreshed,
     )
     return {
-        "lob_rows": [lob],
+        "filter_rows": filters,
+        "lob_rows": [lob, lob_detail],
         "agent_rows": [agent],
         "daily_rows": [daily],
         "result_rows": [result],
@@ -70,6 +93,26 @@ def _rows() -> dict[str, list[tuple[object, ...]]]:
 class PCSWorkflowTests(unittest.TestCase):
     def test_text_business_dates_are_parsed_for_sqlite_rows(self):
         self.assertEqual(_as_date("2026-09-08 17:00:00"), date(2026, 9, 8))
+
+    def test_selectable_periods_have_explicit_like_for_like_comparisons(self):
+        windows = {
+            item.label: item
+            for item in _pcs_reporting_windows(
+                date(2026, 9, 10), date(2026, 9, 8),
+            )
+        }
+        self.assertEqual(
+            (windows["Latest day"].prior_start, windows["Latest day"].prior_end),
+            (date(2026, 9, 8), date(2026, 9, 8)),
+        )
+        self.assertEqual(
+            (windows["Current week"].prior_start, windows["Current week"].prior_end),
+            (date(2026, 8, 31), date(2026, 9, 3)),
+        )
+        self.assertEqual(
+            (windows["Current MTD"].prior_start, windows["Current MTD"].prior_end),
+            (date(2026, 8, 1), date(2026, 8, 10)),
+        )
 
     def test_live_tracker_is_lightweight_and_created_once(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -99,18 +142,27 @@ class PCSWorkflowTests(unittest.TestCase):
             try:
                 self.assertEqual(workbook.sheetnames, [
                     "OVERVIEW", "PERFORMANCE", "COACHING", "SETUP", "HELP",
-                    "_PCS_LOB", "_PCS_AGENT", "_PCS_DAILY", "_AUDIT",
+                    "_PCS_FILTERS", "_PCS_LOB", "_PCS_AGENT", "_PCS_DAILY",
+                    "_PCS_COACH", "_PCS_CALC", "_AUDIT",
                 ])
                 self.assertNotIn("DATA", workbook.sheetnames)
                 self.assertEqual(len(workbook["OVERVIEW"]._charts), 2)
                 self.assertEqual(workbook["OVERVIEW"]["A39"].value,
-                                 "AGENT PERFORMANCE · FULL FILTERABLE VIEW IS ON PERFORMANCE")
+                                 "AGENT PERFORMANCE · CASCADING LOB → TEAM LEADER → AGENT")
+                self.assertEqual(len(workbook["OVERVIEW"].data_validations.dataValidation), 4)
+                self.assertTrue(workbook["OVERVIEW"]["A6"].value.startswith("=IFERROR(INDEX("))
                 self.assertIn("tblPcsPerformance", workbook["PERFORMANCE"].tables)
                 self.assertIn("tblCoachingQueue", workbook["COACHING"].tables)
                 self.assertIn("tblCoachingActions", workbook["COACHING"].tables)
+                self.assertIn("tblPcsFilters", workbook["_PCS_FILTERS"].tables)
                 self.assertIn("tblPcsLob", workbook["_PCS_LOB"].tables)
                 self.assertIn("tblPcsAgent", workbook["_PCS_AGENT"].tables)
                 self.assertIn("tblPcsDaily", workbook["_PCS_DAILY"].tables)
+                self.assertIn("tblPcsCoachingView", workbook["_PCS_COACH"].tables)
+                self.assertEqual(
+                    tuple(cell.value for cell in workbook["_PCS_FILTERS"][4]),
+                    PCS_FILTER_HEADERS,
+                )
                 self.assertEqual(
                     tuple(cell.value for cell in workbook["_PCS_LOB"][4]),
                     PCS_LOB_SCORECARD_HEADERS,
@@ -129,10 +181,22 @@ class PCSWorkflowTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     tuple(cell.value for cell in workbook["COACHING"][4][:10]),
+                    PCS_COACHING_HEADERS[2:12],
+                )
+                self.assertEqual(
+                    tuple(cell.value for cell in workbook["_PCS_COACH"][4]),
                     PCS_COACHING_HEADERS,
                 )
             finally:
                 workbook.close()
+
+            cached = load_workbook(path, read_only=True, data_only=True)
+            try:
+                self.assertEqual(cached["OVERVIEW"]["A6"].value, 4.3)
+                self.assertEqual(cached["_PCS_CALC"]["B2"].value, 4.3)
+                self.assertEqual(cached["COACHING"]["A5"].value, datetime(2026, 9, 8))
+            finally:
+                cached.close()
 
             saved = path.read_bytes()
             self.assertEqual(ensure_pcs_tracker(config, **_rows()), path)

@@ -19,19 +19,19 @@ from .database import DatabaseConnection
 from .metrics import load_metric_catalog
 
 
-PCS_FEED_SCHEMA_VERSION = "5"
+PCS_FEED_SCHEMA_VERSION = "6"
+PCS_FILTER_HEADERS = (
+    "Group Key", "Sort Order", "Value",
+)
 PCS_COACHING_HEADERS = (
-    "Date", "LOB", "Team Leader", "Agent", "Agent ID", "Q1 Score",
-    "Priority", "Call ID", "Customer Comment", "Coaching Key",
+    "View Key", "Rank", "Date", "LOB", "Team Leader", "Agent",
+    "Agent ID", "Q1 Score", "Priority", "Call ID", "Customer Comment",
+    "Coaching Key", "Data Through", "Feed Refreshed At",
 )
 PCS_LOB_SCORECARD_HEADERS = (
-    "LOB", "As Of Date", "Latest Day PCS", "Latest Day Participation",
-    "Latest Day Valid Q1", "Current MTD PCS", "Prior MTD PCS",
-    "MTD Change", "Current MTD Participation", "Prior MTD Participation",
-    "Current MTD Valid Q1", "Current MTD PCS Status 1",
-    "Current MTD Q1 Nonblank", "Current MTD Score <= 3",
-    "Current MTD Score > 3", "Current MTD Inbound Call Legs",
-    "Sample State", "Data Through", "Feed Refreshed At",
+    "View Key", "Record Type", "Rank", "LOB", "Valid Q1", "PCS",
+    "Prior PCS", "Change", "Participation", "Coaching Due",
+    "Data Through", "Feed Refreshed At",
 )
 PCS_RESULTS_HEADERS = (
     "Period View", "Period Start", "Period End", "Scope Level", "LOB",
@@ -41,15 +41,13 @@ PCS_RESULTS_HEADERS = (
     "Sample State", "Data Through", "Feed Refreshed At",
 )
 PCS_AGENT_SCORECARD_HEADERS = (
-    "Agent", "Agent ID", "LOB", "Team Leader", "Current MTD PCS",
-    "Prior MTD PCS", "MTD Change", "Current MTD Participation",
-    "Current MTD Valid Q1", "Current MTD Score <= 3", "Sample State",
+    "View Key", "Rank", "Agent", "Agent ID", "LOB", "Team Leader", "PCS",
+    "Prior PCS", "Change", "Participation", "Valid Q1", "Coaching Due",
     "Data Through", "Feed Refreshed At",
 )
 PCS_DAILY_SCORECARD_HEADERS = (
-    "Date", "PCS Average", "Participation Rate", "Valid Q1",
-    "PCS Status 1", "Q1 Nonblank", "Score <= 3", "Score > 3",
-    "Inbound Call Legs", "Data Through", "Feed Refreshed At",
+    "View Key", "Rank", "Date", "PCS", "Participation", "Valid Q1",
+    "Coaching Due", "Data Through", "Feed Refreshed At",
 )
 
 
@@ -167,7 +165,7 @@ def _power_query_script(
     types: Sequence[tuple[str, str]],
     sharepoint: bool,
 ) -> str:
-    """Return copy-ready M for the two deliberately simple PCS queries."""
+    """Return copy-ready M for a deliberately simple PCS transport query."""
 
     required = ", ".join(f'"{value}"' for value in headers)
     type_rows = ",\n            ".join(f'{{"{name}", {kind}}}' for name, kind in types)
@@ -300,165 +298,321 @@ def _pcs_scope_aggregates(
     return output
 
 
-def pcs_lob_scorecard_rows(
-    conn: DatabaseConnection,
+@dataclass(frozen=True)
+class PCSPeriodWindow:
+    label: str
+    start: date
+    end: date
+    prior_start: date
+    prior_end: date
+
+
+def _month_before(value: date) -> tuple[date, date]:
+    end = value.replace(day=1) - timedelta(days=1)
+    return end.replace(day=1), end
+
+
+def _pcs_reporting_windows(
     as_of: date,
-    minimum_sample: int,
-    refreshed: datetime,
-) -> list[tuple[Any, ...]]:
-    """Build one management-ready row per LOB plus a reconciling ALL row."""
+    previous_available: date | None = None,
+) -> tuple[PCSPeriodWindow, ...]:
+    """Return each selectable period and its like-for-like comparison window."""
 
-    periods = {label: (start, end) for label, start, end in _pcs_reporting_periods(as_of)}
-    latest = {
-        str(row["lob"]): row
-        for row in _pcs_scope_aggregates(conn, *periods["Latest day"], "LOB")
-    }
-    current = {
-        str(row["lob"]): row
-        for row in _pcs_scope_aggregates(conn, *periods["Current MTD"], "LOB")
-    }
-    prior = {
-        str(row["lob"]): row
-        for row in _pcs_scope_aggregates(conn, *periods["Previous MTD same days"], "LOB")
-    }
-    for target, label in ((latest, "Latest day"), (current, "Current MTD"), (prior, "Previous MTD same days")):
-        target["ALL"] = _pcs_scope_aggregates(conn, *periods[label], "ALL")[0]
-    lobs = ["ALL", *sorted((set(latest) | set(current) | set(prior)) - {"ALL"})]
-    rows: list[tuple[Any, ...]] = []
-    empty: dict[str, Any] = {}
-    for lob in lobs:
-        day = latest.get(lob, empty)
-        mtd = current.get(lob, empty)
-        previous = prior.get(lob, empty)
-        mtd_score = mtd.get("pcs_average")
-        prior_score = previous.get("pcs_average")
-        valid = int(mtd.get("valid_q1") or 0)
-        rows.append((
-            lob, as_of,
-            day.get("pcs_average"), day.get("participation_rate"),
-            int(day.get("valid_q1") or 0),
-            mtd_score, prior_score,
-            (mtd_score - prior_score) if mtd_score is not None and prior_score is not None else None,
-            mtd.get("participation_rate"), previous.get("participation_rate"),
-            valid, int(mtd.get("pcs_status_1") or 0),
-            int(mtd.get("q1_nonblank") or 0), int(mtd.get("low_scores") or 0),
-            int(mtd.get("positive_scores") or 0), int(mtd.get("inbound_legs") or 0),
-            "LOW SAMPLE" if valid < minimum_sample else "OK",
-            as_of, refreshed,
-        ))
-    return rows
-
-
-def pcs_agent_scorecard_rows(
-    conn: DatabaseConnection,
-    as_of: date,
-    minimum_sample: int,
-    refreshed: datetime,
-) -> list[tuple[Any, ...]]:
-    """Build the compact current/prior MTD agent table used on Overview."""
-
-    periods = {
-        label: (start, end)
-        for label, start, end in _pcs_reporting_periods(as_of)
-    }
-    current = {
-        str(row["agent_id"]): row
-        for row in _pcs_scope_aggregates(
-            conn, *periods["Current MTD"], "AGENT",
-        )
-        if str(row["agent_id"] or "").strip()
-    }
-    prior = {
-        str(row["agent_id"]): row
-        for row in _pcs_scope_aggregates(
-            conn, *periods["Previous MTD same days"], "AGENT",
-        )
-        if str(row["agent_id"] or "").strip()
-    }
-    rows: list[tuple[Any, ...]] = []
-    for agent_id, item in sorted(
-        current.items(),
-        key=lambda pair: (
-            str(pair[1]["lob"]).casefold(),
-            str(pair[1]["team_leader"]).casefold(),
-            str(pair[1]["agent"]).casefold(),
-            pair[0],
+    month_start = as_of.replace(day=1)
+    previous_start, previous_end = _month_before(as_of)
+    two_months_start, two_months_end = _month_before(previous_start)
+    current_days = (as_of - month_start).days
+    previous_mtd_end = min(previous_end, previous_start + timedelta(days=current_days))
+    previous_mtd_days = (previous_mtd_end - previous_start).days
+    two_months_mtd_end = min(
+        two_months_end,
+        two_months_start + timedelta(days=previous_mtd_days),
+    )
+    week_start = as_of - timedelta(days=as_of.weekday())
+    latest_prior = previous_available or (as_of - timedelta(days=1))
+    return (
+        PCSPeriodWindow("Latest day", as_of, as_of, latest_prior, latest_prior),
+        PCSPeriodWindow(
+            "Current week", week_start, as_of,
+            week_start - timedelta(days=7), as_of - timedelta(days=7),
         ),
-    ):
-        previous = prior.get(agent_id, {})
-        current_score = item.get("pcs_average")
-        prior_score = previous.get("pcs_average")
-        valid = int(item.get("valid_q1") or 0)
-        rows.append((
-            item.get("agent") or "Agent",
-            agent_id,
-            item.get("lob") or "Unassigned",
-            item.get("team_leader") or "Unassigned",
-            current_score,
-            prior_score,
-            (
-                current_score - prior_score
-                if current_score is not None and prior_score is not None
-                else None
-            ),
-            item.get("participation_rate"),
-            valid,
-            int(item.get("low_scores") or 0),
-            "LOW SAMPLE" if valid < minimum_sample else "OK",
-            as_of,
-            refreshed,
-        ))
-    return rows
+        PCSPeriodWindow(
+            "Current MTD", month_start, as_of,
+            previous_start, previous_mtd_end,
+        ),
+        PCSPeriodWindow(
+            "Previous MTD same days", previous_start, previous_mtd_end,
+            two_months_start, two_months_mtd_end,
+        ),
+        PCSPeriodWindow(
+            "Previous full month", previous_start, previous_end,
+            two_months_start, two_months_end,
+        ),
+    )
 
 
-def pcs_daily_scorecard_rows(
+def _key_part(value: Any) -> str:
+    return str(value or "Unassigned").strip().replace("|", "/") or "Unassigned"
+
+
+def _selection_key(period: str, lob: str, leader: str, agent: str) -> str:
+    return "|".join(_key_part(value) for value in (period, lob, leader, agent))
+
+
+def _pcs_agent_days(
     conn: DatabaseConnection,
     start: date,
     end: date,
-    refreshed: datetime,
-) -> list[tuple[Any, ...]]:
-    """Build one ratio-of-sums PCS trend row per available business date."""
-
+) -> list[dict[str, Any]]:
     cursor = conn.execute(
-        """SELECT business_date,
-                  coalesce(sum(pcs_score_sum),0),
-                  coalesce(sum(survey_responses),0),
-                  coalesce(sum(pcs_participation_responses),0),
-                  coalesce(sum(pcs_status_calls),0),
-                  coalesce(sum(low_score_responses),0),
-                  coalesce(sum(top_box_responses),0),
-                  coalesce(sum(inbound_calls),0)
+        """SELECT business_date, coalesce(lob,'Unassigned'),
+                  coalesce(team_leader,'Unassigned'), agent_id,
+                  coalesce(agent_name,'Agent'),
+                  coalesce(agent_name,'Agent') || ' [' || agent_id || ']',
+                  coalesce(pcs_score_sum,0), coalesce(survey_responses,0),
+                  coalesce(pcs_participation_responses,0),
+                  coalesce(pcs_status_calls,0),
+                  coalesce(low_score_responses,0),
+                  coalesce(top_box_responses,0), coalesce(inbound_calls,0)
            FROM mart.agent_pcs_day
            WHERE business_date BETWEEN ? AND ?
-           GROUP BY business_date
-           ORDER BY business_date""",
+             AND trim(coalesce(agent_id,''))<>''
+           ORDER BY business_date, lob, team_leader, agent_name, agent_id""",
         (start, end),
     )
-    rows: list[tuple[Any, ...]] = []
-    for (
-        business_date,
-        score_sum,
-        valid,
-        q1_nonblank,
-        eligible,
-        low,
-        positive,
-        inbound,
-    ) in cursor.fetchall():
-        rows.append((
-            business_date,
-            float(score_sum) / float(valid) if valid else None,
-            float(q1_nonblank) / float(eligible) if eligible else None,
-            int(valid or 0),
-            int(eligible or 0),
-            int(q1_nonblank or 0),
-            int(low or 0),
-            int(positive or 0),
-            int(inbound or 0),
-            end,
-            refreshed,
+    output: list[dict[str, Any]] = []
+    for row in cursor.fetchall():
+        business_date = row[0]
+        if isinstance(business_date, datetime):
+            business_date = business_date.date()
+        elif not isinstance(business_date, date):
+            business_date = date.fromisoformat(str(business_date)[:10])
+        output.append({
+            "date": business_date,
+            "lob": _key_part(row[1]),
+            "leader": _key_part(row[2]),
+            "agent_id": str(row[3] or "").strip(),
+            "agent": str(row[4] or "Agent").strip() or "Agent",
+            "selector": _key_part(row[5]),
+            "score_sum": float(row[6] or 0),
+            "valid": int(row[7] or 0),
+            "nonblank": int(row[8] or 0),
+            "eligible": int(row[9] or 0),
+            "low": int(row[10] or 0),
+            "positive": int(row[11] or 0),
+            "inbound": int(row[12] or 0),
+        })
+    return output
+
+
+def _pcs_dimensions(
+    rows: Sequence[dict[str, Any]],
+) -> tuple[
+    tuple[str, ...], dict[str, tuple[str, ...]],
+    dict[tuple[str, str], tuple[str, ...]],
+]:
+    lobs = tuple(sorted({str(row["lob"]) for row in rows}, key=str.casefold))
+    leaders: dict[str, tuple[str, ...]] = {
+        "All": tuple(sorted({str(row["leader"]) for row in rows}, key=str.casefold)),
+    }
+    agents: dict[tuple[str, str], tuple[str, ...]] = {}
+    for lob in lobs:
+        leaders[lob] = tuple(sorted(
+            {str(row["leader"]) for row in rows if row["lob"] == lob},
+            key=str.casefold,
         ))
-    return rows
+    for lob in ("All", *lobs):
+        scoped = list(rows) if lob == "All" else [row for row in rows if row["lob"] == lob]
+        agents[(lob, "All")] = tuple(sorted(
+            {str(row["selector"]) for row in scoped}, key=str.casefold,
+        ))
+        for leader in leaders[lob]:
+            agents[(lob, leader)] = tuple(sorted(
+                {str(row["selector"]) for row in scoped if row["leader"] == leader},
+                key=str.casefold,
+            ))
+    return lobs, leaders, agents
+
+
+def pcs_filter_rows(
+    rows: Sequence[dict[str, Any]],
+    windows: Sequence[PCSPeriodWindow],
+) -> list[tuple[Any, ...]]:
+    """Build contiguous governed dropdown lists for the permanent tracker."""
+
+    lobs, leaders, agents = _pcs_dimensions(rows)
+    groups: list[tuple[str, Sequence[str]]] = [
+        ("PERIOD", tuple(window.label for window in windows)),
+        ("LOB", ("All", *lobs)),
+    ]
+    for lob in ("All", *lobs):
+        groups.append((f"TL|{_key_part(lob)}", ("All", *leaders[lob])))
+        for leader in ("All", *leaders[lob]):
+            groups.append((
+                f"AGENT|{_key_part(lob)}|{_key_part(leader)}",
+                ("All", *agents[(lob, leader)]),
+            ))
+    return [
+        (group, rank, value)
+        for group, values in groups
+        for rank, value in enumerate(values, 1)
+    ]
+
+
+def pcs_dashboard_cache_rows(
+    conn: DatabaseConnection,
+    as_of: date,
+    refreshed: datetime,
+) -> tuple[
+    list[tuple[Any, ...]], list[tuple[Any, ...]],
+    list[tuple[Any, ...]], list[tuple[Any, ...]],
+]:
+    """Precompute every valid Overview selection; Excel only performs lookups."""
+
+    available_dates = [
+        value.date() if isinstance(value, datetime) else (
+            value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
+        )
+        for (value,) in conn.execute(
+            "SELECT DISTINCT business_date FROM mart.agent_pcs_day WHERE business_date<=? ORDER BY business_date DESC LIMIT 2",
+            (as_of,),
+        ).fetchall()
+    ]
+    previous = available_dates[1] if len(available_dates) > 1 else None
+    windows = _pcs_reporting_windows(as_of, previous)
+    earliest = min(window.prior_start for window in windows)
+    rows = _pcs_agent_days(conn, earliest, as_of)
+    lobs, leaders, agents = _pcs_dimensions(rows)
+    filter_rows = pcs_filter_rows(rows, windows)
+    lob_cache: list[tuple[Any, ...]] = []
+    agent_cache: list[tuple[Any, ...]] = []
+    daily_cache: list[tuple[Any, ...]] = []
+
+    selections = [
+        (lob, leader, agent)
+        for lob in ("All", *lobs)
+        for leader in ("All", *leaders[lob])
+        for agent in ("All", *agents[(lob, leader)])
+    ]
+
+    def scopes(row: dict[str, Any]) -> set[tuple[str, str, str]]:
+        lob = str(row["lob"])
+        leader = str(row["leader"])
+        agent = str(row["selector"])
+        return {
+            ("All", "All", "All"), ("All", "All", agent),
+            ("All", leader, "All"), ("All", leader, agent),
+            (lob, "All", "All"), (lob, "All", agent),
+            (lob, leader, "All"), (lob, leader, agent),
+        }
+
+    def add(target: dict[Any, list[float]], key: Any, row: dict[str, Any]) -> None:
+        values = target.setdefault(key, [0.0, 0.0, 0.0, 0.0, 0.0])
+        values[0] += float(row["score_sum"])
+        values[1] += int(row["valid"])
+        values[2] += int(row["nonblank"])
+        values[3] += int(row["eligible"])
+        values[4] += int(row["low"])
+
+    def metric(values: Sequence[float] | None) -> dict[str, Any]:
+        score_sum, valid, nonblank, eligible, low = values or (0, 0, 0, 0, 0)
+        return {
+            "pcs": score_sum / valid if valid else None,
+            "participation": nonblank / eligible if eligible else None,
+            "valid": int(valid), "low": int(low),
+        }
+
+    for window in windows:
+        current_totals: dict[Any, list[float]] = {}
+        prior_totals: dict[Any, list[float]] = {}
+        current_lobs: dict[Any, list[float]] = {}
+        prior_lobs: dict[Any, list[float]] = {}
+        current_agents: dict[Any, list[float]] = {}
+        prior_agents: dict[Any, list[float]] = {}
+        current_days: dict[Any, list[float]] = {}
+        agent_sources: dict[Any, dict[str, Any]] = {}
+        scope_lobs: dict[Any, set[str]] = {}
+        scope_agents: dict[Any, set[str]] = {}
+        for row in rows:
+            is_current = window.start <= row["date"] <= window.end
+            is_prior = window.prior_start <= row["date"] <= window.prior_end
+            if not is_current and not is_prior:
+                continue
+            for scope in scopes(row):
+                if is_current:
+                    add(current_totals, scope, row)
+                    add(current_lobs, (scope, row["lob"]), row)
+                    add(current_agents, (scope, row["agent_id"]), row)
+                    add(current_days, (scope, row["date"]), row)
+                    agent_sources.setdefault((scope, row["agent_id"]), row)
+                    scope_lobs.setdefault(scope, set()).add(str(row["lob"]))
+                    scope_agents.setdefault(scope, set()).add(str(row["agent_id"]))
+                if is_prior:
+                    add(prior_totals, scope, row)
+                    add(prior_lobs, (scope, row["lob"]), row)
+                    add(prior_agents, (scope, row["agent_id"]), row)
+
+        for scope in selections:
+            lob, leader, agent = scope
+            selection = _selection_key(window.label, lob, leader, agent)
+            current = metric(current_totals.get(scope))
+            prior = metric(prior_totals.get(scope))
+            change = (
+                current["pcs"] - prior["pcs"]
+                if current["pcs"] is not None and prior["pcs"] is not None
+                else None
+            )
+            lob_cache.append((
+                f"KPI|{selection}", "KPI", 0, lob,
+                current["valid"], current["pcs"], prior["pcs"], change,
+                current["participation"], current["low"], as_of, refreshed,
+            ))
+            visible_lobs = sorted(scope_lobs.get(scope, set()), key=str.casefold)
+            for rank, visible_lob in enumerate(visible_lobs, 1):
+                current_lob = metric(current_lobs.get((scope, visible_lob)))
+                prior_lob = metric(prior_lobs.get((scope, visible_lob)))
+                lob_change = (
+                    current_lob["pcs"] - prior_lob["pcs"]
+                    if current_lob["pcs"] is not None and prior_lob["pcs"] is not None
+                    else None
+                )
+                lob_cache.append((
+                    f"LOB|{selection}|{rank}", "LOB", rank, visible_lob,
+                    current_lob["valid"], current_lob["pcs"],
+                    prior_lob["pcs"], lob_change,
+                    current_lob["participation"], current_lob["low"],
+                    as_of, refreshed,
+                ))
+            agent_ids = sorted(scope_agents.get(scope, set()), key=lambda agent_id: str(
+                agent_sources[(scope, agent_id)]["agent"]
+            ).casefold())
+            for rank, agent_id in enumerate(agent_ids, 1):
+                source = agent_sources[(scope, agent_id)]
+                current_agent = metric(current_agents.get((scope, agent_id)))
+                prior_agent = metric(prior_agents.get((scope, agent_id)))
+                agent_change = (
+                    current_agent["pcs"] - prior_agent["pcs"]
+                    if current_agent["pcs"] is not None and prior_agent["pcs"] is not None
+                    else None
+                )
+                agent_cache.append((
+                    f"AGENT|{selection}|{rank}", rank, source["agent"],
+                    agent_id, source["lob"], source["leader"],
+                    current_agent["pcs"], prior_agent["pcs"], agent_change,
+                    current_agent["participation"], current_agent["valid"],
+                    current_agent["low"], as_of, refreshed,
+                ))
+            for rank, offset in enumerate(
+                range((window.end - window.start).days + 1), 1,
+            ):
+                business_date = window.start + timedelta(days=offset)
+                daily = metric(current_days.get((scope, business_date)))
+                daily_cache.append((
+                    f"DAILY|{selection}|{rank}", rank, business_date,
+                    daily["pcs"], daily["participation"], daily["valid"],
+                    daily["low"], as_of, refreshed,
+                ))
+    return filter_rows, lob_cache, agent_cache, daily_cache
 
 
 def pcs_result_rows(
@@ -488,31 +642,97 @@ def pcs_result_rows(
     return rows
 
 
+def pcs_coaching_cache_rows(
+    conn: DatabaseConnection,
+    config: Config,
+    as_of: date,
+    refreshed: datetime,
+) -> list[tuple[Any, ...]]:
+    """Build period/LOB lookup rows for the visible coaching work queue."""
+
+    available_dates = [
+        value.date() if isinstance(value, datetime) else (
+            value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
+        )
+        for (value,) in conn.execute(
+            "SELECT DISTINCT business_date FROM mart.agent_pcs_day WHERE business_date<=? ORDER BY business_date DESC LIMIT 2",
+            (as_of,),
+        ).fetchall()
+    ]
+    windows = _pcs_reporting_windows(
+        as_of, available_dates[1] if len(available_dates) > 1 else None,
+    )
+    earliest = min(window.prior_start for window in windows)
+    primary_score = f"question_{config.pcs.primary_score_question}_score"
+    allowed_scores = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
+    cursor = conn.execute(
+        f"""SELECT c.business_date, coalesce(d.lob,c.lob,'Unassigned'),
+                   coalesce(d.team_leader,'Unassigned'),
+                   coalesce(d.canonical_name,c.agent_name,'Agent'), c.agent_id,
+                   c.{primary_score},
+                   CASE WHEN c.{primary_score}<=2 THEN 'High' ELSE 'Normal' END,
+                   c.call_id, c.question_3, c.call_key
+            FROM core.clean_call_leg c
+            LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
+            WHERE c.business_date BETWEEN ? AND ?
+              AND upper(coalesce(c.call_direction,''))='I'
+              AND c.{primary_score} IN ({allowed_scores})
+              AND c.{primary_score}<=?
+            ORDER BY c.business_date DESC, d.team_leader,
+                     coalesce(d.canonical_name,c.agent_name), c.call_start""",
+        (earliest, as_of, config.pcs.negative_score_maximum),
+    )
+    source: list[tuple[Any, ...]] = []
+    for raw in cursor.fetchall():
+        business_date = raw[0]
+        if isinstance(business_date, datetime):
+            business_date = business_date.date()
+        elif not isinstance(business_date, date):
+            business_date = date.fromisoformat(str(business_date)[:10])
+        source.append((
+            business_date, _key_part(raw[1]), _key_part(raw[2]),
+            str(raw[3] or "Agent"), str(raw[4] or ""), raw[5], raw[6],
+            str(raw[7] or ""), str(raw[8] or ""), str(raw[9] or ""),
+        ))
+    lobs = sorted({str(row[1]) for row in source}, key=str.casefold)
+    output: list[tuple[Any, ...]] = []
+    for window in windows:
+        for lob in ("All", *lobs):
+            matches = [
+                row for row in source
+                if window.start <= row[0] <= window.end
+                and (lob == "All" or row[1] == lob)
+            ]
+            for rank, row in enumerate(matches, 1):
+                output.append((
+                    f"COACH|{_key_part(window.label)}|{_key_part(lob)}|{rank}",
+                    rank, *row, as_of, refreshed,
+                ))
+    return output
+
+
 def _publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
+    filter_types = (
+        ("Group Key", "type text"), ("Sort Order", "Int64.Type"),
+        ("Value", "type text"),
+    )
     queue_types = (
+        ("View Key", "type text"), ("Rank", "Int64.Type"),
         ("Date", "type date"), ("LOB", "type text"),
         ("Team Leader", "type text"), ("Agent", "type text"),
         ("Agent ID", "type text"),
         ("Q1 Score", "type number"), ("Customer Comment", "type text"),
         ("Priority", "type text"), ("Call ID", "type text"),
-        ("Coaching Key", "type text"),
+        ("Coaching Key", "type text"), ("Data Through", "type date"),
+        ("Feed Refreshed At", "type datetime"),
     )
     lob_types = (
-        ("LOB", "type text"), ("As Of Date", "type date"),
-        ("Latest Day PCS", "type number"),
-        ("Latest Day Participation", "type number"),
-        ("Latest Day Valid Q1", "Int64.Type"),
-        ("Current MTD PCS", "type number"),
-        ("Prior MTD PCS", "type number"), ("MTD Change", "type number"),
-        ("Current MTD Participation", "type number"),
-        ("Prior MTD Participation", "type number"),
-        ("Current MTD Valid Q1", "Int64.Type"),
-        ("Current MTD PCS Status 1", "Int64.Type"),
-        ("Current MTD Q1 Nonblank", "Int64.Type"),
-        ("Current MTD Score <= 3", "Int64.Type"),
-        ("Current MTD Score > 3", "Int64.Type"),
-        ("Current MTD Inbound Call Legs", "Int64.Type"),
-        ("Sample State", "type text"), ("Data Through", "type date"),
+        ("View Key", "type text"), ("Record Type", "type text"),
+        ("Rank", "Int64.Type"), ("LOB", "type text"),
+        ("Valid Q1", "Int64.Type"), ("PCS", "type number"),
+        ("Prior PCS", "type number"), ("Change", "type number"),
+        ("Participation", "type number"), ("Coaching Due", "Int64.Type"),
+        ("Data Through", "type date"),
         ("Feed Refreshed At", "type datetime"),
     )
     result_types = (
@@ -529,30 +749,30 @@ def _publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
         ("Feed Refreshed At", "type datetime"),
     )
     agent_types = (
+        ("View Key", "type text"), ("Rank", "Int64.Type"),
         ("Agent", "type text"), ("Agent ID", "type text"),
         ("LOB", "type text"), ("Team Leader", "type text"),
-        ("Current MTD PCS", "type number"),
-        ("Prior MTD PCS", "type number"), ("MTD Change", "type number"),
-        ("Current MTD Participation", "type number"),
-        ("Current MTD Valid Q1", "Int64.Type"),
-        ("Current MTD Score <= 3", "Int64.Type"),
-        ("Sample State", "type text"), ("Data Through", "type date"),
+        ("PCS", "type number"), ("Prior PCS", "type number"),
+        ("Change", "type number"), ("Participation", "type number"),
+        ("Valid Q1", "Int64.Type"), ("Coaching Due", "Int64.Type"),
+        ("Data Through", "type date"),
         ("Feed Refreshed At", "type datetime"),
     )
     daily_types = (
-        ("Date", "type date"), ("PCS Average", "type number"),
-        ("Participation Rate", "type number"), ("Valid Q1", "Int64.Type"),
-        ("PCS Status 1", "Int64.Type"), ("Q1 Nonblank", "Int64.Type"),
-        ("Score <= 3", "Int64.Type"), ("Score > 3", "Int64.Type"),
-        ("Inbound Call Legs", "Int64.Type"), ("Data Through", "type date"),
+        ("View Key", "type text"), ("Rank", "Int64.Type"),
+        ("Date", "type date"), ("PCS", "type number"),
+        ("Participation", "type number"), ("Valid Q1", "Int64.Type"),
+        ("Coaching Due", "Int64.Type"), ("Data Through", "type date"),
         ("Feed Refreshed At", "type datetime"),
     )
     specifications = (
+        ("POWER_QUERY_PCS_FILTERS_SHAREPOINT.txt", "PCS_FILTER_LIST_CURRENT.csv", PCS_FILTER_HEADERS, filter_types, True),
         ("POWER_QUERY_COACHING_QUEUE_SHAREPOINT.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types, True),
         ("POWER_QUERY_PCS_LOB_SHAREPOINT.txt", "PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS, lob_types, True),
         ("POWER_QUERY_PCS_AGENT_SHAREPOINT.txt", "PCS_AGENT_SCORECARD_CURRENT.csv", PCS_AGENT_SCORECARD_HEADERS, agent_types, True),
         ("POWER_QUERY_PCS_DAILY_SHAREPOINT.txt", "PCS_DAILY_SCORECARD_CURRENT.csv", PCS_DAILY_SCORECARD_HEADERS, daily_types, True),
         ("POWER_QUERY_PCS_RESULTS_SHAREPOINT.txt", "PCS_RESULTS_CURRENT.csv", PCS_RESULTS_HEADERS, result_types, True),
+        ("POWER_QUERY_PCS_FILTERS_LOCAL.txt", "PCS_FILTER_LIST_CURRENT.csv", PCS_FILTER_HEADERS, filter_types, False),
         ("POWER_QUERY_COACHING_QUEUE_LOCAL.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types, False),
         ("POWER_QUERY_PCS_LOB_LOCAL.txt", "PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS, lob_types, False),
         ("POWER_QUERY_PCS_AGENT_LOCAL.txt", "PCS_AGENT_SCORECARD_CURRENT.csv", PCS_AGENT_SCORECARD_HEADERS, agent_types, False),
@@ -589,19 +809,21 @@ def publish_pcs_feeds(
     minimum_sample = int(method.minimum_sample) if method is not None else 1
     refreshed = datetime.now()
 
-    lob_rows = pcs_lob_scorecard_rows(conn, end, minimum_sample, refreshed)
+    filter_rows, lob_rows, agent_rows, daily_rows = pcs_dashboard_cache_rows(
+        conn, end, refreshed,
+    )
+    path = folder / "PCS_FILTER_LIST_CURRENT.csv"
+    counts.append((path.name, _atomic_csv(path, PCS_FILTER_HEADERS, filter_rows)))
+    files.append(path)
+
     path = folder / "PCS_LOB_SCORECARD_CURRENT.csv"
     counts.append((path.name, _atomic_csv(path, PCS_LOB_SCORECARD_HEADERS, lob_rows)))
     files.append(path)
 
-    agent_rows = pcs_agent_scorecard_rows(conn, end, minimum_sample, refreshed)
     path = folder / "PCS_AGENT_SCORECARD_CURRENT.csv"
     counts.append((path.name, _atomic_csv(path, PCS_AGENT_SCORECARD_HEADERS, agent_rows)))
     files.append(path)
 
-    daily_rows = pcs_daily_scorecard_rows(
-        conn, end.replace(day=1), end, refreshed,
-    )
     path = folder / "PCS_DAILY_SCORECARD_CURRENT.csv"
     counts.append((path.name, _atomic_csv(path, PCS_DAILY_SCORECARD_HEADERS, daily_rows)))
     files.append(path)
@@ -611,26 +833,7 @@ def publish_pcs_feeds(
     counts.append((path.name, _atomic_csv(path, PCS_RESULTS_HEADERS, result_rows)))
     files.append(path)
 
-    primary = config.pcs.primary_score_question
-    primary_score = f"question_{primary}_score"
-    allowed_scores = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
-    _query_headers, rows = _rows(
-        conn,
-        f"""SELECT c.business_date, coalesce(d.lob,c.lob), d.team_leader,
-                   coalesce(d.canonical_name,c.agent_name), c.agent_id,
-                   c.{primary_score},
-                   CASE WHEN c.{primary_score}<=2 THEN 'High' ELSE 'Normal' END,
-                   c.call_id, c.question_3, c.call_key
-            FROM core.clean_call_leg c
-            LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
-            WHERE c.business_date BETWEEN ? AND ?
-              AND upper(coalesce(c.call_direction,''))='I'
-              AND c.{primary_score} IN ({allowed_scores})
-              AND c.{primary_score}<=?
-            ORDER BY c.business_date DESC, d.team_leader,
-                     coalesce(d.canonical_name,c.agent_name), c.call_start""",
-        (start, end, config.pcs.negative_score_maximum),
-    )
+    rows = pcs_coaching_cache_rows(conn, config, end, refreshed)
     path = folder / "PCS_COACHING_OPPORTUNITY_CURRENT.csv"
     counts.append((path.name, _atomic_csv(path, PCS_COACHING_HEADERS, rows)))
     files.append(path)
@@ -745,6 +948,6 @@ def publish_shared_feeds(
 ) -> tuple[SharedFeedResult, ...]:
     """Refresh every stable collaboration feed after the Hub models finish."""
 
-    # PCS publishes its five focused feeds inside its targeted report builder.
+    # PCS publishes its six focused feeds inside its targeted report builder.
     # Only Absenteeism uses the generic collaboration-feed workflow.
     return (publish_absence_feeds(conn, config, start, end),)

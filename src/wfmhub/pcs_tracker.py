@@ -37,18 +37,18 @@ from .shared_feeds import (
     PCS_AGENT_SCORECARD_HEADERS,
     PCS_COACHING_HEADERS,
     PCS_DAILY_SCORECARD_HEADERS,
+    PCS_FILTER_HEADERS,
     PCS_LOB_SCORECARD_HEADERS,
     PCS_RESULTS_HEADERS,
-    pcs_agent_scorecard_rows,
-    pcs_daily_scorecard_rows,
-    pcs_lob_scorecard_rows,
+    pcs_coaching_cache_rows,
+    pcs_dashboard_cache_rows,
     pcs_result_rows,
     publish_pcs_feeds,
 )
 
 
 PCS_TRACKER_FILENAME = "PCS Live Tracker.xlsx"
-PCS_TRACKER_VERSION = "2026.11.0"
+PCS_TRACKER_VERSION = "2026.11.1"
 COACHING_ACTION_HEADERS = (
     "Coaching Key", "Call ID", "Coaching Status", "Coach",
     "Coaching Date", "Due Date", "Coaching Comment",
@@ -324,8 +324,55 @@ def _write_merged_formula(
     )
 
 
+def _cache_map(rows: Sequence[Sequence[Any]]) -> dict[str, tuple[Any, ...]]:
+    return {str(row[0]): tuple(row) for row in rows}
+
+
+def _table_lookup(table: str, header: str, key_expression: str) -> str:
+    return (
+        f'=IFERROR(INDEX({table}[{header}],MATCH({key_expression},'
+        f'{table}[View Key],0)),"")'
+    )
+
+
+def _selected_key(*, sheet: str | None = None) -> str:
+    prefix = f"'{sheet}'!" if sheet else ""
+    return (
+        f'{prefix}$C$2&"|"&SUBSTITUTE({prefix}$J$2,"|","/")&"|"&'
+        f'SUBSTITUTE({prefix}$Q$2,"|","/")&"|"&'
+        f'SUBSTITUTE({prefix}$X$2,"|","/")'
+    )
+
+
+def _add_filter_names(workbook) -> None:
+    keys = "'_PCS_FILTERS'!$A$5:$A$50000"
+    values = "'_PCS_FILTERS'!$C$5"
+    workbook.define_name(
+        "PCS_PERIOD_LIST",
+        f'=OFFSET({values},MATCH("PERIOD",{keys},0)-1,0,COUNTIF({keys},"PERIOD"),1)',
+    )
+    workbook.define_name(
+        "PCS_LOB_LIST",
+        f'=OFFSET({values},MATCH("LOB",{keys},0)-1,0,COUNTIF({keys},"LOB"),1)',
+    )
+    team_group = '"TL|"&SUBSTITUTE(OVERVIEW!$J$2,"|","/")'
+    workbook.define_name(
+        "PCS_TL_ACTIVE",
+        f'=OFFSET({values},MATCH({team_group},{keys},0)-1,0,COUNTIF({keys},{team_group}),1)',
+    )
+    agent_group = (
+        '"AGENT|"&SUBSTITUTE(OVERVIEW!$J$2,"|","/")&"|"&'
+        'SUBSTITUTE(OVERVIEW!$Q$2,"|","/")'
+    )
+    workbook.define_name(
+        "PCS_AGENT_ACTIVE",
+        f'=OFFSET({values},MATCH({agent_group},{keys},0)-1,0,COUNTIF({keys},{agent_group}),1)',
+    )
+
+
 def _add_overview(
     report: ExcelReport,
+    filter_rows: Sequence[Sequence[Any]],
     lob_rows: Sequence[Sequence[Any]],
     agent_rows: Sequence[Sequence[Any]],
     daily_rows: Sequence[Sequence[Any]],
@@ -338,129 +385,101 @@ def _add_overview(
     worksheet.set_tab_color(COLORS["gold"])
     worksheet.freeze_panes(2, 0)
     write_v2_header(
-        worksheet,
-        formats,
-        "PCS PERFORMANCE & COACHING",
-        status="POWER QUERY",
-        status_kind="LIVE",
+        worksheet, formats, "PCS PERFORMANCE & COACHING",
+        status="LIVE FILTERS", status_kind="LIVE",
     )
 
-    all_row = next(
-        (tuple(row) for row in lob_rows if str(row[0] or "").upper() == "ALL"),
-        tuple(lob_rows[0]) if lob_rows else None,
+    defaults = ("Current MTD", "All", "All", "All")
+    filters = (
+        ("PERIOD", defaults[0], "=PCS_PERIOD_LIST"),
+        ("LOB", defaults[1], "=PCS_LOB_LIST"),
+        ("TEAM LEADER", defaults[2], "=PCS_TL_ACTIVE"),
+        ("AGENT", defaults[3], "=PCS_AGENT_ACTIVE"),
     )
-    info_label = workbook.add_format({
-        "font_name": "Aptos", "font_size": 8, "bold": True,
-        "font_color": COLORS["muted"], "bg_color": COLORS["canvas"],
-        "align": "left", "valign": "vcenter",
-    })
-    info_value = workbook.add_format({
-        "font_name": "Aptos", "font_size": 10, "bold": True,
-        "font_color": COLORS["navy"], "bg_color": COLORS["white"],
-        "align": "left", "valign": "vcenter", "indent": 1,
-        "border": 1, "border_color": COLORS["line"],
-    })
-    info_date = workbook.add_format({
-        "font_name": "Aptos", "font_size": 10, "bold": True,
-        "font_color": COLORS["navy"], "bg_color": COLORS["white"],
-        "align": "left", "valign": "vcenter", "indent": 1,
-        "border": 1, "border_color": COLORS["line"],
-        "num_format": "yyyy-mm-dd",
-    })
-    info = (
-        ("DATA THROUGH", "=IF('_PCS_LOB'!A5=\"\",\"\",'_PCS_LOB'!R5)", info_date, _cached(all_row, "Data Through", PCS_LOB_SCORECARD_HEADERS)),
-        ("REFRESH", "POWER QUERY", info_value, None),
-        ("INTERACTION", "NATIVE SLICERS", info_value, None),
-        ("SCOPE", "ACTIVE FTE", info_value, None),
-    )
-    for block, (label, value, value_format, cache) in enumerate(info):
+    for block, (label, value, source) in enumerate(filters):
         first = block * 7
-        worksheet.merge_range(1, first, 1, first + 1, label, info_label)
-        worksheet.merge_range(1, first + 2, 1, first + 6, "", value_format)
-        if isinstance(value, str) and value.startswith("="):
-            worksheet.write_formula(
-                1, first + 2, value, value_format, _formula_cache(cache),
-            )
-        else:
-            worksheet.write(1, first + 2, value, value_format)
+        worksheet.merge_range(1, first, 1, first + 1, label, formats.filter_label)
+        worksheet.merge_range(1, first + 2, 1, first + 6, value, formats.filter_value)
+        worksheet.data_validation(1, first + 2, 1, first + 2, {
+            "validate": "list", "source": source,
+            "input_title": label,
+            "input_message": "Choose a governed value; reset child filters to All after changing a parent.",
+            "error_title": "Invalid filter",
+            "error_message": "Choose a value from the dropdown list.",
+        })
     worksheet.set_row_pixels(1, 52)
 
-    write_v2_kpis(worksheet, formats, (
+    selected = _selected_key()
+    default_key = "|".join(defaults)
+    lob_map = _cache_map(lob_rows)
+    agent_map = _cache_map(agent_rows)
+    daily_map = _cache_map(daily_rows)
+    kpi = lob_map.get(
+        f"KPI|{default_key}", tuple(None for _ in PCS_LOB_SCORECARD_HEADERS),
+    )
+    card_specs = (
+        ("SELECTED PCS", "PCS", "decimal"),
+        ("PARTICIPATION", "Participation", "percent"),
+        ("PRIOR COMPARABLE", "Prior PCS", "decimal"),
+        ("CHANGE", "Change", "decimal"),
+    )
+    write_v2_kpis(worksheet, formats, tuple(
         (
-            "Current MTD PCS",
-            '=IF(\'_PCS_LOB\'!A5="","",\'_PCS_LOB\'!F5)',
-            "decimal",
-            _cached(all_row, "Current MTD PCS", PCS_LOB_SCORECARD_HEADERS),
-        ),
-        (
-            "Participation",
-            '=IF(\'_PCS_LOB\'!A5="","",\'_PCS_LOB\'!I5)',
-            "percent",
-            _cached(all_row, "Current MTD Participation", PCS_LOB_SCORECARD_HEADERS),
-        ),
-        (
-            "Prior MTD PCS",
-            '=IF(\'_PCS_LOB\'!A5="","",\'_PCS_LOB\'!G5)',
-            "decimal",
-            _cached(all_row, "Prior MTD PCS", PCS_LOB_SCORECARD_HEADERS),
-        ),
-        (
-            "Change",
-            '=IF(\'_PCS_LOB\'!A5="","",\'_PCS_LOB\'!H5)',
-            "decimal",
-            _cached(all_row, "MTD Change", PCS_LOB_SCORECARD_HEADERS),
-        ),
+            label,
+            _table_lookup("tblPcsLob", header, f'"KPI|"&{selected}'),
+            kind,
+            _cached(kpi, header, PCS_LOB_SCORECARD_HEADERS),
+        )
+        for label, header, kind in card_specs
     ))
 
     lob_chart = workbook.add_chart({"type": "bar"})
     lob_chart.add_series({
-        "name": "Current MTD",
-        "categories": "='_PCS_LOB'!$A$6:$A$17",
-        "values": "='_PCS_LOB'!$F$6:$F$17",
-        "fill": {"color": COLORS["teal"]},
-        "border": {"none": True},
+        "name": "Selected", "categories": "='_PCS_CALC'!$A$2:$A$13",
+        "values": "='_PCS_CALC'!$B$2:$B$13",
+        "fill": {"color": COLORS["teal"]}, "border": {"none": True},
         "data_labels": {"value": True, "num_format": "0.00"},
     })
     lob_chart.add_series({
-        "name": "Prior comparable",
-        "categories": "='_PCS_LOB'!$A$6:$A$17",
-        "values": "='_PCS_LOB'!$G$6:$G$17",
-        "fill": {"color": COLORS["muted"]},
-        "border": {"none": True},
+        "name": "Prior comparable", "categories": "='_PCS_CALC'!$A$2:$A$13",
+        "values": "='_PCS_CALC'!$C$2:$C$13",
+        "fill": {"color": COLORS["muted"]}, "border": {"none": True},
     })
-    style_v2_chart(lob_chart, title="PCS BY LOB", kind="bar")
+    style_v2_chart(lob_chart, title="PCS BY LOB · SELECTED SCOPE", kind="bar")
     lob_chart.set_x_axis({"min": 1, "max": 5, "major_unit": 1})
     lob_chart.set_y_axis({"reverse": True})
 
     trend_chart = workbook.add_chart({"type": "line"})
     trend_chart.add_series({
-        "name": "Daily PCS",
-        "categories": "='_PCS_DAILY'!$A$5:$A$35",
-        "values": "='_PCS_DAILY'!$B$5:$B$35",
+        "name": "Daily PCS", "categories": "='_PCS_CALC'!$D$2:$D$32",
+        "values": "='_PCS_CALC'!$E$2:$E$32",
         "line": {"color": COLORS["teal"], "width": 2.25},
-        "marker": {
-            "type": "circle", "size": 5,
-            "fill": {"color": COLORS["teal"]},
-            "border": {"color": COLORS["teal"]},
-        },
+        "marker": {"type": "circle", "size": 5,
+                   "fill": {"color": COLORS["teal"]},
+                   "border": {"color": COLORS["teal"]}},
     })
-    style_v2_chart(trend_chart, title="CURRENT MONTH PCS TREND")
+    style_v2_chart(trend_chart, title="DAILY PCS · SELECTED PERIOD")
     trend_chart.set_y_axis({"min": 1, "max": 5, "major_unit": 1})
     trend_chart.set_x_axis({"date_axis": True, "num_format": "d-mmm"})
     worksheet.insert_chart(7, 0, lob_chart)
     worksheet.insert_chart(7, 14, trend_chart)
 
     worksheet.merge_range(
-        ACTION_SECTION_ROW,
-        0,
-        ACTION_SECTION_ROW,
-        27,
-        "LOB PERFORMANCE · CURRENT MTD VS PRIOR COMPARABLE",
-        formats.section,
+        ACTION_SECTION_ROW, 0, ACTION_SECTION_ROW, 27,
+        "LOB PERFORMANCE · RESPONDS TO ALL FOUR DROPDOWNS", formats.section,
     )
     lob_headers = (
-        "LOB", "VALID Q1", "CURRENT PCS", "PRIOR PCS",
+        "LOB", "VALID Q1", "SELECTED PCS", "PRIOR PCS",
         "CHANGE", "PARTICIPATION", "COACHING DUE",
+    )
+    lob_source_headers = (
+        "LOB", "Valid Q1", "PCS", "Prior PCS", "Change",
+        "Participation", "Coaching Due",
+    )
+    lob_formats = (
+        formats.table_text, formats.table_integer, formats.table_decimal,
+        formats.table_decimal, formats.table_decimal, formats.table_percent,
+        formats.table_integer,
     )
     for column, header in enumerate(lob_headers):
         first = column * 4
@@ -468,92 +487,118 @@ def _add_overview(
             ACTION_HEADER_ROW, first, ACTION_HEADER_ROW, first + 3,
             header, formats.table_header,
         )
-    lob_source_columns = ("A", "K", "F", "G", "H", "I", "N")
-    lob_formats = (
-        formats.table_text, formats.table_integer, formats.table_decimal,
-        formats.table_decimal, formats.table_decimal, formats.table_percent,
-        formats.table_integer,
-    )
-    visible_lobs = [
-        tuple(row) for row in lob_rows if str(row[0] or "").upper() != "ALL"
-    ]
     for offset in range(12):
+        rank = offset + 1
         row_index = ACTION_FIRST_ROW + offset
-        source_row = 6 + offset
-        cached_row = visible_lobs[offset] if offset < len(visible_lobs) else None
-        for column, (source_column, cell_format) in enumerate(
-            zip(lob_source_columns, lob_formats),
-        ):
+        cached = lob_map.get(
+            f"LOB|{default_key}|{rank}",
+            tuple(None for _ in PCS_LOB_SCORECARD_HEADERS),
+        )
+        key = f'"LOB|"&{selected}&"|{rank}"'
+        for column, (header, cell_format) in enumerate(zip(lob_source_headers, lob_formats)):
             first = column * 4
-            header = (
-                "LOB", "Current MTD Valid Q1", "Current MTD PCS",
-                "Prior MTD PCS", "MTD Change", "Current MTD Participation",
-                "Current MTD Score <= 3",
-            )[column]
-            formula = (
-                f'=IF(\'_PCS_LOB\'!$A${source_row}="","",'
-                f'\'_PCS_LOB\'!${source_column}${source_row})'
-            )
             _write_merged_formula(
-                worksheet, row_index, first, first + 3, formula, cell_format,
-                _cached(cached_row, header, PCS_LOB_SCORECARD_HEADERS),
+                worksheet, row_index, first, first + 3,
+                _table_lookup("tblPcsLob", header, key), cell_format,
+                _cached(cached, header, PCS_LOB_SCORECARD_HEADERS),
             )
         worksheet.set_row_pixels(row_index, 26)
 
     agent_section_row = ACTION_FIRST_ROW + 14
     agent_header_row = agent_section_row + 1
     worksheet.merge_range(
-        agent_section_row,
-        0,
-        agent_section_row,
-        27,
-        "AGENT PERFORMANCE · FULL FILTERABLE VIEW IS ON PERFORMANCE",
-        formats.section,
+        agent_section_row, 0, agent_section_row, 27,
+        "AGENT PERFORMANCE · CASCADING LOB → TEAM LEADER → AGENT", formats.section,
     )
     agent_headers = (
         ("AGENT", 0, 4), ("AGENT ID", 5, 7), ("LOB", 8, 10),
-        ("TEAM LEADER", 11, 15), ("CURRENT PCS", 16, 18),
+        ("TEAM LEADER", 11, 15), ("SELECTED PCS", 16, 18),
         ("PRIOR PCS", 19, 21), ("CHANGE", 22, 24),
         ("PARTICIPATION", 25, 27),
     )
-    for header, first, last in agent_headers:
-        worksheet.merge_range(
-            agent_header_row, first, agent_header_row, last,
-            header, formats.table_header,
-        )
-    agent_source_columns = ("A", "B", "C", "D", "E", "F", "G", "H")
     agent_source_headers = (
-        "Agent", "Agent ID", "LOB", "Team Leader", "Current MTD PCS",
-        "Prior MTD PCS", "MTD Change", "Current MTD Participation",
+        "Agent", "Agent ID", "LOB", "Team Leader", "PCS",
+        "Prior PCS", "Change", "Participation",
     )
     agent_formats = (
         formats.table_text, formats.table_text, formats.table_text,
         formats.table_text, formats.table_decimal, formats.table_decimal,
         formats.table_decimal, formats.table_percent,
     )
-    capacity = max(50, min(1000, len(agent_rows) + 50))
-    for offset in range(capacity):
+    for header, first, last in agent_headers:
+        worksheet.merge_range(
+            agent_header_row, first, agent_header_row, last,
+            header, formats.table_header,
+        )
+    agent_capacity = max(50, min(1000, sum(
+        1 for row in filter_rows if row[0] == "AGENT|All|All"
+    ) - 1))
+    for offset in range(agent_capacity):
+        rank = offset + 1
         row_index = agent_header_row + 1 + offset
-        source_row = 5 + offset
-        cached_row = tuple(agent_rows[offset]) if offset < len(agent_rows) else None
-        for (_header, first, last), source_column, source_header, cell_format in zip(
-            agent_headers,
-            agent_source_columns,
-            agent_source_headers,
-            agent_formats,
+        cached = agent_map.get(
+            f"AGENT|{default_key}|{rank}",
+            tuple(None for _ in PCS_AGENT_SCORECARD_HEADERS),
+        )
+        key = f'"AGENT|"&{selected}&"|{rank}"'
+        for (_label, first, last), header, cell_format in zip(
+            agent_headers, agent_source_headers, agent_formats,
         ):
-            formula = (
-                f'=IF(\'_PCS_AGENT\'!$A${source_row}="","",'
-                f'\'_PCS_AGENT\'!${source_column}${source_row})'
-            )
             _write_merged_formula(
-                worksheet, row_index, first, last, formula, cell_format,
-                _cached(cached_row, source_header, PCS_AGENT_SCORECARD_HEADERS),
+                worksheet, row_index, first, last,
+                _table_lookup("tblPcsAgent", header, key), cell_format,
+                _cached(cached, header, PCS_AGENT_SCORECARD_HEADERS),
             )
         worksheet.set_row_pixels(row_index, 25)
     worksheet.set_footer(
         "&LPrepared by Anass ASSRI | WFM&CPCS operational tracker&RPage &P of &N",
     )
+
+
+def _add_calc_sheet(
+    report: ExcelReport,
+    lob_rows: Sequence[Sequence[Any]],
+    daily_rows: Sequence[Sequence[Any]],
+) -> None:
+    worksheet = report.workbook.add_worksheet("_PCS_CALC")
+    headers = ("LOB", "PCS", "Prior PCS", "Date", "Daily PCS", "Daily Participation")
+    for column, header in enumerate(headers):
+        worksheet.write(0, column, header, report.header)
+    selected = _selected_key(sheet="OVERVIEW")
+    default_key = "Current MTD|All|All|All"
+    lob_map = _cache_map(lob_rows)
+    daily_map = _cache_map(daily_rows)
+    for offset in range(12):
+        rank = offset + 1
+        key = f'"LOB|"&{selected}&"|{rank}"'
+        cached = lob_map.get(
+            f"LOB|{default_key}|{rank}",
+            tuple(None for _ in PCS_LOB_SCORECARD_HEADERS),
+        )
+        for column, header in enumerate(("LOB", "PCS", "Prior PCS")):
+            worksheet.write_formula(
+                offset + 1, column,
+                _table_lookup("tblPcsLob", header, key),
+                None, _formula_cache(_cached(cached, header, PCS_LOB_SCORECARD_HEADERS)),
+            )
+    for offset in range(31):
+        rank = offset + 1
+        key = f'"DAILY|"&{selected}&"|{rank}"'
+        cached = daily_map.get(
+            f"DAILY|{default_key}|{rank}",
+            tuple(None for _ in PCS_DAILY_SCORECARD_HEADERS),
+        )
+        for column, header, cell_format in (
+            (3, "Date", report.date), (4, "PCS", report.decimal),
+            (5, "Participation", report.percent),
+        ):
+            worksheet.write_formula(
+                offset + 1, column,
+                _table_lookup("tblPcsDaily", header, key),
+                cell_format,
+                _formula_cache(_cached(cached, header, PCS_DAILY_SCORECARD_HEADERS)),
+            )
+    worksheet.hide()
 
 
 def _add_coaching(
@@ -567,50 +612,60 @@ def _add_coaching(
     worksheet.set_tab_color(COLORS["gold"])
     worksheet.freeze_panes(4, 0)
     worksheet.merge_range("A1:R1", "PCS COACHING", report.title)
+    worksheet.merge_range("A2:B2", "PERIOD", report.subtitle)
+    worksheet.merge_range("C2:E2", "Current MTD", report.editable)
+    worksheet.merge_range("F2:G2", "LOB", report.subtitle)
+    worksheet.merge_range("H2:J2", "All", report.editable)
     worksheet.merge_range(
-        "A2:R2",
-        "Power Query queue on the left · permanent blue action log on the right · use native table filters or add slicers",
-        report.subtitle,
+        "L2:R2", "Blue table = permanent human-owned action log", report.subtitle,
     )
-    _write_table(
-        report,
-        worksheet,
-        first_row=3,
-        first_column=0,
-        table_name="tblCoachingQueue",
-        headers=PCS_COACHING_HEADERS,
-        rows=coaching_rows,
-    )
+    worksheet.data_validation("C2", {"validate": "list", "source": "=PCS_PERIOD_LIST"})
+    worksheet.data_validation("H2", {"validate": "list", "source": "=PCS_LOB_LIST"})
+    queue_headers = PCS_COACHING_HEADERS[2:12]
+    queue_capacity = max(30, min(5000, max(
+        (int(row[1] or 0) for row in coaching_rows), default=0,
+    )))
+    default_key = "COACH|Current MTD|All"
+    cache = _cache_map(coaching_rows)
+    for offset in range(queue_capacity):
+        rank = offset + 1
+        cached = cache.get(
+            f"{default_key}|{rank}", tuple(None for _ in PCS_COACHING_HEADERS),
+        )
+        key = f'"COACH|"&$C$2&"|"&SUBSTITUTE($H$2,"|","/")&"|{rank}"'
+        for column, header in enumerate(queue_headers):
+            worksheet.write_formula(
+                4 + offset, column,
+                _table_lookup("tblPcsCoachingView", header, key),
+                _cell_format(report, header, _cached(cached, header, PCS_COACHING_HEADERS)),
+                _formula_cache(_cached(cached, header, PCS_COACHING_HEADERS)),
+            )
+    worksheet.add_table(3, 0, 3 + queue_capacity, len(queue_headers) - 1, {
+        "name": "tblCoachingQueue", "style": "Table Style Light 9",
+        "columns": [{"header": header, "header_format": report.header} for header in queue_headers],
+    })
     padded_actions = [tuple(row) for row in actions]
     padded_actions.extend(
         tuple(None for _ in COACHING_ACTION_HEADERS)
         for _ in range(max(25, 100 - len(padded_actions)))
     )
     _write_table(
-        report,
-        worksheet,
-        first_row=3,
-        first_column=11,
-        table_name="tblCoachingActions",
-        headers=COACHING_ACTION_HEADERS,
-        rows=padded_actions,
-        editable_headers=set(COACHING_ACTION_HEADERS),
+        report, worksheet, first_row=3, first_column=11,
+        table_name="tblCoachingActions", headers=COACHING_ACTION_HEADERS,
+        rows=padded_actions, editable_headers=set(COACHING_ACTION_HEADERS),
     )
     worksheet.data_validation(4, 13, 5003, 13, {
         "validate": "list",
         "source": ["Pending", "Planned", "Completed", "Not required"],
     })
     worksheet.conditional_format(4, 11, 5003, 11, {
-        "type": "duplicate",
-        "format": report.error,
+        "type": "duplicate", "format": report.error,
     })
-    queue_widths = (12, 13, 20, 24, 12, 10, 11, 24, 34, 40)
-    for column, width in enumerate(queue_widths):
+    for column, width in enumerate((12, 13, 20, 24, 12, 10, 11, 24, 34, 40)):
         worksheet.set_column(column, column, width)
     worksheet.set_column(10, 10, 3)
-    action_widths = (40, 24, 16, 20, 16, 16, 34)
-    for offset, width in enumerate(action_widths, 11):
-        worksheet.set_column(offset, offset, width)
+    for column, width in enumerate((40, 24, 16, 20, 16, 16, 34), 11):
+        worksheet.set_column(column, column, width)
     worksheet.set_footer(
         "&LPrepared by Anass ASSRI | WFM&CPCS coaching&RPage &P of &N",
     )
@@ -624,17 +679,18 @@ def _add_setup(report: ExcelReport, config: Config) -> None:
         "Install once with WFMHub; normal updates replace CSV feeds, then Excel Data > Refresh All reloads the tables.",
         ["Setting", "Value", "Why it exists"],
         [
-            ("Power Query Installed", "NO", "Set automatically after all five query tables refresh"),
+            ("Power Query Installed", "NO", "Set automatically after all six query tables refresh"),
             ("Connection Mode", "LOCAL", "Use the locally synced WFMHub feed folder"),
             ("Connection Owner", "Anass ASSRI", "One owner controls connection changes"),
             ("Local Feed Folder", str(folder), "Fixed clean CSV folder outside the workbook"),
             ("SharePoint Site URL", "https://company.sharepoint.com/sites/WFM", "Reserved for a later SharePoint-feed migration"),
             ("SharePoint Feed Folder", "/Shared Documents/WFMHub/Feed/PCS/", "Reserved SharePoint folder fragment"),
+            ("Filter Script", str(folder / "POWER_QUERY_PCS_FILTERS_LOCAL.txt"), "Cascading Period, LOB, Team Leader and Agent lists"),
             ("LOB Script", str(folder / "POWER_QUERY_PCS_LOB_LOCAL.txt"), "Overview LOB scorecard"),
             ("Agent Script", str(folder / "POWER_QUERY_PCS_AGENT_LOCAL.txt"), "Overview agent scorecard"),
             ("Daily Script", str(folder / "POWER_QUERY_PCS_DAILY_LOCAL.txt"), "Overview daily trend"),
             ("Performance Script", str(folder / "POWER_QUERY_PCS_RESULTS_LOCAL.txt"), "Native-filter and slicer-ready performance table"),
-            ("Coaching Script", str(folder / "POWER_QUERY_COACHING_QUEUE_LOCAL.txt"), "Exact low-score call queue"),
+            ("Coaching Script", str(folder / "POWER_QUERY_COACHING_QUEUE_LOCAL.txt"), "Period/LOB coaching view cache"),
             ("Workbook Last Refreshed", "Never", "Written after desktop Excel finishes Refresh All"),
             ("Last Installer Result", "Not run", "Latest desktop Excel connection result"),
             ("Template Version", PCS_TRACKER_VERSION, "Controls the one-time action-preserving migration"),
@@ -655,10 +711,12 @@ def _add_help(report: ExcelReport) -> None:
         [
             (1, "Run Update PCS data", "WFMHub", "SQLite and the fixed clean CSV feeds are refreshed"),
             (2, "Run Install/repair Power Query once after this upgrade", "PCS menu", "The permanent workbook is connected to the CSV feeds"),
-            (3, "Open PCS Live Tracker and choose Data > Refresh All", "Excel", "Overview, Performance and Coaching reload"),
-            (4, "Use table filter arrows or Insert > Slicer", "PERFORMANCE", "Filter Period View, Scope Level, LOB, Team Leader or Agent"),
-            (5, "Filter the exact low-score calls", "COACHING", "Call ID and Coaching Key identify the call to review"),
-            (6, "Copy the key and call ID into the blue action table", "COACHING", "Quality records status, coach, dates and comment permanently"),
+            (3, "Open PCS Live Tracker and choose Data > Refresh All", "Excel", "All six lightweight query caches reload"),
+            (4, "Choose Period, then LOB, Team Leader and Agent", "OVERVIEW", "Cards, charts and both tables update together"),
+            (5, "After changing a parent, reset child filters to All", "OVERVIEW", "Every selection remains valid and easy to understand"),
+            (6, "Use Period and LOB", "COACHING", "The exact low-score calls appear with Call ID and Coaching Key"),
+            (7, "Copy the key and call ID into the blue action table", "COACHING", "Quality records status, coach, dates and comment permanently"),
+            (8, "Use table filters or add slicers for detailed checks", "PERFORMANCE", "Inspect governed period, LOB, team and agent rows"),
         ],
     )
     worksheet.set_column("A:A", 10)
@@ -677,9 +735,9 @@ def _add_audit(report: ExcelReport, generated: datetime) -> None:
             ("Tracker version", PCS_TRACKER_VERSION),
             ("Design", f"{REPORT_DESIGN_ID} {REPORT_DESIGN_VERSION}"),
             ("Created", generated),
-            ("Workbook grain", "Lightweight governed scorecards and low-score calls"),
+            ("Workbook grain", "Precomputed selection caches and low-score calls"),
             ("Raw data", "External fixed CSV feeds only; no raw-data worksheet"),
-            ("Update method", "Power Query direct from CSV"),
+            ("Update method", "Power Query from six fixed CSV feeds"),
             ("KPI method", "Python/SQLite ratio of additive sums"),
             ("Human-owned table", "COACHING!tblCoachingActions"),
         ],
@@ -690,6 +748,7 @@ def _add_audit(report: ExcelReport, generated: datetime) -> None:
 def ensure_pcs_tracker(
     config: Config,
     *,
+    filter_rows: Sequence[Sequence[Any]] = (),
     lob_rows: Sequence[Sequence[Any]] = (),
     agent_rows: Sequence[Sequence[Any]] = (),
     daily_rows: Sequence[Sequence[Any]] = (),
@@ -714,7 +773,8 @@ def ensure_pcs_tracker(
         "WFMHub PCS Live Tracker", PCS_TRACKER_VERSION,
     )
     try:
-        _add_overview(report, lob_rows, agent_rows, daily_rows)
+        _add_filter_names(report.workbook)
+        _add_overview(report, filter_rows, lob_rows, agent_rows, daily_rows)
         _query_sheet(
             report,
             name="PERFORMANCE",
@@ -727,6 +787,16 @@ def ensure_pcs_tracker(
         _add_coaching(report, coaching_rows, migrated_actions)
         _add_setup(report, config)
         _add_help(report)
+        _query_sheet(
+            report,
+            name="_PCS_FILTERS",
+            title="PCS FILTER STAGING",
+            subtitle="Power Query destination for governed cascading dropdown lists.",
+            table_name="tblPcsFilters",
+            headers=PCS_FILTER_HEADERS,
+            rows=filter_rows,
+            hidden=True,
+        )
         _query_sheet(
             report,
             name="_PCS_LOB",
@@ -757,6 +827,17 @@ def ensure_pcs_tracker(
             rows=daily_rows,
             hidden=True,
         )
+        _query_sheet(
+            report,
+            name="_PCS_COACH",
+            title="PCS COACHING STAGING",
+            subtitle="Power Query destination for the period and LOB coaching cache.",
+            table_name="tblPcsCoachingView",
+            headers=PCS_COACHING_HEADERS,
+            rows=coaching_rows,
+            hidden=True,
+        )
+        _add_calc_sheet(report, lob_rows, daily_rows)
         _add_audit(report, generated)
         report.close()
         if target.is_file():
@@ -800,48 +881,22 @@ def build_pcs_live_tracker(
     target = tracker_path(config)
     if target.is_file() and _tracker_contract_version(target) == PCS_TRACKER_VERSION:
         return target
+    generated = datetime.now()
+    filter_rows, lob_rows, agent_rows, daily_rows = pcs_dashboard_cache_rows(
+        conn, available_end, generated,
+    )
     metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
     method = metric_catalog.method_for("pcs_average", available_end, {})
     minimum_sample = int(method.minimum_sample) if method is not None else 1
-    generated = datetime.now()
-    lob_rows = pcs_lob_scorecard_rows(
-        conn, available_end, minimum_sample, generated,
-    )
-    agent_rows = pcs_agent_scorecard_rows(
-        conn, available_end, minimum_sample, generated,
-    )
-    daily_rows = pcs_daily_scorecard_rows(
-        conn, available_end.replace(day=1), available_end, generated,
-    )
     result_rows = pcs_result_rows(
         conn, available_end, minimum_sample, generated,
     )
-    primary_score = f"question_{config.pcs.primary_score_question}_score"
-    allowed_scores = ", ".join(
-        f"{value:g}" for value in config.pcs.allowed_scores
+    coaching_rows = pcs_coaching_cache_rows(
+        conn, config, available_end, generated,
     )
-    coaching_rows = conn.execute(
-        f"""SELECT c.business_date, coalesce(d.lob,c.lob), d.team_leader,
-                   coalesce(d.canonical_name,c.agent_name), c.agent_id,
-                   c.{primary_score},
-                   CASE WHEN c.{primary_score}<=2 THEN 'High' ELSE 'Normal' END,
-                   c.call_id, c.question_3, c.call_key
-            FROM core.clean_call_leg c
-            LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
-            WHERE c.business_date BETWEEN ? AND ?
-              AND upper(coalesce(c.call_direction,''))='I'
-              AND c.{primary_score} IN ({allowed_scores})
-              AND c.{primary_score}<=?
-            ORDER BY c.business_date DESC, d.team_leader,
-                     coalesce(d.canonical_name,c.agent_name), c.call_start""",
-        (
-            available_start,
-            available_end,
-            config.pcs.negative_score_maximum,
-        ),
-    ).fetchall()
     return ensure_pcs_tracker(
         config,
+        filter_rows=filter_rows,
         lob_rows=lob_rows,
         agent_rows=agent_rows,
         daily_rows=daily_rows,

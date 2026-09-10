@@ -15,6 +15,9 @@ param(
     [string]$FeedFolder,
 
     [Parameter(Mandatory = $true)]
+    [string]$FilterQueryPath,
+
+    [Parameter(Mandatory = $true)]
     [string]$AgentQueryPath,
 
     [Parameter(Mandatory = $true)]
@@ -170,6 +173,54 @@ function Set-TableColumnFormat {
     finally { Release-ComObject $sheet }
 }
 
+function Save-PresentationFormulas {
+    $snapshots = @()
+    foreach ($sheetName in @("OVERVIEW", "COACHING", "_PCS_CALC")) {
+        $sheet = $script:Workbook.Worksheets.Item($sheetName)
+        try {
+            $used = $sheet.UsedRange
+            try {
+                $formulaCells = $null
+                try { $formulaCells = $used.SpecialCells(-4123) } catch {}
+                if ($null -ne $formulaCells) {
+                    try {
+                        foreach ($cell in $formulaCells.Cells) {
+                            try {
+                                $formula = [string]$cell.Formula
+                                if ($formula -like "*tblPcs*") {
+                                    $snapshots += [PSCustomObject]@{
+                                        SheetName = $sheetName
+                                        Address = [string]$cell.Address
+                                        Formula = $formula
+                                    }
+                                }
+                            }
+                            finally { Release-ComObject $cell }
+                        }
+                    }
+                    finally { Release-ComObject $formulaCells }
+                }
+            }
+            finally { Release-ComObject $used }
+        }
+        finally { Release-ComObject $sheet }
+    }
+    return $snapshots
+}
+
+function Restore-PresentationFormulas {
+    param([object[]]$Snapshots)
+    foreach ($snapshot in $Snapshots) {
+        $sheet = $script:Workbook.Worksheets.Item([string]$snapshot.SheetName)
+        try {
+            $cell = $sheet.Range([string]$snapshot.Address)
+            try { $cell.Formula = [string]$snapshot.Formula }
+            finally { Release-ComObject $cell }
+        }
+        finally { Release-ComObject $sheet }
+    }
+}
+
 function Add-QueryTable {
     param(
         [string]$QueryName,
@@ -249,18 +300,22 @@ try {
     }
 
     if ($Action -eq "Install") {
-        foreach ($path in @($AgentQueryPath, $CoachingQueryPath, $LobQueryPath, $ResultsQueryPath, $DailyQueryPath)) {
+        foreach ($path in @($FilterQueryPath, $AgentQueryPath, $CoachingQueryPath, $LobQueryPath, $ResultsQueryPath, $DailyQueryPath)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
                 throw "Power Query definition not found: $path"
             }
         }
-        Remove-StarterTable "_PCS_LOB" "tblPcsLob" 4 19
-        Remove-StarterTable "_PCS_AGENT" "tblPcsAgent" 4 13
-        Remove-StarterTable "_PCS_DAILY" "tblPcsDaily" 4 11
+        $presentation = Save-PresentationFormulas
+        Remove-StarterTable "_PCS_FILTERS" "tblPcsFilters" 4 3
+        Remove-StarterTable "_PCS_LOB" "tblPcsLob" 4 12
+        Remove-StarterTable "_PCS_AGENT" "tblPcsAgent" 4 14
+        Remove-StarterTable "_PCS_DAILY" "tblPcsDaily" 4 9
         Remove-StarterTable "PERFORMANCE" "tblPcsPerformance" 4 21
-        Remove-StarterTable "COACHING" "tblCoachingQueue" 4 10
+        Remove-StarterTable "_PCS_COACH" "tblPcsCoachingView" 4 14
         Remove-WorkbookQuery "PCS_DATA"
         Remove-WorkbookQuery "COACHING_QUEUE"
+        Remove-WorkbookQuery "PCS_FILTERS"
+        Remove-WorkbookQuery "PCS_COACHING_VIEW"
         Remove-WorkbookQuery "PCS_LOB"
         Remove-WorkbookQuery "PCS_AGENT"
         Remove-WorkbookQuery "PCS_DAILY"
@@ -268,11 +323,13 @@ try {
         Remove-WorkbookQuery "PCS_SCOPE"
         Set-SetupValue "Connection Mode" $Mode
         Set-SetupValue "Local Feed Folder" ([System.IO.Path]::GetFullPath($FeedFolder))
+        Add-QueryTable "PCS_FILTERS" ([System.IO.File]::ReadAllText($FilterQueryPath)) "_PCS_FILTERS" "tblPcsFilters" "A4"
         Add-QueryTable "PCS_LOB" ([System.IO.File]::ReadAllText($LobQueryPath)) "_PCS_LOB" "tblPcsLob" "A4"
         Add-QueryTable "PCS_AGENT" ([System.IO.File]::ReadAllText($AgentQueryPath)) "_PCS_AGENT" "tblPcsAgent" "A4"
         Add-QueryTable "PCS_DAILY" ([System.IO.File]::ReadAllText($DailyQueryPath)) "_PCS_DAILY" "tblPcsDaily" "A4"
         Add-QueryTable "PCS_RESULTS" ([System.IO.File]::ReadAllText($ResultsQueryPath)) "PERFORMANCE" "tblPcsPerformance" "A4"
-        Add-QueryTable "COACHING_QUEUE" ([System.IO.File]::ReadAllText($CoachingQueryPath)) "COACHING" "tblCoachingQueue" "A4"
+        Add-QueryTable "PCS_COACHING_VIEW" ([System.IO.File]::ReadAllText($CoachingQueryPath)) "_PCS_COACH" "tblPcsCoachingView" "A4"
+        Restore-PresentationFormulas $presentation
         Set-SetupValue "Power Query Installed" "YES"
         Set-SetupValue "Last Installer Result" "Installed successfully"
     }
@@ -280,7 +337,6 @@ try {
     $script:Workbook.RefreshAll()
     Wait-ForRefresh
     foreach ($format in @(
-        @("_PCS_LOB", "tblPcsLob", "As Of Date", "yyyy-mm-dd"),
         @("_PCS_LOB", "tblPcsLob", "Data Through", "yyyy-mm-dd"),
         @("_PCS_LOB", "tblPcsLob", "Feed Refreshed At", "yyyy-mm-dd hh:mm"),
         @("_PCS_AGENT", "tblPcsAgent", "Data Through", "yyyy-mm-dd"),
@@ -292,7 +348,9 @@ try {
         @("PERFORMANCE", "tblPcsPerformance", "Period End", "yyyy-mm-dd"),
         @("PERFORMANCE", "tblPcsPerformance", "Data Through", "yyyy-mm-dd"),
         @("PERFORMANCE", "tblPcsPerformance", "Feed Refreshed At", "yyyy-mm-dd hh:mm"),
-        @("COACHING", "tblCoachingQueue", "Date", "yyyy-mm-dd")
+        @("_PCS_COACH", "tblPcsCoachingView", "Date", "yyyy-mm-dd"),
+        @("_PCS_COACH", "tblPcsCoachingView", "Data Through", "yyyy-mm-dd"),
+        @("_PCS_COACH", "tblPcsCoachingView", "Feed Refreshed At", "yyyy-mm-dd hh:mm")
     )) {
         Set-TableColumnFormat $format[0] $format[1] $format[2] $format[3]
     }

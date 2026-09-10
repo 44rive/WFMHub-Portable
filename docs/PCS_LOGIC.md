@@ -41,7 +41,7 @@ scores `<=3`. WFMHub preserves the business meaning without the broken link:
 - every valid inbound Q1 `<=3` creates one coaching opportunity;
 - each opportunity is identified by the stable Coaching Key and exact Call ID;
 - `Actions Rate = unique completed Coaching Keys / all coaching opportunities`;
-- the query table on `COACHING` exposes the low-score calls;
+- the filtered lookup table on `COACHING` exposes the low-score calls;
 - the reviewer copies Coaching Key and Call ID to `tblCoachingActions`, then
   records status, coach, dates, and comment;
 - `tblCoachingActions` is permanent and never a Power Query destination;
@@ -58,7 +58,7 @@ untouched FTE + Call by Call
           -> targeted PCS ingestion and effective-dated roster scope
           -> deduplicated clean call legs
           -> additive agent/day PCS mart
-          -> five small governed CSV feeds
+          -> six governed CSV feeds
           -> Power Query transport
           -> permanent PCS Live Tracker.xlsx
 ```
@@ -67,11 +67,12 @@ The fixed files under `Feed\PCS` are:
 
 | File | Workbook destination | Purpose |
 |---|---|---|
-| `PCS_LOB_SCORECARD_CURRENT.csv` | hidden `_PCS_LOB` | KPI cards and LOB comparison |
-| `PCS_AGENT_SCORECARD_CURRENT.csv` | hidden `_PCS_AGENT` | agent section on Overview |
-| `PCS_DAILY_SCORECARD_CURRENT.csv` | hidden `_PCS_DAILY` | current-month daily trend |
+| `PCS_FILTER_LIST_CURRENT.csv` | hidden `_PCS_FILTERS` | governed cascading dropdown values |
+| `PCS_LOB_SCORECARD_CURRENT.csv` | hidden `_PCS_LOB` | selection-aware cards and LOB comparison cache |
+| `PCS_AGENT_SCORECARD_CURRENT.csv` | hidden `_PCS_AGENT` | selection-aware agent cache |
+| `PCS_DAILY_SCORECARD_CURRENT.csv` | hidden `_PCS_DAILY` | selected-period daily trend cache |
 | `PCS_RESULTS_CURRENT.csv` | `PERFORMANCE` | period/scope table for native filters and slicers |
-| `PCS_COACHING_OPPORTUNITY_CURRENT.csv` | left of `COACHING` | exact low-score call queue |
+| `PCS_COACHING_OPPORTUNITY_CURRENT.csv` | hidden `_PCS_COACH` | period/LOB coaching cache with exact calls |
 
 CSV replacement is atomic. A failed Hub calculation leaves the previous
 complete feed in place. Power Query performs no KPI arithmetic; it checks the
@@ -86,9 +87,17 @@ not open, replace, or modify it. The user opens the workbook and chooses **Data
 > Refresh All** after the CSV feeds are updated.
 
 There is no raw `DATA` worksheet, Data Model, Power Pivot, macro, ODBC driver,
-spill formula, or dynamic-array metadata. `PERFORMANCE` and `COACHING` are
-native Excel tables, so users can filter immediately or add standard Excel
-slicers with **Table Design > Insert Slicer**.
+spill formula, or dynamic-array metadata. `OVERVIEW` uses four dropdowns and
+classic exact `INDEX/MATCH` lookups. `COACHING` uses Period and LOB dropdowns.
+`PERFORMANCE` remains a native Excel table for detailed filtering or optional
+standard slicers.
+
+Selectable comparisons are fixed and explicit: Latest day versus the previous
+available data day; Current week versus the same weekdays one week earlier;
+Current MTD versus the same day span in the prior month; Previous MTD same days
+versus the same span two months earlier; and Previous full month versus the
+month before it. Missing comparison data stays blank and is never converted to
+zero.
 
 ## Reference reconciliation
 

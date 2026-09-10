@@ -39,14 +39,14 @@ when StartEndTimes is missing.
 | `mart.forecast_hour` | Date/hour/mapped scope | Flash and Realisations comparison |
 | `mart.agent_pcs_day` | Agent/day | PCS result and participation |
 
-The PCS collaboration boundary is five fixed UTF-8 CSV products under
-`Feed\PCS`: LOB scorecard, agent scorecard, daily scorecard, standard-period
-results, and exact low-score coaching opportunities. These feeds contain only
+The PCS collaboration boundary is six fixed UTF-8 CSV products under
+`Feed\PCS`: governed filter lists, LOB cache, agent cache, daily cache,
+standard-period results, and exact low-score coaching opportunities. These feeds contain only
 governed result grains required by the workbook; the raw/deduplicated call-leg
 table remains in SQLite unless explicitly exported. Power Query transports the
-fixed schemas to `_PCS_LOB`, `_PCS_AGENT`, `_PCS_DAILY`, `PERFORMANCE`, and the
-left-hand queue on `COACHING`. The permanent `tblCoachingActions` table is not a
-feed destination.
+fixed schemas to `_PCS_FILTERS`, `_PCS_LOB`, `_PCS_AGENT`, `_PCS_DAILY`,
+`_PCS_COACH`, and `PERFORMANCE`. The visible coaching queue and permanent
+`tblCoachingActions` table are not feed destinations.
 
 Legacy-named exports remain callable so existing jobs do not break.
 `yesterday_gap_actions` covers the entire selected completed period, not only

@@ -244,17 +244,18 @@ an absence KPI plus a second hidden penalty.
 
 After installing this release, choose **PCS Report & Coaching > Install/repair
 Power Query** once. Close `PCS Live Tracker.xlsx` before this one-time setup.
-The installer connects five small report tables to the fixed CSVs under
+The installer connects six small report tables to the fixed CSVs under
 `Feed\PCS`; there is no raw call-data sheet.
 
 Your normal PCS routine is then only:
 
 1. Choose **Update latest PCS data** in WFMHub. This loads FTE and Call by Call,
-   refreshes the PCS database, and replaces the five CSV feeds.
+   refreshes the PCS database, and replaces the six CSV feeds.
 2. Open `PCS Live Tracker.xlsx`.
 3. Choose **Data > Refresh All** and wait for Excel to finish.
-4. Use `OVERVIEW` to present the all-scope current month and prior comparable
-   view. LOB is shown first and the agent scorecard is directly below it.
+4. Use the `OVERVIEW` dropdowns in order: Period, LOB, Team Leader, Agent.
+   Cards, charts, LOB rows and agent rows update together. After changing a
+   parent, reset the child selections to `All`.
 5. Use the filter arrows on `PERFORMANCE` for Period View, Scope Level, LOB,
    Team Leader, Agent, or another field. To add a slicer, click inside the table
    and choose **Table Design > Insert Slicer**.
@@ -268,8 +269,7 @@ PCS formulas:
 
 Never average agent PCS percentages or use the raw score sum as the score.
 
-On `COACHING`, the left table refreshes to the exact low-score calls. Filter it
-by Date or LOB with the table arrows, or add native Date/LOB slicers. Copy the
+On `COACHING`, choose Period and LOB to show the exact low-score calls. Copy the
 Coaching Key and Call ID into the compact blue action table on the right, then
 complete Coaching Status, Coach, Coaching Date, Due Date, and Comment. Call ID
 takes the coach directly to the call. Save and share this same tracker; later

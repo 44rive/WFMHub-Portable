@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.27.1 — 2026-09-10
+
+- Adds reliable cascading Period, LOB, Team Leader and Agent dropdowns to the
+  approved PCS Overview; cards, charts, LOB rows and agent rows respond together.
+- Adds Period and LOB controls to the visible Coaching queue while keeping the
+  permanent human-owned action log isolated from Power Query.
+- Replaces fragile workbook-side filtering with optimized Python/SQLite
+  selection caches and classic exact `INDEX/MATCH` formulas.
+- Expands the PCS transport contract to six fixed CSV/query feeds, preserves
+  existing keyed coaching actions during the one-time migration, and keeps
+  later same-version updates byte-for-byte safe.
+- Advances the PCS/catalog contract to `2026.11.1` and the visual contract to
+  `WFMHUB-DESIGN 3.2.0`.
+
 ## 0.27.0 — 2026-09-09
 
 - Rebuilds PCS around one permanent lightweight tracker and five fixed CSV

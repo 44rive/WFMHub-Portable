@@ -29,6 +29,7 @@ from wfmhub.shared_feeds import (
     PCS_AGENT_SCORECARD_HEADERS,
     PCS_COACHING_HEADERS,
     PCS_DAILY_SCORECARD_HEADERS,
+    PCS_FILTER_HEADERS,
     PCS_LOB_SCORECARD_HEADERS,
     PCS_RESULTS_HEADERS,
 )
@@ -1019,6 +1020,7 @@ class EndToEndTests(unittest.TestCase):
                 self.assertFalse(list((home / "Reports").glob("PCS Paste Data - *.xlsx")))
                 pcs_feed = home / "Feed" / "PCS"
                 for filename, headers in (
+                    ("PCS_FILTER_LIST_CURRENT.csv", PCS_FILTER_HEADERS),
                     ("PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS),
                     ("PCS_AGENT_SCORECARD_CURRENT.csv", PCS_AGENT_SCORECARD_HEADERS),
                     ("PCS_DAILY_SCORECARD_CURRENT.csv", PCS_DAILY_SCORECARD_HEADERS),
@@ -1118,20 +1120,22 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(focused_pcs_report.name, PCS_TRACKER_FILENAME)
                 self.assertEqual(focused_pcs_book.sheetnames, [
                     "OVERVIEW", "PERFORMANCE", "COACHING", "SETUP", "HELP",
-                    "_PCS_LOB", "_PCS_AGENT", "_PCS_DAILY", "_AUDIT",
+                    "_PCS_FILTERS", "_PCS_LOB", "_PCS_AGENT", "_PCS_DAILY",
+                    "_PCS_COACH", "_PCS_CALC", "_AUDIT",
                 ])
                 self.assertNotIn("DATA", focused_pcs_book.sheetnames)
                 self.assertEqual(len(focused_pcs_book["OVERVIEW"]._charts), 2)
                 self.assertEqual(
                     [focused_pcs_book["OVERVIEW"][cell].value for cell in ("A5", "H5", "O5", "V5")],
-                    ["CURRENT MTD PCS", "PARTICIPATION", "PRIOR MTD PCS", "CHANGE"],
+                    ["SELECTED PCS", "PARTICIPATION", "PRIOR COMPARABLE", "CHANGE"],
                 )
-                self.assertTrue(focused_pcs_book["OVERVIEW"]["A6"].value.startswith("=IF("))
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["A2"].value, "DATA THROUGH")
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["H2"].value, "REFRESH")
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["O2"].value, "INTERACTION")
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["V2"].value, "SCOPE")
-                self.assertEqual(len(focused_pcs_book["OVERVIEW"].data_validations.dataValidation), 0)
+                self.assertTrue(focused_pcs_book["OVERVIEW"]["A6"].value.startswith("=IFERROR(INDEX("))
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["A2"].value, "PERIOD")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["C2"].value, "Current MTD")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["H2"].value, "LOB")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["O2"].value, "TEAM LEADER")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["V2"].value, "AGENT")
+                self.assertEqual(len(focused_pcs_book["OVERVIEW"].data_validations.dataValidation), 4)
                 self.assertIn("tblPcsPerformance", focused_pcs_book["PERFORMANCE"].tables)
                 self.assertIn("tblCoachingQueue", focused_pcs_book["COACHING"].tables)
                 self.assertIn("tblCoachingActions", focused_pcs_book["COACHING"].tables)
@@ -1156,8 +1160,11 @@ class EndToEndTests(unittest.TestCase):
                     "yyyy-mm-dd",
                 )
                 self.assertEqual(focused_pcs_book["_PCS_LOB"].sheet_state, "hidden")
+                self.assertEqual(focused_pcs_book["_PCS_FILTERS"].sheet_state, "hidden")
                 self.assertEqual(focused_pcs_book["_PCS_AGENT"].sheet_state, "hidden")
                 self.assertEqual(focused_pcs_book["_PCS_DAILY"].sheet_state, "hidden")
+                self.assertEqual(focused_pcs_book["_PCS_COACH"].sheet_state, "hidden")
+                self.assertEqual(focused_pcs_book["_PCS_CALC"].sheet_state, "hidden")
             finally:
                 focused_pcs_book.close()
             with zipfile.ZipFile(focused_pcs_report) as archive:

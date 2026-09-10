@@ -3,10 +3,10 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `3.1.0` |
+| Version | `3.2.0` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
-| First compatible Hub version | `0.27.0` |
+| First compatible Hub version | `0.27.1` |
 
 This is the visual contract for every WFMHub workbook. It changes presentation,
 never business calculations, source scope, table keys, or report maturity.
@@ -71,16 +71,17 @@ defines a target; WFMHub never invents the pictured PCS target.
 - `PCS Live Tracker.xlsx` is the one permanent shared workbook. Normal Hub
   updates replace external CSV feeds, never this file; a versioned migration
   archives the old tracker and preserves keyed actions.
-- `OVERVIEW`: all-scope current-MTD PCS, participation, prior comparable and
-  change cards; LOB current/prior chart, daily trend, compact LOB table, then
-  agent performance below.
+- `OVERVIEW`: cascading Period, LOB, Team Leader and Agent dropdowns; selected
+  PCS, participation, prior comparable and change cards; responsive LOB chart,
+  daily trend, compact LOB table, then agent performance below.
 - `PERFORMANCE`: lightweight standard-period results at LOB, team and agent
   grain. Native table filters are built in and native slicers may be added.
-- `COACHING`: exact low-score query table including Call ID on the left;
+- `COACHING`: Period/LOB-filtered exact low-score table including Call ID;
   permanent compact blue `tblCoachingActions` on the right.
-- `_PCS_LOB`, `_PCS_AGENT`, and `_PCS_DAILY` are hidden lightweight Power Query
-  destinations used by Overview. There is no raw `DATA` worksheet.
-- `SETUP` records the fixed local feed and five query definitions; `HELP`
+- `_PCS_FILTERS`, `_PCS_LOB`, `_PCS_AGENT`, `_PCS_DAILY`, and `_PCS_COACH` are
+  hidden lightweight Power Query destinations. `_PCS_CALC` is the hidden chart
+  bridge. There is no raw `DATA` worksheet.
+- `SETUP` records the fixed local feed and six query definitions; `HELP`
   explains the two-step update; `_AUDIT` records the contract.
 - Python/SQLite own all KPI arithmetic. Power Query is transport only. There is
   no Data Model, Power Pivot, macro, ODBC dependency, spill formula, or
@@ -129,7 +130,7 @@ their calculations and decision workflows still require production review.
 - Generated RTM and Attendance workbooks are dated decision snapshots.
 - `PCS Live Tracker.xlsx` is permanent. Only a versioned, action-preserving
   migration may rebuild it; normal Hub updates never do.
-- Each PCS update atomically replaces five fixed lightweight CSV feeds.
+- Each PCS update atomically replaces six fixed governed CSV feeds.
 - Desktop Excel **Data > Refresh All** reloads query tables from those feeds.
 - Coaching actions remain in `tblCoachingActions` inside the permanent tracker.
 - Blue cells are editable. White, grey and calculated cells are not.
@@ -144,13 +145,15 @@ Every design change requires:
 3. ZIP integrity and reopen checks with `openpyxl`;
 4. verification that the pre-install PCS template contains no malformed query
    parts, Data Model, macros or external links and reopens without repair;
-5. verification of all five fixed CSV schemas, Power Query destination tables,
+5. verification of all six fixed CSV schemas, Power Query destination tables,
    same-version tracker byte preservation, and migration action preservation;
 6. verification that attendance decisions still import from Excel row 4;
 7. a version bump when the report contract changes.
 
 ## Change log
 
+- `3.2.0`: adds cascading Overview selectors and a filtered Coaching view using
+  precomputed caches and classic exact lookups.
 - `3.1.0`: replaces manual paste and the raw `DATA` sheet with five lightweight
   direct-CSV Power Query tables; adds agent performance below LOB performance,
   native filtering/slicer readiness and a compact side-by-side coaching log.

@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
 Context version: `1.5.0`
-Applies to: WFMHub `0.27.0` and later
+Applies to: WFMHub `0.27.1` and later
 Last reviewed: `2026-09-09`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -139,15 +139,16 @@ Attendance Review is regenerated for the selected completed period. REVIEW
 BOARD keeps its exact header on Excel row 4. Users edit five blue ACTUAL fields,
 save, then import the same workbook. Decisions persist by immutable Gap ID.
 
-PCS has one permanent collaboration workbook and five small fixed-name CSV
-feeds: LOB scorecard, agent scorecard, daily trend, full filter-ready results,
+PCS has one permanent collaboration workbook and six fixed-name CSV feeds:
+filter lists, LOB cache, agent cache, daily cache, full filter-ready results,
 and low-score coaching opportunities. No raw call-leg table is loaded into a
 worksheet. The targeted Hub update ingests FTE/Call by Call, refreshes the PCS
 mart, and atomically replaces the feeds. Desktop Excel then uses **Data >
-Refresh All**. `OVERVIEW` reads three hidden lightweight staging tables;
-`PERFORMANCE` and the left side of `COACHING` are native Excel query tables.
-Users may add native table slicers. The action log `tblCoachingActions` on the
-right of `COACHING` is human-owned and is never a query target. Power Query is
+Refresh All**. `OVERVIEW` reads four hidden staging tables through classic
+exact lookups; its four dropdowns cascade Period → LOB → Team Leader → Agent.
+`COACHING` reads a hidden cache through Period/LOB controls. `PERFORMANCE` is
+the only visible query table and may use native table slicers. The action log
+`tblCoachingActions` on the right of `COACHING` is human-owned and is never a query target. Power Query is
 installed or repaired once by desktop Excel automation. There is no Data
 Model, Power Pivot, macro, raw-data sheet, spill formula or dynamic-array
 metadata. A versioned contract migration archives the prior tracker and carries
@@ -211,7 +212,7 @@ Documentation:
 5. Reopen every generated XLSX, inspect ZIP/XML for `#REF!` and unsupported
    formula metadata, and run the full suite.
 6. For PCS, verify populated initial caches, valid OOXML, no raw `DATA` sheet,
-   all five fixed feed schemas, one-time Power Query installation, native table
+   all six fixed feed schemas, one-time Power Query installation, governed dropdown
    destinations, migration/action preservation, and byte preservation during
    later same-version Hub updates.
 7. Bump the snapshot/report contract only for an explicit design migration.
@@ -230,6 +231,8 @@ Documentation:
   repair that archives the prior file and preserves keyed actions.
 - Never point a PCS query at `tblCoachingActions`, and never turn Power Query
   into a KPI calculation layer.
+- PCS Overview selectors are cascading Period → LOB → Team Leader → Agent;
+  change parent filters left-to-right and reset invalid children to `All`.
 - Never add macros, a Data Model, Power Pivot, or a raw call-leg worksheet to PCS.
 - Never edit or relocate source extracts.
 - Never describe an in-development report as payroll-ready.

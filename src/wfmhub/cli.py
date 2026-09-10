@@ -833,7 +833,7 @@ def _build_pcs_from_database(home: Path) -> Path:
 
 
 def _install_pcs_power_query(home: Path) -> None:
-    """Install or repair the five lightweight direct-CSV query tables."""
+    """Install or repair the six governed direct-CSV query tables."""
 
     config = load_config(home)
     report = latest_pcs_report(config)

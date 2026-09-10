@@ -1594,10 +1594,10 @@ def _add_pcs_stable_setup(book: DecisionWorkbook, config: Config) -> None:
     folder = config.feed / "PCS"
     ws = book.table(
         "SETUP", "PCS connection status",
-        "The WFMHub PCS menu installs or refreshes five ordinary Power Query tables. No Data Model is used.",
+        "The WFMHub PCS menu installs or refreshes six ordinary Power Query tables. No Data Model is used.",
         ["Setting", "Value", "Why it exists"],
         [
-            ("Power Query Installed", "NO", "Set automatically after all five query tables refresh"),
+            ("Power Query Installed", "NO", "Set automatically after all six query tables refresh"),
             ("Connection Mode", "LOCAL", "One WFM owner refreshes the locally synced workbook"),
             ("Connection Owner", "Anass ASSRI", "Prevents competing setup changes"),
             ("Local Feed Folder", str(folder), "Fixed clean CSV folder"),

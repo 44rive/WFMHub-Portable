@@ -30,7 +30,11 @@ class LauncherTests(unittest.TestCase):
             REPO / "packaging" / "windows" / "Install-PCSWorkbook.ps1"
         ).read_text(encoding="utf-8")
         self.assertIn('ValidateSet("Install", "Refresh")', installer)
-        self.assertIn('"tblCoachingQueue"', installer)
+        self.assertIn('"tblPcsCoachingView"', installer)
+        self.assertIn('"tblPcsFilters"', installer)
+        self.assertNotIn('Remove-StarterTable "COACHING" "tblCoachingQueue"', installer)
+        self.assertIn("Save-PresentationFormulas", installer)
+        self.assertIn("Restore-PresentationFormulas", installer)
         self.assertNotIn('"tblCoachingActions"', installer)
         self.assertNotIn("/home/founder", text)
         self.assertNotIn("/home/founder", installer)
