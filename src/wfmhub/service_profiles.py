@@ -22,10 +22,13 @@ class ServiceProfileError(RuntimeError):
 class ServiceGroup:
     label: str
     queue_contains: tuple[str, ...]
+    queues: tuple[str, ...] = ()
 
     def matches(self, queue: str | None) -> bool:
-        normalized = str(queue or "").upper()
-        return any(value.upper() in normalized for value in self.queue_contains)
+        normalized = str(queue or "").strip().casefold()
+        if self.queues:
+            return normalized in {value.strip().casefold() for value in self.queues}
+        return any(value.casefold() in normalized for value in self.queue_contains)
 
 
 @dataclass(frozen=True)
@@ -125,9 +128,9 @@ def ensure_service_profiles(home: Path, target: Path | None = None) -> Path:
             str(current.get("version", "")) in {
                 "2026.09.3", "2026.09.4", "2026.09.5", "2026.09.6",
                 "2026.09.7", "2026.09.8", "2026.09.9",
-                "2026.09.10",
+                "2026.09.10", "2026.09.11",
             }
-            and str(default.get("version", "")) == "2026.09.11"
+            and str(default.get("version", "")) == "2026.09.12"
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(
@@ -202,10 +205,14 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
                 f"Invalid service profile {profile_id!r}: operating hours must be between 0 and 23"
             )
         groups = tuple(
-            ServiceGroup(str(group.get("label", "")).strip(), tuple(str(value) for value in group.get("queue_contains", [])))
+            ServiceGroup(
+                str(group.get("label", "")).strip(),
+                tuple(str(value) for value in group.get("queue_contains", [])),
+                tuple(str(value) for value in group.get("queues", [])),
+            )
             for group in item.get("groups", [])
         )
-        if any(not group.label or not group.queue_contains for group in groups):
+        if any(not group.label or not (group.queue_contains or group.queues) for group in groups):
             raise ServiceProfileError(f"Invalid service group in profile {profile_id!r}")
         profiles.append(ServiceProfile(
             profile_id=profile_id,

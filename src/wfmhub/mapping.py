@@ -17,15 +17,27 @@ class QueueMappingError(RuntimeError):
 
 
 _SHIPPED_SCOPE_MIGRATIONS = {
-    _queue: ("Ford FR", "RSA BE FR")
-    for _queue in (
-        "APBN_BRU_MOBILITY_Ford_Assistance_FR",
-        "APBN_BRU_MOBILITY_Ford_Dealers_FR",
-        "APBN_LUX_MOBILITY_Ford_Assistance_FR",
-        "APCH_ZRH_RSA_Ford_Assistance_FR",
-        "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
-        "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
-    )
+    "APBN_BRU_MOBILITY_Ford_Assistance_FR": ({"Ford FR"}, "RSA BE FR"),
+    "APBN_BRU_MOBILITY_Ford_Dealers_FR": ({"Ford FR"}, "RSA BE FR"),
+    "APBN_LUX_MOBILITY_Ford_Assistance_FR": ({"Ford FR"}, "RSA BE FR"),
+    "APBN_AMS_RSA_Ford_Assistance_NL": ({"Ford NL"}, "RSA NL"),
+    "APBN_AMS_RSA_Ford_Dealers_NL": ({"Ford NL"}, "RSA NL"),
+    "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR": ({"RSA BE FR"}, "Ford FR"),
+    "APFR_PAR_RSA_CHERY_ASSISTANCE_FR": ({"RSA BE FR"}, "Ford FR"),
+}
+
+_SHIPPED_QUEUE_REMOVALS = {
+    "BRU_MOBILITY_BIKE_Bike_FR": {("RSA BE FR", "RSA BE")},
+    "BRU_MOBILITY_BIKE_Bike_VL": {("RSA BE VL", "RSA VL")},
+    "APBN_BRU_MOBILITY_POLICE_OBU_DE": {("RSA BE VL", "RSA VL")},
+    "APBN_BRU_MOBILITY_POLICE_OBU_EN": {("RSA BE VL", "RSA VL")},
+    "APBN_BRU_MOBILITY_POLICE_OBU_ES": {("RSA BE VL", "RSA VL")},
+    "APBN_BRU_MOBILITY_POLICE_OBU_PL": {("RSA BE VL", "RSA VL")},
+    "APBN_BRU_MOBILITY_POLICE_OBU_VL": {("RSA BE VL", "RSA VL")},
+    "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL": {("RSA NL", "RSA NL")},
+    "APCH_ZRH_RSA_Ford_Assistance_FR": {
+        ("Ford FR", "Ford FR"), ("RSA BE FR", "RSA BE"),
+    },
 }
 
 
@@ -130,16 +142,34 @@ def ensure_queue_mapping(home: Path, target: Path | None = None) -> Path:
                 if (
                     migration is not None
                     and shipped_row is not None
-                    and str(row.get("service_scope") or "").strip() == migration[0]
+                    and str(row.get("service_scope") or "").strip() in migration[0]
                     and str(shipped_row.get("service_scope") or "").strip()
                     == migration[1]
                 ):
                     row["service_scope"] = shipped_row["service_scope"]
                     row["designation"] = shipped_row["designation"]
                     migrated = True
+            retained = []
+            removed = False
+            for row in current:
+                queue = str(row.get("source_value") or "").strip()
+                removable = _SHIPPED_QUEUE_REMOVALS.get(queue, set())
+                current_values = (
+                    str(row.get("service_scope") or "").strip(),
+                    str(row.get("designation") or "").strip(),
+                )
+                if (
+                    str(row.get("mapping_type") or "").strip().casefold() == "queue"
+                    and _key(row.get("source_system")) == "STORM"
+                    and current_values in removable
+                ):
+                    removed = True
+                    continue
+                retained.append(row)
+            current = retained
             known = {identity(row) for row in current}
             additions = [row for row in shipped if identity(row) not in known]
-            if migrated or additions:
+            if migrated or removed or additions:
                 stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                 shutil.copy2(
                     target,

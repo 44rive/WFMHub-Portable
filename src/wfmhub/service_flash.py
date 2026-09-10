@@ -738,10 +738,12 @@ def _flash_columns(
 ) -> tuple[list[str], list[list[Any]], int, int, int]:
     if profile.flash_layout == "oem_split":
         headers = [
-            "Hour", "Forecast", "Actual", "Volume Handled", "Handled in SL",
-            "Variance", "Ford Volume", "Chery Volume", "Toyota Volume", "TSL OEM", "TSL Ford",
-            "TSL Chery", "TSL Toyota", "Routed Rate", "AHT", "No Show HC",
-            "Data State",
+            "Hour", "Forecast",
+            "OEM Entered", "OEM Handled", "OEM Handled in SL", "TSL OEM",
+            "Ford Entered", "Ford Handled", "Ford Handled in SL", "TSL Ford",
+            "Toyota Entered", "Toyota Handled", "Toyota Handled in SL", "TSL Toyota",
+            "Chery Entered", "Chery Handled", "Chery Handled in SL", "TSL Chery",
+            "Variance", "Routed Rate", "AHT", "No Show HC", "Data State",
         ]
         rows = []
         for row in hourly:
@@ -749,15 +751,19 @@ def _flash_columns(
             chery = row["groups"].get("Chery") or {}
             toyota = row["groups"].get("Toyota") or {}
             rows.append([
-                row["hour_label"], row["forecast"], row["offered"],
-                row.get("answered"), row.get("answered_within_target"),
-                row.get("volume_variance"), ford.get("offered"),
-                chery.get("offered"), toyota.get("offered"), row["service_level"],
-                ford.get("service_level"), chery.get("service_level"),
-                toyota.get("service_level"), row["availability"],
+                row["hour_label"], row["forecast"],
+                row["offered"], row.get("answered"),
+                row.get("answered_within_target"), row["service_level"],
+                ford.get("offered"), ford.get("answered"),
+                ford.get("answered_within_target"), ford.get("service_level"),
+                toyota.get("offered"), toyota.get("answered"),
+                toyota.get("answered_within_target"), toyota.get("service_level"),
+                chery.get("offered"), chery.get("answered"),
+                chery.get("answered_within_target"), chery.get("service_level"),
+                row.get("volume_variance"), row["availability"],
                 row["aht_seconds"], row.get("no_show_hc"), row["data_state"],
             ])
-        return headers, rows, 1, 2, 9
+        return headers, rows, 1, 2, 5
     headers = [
         "Hour", "Forecast", "Actual", "Volume Handled", "Handled in SL",
         "Variance", "TSL", "Routed Rate", "AHT", "No Show HC", "Data State",
@@ -913,16 +919,20 @@ def _add_flash_sheet(
     total_values = total or {}
     if profile.flash_layout == "oem_split":
         ford = group_totals.get("Ford") or {}
-        chery = group_totals.get("Chery") or {}
         toyota = group_totals.get("Toyota") or {}
+        chery = group_totals.get("Chery") or {}
         values = [
-            total_values.get("forecast"), total_values.get("offered"),
-            total_values.get("answered"), total_values.get("answered_within_target"),
-            total_values.get("volume_variance"), ford.get("offered"),
-            chery.get("offered"), toyota.get("offered"),
-            total_values.get("service_level"), ford.get("service_level"),
-            chery.get("service_level"), toyota.get("service_level"),
-            total_values.get("availability"), total_values.get("aht_seconds"),
+            total_values.get("forecast"),
+            total_values.get("offered"), total_values.get("answered"),
+            total_values.get("answered_within_target"), total_values.get("service_level"),
+            ford.get("offered"), ford.get("answered"),
+            ford.get("answered_within_target"), ford.get("service_level"),
+            toyota.get("offered"), toyota.get("answered"),
+            toyota.get("answered_within_target"), toyota.get("service_level"),
+            chery.get("offered"), chery.get("answered"),
+            chery.get("answered_within_target"), chery.get("service_level"),
+            total_values.get("volume_variance"), total_values.get("availability"),
+            total_values.get("aht_seconds"),
             total_values.get("no_show_hc"), "READY" if total else "INCOMPLETE",
         ]
     else:
@@ -1394,7 +1404,7 @@ def build_service_flashes_workbook(
         )
         book.definitions([
             ("Volume Actual", "Every inbound entry into a mapped Flash queue", "Storm Total Entered", "A transfer entering another mapped queue is another queue entry"),
-            ("OEM visible scope", " and ".join(oem_groups) or "Every configured group", "Matches the Storm OEM platform", "Four Ford FR queues plus the Chery and Toyota/Lexus queues shown in Storm"),
+            ("OEM visible scope", " and ".join(oem_groups) or "Every configured group", "Matches the supplied queue reference", "Exactly one APFR Ford queue, one APFR Toyota/Lexus queue, and one APFR Chery queue"),
             ("Volume Handled", "Inbound queue entry routed to an agent", "Storm Total Routed", "Agent may be outside the FTE roster; the queue is the service boundary"),
             ("Response time", "Total Queue Wait Time + Ringing Duration", "Storm threshold clock", "Reproduced from the Call-by-Call business reference"),
             ("Volume Handled in SL", f"Routed queue entry with response time < {rulebook.target_seconds} seconds", "SLA numerator", "Threshold is editable in wfm_rules.toml"),

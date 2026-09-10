@@ -5,7 +5,7 @@
 # follow Storm and reset at midnight.
 
 [catalog]
-version = "2026.09.11"
+version = "2026.09.12"
 default_profile = "ford_oem_fr"
 description = "Effective-dated service and Book1 Flash profiles for RSA Netherlands, RSA Belgium, Ford Netherlands, and Ford OEM France."
 
@@ -17,13 +17,15 @@ staffing_lobs = ["OEM FR"]
 source_systems = ["CALL_BY_CALL"]
 flash_source_systems = ["CALL_BY_CALL"]
 flash_sheet = "Flash OEM"
-flash_layout = "standard"
+flash_layout = "oem_split"
 operating_start_hour = 0
 operating_end_hour = 23
 display_order = 4
-flash_total_groups = ["Ford"]
+flash_total_groups = ["Ford", "Toyota", "Chery"]
 flash_queues = [
   "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR",
+  "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
+  "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
 ]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"
@@ -32,7 +34,15 @@ effective_from = 2026-01-01
 
 [[profiles.groups]]
 label = "Ford"
-queue_contains = ["FORD"]
+queues = ["APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR"]
+
+[[profiles.groups]]
+label = "Toyota"
+queues = ["APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR"]
+
+[[profiles.groups]]
+label = "Chery"
+queues = ["APFR_PAR_RSA_CHERY_ASSISTANCE_FR"]
 
 [[profiles]]
 id = "ford_nl"
@@ -80,6 +90,7 @@ flash_total_groups = ["RSA", "Provider"]
 flash_queues = [
   "APBN_BRU_MOBILITY_BIKE_Bike_FR",
   "APBN_BRU_MOBILITY_BIKE_Bike_VL",
+  "APBN_BRU_MOBILITY_Ford_Assistance_DE",
   "APBN_BRU_MOBILITY_INSURAN_Front_FR",
   "APBN_BRU_MOBILITY_INSURAN_Front_VL",
   "APBN_BRU_MOBILITY_INTERNAT_Front_FR",
@@ -96,6 +107,10 @@ flash_queues = [
   "APBN_BRU_MOBILITY_PROVIDER_Morocco_EN",
   "APBN_BRU_MOBILITY_VIP_Front_FR",
   "APBN_BRU_MOBILITY_VIP_Front_VL",
+  "APBN_BRU_MOBILITY_Ford_Assistance_FR",
+  "APBN_BRU_MOBILITY_Ford_Assistance_VL",
+  "APBN_BRU_MOBILITY_Ford_Dealers_FR",
+  "APBN_BRU_MOBILITY_Ford_Dealers_VL",
   "APBN_BRU_RSA_INSURAN_AB_FR",
   "APBN_BRU_RSA_INSURAN_AB_VL",
   "APBN_BRU_RSA_INSURAN_All_FR",
@@ -114,12 +129,8 @@ flash_queues = [
   "APBN_BRU_RSA_PROVIDER_All_VL",
   "APBN_BRU_RSA_VIP_Front_FR",
   "APBN_BRU_RSA_VIP_Front_VL",
-  "APBN_BRU_MOBILITY_Ford_Assistance_FR",
-  "APBN_BRU_MOBILITY_Ford_Dealers_FR",
+  "APBN_LUX_MOBILITY_Ford_Assistance_DE",
   "APBN_LUX_MOBILITY_Ford_Assistance_FR",
-  "APCH_ZRH_RSA_Ford_Assistance_FR",
-  "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
-  "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
 ]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"

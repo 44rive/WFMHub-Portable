@@ -10,6 +10,7 @@ from openpyxl import Workbook, load_workbook
 
 from wfmhub.ingestion import AgentScope, SourceSchemaError, parse_agent_status, parse_calls, parse_forecast, parse_fte, parse_lilo, parse_queue_actual, parse_schedule
 from wfmhub.mapping import load_queue_mapping
+from wfmhub.rules import load_rulebook
 from tools.build_fte_template import standardize_source
 
 
@@ -370,6 +371,20 @@ class ParserTests(unittest.TestCase):
             )
             row = parse_agent_status(path, "file").tables["raw.agent_status"][0]
             self.assertEqual(str(row["extract_date"]), "2026-08-24")
+
+    def test_status_parser_uses_configured_operations_reference(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "Agent Status.csv"
+            path.write_text(
+                "[Serial Number],[Status],[Status Start Date and Time],[Agent],[Agent ID],[Status Duration],[Queue]\n"
+                "one,Disponible,8/24/2026 12:00,Jane,123,0:05:00,Main\n"
+                "two,Back-Office,8/24/2026 12:05,Jane,123,0:05:00,Main\n",
+                encoding="utf-8-sig",
+            )
+            repo = Path(__file__).resolve().parents[1]
+            rulebook = load_rulebook(repo, repo / "config" / "default_rules.toml")
+            rows = parse_agent_status(path, "file", rulebook=rulebook).tables["raw.agent_status"]
+            self.assertEqual([row["actual_category"] for row in rows], ["Productive", "Productive"])
 
     def test_forecast_discovers_header_and_scales_service_level(self):
         with tempfile.TemporaryDirectory() as folder:

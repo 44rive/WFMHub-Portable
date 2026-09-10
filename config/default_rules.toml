@@ -5,7 +5,7 @@
 # every change. All percentages are stored as decimals (0.80 = 80%).
 
 [rulebook]
-version = "2026.09.1"
+version = "2026.09.2"
 effective_from = "2026-01-01"
 description = "Canonical WFM rules learned from the August Verint, Storm, PCS and reporting references."
 
@@ -245,3 +245,213 @@ absence = false
 vacation = false
 unpaid = false
 shrinkage = true
+
+# Agent Status and AUX reference supplied by Operations. Exact labels win;
+# unlisted source values continue through the conservative legacy fallback.
+# qualification_1/2 remain blank where the source reference did not define them.
+
+[[status_rules]]
+status = "Brief"
+aux_classification = "Management"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Conférence"
+aux_classification = "Management"
+qualification_1 = "Non productive"
+qualification_2 = "Other"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Réunion"
+aux_classification = "Management"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Meeting"
+aux_classification = "Management"
+qualification_1 = "Non productive"
+qualification_2 = "Management"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Ops Support"
+aux_classification = "Support"
+qualification_1 = "Non productive"
+qualification_2 = "Management"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Support"
+aux_classification = "Support"
+qualification_1 = "Non productive"
+qualification_2 = "Management"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Training"
+aux_classification = "Training"
+qualification_1 = "Non productive"
+qualification_2 = "Training"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Formation"
+aux_classification = "Training"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Back Office (BO)"
+aux_classification = "BO"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Backoffice"
+aux_classification = "BO"
+qualification_1 = "BO productive"
+qualification_2 = "BO productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Back-Office"
+aux_classification = "BO"
+qualification_1 = "BO productive"
+qualification_2 = "BO productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Other Tasks"
+aux_classification = "BO"
+qualification_1 = "BO productive"
+qualification_2 = "BO productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Break"
+aux_classification = "Breaks"
+qualification_1 = "Non productive"
+qualification_2 = "Break"
+attendance_category = "Break"
+
+[[status_rules]]
+status = "Personal"
+aux_classification = "Breaks"
+qualification_1 = "Non productive"
+qualification_2 = "Break"
+attendance_category = "Break"
+
+[[status_rules]]
+status = "Available"
+aux_classification = "Available"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Disponible"
+aux_classification = "Available"
+qualification_1 = "Productive"
+qualification_2 = "Productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "RONA"
+aux_classification = "IT Incident"
+qualification_1 = "Non productive"
+qualification_2 = "Other"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "IT downtime"
+aux_classification = "IT Incident"
+qualification_1 = "Non productive"
+qualification_2 = "Other"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Prépa Appel entrant"
+aux_classification = "Inbound"
+qualification_1 = "Productive"
+qualification_2 = "Productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Entrant"
+aux_classification = "Inbound"
+qualification_1 = "Productive"
+qualification_2 = "Productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Post-appel"
+aux_classification = "Inbound"
+qualification_1 = "Productive"
+qualification_2 = "Productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Prépa Appel sortant"
+aux_classification = "Outbound"
+qualification_1 = "Productive"
+qualification_2 = "Productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Sortants en attente"
+aux_classification = "Outbound"
+qualification_1 = "Productive"
+qualification_2 = "Productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Sortant"
+aux_classification = "Outbound"
+qualification_1 = "Productive"
+qualification_2 = "Productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Appel entrant de rappel"
+qualification_1 = "Productive"
+qualification_2 = "Productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Entrant en attente"
+qualification_1 = "Productive"
+qualification_2 = "Productive"
+attendance_category = "Productive"
+
+[[status_rules]]
+status = "Statut non disponible"
+qualification_1 = "Non productive"
+qualification_2 = "Other"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Consultation"
+qualification_1 = "Non productive"
+qualification_2 = "Other"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Meal"
+qualification_1 = "Non productive"
+qualification_2 = "Lunch"
+attendance_category = "Lunch"
+
+[[status_rules]]
+status = "Indisponible"
+qualification_1 = "Non productive"
+qualification_2 = "Other"
+attendance_category = "Auxiliary"
+
+[[status_rules]]
+status = "Lunch"
+qualification_1 = "Non productive"
+qualification_2 = "Lunch"
+attendance_category = "Lunch"
+
+[[status_rules]]
+status = "Consultation en attente"
+qualification_1 = "Non productive"
+qualification_2 = "Other"
+attendance_category = "Auxiliary"

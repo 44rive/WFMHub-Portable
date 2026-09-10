@@ -33,6 +33,15 @@ class ActivityRule:
 
 
 @dataclass(frozen=True)
+class StatusRule:
+    status: str
+    aux_classification: str
+    qualification_1: str
+    qualification_2: str
+    attendance_category: str
+
+
+@dataclass(frozen=True)
 class Rulebook:
     file: Path
     version: str
@@ -49,6 +58,7 @@ class Rulebook:
     target_seconds: int
     short_abandon_seconds: int
     activity_rules: tuple[ActivityRule, ...]
+    status_rules: tuple[StatusRule, ...]
     pcs_scored_questions: tuple[int, ...]
     pcs_comment_questions: tuple[int, ...]
     pcs_survey_mode: str
@@ -78,6 +88,11 @@ class Rulebook:
                 if rule.match == "exact_or_suffix" and (suffix == pattern or suffix.endswith(" " + pattern)):
                     return rule
         return None
+
+    @lru_cache(maxsize=512)
+    def classify_status(self, value: str | None) -> StatusRule | None:
+        normalized = " ".join(str(value or "").strip().casefold().split())
+        return next((rule for rule in self.status_rules if rule.status.casefold() == normalized), None)
 
 _ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
 _ALLOWED_UNARYOPS = (ast.UAdd, ast.USub)
@@ -237,8 +252,10 @@ def ensure_rulebook(home: Path) -> Path:
         current_meta = current.get("rulebook", {})
         shipped_meta = shipped.get("rulebook", {})
         if (
-            str(current_meta.get("version", "")) in {"2026.08.2", "2026.08.3"}
-            and str(shipped_meta.get("version", "")) == "2026.09.1"
+            str(current_meta.get("version", "")) in {
+                "2026.08.2", "2026.08.3", "2026.09.1",
+            }
+            and str(shipped_meta.get("version", "")) == "2026.09.2"
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             backup = target.with_name(
@@ -250,10 +267,15 @@ def ensure_rulebook(home: Path) -> Path:
             content = target.read_text(encoding="utf-8")
             current_version = str(current_meta.get("version", ""))
             content = content.replace(
-                f'version = "{current_version}"', 'version = "2026.09.1"', 1,
+                f'version = "{current_version}"', 'version = "2026.09.2"', 1,
             )
             if int(current.get("service", {}).get("target_seconds", 20)) == 20:
                 content = content.replace("target_seconds = 20", "target_seconds = 30", 1)
+            if not current.get("status_rules"):
+                marker = "# Agent Status and AUX reference supplied by Operations."
+                shipped_content = default.read_text(encoding="utf-8")
+                if marker in shipped_content:
+                    content = content.rstrip() + "\n\n" + marker + shipped_content.split(marker, 1)[1]
             target.write_text(content, encoding="utf-8")
     return target
 
@@ -327,6 +349,35 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
     if missing_categories:
         raise RulebookError(f"Missing engine-required activity categories: {', '.join(missing_categories)}")
 
+    status_rules: list[StatusRule] = []
+    seen_statuses: set[str] = set()
+    valid_status_categories = {"PRODUCTIVE", "AUXILIARY", "BREAK", "LUNCH", "UNAVAILABLE", "LOGGED OFF"}
+    for index, item in enumerate(raw.get("status_rules", []), 1):
+        if not isinstance(item, dict):
+            raise RulebookError(f"status_rules item {index} must be a table")
+        status = " ".join(str(item.get("status", "")).strip().split())
+        attendance_category = str(item.get("attendance_category", "")).strip()
+        normalized = status.casefold()
+        if not status or not attendance_category:
+            raise RulebookError(
+                f"status_rules item {index} requires status and attendance_category"
+            )
+        if normalized in seen_statuses:
+            raise RulebookError(f"Duplicate Agent Status reference {status!r}")
+        if attendance_category.upper() not in valid_status_categories:
+            raise RulebookError(
+                f"Status rule {status!r} has unsupported attendance_category "
+                f"{attendance_category!r}"
+            )
+        seen_statuses.add(normalized)
+        status_rules.append(StatusRule(
+            status=status,
+            aux_classification=str(item.get("aux_classification", "")).strip(),
+            qualification_1=str(item.get("qualification_1", "")).strip(),
+            qualification_2=str(item.get("qualification_2", "")).strip(),
+            attendance_category=attendance_category,
+        ))
+
     scored_questions = tuple(int(value) for value in pcs.get("scored_questions", []))
     comment_questions = tuple(int(value) for value in pcs.get("comment_questions", []))
     pcs_minimum = float(pcs.get("minimum_score", 1))
@@ -370,6 +421,7 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
         target_seconds=target_seconds,
         short_abandon_seconds=short_abandon_seconds,
         activity_rules=tuple(activity_rules),
+        status_rules=tuple(status_rules),
         pcs_scored_questions=scored_questions, pcs_comment_questions=comment_questions,
         pcs_survey_mode=str(pcs.get("survey_mode", "2")),
         pcs_primary_score_question=pcs_primary_question,
@@ -388,5 +440,5 @@ def validate_rulebook(rulebook: Rulebook) -> list[str]:
     return [
         f"Rulebook {rulebook.version} is valid.",
         f"SHA-256: {rulebook.sha256}",
-        f"{len(rulebook.activity_rules)} activity rules; KPI arithmetic is in metric_catalog.toml.",
+        f"{len(rulebook.activity_rules)} activity rules and {len(rulebook.status_rules)} Agent Status/AUX references; KPI arithmetic is in metric_catalog.toml.",
     ]

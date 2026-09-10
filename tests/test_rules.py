@@ -25,6 +25,12 @@ class RulebookTests(unittest.TestCase):
         self.assertEqual(rules.classify_activity(".AP BEN | Leave - Unpaid").category, "UNPAID_LEAVE")
         self.assertEqual(rules.classify_activity(".AP BEN | NR - Lunch Break").category, "LUNCH")
         self.assertEqual(rules.classify_activity(".AP BEN | BE RSA Front-office FR").category, "PRODUCTION")
+        self.assertEqual(rules.classify_status("Disponible").attendance_category, "Productive")
+        self.assertEqual(rules.classify_status("Disponible").aux_classification, "Available")
+        self.assertEqual(rules.classify_status("Back-Office").qualification_1, "BO productive")
+        self.assertEqual(rules.classify_status("Meal").attendance_category, "Lunch")
+        self.assertEqual(rules.classify_status("not configured"), None)
+        self.assertEqual(len(rules.status_rules), 32)
 
     def test_formula_engine_calculates_service_availability_and_rejects_code(self):
         self.assertEqual(evaluate_formula("answered / nullif(offered, 0)", {"answered": 9, "offered": 10}), 0.9)
@@ -42,7 +48,8 @@ class RulebookTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (config / "default_rules.toml").write_text(default, encoding="utf-8")
-            current = default.replace('version = "2026.09.1"', 'version = "2026.08.3"', 1)
+            current = default.replace('version = "2026.09.2"', 'version = "2026.08.3"', 1)
+            current = current.split("# Agent Status and AUX reference supplied by Operations.", 1)[0]
             current = current.replace("target_seconds = 30", "target_seconds = 20", 1)
             current = current.replace(
                 "Canonical WFM rules learned", "Locally reviewed WFM rules learned", 1,
@@ -50,9 +57,10 @@ class RulebookTests(unittest.TestCase):
             (config / "wfm_rules.toml").write_text(current, encoding="utf-8")
             target = ensure_rulebook(home)
             migrated = target.read_text(encoding="utf-8")
-            self.assertIn('version = "2026.09.1"', migrated)
+            self.assertIn('version = "2026.09.2"', migrated)
             self.assertIn("target_seconds = 30", migrated)
             self.assertIn("Locally reviewed WFM rules learned", migrated)
+            self.assertIn('status = "Disponible"', migrated)
             self.assertEqual(len(list(config.glob("wfm_rules_pre_storm_service_*.toml"))), 1)
 
     def test_invalid_metric_formula_is_rejected_before_refresh(self):

@@ -57,11 +57,18 @@ allowlists live under `flash_queues` in `config\service_profiles.toml`:
 
 - RSA NL includes all 30 queues displayed in `TOLEARN\RSA NL.png`, including
   its Provider and RSA Ford-labelled rows.
-- RSA BE includes its 36 screenshot-reviewed FR/VL/EN queues plus the six
-  Ford-FR queues transferred by the 2026-09-10 business decision.
+- RSA BE includes exactly 43 supplied queues. Four of them are also explicitly
+  present in the Ford NL Flash allowlist; this dual-Flash membership is
+  intentional and is represented by the two exact allowlists.
 - Ford NL includes the six NL/VL/DE queues displayed for that Flash.
-- Ford FR/OEM now keeps only
-  `APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR`.
+- Ford FR/OEM includes exactly three APFR queues: Ford Assistance,
+  Toyota/Lexus, and Chery Assistance.
+
+Queue mapping has one primary data-model scope per queue, while a Flash
+allowlist may intentionally overlap another Flash. The four RSA BE/Ford NL
+overlap queues retain `Ford NL` as their primary scope and are counted in both
+specified Flash views. The APFR Toyota/Lexus and Chery queues use the internal
+`Ford FR` service scope and the user-facing Ford/Toyota/Chery designations.
 
 No queue is admitted by substring, suffix, designation or inferred LOB. A
 mapped Call-by-Call queue that is absent from the exact profile allowlist stays
@@ -76,9 +83,9 @@ to confirmed No Show HC or the automatic call count. Exact gap treatment remains
 in Attendance Review. `Due HC = Present HC + No Show HC + Unknown HC`, while
 Offline Now is a subset of Present HC.
 
-The hourly and LOB summary tables expose both `Volume Handled` (routed/answered
-queue entries) and `Handled in SL` (routed/answered within the configured SLA
-threshold) beside the TSL result.
+The hourly and LOB summary tables expose both handled volume and handled-in-SL
+volume. OEM additionally exposes Entered, Handled, Handled in SL, and TSL for
+the combined OEM total and separately for Ford, Toyota/Lexus, and Chery.
 
 The roster side of those joins is explicit: OEM = `OEM FR`, RSA Belgium =
 `RSA FR` + `RSA VL`, Ford Netherlands = `Ford Dutch`, and RSA Netherlands =

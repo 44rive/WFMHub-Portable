@@ -146,7 +146,7 @@ class ExcelTemplateTests(unittest.TestCase):
                 self.assertEqual(
                     workbook.sheetnames,
                     [
-                        "METRIC_METHODS", "ACTIVITY_RULES", "ANALYTICS_RULES",
+                        "METRIC_METHODS", "ACTIVITY_RULES", "STATUS_REFERENCE", "ANALYTICS_RULES",
                         "REPORT_CONTRACTS", "SERVICE_PROFILES", "SERVICE_GROUPS",
                         "QUEUE_MAPPING",
                     ],
@@ -164,10 +164,12 @@ class ExcelTemplateTests(unittest.TestCase):
         self.assertEqual(ford.staffing_lobs, ("OEM FR",))
         self.assertEqual(
             [group.label for group in ford.groups],
-            ["Ford"],
+            ["Ford", "Toyota", "Chery"],
         )
         self.assertEqual(ford.flash_queues, (
             "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR",
+            "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
+            "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
         ))
 
     def test_previous_service_profile_catalog_upgrades_with_backup(self):
@@ -182,21 +184,21 @@ class ExcelTemplateTests(unittest.TestCase):
                 default_text, encoding="utf-8",
             )
             previous_text = default_text.replace(
-                'version = "2026.09.11"', 'version = "2026.09.10"', 1,
+                'version = "2026.09.12"', 'version = "2026.09.11"', 1,
             )
             target = config / "service_profiles.toml"
             target.write_text(previous_text, encoding="utf-8")
 
             catalog = load_service_profiles(home, target)
 
-            self.assertEqual(catalog.version, "2026.09.11")
+            self.assertEqual(catalog.version, "2026.09.12")
             self.assertEqual(
                 catalog.select("ford_oem_fr", date(2026, 9, 1)).flash_total_groups,
-                ("Ford",),
+                ("Ford", "Toyota", "Chery"),
             )
             self.assertEqual(
                 len(catalog.select("ford_oem_fr", date(2026, 9, 1)).flash_queues),
-                1,
+                3,
             )
             self.assertEqual(
                 len(list(config.glob("service_profiles_pre_lob_scope_*.toml"))),

@@ -249,18 +249,20 @@ class CallServiceModelTests(unittest.TestCase):
                 )
         profile = catalog.select("ford_oem_fr", date(2026, 9, 1))
         self.assertEqual(profile.staffing_lobs, ("OEM FR",))
-        self.assertEqual(profile.flash_layout, "standard")
+        self.assertEqual(profile.flash_layout, "oem_split")
         self.assertEqual(profile.flash_queues, (
             "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR",
+            "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
+            "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
         ))
-        self.assertEqual(profile.flash_total_groups, ("Ford",))
+        self.assertEqual(profile.flash_total_groups, ("Ford", "Toyota", "Chery"))
         self.assertTrue(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR"},
         ))
-        self.assertFalse(_included_in_flash_total(
+        self.assertTrue(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR"},
         ))
-        self.assertFalse(_included_in_flash_total(
+        self.assertTrue(_included_in_flash_total(
             profile, {"queue": "APFR_PAR_RSA_CHERY_ASSISTANCE_FR"},
         ))
         self.assertFalse(_included_in_flash_total(
@@ -296,11 +298,14 @@ class CallServiceModelTests(unittest.TestCase):
         ))
         rsa_be = catalog.select("rsa_be", date(2026, 9, 1))
         self.assertEqual(rsa_be.staffing_lobs, ("RSA FR", "RSA VL"))
-        self.assertEqual(len(rsa_be.flash_queues), 42)
+        self.assertEqual(len(rsa_be.flash_queues), 43)
         self.assertTrue(_included_in_flash_total(
             rsa_be, {"queue": "APBN_BRU_MOBILITY_PROVIDER_Interco_EN"},
         ))
         self.assertTrue(_included_in_flash_total(
+            rsa_be, {"queue": "APBN_BRU_MOBILITY_Ford_Assistance_DE"},
+        ))
+        self.assertFalse(_included_in_flash_total(
             rsa_be, {"queue": "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR"},
         ))
         self.assertFalse(_included_in_flash_total(
@@ -313,15 +318,19 @@ class CallServiceModelTests(unittest.TestCase):
             "service_level": 0.6, "aht_seconds": 200,
             "data_state": "READY",
             "groups": {
-                "Ford": {"offered": 3, "service_level": 2 / 3, "availability": 1},
-                "Chery": {"offered": 1, "service_level": 1, "availability": 1},
-                "Toyota": {"offered": 2, "service_level": 0.5, "availability": 0.5},
+                "Ford": {"offered": 3, "answered": 2, "answered_within_target": 2, "service_level": 2 / 3, "availability": 1},
+                "Chery": {"offered": 1, "answered": 1, "answered_within_target": 1, "service_level": 1, "availability": 1},
+                "Toyota": {"offered": 2, "answered": 1, "answered_within_target": 1, "service_level": 0.5, "availability": 0.5},
             },
         }
         headers, _, _, _, _ = _flash_columns(profile, [blank])
         self.assertEqual(headers, [
-            "Hour", "Forecast", "Actual", "Volume Handled", "Handled in SL",
-            "Variance", "TSL", "Routed Rate", "AHT", "No Show HC", "Data State",
+            "Hour", "Forecast",
+            "OEM Entered", "OEM Handled", "OEM Handled in SL", "TSL OEM",
+            "Ford Entered", "Ford Handled", "Ford Handled in SL", "TSL Ford",
+            "Toyota Entered", "Toyota Handled", "Toyota Handled in SL", "TSL Toyota",
+            "Chery Entered", "Chery Handled", "Chery Handled in SL", "TSL Chery",
+            "Variance", "Routed Rate", "AHT", "No Show HC", "Data State",
         ])
         cards = _flash_cards(
             profile,

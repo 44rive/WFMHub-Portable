@@ -14,6 +14,7 @@ REPO = Path(__file__).resolve().parents[1]
 class QueueMappingTests(unittest.TestCase):
     def test_default_mapping_maps_forecasts_queues_and_rollups(self):
         mapping = load_queue_mapping(REPO / "config" / "default_queue_mapping.csv")
+        self.assertEqual(len(mapping.queue_rows), 79)
         forecast = mapping.map_forecast("RSA_BE_08-2026.txt", "Combined - All Media")
         self.assertEqual((forecast.service_scope, forecast.comparison_scope), ("RSA BE", "RSA BE"))
         prefixed = mapping.map_forecast("Forecast_RSA_NL_August.txt", "Combined - All Media")
@@ -48,20 +49,33 @@ class QueueMappingTests(unittest.TestCase):
             "APBN_BRU_MOBILITY_Ford_Assistance_FR",
             "APBN_BRU_MOBILITY_Ford_Dealers_FR",
             "APBN_LUX_MOBILITY_Ford_Assistance_FR",
-            "APCH_ZRH_RSA_Ford_Assistance_FR",
-            "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
-            "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
         ):
             self.assertEqual(
                 mapping.map_actual("STORM", queue, None, None).service_scope,
                 "RSA BE FR",
             )
+        for queue in (
+            "APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR",
+            "APFR_PAR_RSA_CSTRUCTR_TOYOTA-LEXUS_FR",
+            "APFR_PAR_RSA_CHERY_ASSISTANCE_FR",
+        ):
+            self.assertEqual(
+                mapping.map_actual("STORM", queue, None, None).service_scope,
+                "Ford FR",
+            )
+        self.assertEqual(
+            mapping.map_actual(
+                "STORM", "APFR_PAR_RSA_ACM_FRONT_FR", None, None,
+            ).service_scope,
+            "ACM",
+        )
         reference_additions = {
-            "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL": "RSA NL",
             "APBN_AMS_MOBILITY_NIGHT_NightShift_NL": "RSA NL",
             "APBN_AMS_MOBILITY_INSURAN_Front_EN": "RSA NL",
             "APBN_AMS_RSA_OEM_All_NL": "RSA NL",
             "APBN_AMS_RSA_PROVIDER_All_NL": "RSA NL",
+            "APBN_AMS_RSA_Ford_Assistance_NL": "RSA NL",
+            "APBN_AMS_RSA_Ford_Dealers_NL": "RSA NL",
             "APBN_BRU_MOBILITY_BIKE_Bike_FR": "RSA BE FR",
             "APBN_BRU_MOBILITY_BIKE_Bike_VL": "RSA BE VL",
             "APBN_BRU_MOBILITY_NIGHT_NightShift_FR": "RSA BE FR",
@@ -75,6 +89,16 @@ class QueueMappingTests(unittest.TestCase):
             self.assertEqual(
                 mapping.map_actual("STORM", queue, None, None).service_scope,
                 scope,
+            )
+        for retired in (
+            "APCH_ZRH_RSA_Ford_Assistance_FR",
+            "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL",
+            "APBN_BRU_MOBILITY_POLICE_OBU_EN",
+            "BRU_MOBILITY_BIKE_Bike_FR",
+        ):
+            self.assertEqual(
+                mapping.map_actual("STORM", retired, None, None).status,
+                "UNMAPPED",
             )
 
     def test_new_defaults_merge_without_replacing_local_queue_override(self):
@@ -129,6 +153,34 @@ class QueueMappingTests(unittest.TestCase):
             self.assertEqual(
                 mapping.map_actual(
                     "STORM", "APBN_BRU_MOBILITY_Ford_Dealers_FR", None, None,
+                ).service_scope,
+                "CUSTOM",
+            )
+
+    def test_known_obsolete_defaults_are_retired_but_custom_rows_survive(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            (home / "config").mkdir()
+            shipped = home / "config" / "default_queue_mapping.csv"
+            shutil.copy2(REPO / "config" / "default_queue_mapping.csv", shipped)
+            target = home / "config" / "queue_mapping.csv"
+            target.write_text(
+                "mapping_type,source_system,source_value,service_scope,designation\n"
+                "queue,STORM,APCH_ZRH_RSA_Ford_Assistance_FR,RSA BE FR,RSA BE\n"
+                "queue,STORM,APBN_BRU_MOBILITY_POLICE_OBU_EN,CUSTOM,Custom\n",
+                encoding="utf-8",
+            )
+            ensure_queue_mapping(home, target)
+            mapping = load_queue_mapping(target)
+            self.assertEqual(
+                mapping.map_actual(
+                    "STORM", "APCH_ZRH_RSA_Ford_Assistance_FR", None, None,
+                ).status,
+                "UNMAPPED",
+            )
+            self.assertEqual(
+                mapping.map_actual(
+                    "STORM", "APBN_BRU_MOBILITY_POLICE_OBU_EN", None, None,
                 ).service_scope,
                 "CUSTOM",
             )

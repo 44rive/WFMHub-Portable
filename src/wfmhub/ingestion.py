@@ -18,6 +18,7 @@ from .config import Config
 from .database import DatabaseConnection
 from .mapping import QueueMapping, load_queue_mapping
 from .progress import ProgressCallback
+from .rules import Rulebook, load_rulebook
 from .utils import (
     classify_assignment,
     classify_event,
@@ -124,6 +125,7 @@ AGENT_SCOPE_POLICY_VERSION = "v3-active-or-leaver-id-or-unique-name"
 SCHEDULE_PARSER_POLICY_VERSION = "v2-explicit-start-end-vs-activities"
 FTE_PARSER_POLICY_VERSION = "v2-time-off-registers"
 CALL_PARSER_POLICY_VERSION = "v4-active-roster-or-mapped-queue"
+STATUS_PARSER_POLICY_VERSION = "v2-configured-status-reference"
 
 
 FILENAME_DATE_RE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
@@ -783,6 +785,7 @@ def _status_reader(path: Path):
 
 def _status_record(
     row: dict[str, Any], file_id: str, source_row: int, scope: AgentScope | None,
+    rulebook: Rulebook | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     agent_id = normalize_id(row.get("[Agent ID]"))
     start = parse_datetime(row.get("[Status Start Date and Time]"))
@@ -799,24 +802,33 @@ def _status_record(
     if not serial:
         serial = hashlib.sha256(repr(sorted(row.items())).encode("utf-8")).hexdigest()
     status = _clean(row.get("[Status]"))
+    configured = rulebook.classify_status(status) if rulebook is not None else None
     return {
         "source_file_id": file_id, "source_row": source_row,
         # A range filename is only a label; every row timestamp is authoritative.
         "serial_number": serial, "extract_date": start.date(), "agent_id": agent_id,
         "agent_name": _clean(row.get("[Agent]")), "status": status,
-        "actual_category": classify_status(status), "status_start": start,
+        "actual_category": (
+            configured.attendance_category if configured is not None
+            else classify_status(status)
+        ), "status_start": start,
         "status_end": end, "duration_seconds": seconds, "queue": _clean(row.get("[Queue]")),
     }, None
 
 
-def parse_agent_status(path: Path, file_id: str, scope: AgentScope | None = None) -> ParseResult:
+def parse_agent_status(
+    path: Path,
+    file_id: str,
+    scope: AgentScope | None = None,
+    rulebook: Rulebook | None = None,
+) -> ParseResult:
     output: list[dict[str, Any]] = []
     rejected: list[str] = []
     scoped_out = 0
     handle, reader = _status_reader(path)
     try:
         for source_row, row in enumerate(reader, 2):
-            record, reason = _status_record(row, file_id, source_row, scope)
+            record, reason = _status_record(row, file_id, source_row, scope, rulebook)
             if reason == "outside roster":
                 scoped_out += 1
             elif reason:
@@ -833,6 +845,7 @@ def _insert_status_direct(
     path: Path,
     file_id: str,
     scope: AgentScope,
+    rulebook: Rulebook,
     progress: ProgressCallback | None = None,
 ) -> tuple[int, int, int]:
     count = scoped_out = rejected = processed = 0
@@ -843,7 +856,7 @@ def _insert_status_direct(
             processed += 1
             if progress is not None and processed % 5000 == 0:
                 progress(processed, 0, f"Agent Status: {processed:,} rows scanned")
-            record, reason = _status_record(row, file_id, source_row, scope)
+            record, reason = _status_record(row, file_id, source_row, scope, rulebook)
             if reason == "outside roster":
                 scoped_out += 1
                 continue
@@ -1317,6 +1330,7 @@ def ingest_all(
     ]
     total = len(candidates)
     queue_mapping = load_queue_mapping(config.queue_mapping)
+    rulebook = load_rulebook(config.home, config.business_rules)
     if progress is not None:
         progress(0, total, "Scanning source files")
     for index, candidate in enumerate(candidates, 1):
@@ -1340,6 +1354,11 @@ def ingest_all(
             scope_fingerprint = FTE_PARSER_POLICY_VERSION
         if candidate.family == "schedule":
             scope_fingerprint = f"{scope_fingerprint}|{SCHEDULE_PARSER_POLICY_VERSION}"
+        if candidate.family == "agent_status":
+            scope_fingerprint = (
+                f"{scope_fingerprint}|{STATUS_PARSER_POLICY_VERSION}|"
+                f"rulebook:{rulebook.sha256}"
+            )
         if candidate.family == "calls":
             # Re-read unchanged Call-by-Call files whenever the queue catalog
             # changes: mapped queue demand is part of the admitted scope.
@@ -1406,7 +1425,7 @@ def ingest_all(
                     )
                 elif candidate.family == "agent_status":
                     row_count, scoped_out_count, rejected_count = _insert_status_direct(
-                        conn, path, file_id, scope, progress
+                        conn, path, file_id, scope, rulebook, progress
                     )
                 elif candidate.family == "calls":
                     row_count, scoped_out_count, rejected_count = _insert_calls_direct(

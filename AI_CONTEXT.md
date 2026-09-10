@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.5.2`
-Applies to: WFMHub `0.27.3` and later
+Context version: `1.5.3`
+Applies to: WFMHub `0.27.4` and later
 Last reviewed: `2026-09-10`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -116,8 +116,14 @@ mapping so abandoned demand is not lost.
 - Service Level follows the documented Storm C/(A+B-D) contract and exact
   screenshot-reviewed queue allowlists. See `docs/SERVICE_KPI_REFERENCE.md`.
 - Never infer a queue from its name, language suffix, country, or apparent LOB.
-- Ford FR/OEM keeps only `APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR`; the other
-  six previously Ford-FR-mapped queues belong to RSA BE from 2026-09-10.
+- Ford FR/OEM contains exactly the supplied APFR Ford Assistance, Toyota/Lexus,
+  and Chery Assistance queues. Its Flash shows entered, handled, handled in SL,
+  and TSL for each sub-LOB and for OEM combined.
+- RSA BE contains exactly 43 supplied queues. Four also occur in the exact Ford
+  NL Flash allowlist; their dual-Flash membership is intentional, while their
+  primary data-model scope remains Ford NL.
+- Agent Status and AUX labels are exact configurable business references in
+  `default_rules.toml`; unlisted labels use the conservative legacy fallback.
 - Active roster LOBs, including Travel-labelled LOBs, flow automatically into
   roster-driven Attendance, Staffing, Absence, PCS and Bonus outputs. A Travel
   service Flash/SL must not be invented without exact queue and forecast maps.
@@ -212,6 +218,7 @@ Documentation:
 - `docs/ARCHITECTURE.md`
 - `docs/CLEAN_DATA_CONTRACT.md`
 - `docs/SERVICE_KPI_REFERENCE.md`
+- `docs/QUEUE_REFERENCE_CHANGE_2026-09-10.md`
 - `docs/PCS_LOGIC.md`
 - `docs/ATTENDANCE_DECISION_LEDGER.md`
 - `docs/REPORT_DESIGN_SYSTEM.md`

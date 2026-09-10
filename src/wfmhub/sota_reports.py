@@ -70,6 +70,22 @@ def _add_catalog_sheets(
         ],
     )
     report.add_table_sheet(
+        "STATUS_REFERENCE", "Agent Status and AUX reference",
+        "Exact Operations labels drive the clean Agent Status category. Empty qualifications were not supplied and are intentionally left blank.",
+        [
+            "status", "aux_classification", "qualification_1", "qualification_2",
+            "attendance_category", "rule_version", "rule_sha256",
+        ],
+        [
+            (
+                item.status, item.aux_classification, item.qualification_1,
+                item.qualification_2, item.attendance_category,
+                rulebook.version, rulebook.sha256,
+            )
+            for item in rulebook.status_rules
+        ],
+    )
+    report.add_table_sheet(
         "ANALYTICS_RULES", "Finding thresholds",
         "Finding thresholds compare KPI values with targets and prior periods.",
         ["scope", "warning_delta", "critical_delta", "trend_delta", "version", "sha256"],
@@ -124,10 +140,11 @@ def _add_catalog_sheets(
     report.add_table_sheet(
         "SERVICE_GROUPS", "Service profile display groups",
         "Queue text is assigned to the first matching display group inside its effective service profile.",
-        ["profile_id", "group_order", "group_label", "queue_contains", "catalog_version", "catalog_sha256"],
+        ["profile_id", "group_order", "group_label", "exact_queues", "queue_contains", "catalog_version", "catalog_sha256"],
         [
             (
-                profile.profile_id, index, group.label, " | ".join(group.queue_contains),
+                profile.profile_id, index, group.label, " | ".join(group.queues),
+                " | ".join(group.queue_contains),
                 service_profiles.version, service_profiles.sha256,
             )
             for profile in service_profiles.profiles

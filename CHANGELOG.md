@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.27.4 — 2026-09-10
+
+- Reconciles the four Service Flash allowlists to the supplied queue authority:
+  RSA NL 30, RSA BE 43, Ford NL 6, and OEM 3 exact queues.
+- Moves APFR Toyota/Lexus and Chery from RSA BE to OEM and records the four
+  intentional RSA BE/Ford NL overlapping queues without queue-name inference.
+- Expands OEM hourly and total output with Entered, Handled, Handled in SL, and
+  TSL for OEM combined and Ford, Toyota/Lexus, and Chery separately.
+- Adds the supplied Agent Status qualification and AUX classification reference
+  to the editable rulebook and governance workbook; unchanged Agent Status
+  extracts are automatically reclassified when the rulebook changes.
+- Adds the APFR ACM queue and corrects the two AMS RSA Ford-labelled queues to
+  their supplied RSA NL primary scope.
+
 ## 0.27.3 — 2026-09-10
 
 - Removes the PCS presentation cutoff that exposed only five recent reporting
