@@ -61,7 +61,10 @@ def _parameterize(project_root: Path, hub_root: Path) -> None:
         f'expression HubRoot = "{escaped}" meta '
         '[IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]'
     )
-    updated, count = _HUB_ROOT_PATTERN.subn(replacement, text, count=1)
+    # Use a callable replacement so ``re`` never interprets Windows path
+    # backslashes (for example ``C:\Users``) as replacement escapes such as
+    # ``\U``.  The returned string is inserted literally.
+    updated, count = _HUB_ROOT_PATTERN.subn(lambda _match: replacement, text, count=1)
     if count != 1:
         raise RuntimeError(
             f"Cannot set the HubRoot parameter in {expressions}. "

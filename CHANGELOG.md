@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.29.1 - 2026-09-11
+
+- Fix `POWERBI.cmd` failing with `bad escape \U` when WFMHub is installed
+  below a normal Windows `C:\Users\...` path.
+- Add a regression test proving that Power BI `HubRoot` parameterization treats
+  Windows backslashes as literal path characters.
+
 ## 0.29.0 - 2026-09-11
 
 - Ship a real, source-controlled Power BI Project (`.pbip`) with seven premium

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from wfmhub.config import load_config
-from wfmhub.powerbi_project import PROJECT_NAME, install_powerbi_project
+from wfmhub.powerbi_project import PROJECT_NAME, _parameterize, install_powerbi_project
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -16,6 +16,23 @@ TEMPLATE = REPO / "templates" / "powerbi" / PROJECT_NAME
 
 
 class PowerBIProjectTests(unittest.TestCase):
+    def test_parameterizer_treats_windows_backslashes_as_literal_text(self):
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder) / "project"
+            shutil.copytree(TEMPLATE, project)
+            windows_like_home = Path(folder) / r"C:\Users\JMNKHSP\WFMHub"
+
+            _parameterize(project, windows_like_home)
+
+            expressions = (
+                project / f"{PROJECT_NAME}.SemanticModel" /
+                "definition" / "expressions.tmdl"
+            )
+            self.assertIn(
+                str(windows_like_home.resolve()),
+                expressions.read_text(encoding="utf-8"),
+            )
+
     def test_shipped_pbip_has_seven_valid_pages_and_governed_sources(self):
         project = TEMPLATE / f"{PROJECT_NAME}.pbip"
         self.assertTrue(project.is_file())
