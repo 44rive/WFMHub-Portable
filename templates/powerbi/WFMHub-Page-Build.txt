@@ -1,23 +1,24 @@
-WFMHUB PREMIUM PAGE BUILD
-=========================
+WFMHUB PREMIUM PBIP CONTRACT
+============================
 
 GLOBAL
 Use 16:9. Navy header #0B1F33, teal #007C83, gold #D6A84B, canvas #F4F7F9.
-Keep Date, LOB and Team slicers in the same upper band and sync them across
-pages. Each page uses one decision question and no more than six headline KPIs.
+The live implementation is templates\powerbi\WFMHub BI\WFMHub BI.pbip.
+Regenerate it deterministically with tools\build_powerbi_project.py.
+Every 1280x720 page uses: 136px left rail, 52px header, four 260px slicers,
+four 260x94 KPI cards, two 544x260 charts, one 1116x166 action table and the
+Prepared by Anass ASSRI | WFM footer. Do not add AI branding.
 
 1 EXECUTIVE OVERVIEW
-Cards: Service Level, Routing Availability, Staffing Gap, No Show HC,
-PCS Average, Final Absence. Trend: SL and volume by date. Matrix: LOB pulse.
+Cards: Service Level, Attendance, PCS Average, Capacity Gap. Trend and LOB pulse.
 
 2 SERVICE & FORECAST
-Cards: Offered, Answered, SL, AHT, Volume Variance. Line/column: hourly forecast
+Cards: Service Level, Offered, Volume Variance, Routing Availability. Line: forecast
 volume vs actual offered; forecast-only drill retains native 15-minute rows.
 Matrix: Service Scope > Queue by hour.
 
 3 ATTENDANCE CONTROL
-Cards: Scheduled HC, Present HC, No Show HC, Callout HC, Late Minutes,
-Early Leave Minutes. Table: exact agent callout list. Timeline/detail:
+Cards: Due HC, Present HC, No Show HC, Callout HC. Table: exact agent callout list. Timeline/detail:
 FactAttendanceGap with exact gap start/end.
 
 4 PCS PERFORMANCE & COACHING

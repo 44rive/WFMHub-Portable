@@ -1,0 +1,115 @@
+/// Approved PTO and effective Away segments after roster validation.
+table 'Time Off'
+
+	/// Distinct agent-days covered by effective governed PTO or Away segments.
+	measure 'PTO / Away HC' = ```
+			DISTINCTCOUNT('Time Off'[Agent Day Key])
+			```
+		formatString: #,##0
+		displayFolder: 'Time off'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Segment Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Segment Key
+
+	column 'Agent Day Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent Day Key
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Ops Manager'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Ops Manager
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Language'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Language
+
+	column 'Source Kind'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Source Kind
+
+	column 'Absence Type'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Absence Type
+
+	column 'Record Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Record Status
+
+	column 'Segment Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Segment Start
+
+	column 'Segment End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Segment End
+
+	column 'Planned Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Planned Minutes
+
+	partition 'Time Off' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactTimeOff.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Segment Key", "Agent Day Key", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Language", "Source Kind", "Absence Type", "Record Status", "Segment Start", "Segment End", "Planned Minutes"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Planned Minutes"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Segment Key", type text}, {"Agent Day Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Language", type text}, {"Source Kind", type text}, {"Absence Type", type text}, {"Record Status", type text}, {"Segment Start", type text}, {"Segment End", type text}, {"Planned Minutes", Int64.Type}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

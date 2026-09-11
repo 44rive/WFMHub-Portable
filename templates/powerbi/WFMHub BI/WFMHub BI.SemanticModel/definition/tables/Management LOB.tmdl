@@ -1,0 +1,28 @@
+/// Explicit conformed management LOB used across operational domains.
+table 'Management LOB'
+
+	column 'Management LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Sort Order'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Sort Order
+
+	partition 'Management LOB' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\DimManagementLOB.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Management LOB", "Sort Order"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Sort Order"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Management LOB", type text}, {"Sort Order", Int64.Type}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

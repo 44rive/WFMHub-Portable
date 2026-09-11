@@ -100,7 +100,9 @@ See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
 Query installation and the optional shared-Absenteeism setup.
 The [Power BI direction](docs/POWERBI_WFMHUB_PERSPECTIVE.md) and
 [premium page specification](docs/POWERBI_PREMIUM_DESIGN_V1.md) describe the
-governed `Feed\PowerBI` model and seven approved pages.
+governed `Feed\PowerBI` model and seven implemented pages. Run a full update,
+then double-click `POWERBI.cmd`; the [beginner Power BI guide](docs/POWERBI_BEGINNER_GUIDE.md)
+explains the two-refresh routine.
 
 The approved visual contract is in the
 [report design system](docs/REPORT_DESIGN_SYSTEM.md), with a data-free

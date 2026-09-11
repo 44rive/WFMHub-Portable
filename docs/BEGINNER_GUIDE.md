@@ -8,13 +8,17 @@ Think of WFMHub as a washing machine for data:
 4. It calculates the agreed formulas.
 5. It creates the Excel file you asked for.
 
-You do not need to install Python, SQLite, DuckDB, ODBC, or Power BI.
+You do not need to install Python, SQLite, DuckDB, or ODBC. The optional Power
+BI dashboard requires Microsoft Power BI Desktop, which is not bundled in the
+portable Hub.
 
-## The two files you click
+## The files you click
 
 - `SETUP.cmd`: use it once after extracting WFMHub.
 - `UPGRADE.cmd`: use it only when a new release was extracted into a different folder.
 - `WFMHub.cmd`: use it for normal work.
+- `POWERBI.cmd`: open the already-built seven-page Power BI project after a
+  full Hub update.
 
 Never move only the `.cmd` file. Keep the full WFMHub folder together.
 
@@ -76,6 +80,9 @@ from mapped Verint Activities after the day.
 7. Wait for **Refresh complete**.
 8. Choose the individual report you need.
 9. Open it from `Reports`.
+
+For Power BI, run **All sources** once, then double-click `POWERBI.cmd` and use
+**Home > Refresh** in Power BI Desktop. You do not build the queries or pages.
 
 You do not need to refresh the sources again for every workbook. After one
 refresh, the reports use the same prepared database.

@@ -1,10 +1,11 @@
 # WFMHub Power BI — premium design proposal V1
 
-Status: **visual proposal only — not implemented**
+Status: **implemented as the source-controlled `WFMHub BI.pbip` project**
 
 The existing Excel reports remain part of WFMHub. Power BI is added as a
-separate analytical and management layer. All values shown below are
-illustrative prototype data.
+separate analytical and management layer. Prototype values shown below are
+illustrative; the implemented project binds this design to governed
+`Feed\PowerBI` facts and explicit measures.
 
 ## Shared experience
 
@@ -84,6 +85,8 @@ and the exact configuration versions behind the dashboard.
 
 ## Validation boundary
 
-Approval of this document approves visual direction and page composition only.
-It does not approve illustrative numbers, invent new KPIs, change current Hub
-calculations, retire Excel reports, or authorize Power BI publication.
+The implemented project does not approve illustrative prototype numbers,
+invent KPI targets, change current Hub calculations, retire Excel reports, or
+authorize publication. Power BI Desktop rendering remains the final visual
+acceptance boundary; the source PBIR passes Microsoft's report-authoring
+validator before release.

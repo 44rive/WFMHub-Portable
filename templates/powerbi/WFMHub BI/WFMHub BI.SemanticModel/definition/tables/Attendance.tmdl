@@ -1,0 +1,232 @@
+/// One governed attendance result per scheduled agent day.
+table 'Attendance'
+
+	/// Scheduled agent-days with positive governed work minutes.
+	measure 'Due HC' = ```
+			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0)
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance'
+
+	/// Due agent-days with observed presence; late arrivals remain present.
+	measure 'Present HC' = ```
+			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0, 'Attendance'[First Login] <> BLANK(), 'Attendance'[First Login] <> "")
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance'
+
+	/// Evidence-backed completed no-show agent-days only.
+	measure 'No Show HC' = ```
+			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Attendance Result] = "No show")
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance'
+
+	/// Due population not yet proven present or no-show; never silently promoted to no-show.
+	measure 'Unknown / Possible No Show HC' = ```
+			MAX([Due HC] - [Present HC] - [No Show HC], 0)
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance'
+
+	/// Attendance cases requiring an operational call or follow-up.
+	measure 'Callout HC' = ```
+			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Requires Call] = "1")
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance'
+
+	/// Agent-days with governed late minutes.
+	measure 'Late HC' = ```
+			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Late Minutes] > 0)
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance'
+
+	/// Completed agent-days with governed early-leave minutes.
+	measure 'Early Leave HC' = ```
+			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Early Leave Minutes] > 0)
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance'
+
+	/// Present agent-days divided by due agent-days.
+	measure 'Attendance %' = ```
+			DIVIDE([Present HC], [Due HC])
+			```
+		formatString: 0.0%
+		displayFolder: 'Attendance'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Agent Day Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent Day Key
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Ops Manager'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Ops Manager
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Market'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Market
+
+	column 'Language'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Language
+
+	column 'Location'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Location
+
+	column 'Scheduled Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Scheduled Start
+
+	column 'Scheduled End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Scheduled End
+
+	column 'Scheduled Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Scheduled Minutes
+
+	column 'Planned Work Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Planned Work Minutes
+
+	column 'Planning Overlay'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Planning Overlay
+
+	column 'First Login'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: First Login
+
+	column 'Last Logout'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Last Logout
+
+	column 'Attendance Result'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Attendance Result
+
+	column 'Call Action'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Call Action
+
+	column 'Requires Call'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Requires Call
+
+	column 'Shift State'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Shift State
+
+	column 'Actual Evidence'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Actual Evidence
+
+	column 'Is Provisional'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Is Provisional
+
+	column 'Late Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Late Minutes
+
+	column 'Early Leave Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Early Leave Minutes
+
+	column 'No Show Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: No Show Minutes
+
+	column 'Status Covered Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Status Covered Minutes
+
+	partition 'Attendance' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactAttendanceDay.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Agent Day Key", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Market", "Language", "Location", "Scheduled Start", "Scheduled End", "Scheduled Minutes", "Planned Work Minutes", "Planning Overlay", "First Login", "Last Logout", "Attendance Result", "Call Action", "Requires Call", "Shift State", "Actual Evidence", "Is Provisional", "Late Minutes", "Early Leave Minutes", "No Show Minutes", "Status Covered Minutes"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Scheduled Minutes", "Planned Work Minutes", "Late Minutes", "Early Leave Minutes", "No Show Minutes", "Status Covered Minutes"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Agent Day Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Market", type text}, {"Language", type text}, {"Location", type text}, {"Scheduled Start", type text}, {"Scheduled End", type text}, {"Scheduled Minutes", Int64.Type}, {"Planned Work Minutes", Int64.Type}, {"Planning Overlay", type text}, {"First Login", type text}, {"Last Logout", type text}, {"Attendance Result", type text}, {"Call Action", type text}, {"Requires Call", type text}, {"Shift State", type text}, {"Actual Evidence", type text}, {"Is Provisional", type text}, {"Late Minutes", Int64.Type}, {"Early Leave Minutes", Int64.Type}, {"No Show Minutes", Int64.Type}, {"Status Covered Minutes", Int64.Type}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

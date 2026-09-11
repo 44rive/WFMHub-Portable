@@ -1,0 +1,198 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "1b6791b2a0f3ba8805ab",
+  "position": {
+    "x": 150,
+    "y": 522,
+    "z": 400,
+    "height": 166,
+    "width": 1116,
+    "tabOrder": 400
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Attendance"
+                    }
+                  },
+                  "Property": "Agent"
+                }
+              },
+              "queryRef": "Attendance.Agent",
+              "nativeQueryRef": "Agent"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Attendance"
+                    }
+                  },
+                  "Property": "Team Leader"
+                }
+              },
+              "queryRef": "Attendance.Team Leader",
+              "nativeQueryRef": "Team Leader"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Attendance"
+                    }
+                  },
+                  "Property": "Scheduled Start"
+                }
+              },
+              "queryRef": "Attendance.Scheduled Start",
+              "nativeQueryRef": "Scheduled Start"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Attendance"
+                    }
+                  },
+                  "Property": "First Login"
+                }
+              },
+              "queryRef": "Attendance.First Login",
+              "nativeQueryRef": "First Login"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Attendance"
+                    }
+                  },
+                  "Property": "Attendance Result"
+                }
+              },
+              "queryRef": "Attendance.Attendance Result",
+              "nativeQueryRef": "Attendance Result"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Attendance"
+                    }
+                  },
+                  "Property": "Call Action"
+                }
+              },
+              "queryRef": "Attendance.Call Action",
+              "nativeQueryRef": "Call Action"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Call and follow-up list'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

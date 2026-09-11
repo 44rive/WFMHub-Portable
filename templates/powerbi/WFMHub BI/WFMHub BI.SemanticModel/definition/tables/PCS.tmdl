@@ -1,0 +1,205 @@
+/// Additive PCS and participation counters per governed agent day.
+table 'PCS'
+
+	/// Ratio of summed PCS scores to summed valid responses.
+	measure 'PCS Average' = ```
+			DIVIDE(SUM('PCS'[PCS Score Sum]), SUM('PCS'[Valid PCS]))
+			```
+		formatString: 0.00
+		displayFolder: 'PCS'
+
+	/// Summed participation responses divided by summed participation-eligible calls.
+	measure 'PCS Participation %' = ```
+			DIVIDE(SUM('PCS'[PCS Participation Responses]), SUM('PCS'[PCS Status Calls]))
+			```
+		formatString: 0.0%
+		displayFolder: 'PCS'
+
+	/// Count of valid PCS responses.
+	measure 'Valid PCS Responses' = ```
+			SUM('PCS'[Valid PCS])
+			```
+		formatString: #,##0
+		displayFolder: 'PCS'
+
+	/// Responses inside the configured low-score band.
+	measure 'Low Score Responses' = ```
+			SUM('PCS'[Low Score Responses])
+			```
+		formatString: #,##0
+		displayFolder: 'PCS'
+
+	/// Responses inside the configured top-box band.
+	measure 'Top Box Responses' = ```
+			SUM('PCS'[Top Box Responses])
+			```
+		formatString: #,##0
+		displayFolder: 'PCS'
+
+	/// PCS Average expressed against the five-point scale for cross-domain visual comparison.
+	measure 'PCS Index %' = ```
+			DIVIDE([PCS Average], 5)
+			```
+		formatString: 0.0%
+		displayFolder: 'PCS'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Agent Day Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent Day Key
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Ops Manager'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Ops Manager
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Market'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Market
+
+	column 'Language'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Language
+
+	column 'Location'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Location
+
+	column 'Call Legs'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Call Legs
+
+	column 'Handled Calls'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Handled Calls
+
+	column 'Inbound Calls'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Inbound Calls
+
+	column 'Outbound Calls'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Outbound Calls
+
+	column 'Handle Seconds'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Handle Seconds
+
+	column 'PCS Score Sum'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: PCS Score Sum
+
+	column 'Valid PCS'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Valid PCS
+
+	column 'PCS Status Calls'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: PCS Status Calls
+
+	column 'PCS Participation Responses'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: PCS Participation Responses
+
+	column 'Low Score Responses'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Low Score Responses
+
+	column 'Top Box Responses'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Top Box Responses
+
+	column 'Comments Count'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Comments Count
+
+	partition 'PCS' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactPCSAgentDay.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Agent Day Key", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Market", "Language", "Location", "Call Legs", "Handled Calls", "Inbound Calls", "Outbound Calls", "Handle Seconds", "PCS Score Sum", "Valid PCS", "PCS Status Calls", "PCS Participation Responses", "Low Score Responses", "Top Box Responses", "Comments Count"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Call Legs", "Handled Calls", "Inbound Calls", "Outbound Calls", "Handle Seconds", "PCS Score Sum", "Valid PCS", "PCS Status Calls", "PCS Participation Responses", "Low Score Responses", "Top Box Responses", "Comments Count"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Agent Day Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Market", type text}, {"Language", type text}, {"Location", type text}, {"Call Legs", Int64.Type}, {"Handled Calls", Int64.Type}, {"Inbound Calls", Int64.Type}, {"Outbound Calls", Int64.Type}, {"Handle Seconds", Int64.Type}, {"PCS Score Sum", type number}, {"Valid PCS", Int64.Type}, {"PCS Status Calls", Int64.Type}, {"PCS Participation Responses", Int64.Type}, {"Low Score Responses", Int64.Type}, {"Top Box Responses", Int64.Type}, {"Comments Count", Int64.Type}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

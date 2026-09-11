@@ -33,6 +33,7 @@ from .pcs_tracker import (
 )
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
 from .progress import ProgressBar, ProgressCallback
+from .powerbi_project import open_powerbi_project
 from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack, report_current_path
 from .report_specs import load_report_catalog, validate_report_catalog
 from .rules import load_rulebook, validate_rulebook
@@ -957,15 +958,16 @@ def menu(home: Path) -> int:
         print("\n  ANALYZE")
         print("    [5] Analyze a period")
         print("    [6] Export clean data")
+        print("    [7] Open Power BI dashboard")
         print("\n  IN DEVELOPMENT")
-        print("    [7] Staffing")
-        print("    [8] Realisations")
-        print("    [9] Final Absenteeism")
-        print("   [10] Bonus")
+        print("    [8] Staffing")
+        print("    [9] Realisations")
+        print("   [10] Final Absenteeism")
+        print("   [11] Bonus")
         print("\n  SETTINGS")
-        print("   [11] System and advanced tools")
-        print("   [12] Exit")
-        choice = input("\n  Choose 1-12: ").strip()
+        print("   [12] System and advanced tools")
+        print("   [13] Exit")
+        choice = input("\n  Choose 1-13: ").strip()
         try:
             if choice == "1":
                 group = _choose_source_group()
@@ -987,12 +989,17 @@ def menu(home: Path) -> int:
                 file_format = input("Format CSV or XLSX [CSV]: ").strip().lower() or "csv"
                 export_clean(home, dataset, start, end, file_format, use_config_period=use_config)
             elif choice == "7":
-                _build_menu_product(home, "staffing")
+                result = open_powerbi_project(load_config(home))
+                print(f"Power BI     : {result.project}")
+                if result.archived:
+                    print(f"Prior project: {result.archived}")
             elif choice == "8":
-                _build_menu_product(home, "realisations")
+                _build_menu_product(home, "staffing")
             elif choice == "9":
-                _build_menu_product(home, "absence")
+                _build_menu_product(home, "realisations")
             elif choice == "10":
+                _build_menu_product(home, "absence")
+            elif choice == "11":
                 print("\nBONUS MANAGEMENT")
                 print("1. Import Bonus Matrix v1.2, then build")
                 print("2. Build from the already imported matrix")
@@ -1003,12 +1010,12 @@ def menu(home: Path) -> int:
                 elif bonus_choice != "2":
                     raise ValueError("Please choose 1 or 2")
                 _build_menu_product(home, "bonus")
-            elif choice == "11":
-                _advanced_menu(home)
             elif choice == "12":
+                _advanced_menu(home)
+            elif choice == "13":
                 return 0
             else:
-                print("Please choose a number from 1 to 12.")
+                print("Please choose a number from 1 to 13.")
         except Exception as exc:
             print(f"\nERROR: {exc}")
             print("Nothing was changed in your extract files. Check the latest file in logs.")
@@ -1082,6 +1089,8 @@ def parser() -> argparse.ArgumentParser:
     )
     rules_p.add_argument("metric", nargs="?", help="Metric id for the explain action")
     rules_p.add_argument("--against", type=Path, help="Earlier metric catalog for the diff action")
+    powerbi_p = commands.add_parser("powerbi", help="Install or open the governed Power BI project")
+    powerbi_p.add_argument("action", choices=("install", "open"), nargs="?", default="open")
     commands.add_parser("menu", help="Open the interactive menu")
     return root
 
@@ -1133,6 +1142,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if run_doctor(home) else 1
         if args.command == "rules":
             return rules_tool(home, args.action, args.metric, args.against)
+        if args.command == "powerbi":
+            config = load_config(home)
+            result = open_powerbi_project(config, launch=args.action == "open")
+            print(f"Power BI project: {result.project}")
+            if result.archived:
+                print(f"Previous project archived: {result.archived}")
+            if args.action == "install":
+                print("Open WFMHub BI.pbip in Power BI Desktop, then choose Refresh.")
+            return 0
         return menu(home)
     except (ConfigError, HubLockedError, FileNotFoundError, FileExistsError, ValueError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

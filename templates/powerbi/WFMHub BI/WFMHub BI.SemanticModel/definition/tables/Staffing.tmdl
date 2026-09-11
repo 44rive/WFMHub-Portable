@@ -1,0 +1,148 @@
+/// Scheduled and observed capacity at date, interval, roster LOB and language grain.
+table 'Staffing'
+
+	/// Average net scheduled FTE across selected intervals after governed time off.
+	measure 'Scheduled FTE' = ```
+			AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Scheduled FTE])), [Interval FTE])
+			```
+		formatString: #,##0.0
+		displayFolder: 'Capacity'
+
+	/// Average observed FTE across selected completed intervals.
+	measure 'Observed FTE' = ```
+			AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Observed FTE])), [Interval FTE])
+			```
+		formatString: #,##0.0
+		displayFolder: 'Capacity'
+
+	/// Average productive FTE across selected completed intervals.
+	measure 'Productive FTE' = ```
+			AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Productive FTE])), [Interval FTE])
+			```
+		formatString: #,##0.0
+		displayFolder: 'Capacity'
+
+	/// Required FTE less scheduled FTE, floored at zero.
+	measure 'Capacity Gap FTE' = ```
+			MAX([Required FTE] - [Scheduled FTE], 0)
+			```
+		formatString: #,##0.0
+		displayFolder: 'Capacity'
+
+	/// Scheduled FTE less observed FTE, floored at zero.
+	measure 'Observed Gap FTE' = ```
+			MAX([Scheduled FTE] - [Observed FTE], 0)
+			```
+		formatString: #,##0.0
+		displayFolder: 'Capacity'
+
+	/// Scheduled FTE divided by required FTE.
+	measure 'Coverage %' = ```
+			DIVIDE([Scheduled FTE], [Required FTE])
+			```
+		formatString: 0.0%
+		displayFolder: 'Capacity'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Time Slot'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Time Slot
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Language'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Language
+
+	column 'Gross Scheduled FTE'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Gross Scheduled FTE
+
+	column 'Planned Time Off FTE'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Planned Time Off FTE
+
+	column 'Scheduled FTE'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Scheduled FTE
+
+	column 'Observed FTE'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Observed FTE
+
+	column 'Productive FTE'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Productive FTE
+
+	column 'Staffing Variance FTE'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Staffing Variance FTE
+
+	column 'Staffing Gap FTE'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Staffing Gap FTE
+
+	column 'Staffing State'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Staffing State
+
+	column 'Evidence Basis'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Evidence Basis
+
+	partition 'Staffing' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactStaffing15Min.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Time Slot", "LOB", "Management LOB", "Language", "Gross Scheduled FTE", "Planned Time Off FTE", "Scheduled FTE", "Observed FTE", "Productive FTE", "Staffing Variance FTE", "Staffing Gap FTE", "Staffing State", "Evidence Basis"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Time Slot", "Gross Scheduled FTE", "Planned Time Off FTE", "Scheduled FTE", "Observed FTE", "Productive FTE", "Staffing Variance FTE", "Staffing Gap FTE"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Time Slot", Int64.Type}, {"LOB", type text}, {"Management LOB", type text}, {"Language", type text}, {"Gross Scheduled FTE", type number}, {"Planned Time Off FTE", type number}, {"Scheduled FTE", type number}, {"Observed FTE", type number}, {"Productive FTE", type number}, {"Staffing Variance FTE", type number}, {"Staffing Gap FTE", type number}, {"Staffing State", type text}, {"Evidence Basis", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
 Context version: `1.6.0`
-Applies to: WFMHub `0.28.0` and later
+Applies to: WFMHub `0.29.0` and later
 Last reviewed: `2026-09-11`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -184,8 +184,12 @@ Complete updates atomically publish the governed Power BI star feed under
 `Feed\PowerBI`; its manifest is written last. Power BI never reads SQLite or
 raw extracts and never recalculates source classification. It relates stable
 dimensions and derives ratios only from summed additive counters. The PBIX is a
-Power BI Desktop-owned artifact; the portable runtime ships the theme, DAX and
-page build contract rather than fabricating a binary PBIX.
+Power BI Desktop-owned artifact. The portable runtime ships a real,
+source-controlled `WFMHub BI.pbip` project with the seven approved pages,
+import partitions, explicit DAX measures and theme. `POWERBI.cmd` installs it
+under `Reports\Power BI`, sets only the `HubRoot` parameter, and opens it in
+Desktop. A PBIX remains a Desktop-saved publishable snapshot rather than a
+binary fabricated by Python.
 
 Every current report first screen uses the measured grid in
 `src/wfmhub/excel_layout.py`: 28 equal 52-pixel columns, four equal KPI cards,
@@ -238,6 +242,7 @@ Documentation:
 - `docs/REPORT_DESIGN_SYSTEM.md`
 - `docs/POWERBI_WFMHUB_PERSPECTIVE.md`
 - `docs/POWERBI_PREMIUM_DESIGN_V1.md`
+- `docs/POWERBI_BEGINNER_GUIDE.md`
 
 ## Safe change protocol
 

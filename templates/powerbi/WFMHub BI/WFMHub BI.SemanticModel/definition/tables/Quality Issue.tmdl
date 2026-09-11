@@ -1,0 +1,88 @@
+/// Governed refresh quality issues with source and agent evidence.
+table 'Quality Issue'
+
+	/// Quality issues recorded in the selected context.
+	measure 'Quality Issues' = ```
+			COUNTROWS('Quality Issue')
+			```
+		formatString: #,##0
+		displayFolder: 'Data quality'
+
+	/// Quality issues at error or critical severity.
+	measure 'Critical Quality Issues' = ```
+			CALCULATE(COUNTROWS('Quality Issue'), 'Quality Issue'[Severity] IN {"ERROR", "CRITICAL"})
+			```
+		formatString: #,##0
+		displayFolder: 'Data quality'
+
+	column 'Issue ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Issue ID
+
+	column 'Run ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Run ID
+
+	column 'Detected At'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Detected At
+
+	column 'Source Family'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Source Family
+
+	column 'Source File'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Source File
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Issue Type'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Issue Type
+
+	column 'Severity'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Severity
+
+	column 'Details'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Details
+
+	partition 'Quality Issue' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactQualityIssue.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Issue ID", "Run ID", "Detected At", "Source Family", "Source File", "Date", "Agent ID", "Issue Type", "Severity", "Details"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Issue ID", type text}, {"Run ID", type text}, {"Detected At", type text}, {"Source Family", type text}, {"Source File", type text}, {"Date", type date}, {"Agent ID", type text}, {"Issue Type", type text}, {"Severity", type text}, {"Details", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

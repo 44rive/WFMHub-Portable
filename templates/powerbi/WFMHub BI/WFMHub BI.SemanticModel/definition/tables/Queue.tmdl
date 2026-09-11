@@ -1,0 +1,46 @@
+/// Reviewed queue reference from the active service model.
+table 'Queue'
+
+	column 'Queue'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Queue
+
+	column 'Source System'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Source System
+
+	column 'Service Scope'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Service Scope
+
+	column 'Comparison Scope'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Comparison Scope
+
+	column 'Designation'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Designation
+
+	column 'Mapping Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Mapping Status
+
+	partition 'Queue' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\DimQueue.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Queue", "Source System", "Service Scope", "Comparison Scope", "Designation", "Mapping Status"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Queue", type text}, {"Source System", type text}, {"Service Scope", type text}, {"Comparison Scope", type text}, {"Designation", type text}, {"Mapping Status", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

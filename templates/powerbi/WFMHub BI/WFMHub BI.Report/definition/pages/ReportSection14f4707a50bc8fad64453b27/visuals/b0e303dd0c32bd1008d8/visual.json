@@ -1,0 +1,198 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "b0e303dd0c32bd1008d8",
+  "position": {
+    "x": 150,
+    "y": 522,
+    "z": 400,
+    "height": 166,
+    "width": 1116,
+    "tabOrder": 400
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staffing"
+                    }
+                  },
+                  "Property": "LOB"
+                }
+              },
+              "queryRef": "Staffing.LOB",
+              "nativeQueryRef": "LOB"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staffing"
+                    }
+                  },
+                  "Property": "Language"
+                }
+              },
+              "queryRef": "Staffing.Language",
+              "nativeQueryRef": "Language"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staffing"
+                    }
+                  },
+                  "Property": "Staffing State"
+                }
+              },
+              "queryRef": "Staffing.Staffing State",
+              "nativeQueryRef": "Staffing State"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staffing"
+                    }
+                  },
+                  "Property": "Scheduled FTE"
+                }
+              },
+              "queryRef": "Staffing.Scheduled FTE",
+              "nativeQueryRef": "Scheduled FTE"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staffing"
+                    }
+                  },
+                  "Property": "Observed FTE"
+                }
+              },
+              "queryRef": "Staffing.Observed FTE",
+              "nativeQueryRef": "Observed FTE"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staffing"
+                    }
+                  },
+                  "Property": "Capacity Gap FTE"
+                }
+              },
+              "queryRef": "Staffing.Capacity Gap FTE",
+              "nativeQueryRef": "Capacity Gap FTE"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Capacity control'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

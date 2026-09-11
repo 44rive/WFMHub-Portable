@@ -1,5 +1,5 @@
-WFMHUB POWER BI STARTER KIT
-===========================
+WFMHUB POWER BI PROJECT
+=======================
 
 WHAT WFMHUB DOES
 ----------------
@@ -8,25 +8,18 @@ SQLite database when needed, calculates governed marts, and replaces the CSVs
 in Feed\PowerBI. POWERBI_MANIFEST_CURRENT.csv is written last, so it is the
 refresh receipt.
 
-WHAT YOU DO ONCE IN POWER BI DESKTOP
-------------------------------------
-1. Get data > Text/CSV and import the CSV files in Feed\PowerBI. Do not import
-   POWERBI_MANIFEST_CURRENT.csv as a business fact.
-2. Transform data. Confirm Date fields are Date; start/end fields are Date/Time;
-   counters and minutes are Whole/Decimal Number; flags are True/False.
-3. Create one-to-many, single-direction relationships:
-     DimDate[Date] -> every fact Date column
-     DimEmployee[Agent ID] -> attendance, gap, PCS, coaching, final ABS Agent ID
-     DimLOB[LOB] -> facts that expose LOB
-     DimQueue[Queue] -> service Queue
-   Forecast Queue can repeat across forecast files/scopes, so use its Service
-   Scope/Date for shared slicing and its own Queue field for forecast detail.
-   Keep fact-to-fact relationships disabled. Use dimensions for slicers.
-4. Import WFMHub-Premium-Theme.json from View > Themes > Browse for themes.
-5. Create a blank _Measures table and add the measures in WFMHub-Measures.dax.
-6. Build the seven pages from docs\POWERBI_PREMIUM_DESIGN_V1.md and the supplied
-   PNG prototypes. Use a 16:9 canvas and Sync slicers for Date, LOB and Team.
-7. Save the PBIX. From now on: WFMHub UPDATE, then Refresh in Power BI.
+WHAT YOU DO
+-----------
+1. Run UPDATE > All sources once in WFMHub.
+2. Double-click POWERBI.cmd, or choose ANALYZE > Open Power BI dashboard.
+3. Power BI Desktop opens the complete seven-page WFMHub BI.pbip project.
+4. Choose Home > Refresh. The HubRoot parameter already points to this WFMHub.
+5. Save a PBIX copy only when you want to publish or share a locked snapshot.
+
+You do not create the queries, relationships, measures, slicers or pages. They
+are already inside the project. Normal Hub releases preserve the installed
+project; a newer project contract archives the old project before installing
+the new one.
 
 SOURCE AUTHORITY
 ----------------

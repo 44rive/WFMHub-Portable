@@ -1,0 +1,85 @@
+/// Latest governed source freshness and load status.
+table 'Source Health'
+
+	/// Configured source families in the latest health snapshot.
+	measure 'Source Count' = ```
+			COUNTROWS('Source Health')
+			```
+		formatString: #,##0
+		displayFolder: 'Data quality'
+
+	/// Source families reporting a ready status.
+	measure 'Sources Ready' = ```
+			CALCULATE(COUNTROWS('Source Health'), 'Source Health'[Status] IN {"OK", "READY", "LOADED"})
+			```
+		formatString: #,##0
+		displayFolder: 'Data quality'
+
+	/// Latest business date present across source families.
+	measure 'Latest Data Date' = ```
+			MAX('Source Health'[Newest Date])
+			```
+		formatString: dd mmm yyyy
+		displayFolder: 'Data quality'
+
+	column 'Source Family'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Source Family
+
+	column 'Expected Path'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Expected Path
+
+	column 'Newest File'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Newest File
+
+	column 'Newest Date'
+		dataType: dateTime
+		summarizeBy: none
+		sourceColumn: Newest Date
+
+	column 'Modified At'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Modified At
+
+	column 'Loaded At'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Loaded At
+
+	column 'Rows'
+		dataType: int64
+		sourceColumn: Rows
+
+	column 'Rejected'
+		dataType: int64
+		sourceColumn: Rejected
+
+	column 'Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Status
+
+	column 'Details'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Details
+
+	partition 'Source Health' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactSourceHealth.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Source Family", "Expected Path", "Newest File", "Newest Date", "Modified At", "Loaded At", "Rows", "Rejected", "Status", "Details"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Newest Date", "Rows", "Rejected"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Source Family", type text}, {"Expected Path", type text}, {"Newest File", type text}, {"Newest Date", type date}, {"Modified At", type text}, {"Loaded At", type text}, {"Rows", Int64.Type}, {"Rejected", Int64.Type}, {"Status", type text}, {"Details", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

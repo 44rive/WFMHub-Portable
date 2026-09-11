@@ -1,0 +1,194 @@
+/// Final Verint Activities absence and shrinkage result per agent day.
+table 'Final Absence'
+
+	/// Planned net minutes from finalized rows only.
+	measure 'Final Planned Minutes' = ```
+			CALCULATE(SUM('Final Absence'[Planned Net Minutes]), 'Final Absence'[Final Ledger Status] IN {"CLEAR", "ABSENCE_RECORDED"})
+			```
+		formatString: #,##0
+		displayFolder: 'Final absence'
+
+	/// Mapped final absence minutes from finalized rows.
+	measure 'Final Absence Minutes' = ```
+			CALCULATE(SUM('Final Absence'[Absence Minutes]), 'Final Absence'[Final Ledger Status] IN {"CLEAR", "ABSENCE_RECORDED"})
+			```
+		formatString: #,##0
+		displayFolder: 'Final absence'
+
+	/// Mapped final shrinkage minutes from finalized rows.
+	measure 'Final Shrinkage Minutes' = ```
+			CALCULATE(SUM('Final Absence'[Shrinkage Minutes]), 'Final Absence'[Final Ledger Status] IN {"CLEAR", "ABSENCE_RECORDED"})
+			```
+		formatString: #,##0
+		displayFolder: 'Final absence'
+
+	/// Mapped vacation/PTO minutes from finalized rows.
+	measure 'Final PTO Minutes' = ```
+			CALCULATE(SUM('Final Absence'[Vacation Minutes]), 'Final Absence'[Final Ledger Status] IN {"CLEAR", "ABSENCE_RECORDED"})
+			```
+		formatString: #,##0
+		displayFolder: 'Final absence'
+
+	/// Final absence minutes divided by finalized planned net minutes.
+	measure 'Final Absence %' = ```
+			DIVIDE([Final Absence Minutes], [Final Planned Minutes])
+			```
+		formatString: 0.0%
+		displayFolder: 'Final absence'
+
+	/// Final shrinkage minutes divided by finalized planned net minutes.
+	measure 'Final Shrinkage %' = ```
+			DIVIDE([Final Shrinkage Minutes], [Final Planned Minutes])
+			```
+		formatString: 0.0%
+		displayFolder: 'Final absence'
+
+	/// Final vacation minutes divided by finalized planned net minutes.
+	measure 'Final PTO %' = ```
+			DIVIDE([Final PTO Minutes], [Final Planned Minutes])
+			```
+		formatString: 0.0%
+		displayFolder: 'Final absence'
+
+	/// Agent-days not yet in a finalized ledger state.
+	measure 'Absence Review HC' = ```
+			CALCULATE(DISTINCTCOUNT('Final Absence'[Agent Day Key]), NOT('Final Absence'[Final Ledger Status] IN {"CLEAR", "ABSENCE_RECORDED"}))
+			```
+		formatString: #,##0
+		displayFolder: 'Final absence'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Agent Day Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent Day Key
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Ops Manager'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Ops Manager
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Market'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Market
+
+	column 'Language'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Language
+
+	column 'Location'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Location
+
+	column 'Scheduled Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Scheduled Minutes
+
+	column 'Planned Net Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Planned Net Minutes
+
+	column 'Absence Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Absence Minutes
+
+	column 'Vacation Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Vacation Minutes
+
+	column 'Unpaid Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Unpaid Minutes
+
+	column 'Shrinkage Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Shrinkage Minutes
+
+	column 'Unmapped Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Unmapped Minutes
+
+	column 'Final Ledger Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Final Ledger Status
+
+	column 'Rule Version'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Rule Version
+
+	partition 'Final Absence' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactFinalAbsenceDay.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Agent Day Key", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Market", "Language", "Location", "Scheduled Minutes", "Planned Net Minutes", "Absence Minutes", "Vacation Minutes", "Unpaid Minutes", "Shrinkage Minutes", "Unmapped Minutes", "Final Ledger Status", "Rule Version"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Scheduled Minutes", "Planned Net Minutes", "Absence Minutes", "Vacation Minutes", "Unpaid Minutes", "Shrinkage Minutes", "Unmapped Minutes"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Agent Day Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Market", type text}, {"Language", type text}, {"Location", type text}, {"Scheduled Minutes", Int64.Type}, {"Planned Net Minutes", Int64.Type}, {"Absence Minutes", Int64.Type}, {"Vacation Minutes", Int64.Type}, {"Unpaid Minutes", Int64.Type}, {"Shrinkage Minutes", Int64.Type}, {"Unmapped Minutes", Int64.Type}, {"Final Ledger Status", type text}, {"Rule Version", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

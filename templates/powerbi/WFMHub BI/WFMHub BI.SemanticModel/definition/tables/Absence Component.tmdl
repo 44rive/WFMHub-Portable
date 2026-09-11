@@ -1,0 +1,140 @@
+/// Mapped Verint activity evidence underlying final absence and shrinkage.
+table 'Absence Component'
+
+	/// Summed mapped/unmapped activity evidence minutes.
+	measure 'Activity Minutes' = ```
+			SUM('Absence Component'[Minutes])
+			```
+		formatString: #,##0
+		displayFolder: 'Absence components'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Event Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Event Key
+
+	column 'Agent Day Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent Day Key
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Activity'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Activity
+
+	column 'Category'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Category
+
+	column 'Event Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Event Start
+
+	column 'Event End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Event End
+
+	column 'Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Minutes
+
+	column 'Counts As Absence'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Counts As Absence
+
+	column 'Counts As Vacation'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Counts As Vacation
+
+	column 'Counts As Unpaid'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Counts As Unpaid
+
+	column 'Counts As Shrinkage'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Counts As Shrinkage
+
+	column 'Mapped'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Mapped
+
+	column 'Evidence Type'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Evidence Type
+
+	column 'Source File'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Source File
+
+	column 'Rule Version'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Rule Version
+
+	partition 'Absence Component' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactFinalAbsenceComponent.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Event Key", "Agent Day Key", "Agent ID", "Agent", "Team Leader", "LOB", "Management LOB", "Activity", "Category", "Event Start", "Event End", "Minutes", "Counts As Absence", "Counts As Vacation", "Counts As Unpaid", "Counts As Shrinkage", "Mapped", "Evidence Type", "Source File", "Rule Version"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Minutes"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Event Key", type text}, {"Agent Day Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Activity", type text}, {"Category", type text}, {"Event Start", type text}, {"Event End", type text}, {"Minutes", Int64.Type}, {"Counts As Absence", type text}, {"Counts As Vacation", type text}, {"Counts As Unpaid", type text}, {"Counts As Shrinkage", type text}, {"Mapped", type text}, {"Evidence Type", type text}, {"Source File", type text}, {"Rule Version", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

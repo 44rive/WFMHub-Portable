@@ -1,0 +1,120 @@
+{
+  "name": "WFMHub-Premium-7f43c96de6f44c729af8d6981ae229c4.json",
+  "dataColors": [
+    "#007C83",
+    "#D6A84B",
+    "#2E6E9E",
+    "#79B7B2",
+    "#C86B4A",
+    "#64748B",
+    "#9A6FB0",
+    "#3E8E62"
+  ],
+  "background": "#F4F7F9",
+  "foreground": "#1F2933",
+  "tableAccent": "#007C83",
+  "good": "#2F855A",
+  "neutral": "#D6A84B",
+  "bad": "#C53030",
+  "maximum": "#007C83",
+  "center": "#D6A84B",
+  "minimum": "#C53030",
+  "textClasses": {
+    "callout": {
+      "fontFace": "Segoe UI Semibold",
+      "color": "#0B1F33"
+    },
+    "title": {
+      "fontFace": "Segoe UI Semibold",
+      "color": "#0B1F33"
+    },
+    "header": {
+      "fontFace": "Segoe UI Semibold",
+      "color": "#0B1F33"
+    },
+    "label": {
+      "fontFace": "Segoe UI",
+      "color": "#526273"
+    }
+  },
+  "visualStyles": {
+    "*": {
+      "*": {
+        "background": [
+          {
+            "show": true,
+            "color": {
+              "solid": {
+                "color": "#FFFFFF"
+              }
+            },
+            "transparency": 0
+          }
+        ],
+        "border": [
+          {
+            "show": true,
+            "color": {
+              "solid": {
+                "color": "#DCE4EA"
+              }
+            },
+            "radius": 8
+          }
+        ],
+        "visualHeader": [
+          {
+            "show": false
+          }
+        ],
+        "title": [
+          {
+            "show": true,
+            "fontFamily": "Segoe UI Semibold",
+            "fontSize": 11,
+            "fontColor": {
+              "solid": {
+                "color": "#0B1F33"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "page": {
+      "*": {
+        "background": [
+          {
+            "color": {
+              "solid": {
+                "color": "#F4F7F9"
+              }
+            },
+            "transparency": 0
+          }
+        ],
+        "outspace": [
+          {
+            "color": {
+              "solid": {
+                "color": "#F4F7F9"
+              }
+            },
+            "transparency": 0
+          }
+        ]
+      }
+    },
+    "tableEx": {
+      "*": {
+        "columnHeaders": [
+          {
+            "autoSizeColumnWidth": true,
+            "columnAdjustment": "growToFit"
+          }
+        ]
+      }
+    }
+  },
+  "$schema": "https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/Report%20Theme%20JSON%20Schema/reportThemeSchema-2.157.json"
+}

@@ -1,0 +1,173 @@
+/// Additive service counters at date, hour and queue grain.
+table 'Service'
+
+	/// Calls offered to the governed queue scope.
+	measure 'Offered Calls' = ```
+			SUM('Service'[Offered])
+			```
+		formatString: #,##0
+		displayFolder: 'Service'
+
+	/// Answered call legs in the governed scope.
+	measure 'Answered Calls' = ```
+			SUM('Service'[Answered])
+			```
+		formatString: #,##0
+		displayFolder: 'Service'
+
+	/// Abandoned call legs in the governed scope.
+	measure 'Abandoned Calls' = ```
+			SUM('Service'[Abandoned])
+			```
+		formatString: #,##0
+		displayFolder: 'Service'
+
+	/// Answered calls inside the configured service threshold.
+	measure 'Handled in SL' = ```
+			SUM('Service'[Answered Within Target])
+			```
+		formatString: #,##0
+		displayFolder: 'Service'
+
+	/// Offered calls after the configured short-abandon treatment.
+	measure 'SLA Eligible Calls' = ```
+			SUM('Service'[SLA Denominator])
+			```
+		formatString: #,##0
+		displayFolder: 'Service'
+
+	/// Ratio of summed handled-in-threshold calls to summed eligible demand.
+	measure 'Service Level %' = ```
+			DIVIDE([Handled in SL], [SLA Eligible Calls])
+			```
+		formatString: 0.0%
+		displayFolder: 'Service'
+
+	/// Answered divided by offered; this is service routing availability, not agent availability.
+	measure 'Routing Availability %' = ```
+			DIVIDE([Answered Calls], [Offered Calls])
+			```
+		formatString: 0.0%
+		displayFolder: 'Service'
+
+	/// Abandoned divided by offered.
+	measure 'Abandon Rate %' = ```
+			DIVIDE([Abandoned Calls], [Offered Calls])
+			```
+		formatString: 0.0%
+		displayFolder: 'Service'
+
+	/// Weighted average handle time from additive handled seconds and answered calls.
+	measure 'AHT Seconds' = ```
+			DIVIDE(SUM('Service'[Handled Seconds]), [Answered Calls])
+			```
+		formatString: #,##0
+		displayFolder: 'Service'
+
+	/// Actual offered demand minus the governed forecast volume.
+	measure 'Volume Variance' = ```
+			[Offered Calls] - [Forecast Volume]
+			```
+		formatString: #,##0;[Red]-#,##0
+		displayFolder: 'Forecast comparison'
+
+	/// Volume variance divided by forecast volume.
+	measure 'Volume Variance %' = ```
+			DIVIDE([Volume Variance], [Forecast Volume])
+			```
+		formatString: 0.0%;[Red]-0.0%
+		displayFolder: 'Forecast comparison'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Time Slot'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Time Slot
+
+	column 'Service Scope'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Service Scope
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Queue'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Queue
+
+	column 'Offered'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Offered
+
+	column 'Answered'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Answered
+
+	column 'Abandoned'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Abandoned
+
+	column 'Answered Within Target'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Answered Within Target
+
+	column 'Handled Seconds'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Handled Seconds
+
+	column 'SLA Denominator'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: SLA Denominator
+
+	column 'Source Files'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Source Files
+
+	partition 'Service' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactServiceHour.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Time Slot", "Service Scope", "Management LOB", "Queue", "Offered", "Answered", "Abandoned", "Answered Within Target", "Handled Seconds", "SLA Denominator", "Source Files"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Time Slot", "Offered", "Answered", "Abandoned", "Answered Within Target", "Handled Seconds", "SLA Denominator"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Time Slot", Int64.Type}, {"Service Scope", type text}, {"Management LOB", type text}, {"Queue", type text}, {"Offered", Int64.Type}, {"Answered", Int64.Type}, {"Abandoned", Int64.Type}, {"Answered Within Target", Int64.Type}, {"Handled Seconds", Int64.Type}, {"SLA Denominator", Int64.Type}, {"Source Files", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

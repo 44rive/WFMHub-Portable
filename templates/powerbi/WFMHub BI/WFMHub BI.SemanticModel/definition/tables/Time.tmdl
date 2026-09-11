@@ -1,0 +1,42 @@
+/// Reusable 15-minute time-of-day dimension.
+table 'Time'
+
+	column 'Time'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Time
+
+	column 'Quarter Hour Index'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Quarter Hour Index
+
+	column 'Hour'
+		dataType: int64
+		sourceColumn: Hour
+
+	column 'Hour Label'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Hour Label
+
+	column 'Time Label'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Time Label
+
+	partition 'Time' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\DimTime.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Time", "Quarter Hour Index", "Hour", "Hour Label", "Time Label"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Quarter Hour Index", "Hour"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Time", type text}, {"Quarter Hour Index", Int64.Type}, {"Hour", Int64.Type}, {"Hour Label", type text}, {"Time Label", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

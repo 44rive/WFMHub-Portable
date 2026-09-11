@@ -1,0 +1,65 @@
+/// Contiguous reporting calendar for the complete governed feed period.
+table 'Date'
+
+	column 'Date'
+		dataType: dateTime
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Year'
+		dataType: int64
+		sourceColumn: Year
+
+	column 'Month Number'
+		dataType: int64
+		sourceColumn: Month Number
+
+	column 'Month'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Month
+
+	column 'Year Month'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Year Month
+
+	column 'ISO Week'
+		dataType: int64
+		sourceColumn: ISO Week
+
+	column 'Weekday'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Weekday
+
+	column 'Weekday Number'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Weekday Number
+
+	column 'Month Start'
+		dataType: dateTime
+		summarizeBy: none
+		sourceColumn: Month Start
+
+	column 'Is Data Through'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Is Data Through
+
+	partition 'Date' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\DimDate.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Year", "Month Number", "Month", "Year Month", "ISO Week", "Weekday", "Weekday Number", "Month Start", "Is Data Through"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Year", "Month Number", "ISO Week", "Weekday Number", "Month Start"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Year", Int64.Type}, {"Month Number", Int64.Type}, {"Month", type text}, {"Year Month", type text}, {"ISO Week", Int64.Type}, {"Weekday", type text}, {"Weekday Number", Int64.Type}, {"Month Start", type date}, {"Is Data Through", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

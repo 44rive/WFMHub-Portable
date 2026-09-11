@@ -66,6 +66,13 @@ without overwriting a destination file, runs `quick_check`, and then applies
 only missing migrations. Historical extracts are not re-ingested merely because
 application code or a report template changed.
 
+The release ships a versioned PBIP source project under
+`_system/templates/powerbi/WFMHub BI`. `POWERBI.cmd` installs it under
+`Reports/Power BI`, rewrites only the `HubRoot` M parameter, and opens it in
+Power BI Desktop. A newer project contract archives the installed project
+before replacement. The PBIP model imports only `Feed/PowerBI`; it never opens
+SQLite or raw extracts.
+
 Logical names such as `raw.lilo` are translated by the database facade into
 SQLite tables such as `raw_lilo`. Business code stays readable and backend
 details remain in one module.
@@ -469,9 +476,13 @@ LOB service-level contracts into one synthetic overall SL.
 
 ## Upgrades
 
-Current releases use SQLite and do not convert or open v0.1 DuckDB data.
-Install the portable release in a new folder, point it at the same untouched
-source root, and let it rebuild SQLite. Preserve the entire old folder.
+Current releases use SQLite and do not convert or open v0.1 DuckDB data. For an
+in-place release, `SETUP.cmd` preserves the existing SQLite file and applies
+only missing migrations. For a release extracted into a new folder,
+`UPGRADE.cmd` adopts the prior SQLite database through its backup API, verifies
+it, copies user-owned configuration/reports/custom jobs without overwriting,
+and applies only missing migrations. A code or report-template release does
+not require historical extracts to be rebuilt.
 Attendance Review is a validated two-way decision workbook: only the five blue
 fields are imported, while SQLite keeps authority over exact evidence.
 

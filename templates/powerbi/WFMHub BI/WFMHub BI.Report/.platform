@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "WFMHub BI"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "280b3cf1-6883-9406-e8c0-c563d839e43e"
+  }
+}

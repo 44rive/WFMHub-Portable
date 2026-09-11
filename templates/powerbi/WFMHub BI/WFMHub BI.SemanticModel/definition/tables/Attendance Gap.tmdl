@@ -1,0 +1,133 @@
+/// Exact start/end attendance gaps prepared for human review.
+table 'Attendance Gap'
+
+	/// Summed exact review-gap minutes.
+	measure 'Gap Minutes' = ```
+			SUM('Attendance Gap'[Gap Minutes])
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance review'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Correction ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Correction ID
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Ops Manager'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Ops Manager
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Scheduled Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Scheduled Start
+
+	column 'Scheduled End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Scheduled End
+
+	column 'Gap Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Gap Start
+
+	column 'Gap End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Gap End
+
+	column 'Gap Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Gap Minutes
+
+	column 'Detected Issue'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Detected Issue
+
+	column 'Priority'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Priority
+
+	column 'Confidence'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Confidence
+
+	column 'Suggested Activity'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Suggested Activity
+
+	column 'Observed Source'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Observed Source
+
+	column 'Reconciliation'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Reconciliation
+
+	column 'Source File'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Source File
+
+	partition 'Attendance Gap' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactAttendanceGap.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Correction ID", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Scheduled Start", "Scheduled End", "Gap Start", "Gap End", "Gap Minutes", "Detected Issue", "Priority", "Confidence", "Suggested Activity", "Observed Source", "Reconciliation", "Source File"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Gap Minutes"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Correction ID", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Scheduled Start", type text}, {"Scheduled End", type text}, {"Gap Start", type text}, {"Gap End", type text}, {"Gap Minutes", Int64.Type}, {"Detected Issue", type text}, {"Priority", type text}, {"Confidence", type text}, {"Suggested Activity", type text}, {"Observed Source", type text}, {"Reconciliation", type text}, {"Source File", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

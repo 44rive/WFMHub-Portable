@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.28.0"
+DEFAULT_VERSION = "0.29.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -122,7 +122,7 @@ def validate_stage(stage: Path, expected_native: dict[str, str]) -> None:
     if unexpected_custom:
         raise RuntimeError(f"Portable stage contains runnable/user custom jobs: {unexpected_custom}")
     allowed_root = {
-        "WFMHub.cmd", "SETUP.cmd", "UPGRADE.cmd", "README.md", "VERSION.txt",
+        "WFMHub.cmd", "SETUP.cmd", "UPGRADE.cmd", "POWERBI.cmd", "README.md", "VERSION.txt",
         "Reports", "Feed", "config", "_system",
     }
     unexpected_root = sorted(path.name for path in stage.iterdir() if path.name not in allowed_root)
@@ -224,6 +224,7 @@ def build(args) -> Path:
     shutil.copy2(ROOT / "WFMHub.cmd", stage / "WFMHub.cmd")
     shutil.copy2(ROOT / "SETUP.cmd", stage / "SETUP.cmd")
     shutil.copy2(ROOT / "UPGRADE.cmd", stage / "UPGRADE.cmd")
+    shutil.copy2(ROOT / "POWERBI.cmd", stage / "POWERBI.cmd")
     (stage / "_system" / "scripts").mkdir(parents=True, exist_ok=True)
     shutil.copy2(
         ROOT / "packaging" / "windows" / "Install-PCSWorkbook.ps1",

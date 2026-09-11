@@ -1,0 +1,148 @@
+/// Deterministic on-demand analysis findings and their evidence pointers.
+table 'Finding'
+
+	/// Count of deterministic analysis findings in context.
+	measure 'Finding Count' = ```
+			COUNTROWS('Finding')
+			```
+		formatString: #,##0
+		displayFolder: 'Analysis'
+
+	column 'Period Start'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Period Start
+
+	column 'Period End'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Period End
+
+	column 'Finding ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Finding ID
+
+	column 'Rank'
+		dataType: int64
+		sourceColumn: Rank
+
+	column 'Finding Type'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Finding Type
+
+	column 'Severity'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Severity
+
+	column 'Domain'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Domain
+
+	column 'Metric ID'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Metric ID
+
+	column 'Source System'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Source System
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Language'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Language
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Title'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Title
+
+	column 'Summary'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Summary
+
+	column 'Current Value'
+		dataType: decimal
+		sourceColumn: Current Value
+
+	column 'Reference Value'
+		dataType: decimal
+		sourceColumn: Reference Value
+
+	column 'Target Value'
+		dataType: decimal
+		sourceColumn: Target Value
+
+	column 'Delta Value'
+		dataType: decimal
+		sourceColumn: Delta Value
+
+	column 'Unit'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Unit
+
+	column 'Evidence Dataset'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Evidence Dataset
+
+	column 'Evidence Filter'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Evidence Filter
+
+	column 'Created At'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Created At
+
+	partition 'Finding' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactFinding.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Period Start", "Period End", "Finding ID", "Rank", "Finding Type", "Severity", "Domain", "Metric ID", "Source System", "LOB", "Management LOB", "Language", "Team Leader", "Agent ID", "Title", "Summary", "Current Value", "Reference Value", "Target Value", "Delta Value", "Unit", "Evidence Dataset", "Evidence Filter", "Created At"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Period Start", "Period End", "Rank", "Current Value", "Reference Value", "Target Value", "Delta Value"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Period Start", type date}, {"Period End", type date}, {"Finding ID", type text}, {"Rank", Int64.Type}, {"Finding Type", type text}, {"Severity", type text}, {"Domain", type text}, {"Metric ID", type text}, {"Source System", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Language", type text}, {"Team Leader", type text}, {"Agent ID", type text}, {"Title", type text}, {"Summary", type text}, {"Current Value", type number}, {"Reference Value", type number}, {"Target Value", type number}, {"Delta Value", type number}, {"Unit", type text}, {"Evidence Dataset", type text}, {"Evidence Filter", type text}, {"Created At", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

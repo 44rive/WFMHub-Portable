@@ -35,6 +35,7 @@ class ServiceGroup:
 class ServiceProfile:
     profile_id: str
     label: str
+    management_lob: str
     service_scopes: tuple[str, ...]
     staffing_lobs: tuple[str, ...]
     source_systems: tuple[str, ...]
@@ -128,9 +129,9 @@ def ensure_service_profiles(home: Path, target: Path | None = None) -> Path:
             str(current.get("version", "")) in {
                 "2026.09.3", "2026.09.4", "2026.09.5", "2026.09.6",
                 "2026.09.7", "2026.09.8", "2026.09.9",
-                "2026.09.10", "2026.09.11", "2026.09.12",
+                "2026.09.10", "2026.09.11", "2026.09.12", "2026.09.13",
             }
-            and str(default.get("version", "")) == "2026.09.13"
+            and str(default.get("version", "")) == "2026.09.14"
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             shutil.copy2(
@@ -217,6 +218,7 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
         profiles.append(ServiceProfile(
             profile_id=profile_id,
             label=str(item.get("label", profile_id)).strip(),
+            management_lob=str(item.get("management_lob", item.get("label", profile_id))).strip(),
             service_scopes=scopes,
             staffing_lobs=staffing_lobs,
             source_systems=systems,
@@ -235,6 +237,10 @@ def load_service_profiles(home: Path, target: Path | None = None) -> ServiceProf
             flash_total_groups=flash_total_groups,
             flash_queues=flash_queues,
         ))
+        if not profiles[-1].management_lob:
+            raise ServiceProfileError(
+                f"Invalid service profile {profile_id!r}: management_lob is required"
+            )
     if not profiles or default_profile not in {profile.profile_id for profile in profiles}:
         raise ServiceProfileError("default_profile must identify at least one profile")
     return ServiceProfileCatalog(file, version, default_profile, hashlib.sha256(content).hexdigest(), tuple(profiles))

@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.28.0 — 2026-09-11
+## 0.29.0 - 2026-09-11
+
+- Ship a real, source-controlled Power BI Project (`.pbip`) with seven premium
+  WFM pages, a reusable import semantic model, explicit DAX measures, slicers,
+  page navigation and the approved WFMHub visual system.
+- Add `POWERBI.cmd` and an Analyze menu action that installs, parameterizes and
+  opens the project without exposing SQLite or raw extracts to Power BI.
+- Add an explicit effective-dated management-LOB bridge so service scopes and
+  roster labels filter the same facts without guessed mappings.
+- Expand the Power BI feed contract with conformed management LOB and 15-minute
+  time keys while preserving additive KPI components and the atomic manifest.
+- Safely archive an older installed PBIP project only when the shipped project
+  contract version increases; normal opens preserve the project.
+
+## 0.28.0 - 2026-09-11
 
 - Keeps the same SQLite database across releases. `SETUP.cmd` performs safe
   in-place additive migrations; the new `UPGRADE.cmd` adopts database, user

@@ -1,0 +1,77 @@
+/// Current governed FTE roster and organisation attributes.
+table 'Employee'
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Employment Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Employment Status
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Ops Manager'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Ops Manager
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Market'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Market
+
+	column 'Language'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Language
+
+	column 'Location'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Location
+
+	column 'City'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: City
+
+	column 'FTE'
+		dataType: decimal
+		sourceColumn: FTE
+
+	partition 'Employee' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\DimEmployee.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Agent ID", "Agent", "Employment Status", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Market", "Language", "Location", "City", "FTE"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"FTE"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Agent ID", type text}, {"Agent", type text}, {"Employment Status", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Market", type text}, {"Language", type text}, {"Location", type text}, {"City", type text}, {"FTE", type number}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

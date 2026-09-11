@@ -5,13 +5,14 @@
 # follow Storm and reset at midnight.
 
 [catalog]
-version = "2026.09.13"
+version = "2026.09.14"
 default_profile = "ford_oem_fr"
 description = "Effective-dated service and Book1 Flash profiles for RSA Netherlands, RSA Belgium, Ford Netherlands, and Ford OEM France."
 
 [[profiles]]
 id = "ford_oem_fr"
 label = "Ford OEM France"
+management_lob = "OEM"
 service_scopes = ["Ford FR"]
 staffing_lobs = ["OEM FR"]
 source_systems = ["CALL_BY_CALL"]
@@ -47,6 +48,7 @@ queues = ["APFR_PAR_RSA_CHERY_ASSISTANCE_FR"]
 [[profiles]]
 id = "ford_nl"
 label = "Ford Netherlands"
+management_lob = "FORD NL"
 service_scopes = ["Ford NL"]
 staffing_lobs = ["Ford Dutch"]
 source_systems = ["CALL_BY_CALL"]
@@ -77,6 +79,7 @@ queue_contains = ["FORD"]
 [[profiles]]
 id = "rsa_be"
 label = "RSA Belgium"
+management_lob = "RSA BE"
 service_scopes = ["RSA BE FR", "RSA BE VL"]
 staffing_lobs = ["RSA FR", "RSA VL"]
 source_systems = ["CALL_BY_CALL"]
@@ -148,6 +151,7 @@ queue_contains = ["RSA", "MOBILITY"]
 [[profiles]]
 id = "rsa_nl"
 label = "RSA Netherlands"
+management_lob = "RSA NL"
 service_scopes = ["RSA NL"]
 staffing_lobs = ["RSA NL"]
 source_systems = ["CALL_BY_CALL"]
