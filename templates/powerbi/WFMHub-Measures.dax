@@ -20,12 +20,12 @@ Forecast Volume = SUM('Forecast'[Volume Forecast])
 Required FTE = AVERAGEX(SUMMARIZE('Forecast', 'Forecast'[Date], 'Forecast'[Time Slot], "Interval FTE", SUM('Forecast'[FTE Required])), [Interval FTE])
 
 // Staffing
-Scheduled FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Scheduled FTE])), [Interval FTE])
-Observed FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Observed FTE])), [Interval FTE])
-Productive FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Productive FTE])), [Interval FTE])
-Capacity Gap FTE = MAX([Required FTE] - [Scheduled FTE], 0)
-Observed Gap FTE = MAX([Scheduled FTE] - [Observed FTE], 0)
-Coverage % = DIVIDE([Scheduled FTE], [Required FTE])
+Average Scheduled FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Scheduled FTE])), [Interval FTE])
+Average Observed FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Observed FTE])), [Interval FTE])
+Average Productive FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Productive FTE])), [Interval FTE])
+Capacity Gap FTE = MAX([Required FTE] - [Average Scheduled FTE], 0)
+Observed Gap FTE = MAX([Average Scheduled FTE] - [Average Observed FTE], 0)
+Coverage % = DIVIDE([Average Scheduled FTE], [Required FTE])
 
 // Attendance
 Due HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0)
@@ -38,14 +38,14 @@ Early Leave HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendan
 Attendance % = DIVIDE([Present HC], [Due HC])
 
 // Attendance Gap
-Gap Minutes = SUM('Attendance Gap'[Gap Minutes])
+Total Gap Minutes = SUM('Attendance Gap'[Gap Minutes])
 
 // PCS
 PCS Average = DIVIDE(SUM('PCS'[PCS Score Sum]), SUM('PCS'[Valid PCS]))
 PCS Participation % = DIVIDE(SUM('PCS'[PCS Participation Responses]), SUM('PCS'[PCS Status Calls]))
 Valid PCS Responses = SUM('PCS'[Valid PCS])
-Low Score Responses = SUM('PCS'[Low Score Responses])
-Top Box Responses = SUM('PCS'[Top Box Responses])
+Low Score Response Count = SUM('PCS'[Low Score Responses])
+Top Box Response Count = SUM('PCS'[Top Box Responses])
 PCS Index % = DIVIDE([PCS Average], 5)
 
 // Time Off

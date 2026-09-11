@@ -139,12 +139,12 @@ TABLES = (
             c("Staffing Gap FTE", "decimal", True), c("Staffing State"), c("Evidence Basis"),
         ),
         (
-            m("Scheduled FTE", "AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], \"Interval FTE\", SUM('Staffing'[Scheduled FTE])), [Interval FTE])", "#,##0.0", "Average net scheduled FTE across selected intervals after governed time off.", "Capacity"),
-            m("Observed FTE", "AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], \"Interval FTE\", SUM('Staffing'[Observed FTE])), [Interval FTE])", "#,##0.0", "Average observed FTE across selected completed intervals.", "Capacity"),
-            m("Productive FTE", "AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], \"Interval FTE\", SUM('Staffing'[Productive FTE])), [Interval FTE])", "#,##0.0", "Average productive FTE across selected completed intervals.", "Capacity"),
-            m("Capacity Gap FTE", "MAX([Required FTE] - [Scheduled FTE], 0)", "#,##0.0", "Required FTE less scheduled FTE, floored at zero.", "Capacity"),
-            m("Observed Gap FTE", "MAX([Scheduled FTE] - [Observed FTE], 0)", "#,##0.0", "Scheduled FTE less observed FTE, floored at zero.", "Capacity"),
-            m("Coverage %", "DIVIDE([Scheduled FTE], [Required FTE])", "0.0%", "Scheduled FTE divided by required FTE.", "Capacity"),
+            m("Average Scheduled FTE", "AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], \"Interval FTE\", SUM('Staffing'[Scheduled FTE])), [Interval FTE])", "#,##0.0", "Average net scheduled FTE across selected intervals after governed time off.", "Capacity"),
+            m("Average Observed FTE", "AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], \"Interval FTE\", SUM('Staffing'[Observed FTE])), [Interval FTE])", "#,##0.0", "Average observed FTE across selected completed intervals.", "Capacity"),
+            m("Average Productive FTE", "AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], \"Interval FTE\", SUM('Staffing'[Productive FTE])), [Interval FTE])", "#,##0.0", "Average productive FTE across selected completed intervals.", "Capacity"),
+            m("Capacity Gap FTE", "MAX([Required FTE] - [Average Scheduled FTE], 0)", "#,##0.0", "Required FTE less average scheduled FTE, floored at zero.", "Capacity"),
+            m("Observed Gap FTE", "MAX([Average Scheduled FTE] - [Average Observed FTE], 0)", "#,##0.0", "Average scheduled FTE less average observed FTE, floored at zero.", "Capacity"),
+            m("Coverage %", "DIVIDE([Average Scheduled FTE], [Required FTE])", "0.0%", "Average scheduled FTE divided by required FTE.", "Capacity"),
         ),
     ),
     Table(
@@ -179,7 +179,7 @@ TABLES = (
             c("Gap Minutes", "int", True), c("Detected Issue"), c("Priority"), c("Confidence"),
             c("Suggested Activity"), c("Observed Source"), c("Reconciliation"), c("Source File"),
         ),
-        (m("Gap Minutes", "SUM('Attendance Gap'[Gap Minutes])", "#,##0", "Summed exact review-gap minutes.", "Attendance review"),),
+        (m("Total Gap Minutes", "SUM('Attendance Gap'[Gap Minutes])", "#,##0", "Summed exact review-gap minutes.", "Attendance review"),),
     ),
     Table(
         "PCS", "FactPCSAgentDay.csv", "Additive PCS and participation counters per governed agent day.",
@@ -197,8 +197,8 @@ TABLES = (
             m("PCS Average", "DIVIDE(SUM('PCS'[PCS Score Sum]), SUM('PCS'[Valid PCS]))", "0.00", "Ratio of summed PCS scores to summed valid responses.", "PCS"),
             m("PCS Participation %", "DIVIDE(SUM('PCS'[PCS Participation Responses]), SUM('PCS'[PCS Status Calls]))", "0.0%", "Summed participation responses divided by summed participation-eligible calls.", "PCS"),
             m("Valid PCS Responses", "SUM('PCS'[Valid PCS])", "#,##0", "Count of valid PCS responses.", "PCS"),
-            m("Low Score Responses", "SUM('PCS'[Low Score Responses])", "#,##0", "Responses inside the configured low-score band.", "PCS"),
-            m("Top Box Responses", "SUM('PCS'[Top Box Responses])", "#,##0", "Responses inside the configured top-box band.", "PCS"),
+            m("Low Score Response Count", "SUM('PCS'[Low Score Responses])", "#,##0", "Responses inside the configured low-score band.", "PCS"),
+            m("Top Box Response Count", "SUM('PCS'[Top Box Responses])", "#,##0", "Responses inside the configured top-box band.", "PCS"),
             m("PCS Index %", "DIVIDE([PCS Average], 5)", "0.0%", "PCS Average expressed against the five-point scale for cross-domain visual comparison.", "PCS"),
         ),
     ),
@@ -353,7 +353,7 @@ PAGES = (
     {
         "title": "PCS Performance & Coaching", "subtitle": "Daily and monthly PCS realization with exact low-score call IDs",
         "slicers": (("Date", "Date", "Date", "Between"), ("Management LOB", "Management LOB", "LOB", "Dropdown"), ("Employee", "Team Leader", "Team leader", "Dropdown"), ("Employee", "Agent", "Agent", "Dropdown")),
-        "cards": (("PCS", "PCS Average"), ("PCS", "PCS Participation %"), ("PCS", "Valid PCS Responses"), ("PCS", "Low Score Responses")),
+        "cards": (("PCS", "PCS Average"), ("PCS", "PCS Participation %"), ("PCS", "Valid PCS Responses"), ("PCS", "Low Score Response Count")),
         "charts": (
             ("lineChart", "Daily PCS index and participation", ("Date", "Date"), (("PCS", "PCS Index %"), ("PCS", "PCS Participation %")), None),
             ("clusteredColumnChart", "PCS performance by LOB", ("Management LOB", "Management LOB"), (("PCS", "PCS Average"),), None),
@@ -363,12 +363,12 @@ PAGES = (
     {
         "title": "Staffing & Capacity", "subtitle": "Required, scheduled and observed capacity at native 15-minute grain",
         "slicers": (("Date", "Date", "Date", "Between"), ("Management LOB", "Management LOB", "LOB", "Dropdown"), ("Staffing", "LOB", "Roster LOB", "Dropdown"), ("Staffing", "Language", "Language", "Dropdown")),
-        "cards": (("Staffing", "Scheduled FTE"), ("Forecast", "Required FTE"), ("Staffing", "Capacity Gap FTE"), ("Staffing", "Coverage %")),
+        "cards": (("Staffing", "Average Scheduled FTE"), ("Forecast", "Required FTE"), ("Staffing", "Capacity Gap FTE"), ("Staffing", "Coverage %")),
         "charts": (
-            ("lineChart", "Intraday required vs scheduled FTE", ("Time", "Time Label"), (("Forecast", "Required FTE"), ("Staffing", "Scheduled FTE")), None),
-            ("clusteredColumnChart", "Capacity gap by LOB", ("Management LOB", "Management LOB"), (("Forecast", "Required FTE"), ("Staffing", "Scheduled FTE")), None),
+            ("lineChart", "Intraday required vs scheduled FTE", ("Time", "Time Label"), (("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE")), None),
+            ("clusteredColumnChart", "Capacity gap by LOB", ("Management LOB", "Management LOB"), (("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE")), None),
         ),
-        "table": ("Capacity control", (("Staffing", "LOB"), ("Staffing", "Language"), ("Staffing", "Staffing State"), ("Staffing", "Scheduled FTE"), ("Staffing", "Observed FTE"), ("Staffing", "Capacity Gap FTE"))),
+        "table": ("Capacity control", (("Staffing", "LOB"), ("Staffing", "Language"), ("Staffing", "Staffing State"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "Average Observed FTE"), ("Staffing", "Capacity Gap FTE"))),
     },
     {
         "title": "Absence & Shrinkage", "subtitle": "Final Verint Activities result with transparent components and review cases",
@@ -416,6 +416,13 @@ def _m_string(value: str) -> str:
 
 
 def _table_tmdl(spec: Table) -> str:
+    measure_names = {measure.name.casefold() for measure in spec.measures}
+    column_names = {column.name.casefold() for column in spec.columns}
+    collisions = sorted(measure_names & column_names)
+    if collisions:
+        raise ValueError(
+            f"Power BI table {spec.name!r} has measure/column name collisions: {collisions}"
+        )
     kind_map = {"string": "string", "int": "int64", "decimal": "decimal", "date": "dateTime"}
     m_map = {"string": "type text", "int": "Int64.Type", "decimal": "type number", "date": "type date"}
     lines = [f"/// {spec.description}", f"table {_quoted(spec.name)}", ""]
@@ -807,7 +814,7 @@ def build() -> Path:
         PROJECT_ROOT / f"{PROJECT_NAME}.pbip",
         {"$schema": "https://developer.microsoft.com/json-schemas/fabric/pbip/pbipProperties/1.0.0/schema.json", "version": "1.0", "artifacts": [{"report": {"path": f"{PROJECT_NAME}.Report"}}], "settings": {"enableAutoRecovery": True}},
     )
-    (PROJECT_ROOT / "PROJECT_VERSION.txt").write_text("1\n", encoding="utf-8")
+    (PROJECT_ROOT / "PROJECT_VERSION.txt").write_text("2\n", encoding="utf-8")
     (PROJECT_ROOT / "README.txt").write_text(
         "WFMHUB BI\n=========\n\n"
         "Open WFMHub BI.pbip with Microsoft Power BI Desktop, then choose Home > Refresh.\n"

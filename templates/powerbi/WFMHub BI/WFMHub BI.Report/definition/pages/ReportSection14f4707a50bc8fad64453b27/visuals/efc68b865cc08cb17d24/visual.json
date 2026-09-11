@@ -55,11 +55,11 @@
                       "Entity": "Staffing"
                     }
                   },
-                  "Property": "Scheduled FTE"
+                  "Property": "Average Scheduled FTE"
                 }
               },
-              "queryRef": "Staffing.Scheduled FTE",
-              "nativeQueryRef": "Scheduled FTE"
+              "queryRef": "Staffing.Average Scheduled FTE",
+              "nativeQueryRef": "Average Scheduled FTE"
             }
           ]
         }

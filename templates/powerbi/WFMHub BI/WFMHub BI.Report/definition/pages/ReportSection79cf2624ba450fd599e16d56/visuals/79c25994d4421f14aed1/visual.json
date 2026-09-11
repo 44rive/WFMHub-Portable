@@ -23,11 +23,11 @@
                       "Entity": "PCS"
                     }
                   },
-                  "Property": "Low Score Responses"
+                  "Property": "Low Score Response Count"
                 }
               },
-              "queryRef": "PCS.Low Score Responses",
-              "nativeQueryRef": "Low Score Responses"
+              "queryRef": "PCS.Low Score Response Count",
+              "nativeQueryRef": "Low Score Response Count"
             }
           ]
         }
@@ -79,7 +79,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Low Score Responses'"
+                  "Value": "'Low Score Response Count'"
                 }
               }
             }

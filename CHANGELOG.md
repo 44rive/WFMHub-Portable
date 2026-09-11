@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.29.2 - 2026-09-11
+
+- Fix Power BI semantic-model load failures caused by measure and source-column
+  names colliding inside the Staffing, Attendance Gap and PCS tables.
+- Update every affected DAX and report visual binding and force a governed Power
+  BI project upgrade so the invalid installed project is archived and replaced.
+- Reject future measure/column name collisions during project generation and in
+  the automated test suite.
+
 ## 0.29.1 - 2026-09-11
 
 - Fix `POWERBI.cmd` failing with `bad escape \U` when WFMHub is installed

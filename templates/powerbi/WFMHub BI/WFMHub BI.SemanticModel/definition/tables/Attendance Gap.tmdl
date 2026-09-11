@@ -2,7 +2,7 @@
 table 'Attendance Gap'
 
 	/// Summed exact review-gap minutes.
-	measure 'Gap Minutes' = ```
+	measure 'Total Gap Minutes' = ```
 			SUM('Attendance Gap'[Gap Minutes])
 			```
 		formatString: #,##0

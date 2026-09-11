@@ -2,43 +2,43 @@
 table 'Staffing'
 
 	/// Average net scheduled FTE across selected intervals after governed time off.
-	measure 'Scheduled FTE' = ```
+	measure 'Average Scheduled FTE' = ```
 			AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Scheduled FTE])), [Interval FTE])
 			```
 		formatString: #,##0.0
 		displayFolder: 'Capacity'
 
 	/// Average observed FTE across selected completed intervals.
-	measure 'Observed FTE' = ```
+	measure 'Average Observed FTE' = ```
 			AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Observed FTE])), [Interval FTE])
 			```
 		formatString: #,##0.0
 		displayFolder: 'Capacity'
 
 	/// Average productive FTE across selected completed intervals.
-	measure 'Productive FTE' = ```
+	measure 'Average Productive FTE' = ```
 			AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Productive FTE])), [Interval FTE])
 			```
 		formatString: #,##0.0
 		displayFolder: 'Capacity'
 
-	/// Required FTE less scheduled FTE, floored at zero.
+	/// Required FTE less average scheduled FTE, floored at zero.
 	measure 'Capacity Gap FTE' = ```
-			MAX([Required FTE] - [Scheduled FTE], 0)
+			MAX([Required FTE] - [Average Scheduled FTE], 0)
 			```
 		formatString: #,##0.0
 		displayFolder: 'Capacity'
 
-	/// Scheduled FTE less observed FTE, floored at zero.
+	/// Average scheduled FTE less average observed FTE, floored at zero.
 	measure 'Observed Gap FTE' = ```
-			MAX([Scheduled FTE] - [Observed FTE], 0)
+			MAX([Average Scheduled FTE] - [Average Observed FTE], 0)
 			```
 		formatString: #,##0.0
 		displayFolder: 'Capacity'
 
-	/// Scheduled FTE divided by required FTE.
+	/// Average scheduled FTE divided by required FTE.
 	measure 'Coverage %' = ```
-			DIVIDE([Scheduled FTE], [Required FTE])
+			DIVIDE([Average Scheduled FTE], [Required FTE])
 			```
 		formatString: 0.0%
 		displayFolder: 'Capacity'

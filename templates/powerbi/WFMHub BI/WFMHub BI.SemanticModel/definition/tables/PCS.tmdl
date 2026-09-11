@@ -23,14 +23,14 @@ table 'PCS'
 		displayFolder: 'PCS'
 
 	/// Responses inside the configured low-score band.
-	measure 'Low Score Responses' = ```
+	measure 'Low Score Response Count' = ```
 			SUM('PCS'[Low Score Responses])
 			```
 		formatString: #,##0
 		displayFolder: 'PCS'
 
 	/// Responses inside the configured top-box band.
-	measure 'Top Box Responses' = ```
+	measure 'Top Box Response Count' = ```
 			SUM('PCS'[Top Box Responses])
 			```
 		formatString: #,##0

@@ -87,6 +87,21 @@ class PowerBIProjectTests(unittest.TestCase):
                         self.assertIn(match[0], fields)
                         self.assertIn(match[1], fields[match[0]])
 
+    def test_no_table_has_a_measure_and_column_with_the_same_name(self):
+        model_root = TEMPLATE / f"{PROJECT_NAME}.SemanticModel" / "definition" / "tables"
+        for path in model_root.glob("*.tmdl"):
+            text = path.read_text(encoding="utf-8")
+            measures = {
+                match.casefold()
+                for match in re.findall(r"^\tmeasure '([^']+)' =", text, re.MULTILINE)
+            }
+            columns = {
+                match.casefold()
+                for match in re.findall(r"^\tcolumn '([^']+)'$", text, re.MULTILINE)
+            }
+            with self.subTest(table=path.stem):
+                self.assertFalse(measures & columns)
+
     @staticmethod
     def _bindings(value, binding_type: str):
         if isinstance(value, dict):
@@ -129,7 +144,9 @@ class PowerBIProjectTests(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
 
             source_root = home / "templates" / "powerbi" / PROJECT_NAME
-            (source_root / "PROJECT_VERSION.txt").write_text("2\n", encoding="utf-8")
+            version_file = source_root / "PROJECT_VERSION.txt"
+            next_version = int(version_file.read_text(encoding="utf-8").strip()) + 1
+            version_file.write_text(f"{next_version}\n", encoding="utf-8")
             third = install_powerbi_project(config)
             self.assertTrue(third.upgraded)
             self.assertIsNotNone(third.archived)
