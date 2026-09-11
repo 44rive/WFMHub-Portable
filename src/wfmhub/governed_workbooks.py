@@ -746,7 +746,7 @@ def build_final_absence_workbook(
                 ("Absence agent-days", absence_days, "integer"),
             ],
             [
-                "This is a legacy compatibility projection. Current reviewed absence originates from schedule, Agent Status, LILO fallback, PTO/Away, and imported Gap-ID decisions.",
+                "This legacy view now reads the Activities-final mart. Agent Status and LILO remain operational attendance evidence only.",
                 f"Daily planned net and every classified numerator are capped at {rulebook.standard_day_hours:g} hours. Overlapping Activities are unioned before daily totals.",
                 f"Vacation: {vacation / 60:,.2f} h  |  unpaid: {unpaid / 60:,.2f} h  |  unmapped review: {unmapped / 60:,.2f} h.",
                 "Event rows are audit evidence and may overlap across categories. Use AGENT_DAY or LOB_MONTH for totals; do not sum ACTIVITY_EVENTS into a headline KPI.",

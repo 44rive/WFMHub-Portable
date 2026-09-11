@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import socket
 import sqlite3
+import tomllib
 from contextlib import contextmanager
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
-from .config import Config, ConfigError
+from .config import Config, ConfigError, load_config
 
 
 class HubLockedError(RuntimeError):
@@ -352,3 +354,117 @@ def backup_database(config: Config) -> Path:
         raise FileNotFoundError(f"Database does not exist yet: {config.database}")
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     return _backup_to(config, config.backups / f"wfm_{stamp}.sqlite3")
+
+
+def adopt_portable_install(new_home: Path, old_home: Path) -> tuple[Path, list[str]]:
+    """Move persistent user state into a newly extracted program release.
+
+    Release ZIPs intentionally contain no database or user-owned configuration.
+    This helper copies that state once, validates the SQLite backup, and then
+    applies only the numbered migrations missing from the existing database.
+    Source extracts and the old installation are never modified.
+    """
+
+    new_home = new_home.resolve()
+    old_home = old_home.resolve()
+    if new_home == old_home:
+        raise ValueError(
+            "This is the same WFMHub folder. Run SETUP.cmd instead; it upgrades "
+            "the existing database in place."
+        )
+    old_config = old_home / "config" / "wfmhub.toml"
+    if not old_config.is_file():
+        raise FileNotFoundError(f"Previous WFMHub config not found: {old_config}")
+    try:
+        raw = tomllib.loads(old_config.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise DatabaseFormatError(f"Cannot read previous WFMHub config: {exc}") from exc
+    old_database_value = str(
+        raw.get("paths", {}).get("database", "_system/database/wfm.sqlite3")
+    )
+    old_database = Path(old_database_value).expanduser()
+    if not old_database.is_absolute():
+        old_database = old_home / old_database
+    old_database = old_database.resolve()
+    if not old_database.is_file():
+        raise FileNotFoundError(f"Previous WFMHub database not found: {old_database}")
+    _validate_database_file(old_database)
+
+    target_database = new_home / "_system" / "database" / "wfm.sqlite3"
+    if target_database.exists() and target_database.stat().st_size:
+        raise FileExistsError(
+            f"The new folder already contains a database: {target_database}. "
+            "WFMHub refused to overwrite it."
+        )
+    target_database.parent.mkdir(parents=True, exist_ok=True)
+    partial_database = target_database.with_name(".wfm.sqlite3.upgrade.partial")
+    partial_database.unlink(missing_ok=True)
+    source_uri = old_database.as_uri() + "?mode=ro"
+    source = sqlite3.connect(source_uri, uri=True)
+    destination = sqlite3.connect(partial_database)
+    try:
+        result = source.execute("PRAGMA quick_check").fetchone()[0]
+        if str(result).lower() != "ok":
+            raise DatabaseFormatError(
+                f"Previous SQLite quick check failed for {old_database}: {result}"
+            )
+        source.backup(destination)
+        result = destination.execute("PRAGMA quick_check").fetchone()[0]
+        if str(result).lower() != "ok":
+            raise DatabaseFormatError(
+                f"Copied SQLite quick check failed for {partial_database}: {result}"
+            )
+        destination.close()
+        destination = None
+        partial_database.replace(target_database)
+    except Exception:
+        partial_database.unlink(missing_ok=True)
+        raise
+    finally:
+        source.close()
+        if destination is not None:
+            destination.close()
+
+    new_config_dir = new_home / "config"
+    new_config_dir.mkdir(parents=True, exist_ok=True)
+    user_config_names = (
+        "wfmhub.toml", "wfm_rules.toml", "metric_catalog.toml",
+        "analytics_rules.toml", "report_catalog.toml", "queue_mapping.csv",
+        "service_profiles.toml",
+    )
+    for name in user_config_names:
+        source_file = old_home / "config" / name
+        target_file = new_config_dir / name
+        if not source_file.is_file() or target_file.exists():
+            continue
+        shutil.copy2(source_file, target_file)
+    copied_config = new_config_dir / "wfmhub.toml"
+    if copied_config.is_file():
+        config_text = copied_config.read_text(encoding="utf-8")
+        config_text = re.sub(
+            r'(?m)^(\s*database\s*=\s*)"[^"]*"\s*$',
+            r'\1"_system/database/wfm.sqlite3"',
+            config_text,
+            count=1,
+        )
+        copied_config.write_text(config_text, encoding="utf-8")
+
+    # Preserve collaboration workbooks and custom jobs without overwriting any
+    # file already present in the new release folder.
+    for relative in (Path("Reports"), Path("_system/custom"), Path("custom")):
+        source_folder = old_home / relative
+        if not source_folder.is_dir():
+            continue
+        target_folder = new_home / (Path("_system/custom") if relative == Path("custom") else relative)
+        for source_file in source_folder.rglob("*"):
+            if not source_file.is_file():
+                continue
+            target_file = target_folder / source_file.relative_to(source_folder)
+            if target_file.exists():
+                continue
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, target_file)
+
+    config = load_config(new_home)
+    applied = migrate(config)
+    return target_database, applied

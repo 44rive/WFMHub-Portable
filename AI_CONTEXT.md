@@ -1,8 +1,8 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.5.3`
-Applies to: WFMHub `0.27.4` and later
-Last reviewed: `2026-09-10`
+Context version: `1.6.0`
+Applies to: WFMHub `0.28.0` and later
+Last reviewed: `2026-09-11`
 
 Read this file before proposing or changing WFMHub. When details are needed,
 follow the authoritative files listed below. Do not reconstruct decisions from
@@ -78,7 +78,7 @@ tenant construction and deployment are pending.
 | FTE Count Agent | identity, organisation, FTE, Active/Leaver scope |
 | FTE Count PTO/Away | planned time-off precedence and future capacity |
 | Verint StartEndTimes | scheduled shift start/end |
-| Verint Activities | Shift Assignment boundary fallback only; not attendance evidence |
+| Verint Activities | Final post-day absence/shrinkage codes; Shift Assignment boundary fallback |
 | Storm Agent Status | primary observed attendance, gaps, breaks and meals |
 | Storm LILO | fallback presence/control when Agent Status coverage is missing |
 | Storm Call by Call | Service Flash, call workload and PCS call legs |
@@ -97,7 +97,9 @@ mapping so abandoned demand is not lost.
 - Row dates win over filename dates. Multi-day files are valid.
 - Missing evidence is unknown, never zero and never automatically No Show.
 - Agent Status is attendance authority; LILO is fallback/control.
-- Verint Activities do not create attendance, absence, or correction truth.
+- Verint Activities never create observed presence, same-day attendance, or gaps.
+- Final Absenteeism uses mapped Verint Activities after the day; empty or
+  incompletely coded shifts remain explicit review cases.
 - Today’s unfinished shift tail is never Early Leave.
 - A person who leaves and returns has an internal exact gap, not one continuous
   early leave.
@@ -134,11 +136,13 @@ Pipeline:
 
 ```text
 untouched extract -> parser/scope gate -> immutable raw/core -> additive marts
-                  -> configured metrics/findings -> focused Excel product
+                  -> configured metrics/findings -> Excel + fixed Power BI feeds
 ```
 
 SQLite uses transactions, WAL, integrity checks, a single-writer lock and
-versioned migrations. Logical table names are translated by the database facade.
+versioned migrations. Releases never ship or recreate user data. `SETUP.cmd`
+upgrades the same database in place; `UPGRADE.cmd` safely adopts it when a new
+release was extracted into another folder. Logical table names are translated by the database facade.
 The detailed grains and incremental/atomic refresh rules are in
 `docs/ARCHITECTURE.md` and `docs/CLEAN_DATA_CONTRACT.md`.
 
@@ -159,6 +163,8 @@ worksheet. The targeted Hub update ingests FTE/Call by Call, refreshes the PCS
 mart, and atomically replaces the feeds. Desktop Excel then uses **Data >
 Refresh All**. `OVERVIEW` reads four hidden staging tables through classic
 exact lookups; its four dropdowns cascade Period → LOB → Team Leader → Agent.
+Selector labels live on row 2 and their dedicated values on row 3 at A3, H3,
+O3 and V3 so adjacent merged cells cannot display another selector's value.
 Period contains the five operational presets, `All available`, and one
 `Month YYYY-MM` choice for every calendar month present in the PCS mart.
 `COACHING` reads a hidden cache through Period/LOB controls. `PERFORMANCE` is
@@ -173,6 +179,13 @@ Presentation formulas use the stable sheet-backed names `PCS_LOB_DATA`,
 `PCS_AGENT_DATA`, `PCS_DAILY_DATA`, and `PCS_COACH_DATA`. They must never
 directly reference a `tblPcs*` query destination because setup replaces those
 ListObjects and Excel rewrites direct references to `#REF!`.
+
+Complete updates atomically publish the governed Power BI star feed under
+`Feed\PowerBI`; its manifest is written last. Power BI never reads SQLite or
+raw extracts and never recalculates source classification. It relates stable
+dimensions and derives ratios only from summed additive counters. The PBIX is a
+Power BI Desktop-owned artifact; the portable runtime ships the theme, DAX and
+page build contract rather than fabricating a binary PBIX.
 
 Every current report first screen uses the measured grid in
 `src/wfmhub/excel_layout.py`: 28 equal 52-pixel columns, four equal KPI cards,
@@ -219,9 +232,12 @@ Documentation:
 - `docs/CLEAN_DATA_CONTRACT.md`
 - `docs/SERVICE_KPI_REFERENCE.md`
 - `docs/QUEUE_REFERENCE_CHANGE_2026-09-10.md`
+- `docs/REFERENCE_UPDATE_2026-09-11.md`
 - `docs/PCS_LOGIC.md`
 - `docs/ATTENDANCE_DECISION_LEDGER.md`
 - `docs/REPORT_DESIGN_SYSTEM.md`
+- `docs/POWERBI_WFMHUB_PERSPECTIVE.md`
+- `docs/POWERBI_PREMIUM_DESIGN_V1.md`
 
 ## Safe change protocol
 
@@ -243,7 +259,8 @@ Documentation:
 
 - Never guess or broaden queue membership.
 - Never revive APBE, APFR or APDE.
-- Never treat Verint Activities as observed attendance or final absence truth.
+- Never treat Verint Activities as observed attendance; use them only for the
+  separately labelled final post-day absence/shrinkage ledger.
 - Never call missing evidence a No Show.
 - Never mark today’s unfinished shift as Early Leave.
 - Never average rates or invent a target.

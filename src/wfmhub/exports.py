@@ -148,12 +148,12 @@ DATASETS: dict[str, ExportDataset] = {
         "SELECT * FROM mart.verint_final_exception WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start",
     ),
     "verint_final_absence_events": ExportDataset(
-        "verint_final_absence_events", "Compatibility projection of reviewed absence components.",
+        "verint_final_absence_events", "Mapped Verint Activities final absence/shrinkage components.",
         """SELECT * FROM mart.verint_final_absence_event
            WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start""",
     ),
     "verint_final_absence_day": ExportDataset(
-        "verint_final_absence_day", "Compatibility projection of reviewed absence per agent/day.",
+        "verint_final_absence_day", "Activities-final absence/shrinkage and completeness per agent/day.",
         """SELECT * FROM mart.verint_final_absence_agent_day
            WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id""",
     ),

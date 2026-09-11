@@ -235,6 +235,10 @@ class PCSWorkflowTests(unittest.TestCase):
                 self.assertEqual(workbook["OVERVIEW"]["A39"].value,
                                  "AGENT PERFORMANCE · CASCADING LOB → TEAM LEADER → AGENT")
                 self.assertEqual(len(workbook["OVERVIEW"].data_validations.dataValidation), 4)
+                self.assertEqual(workbook["OVERVIEW"]["A3"].value, "Current MTD")
+                self.assertEqual(workbook["OVERVIEW"]["H3"].value, "All")
+                self.assertEqual(workbook["OVERVIEW"]["O3"].value, "All")
+                self.assertEqual(workbook["OVERVIEW"]["V3"].value, "All")
                 self.assertTrue(workbook["OVERVIEW"]["A6"].value.startswith("=IFERROR(INDEX("))
                 self.assertIn("PCS_LOB_DATA", workbook["OVERVIEW"]["A6"].value)
                 self.assertNotIn("tblPcs", workbook["OVERVIEW"]["A6"].value)

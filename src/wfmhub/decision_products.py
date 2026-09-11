@@ -3435,12 +3435,12 @@ def build_final_absence_product_workbook(
         [start, end],
     ).fetchone()[0]
     status, status_text = _source_state(
-        conn, ("fte", "start_end", "lilo", "agent_status"), end, final=True,
+        conn, ("fte", "start_end", "activities"), end, final=True,
     )
     if unmapped:
-        status, status_text = "INCOMPLETE", f"{unmapped / 60:,.2f} exact gap hour(s) still need a human decision"
+        status, status_text = "INCOMPLETE", f"{unmapped / 60:,.2f} Verint Activities hour(s) are unmapped"
     elif uncoded_empty:
-        status, status_text = "INCOMPLETE", f"{uncoded_empty:,} scheduled shift(s) lack reliable attendance evidence"
+        status, status_text = "INCOMPLETE", f"{uncoded_empty:,} scheduled shift(s) have no final Verint code or reliable work evidence"
     elif exceptions:
         status, status_text = "INCOMPLETE", f"{exceptions:,} case(s) still require review"
 
@@ -3685,12 +3685,12 @@ def build_final_absence_product_workbook(
     )
     book.table(
         "ABSENCE_COMPONENTS", "Absence components",
-        "Overlapping reviewed intervals are counted once so component hours reconcile to the selected absence scope.",
+        "Overlapping final Verint Activities are counted once so component hours reconcile to the selected absence scope.",
         absence_headers, absence_components,
     )
     book.table(
         "SHRINKAGE_COMPONENTS", "Shrinkage components",
-        "Overlapping reviewed intervals are counted once inside the shrinkage view. Do not add this table to Absence Components.",
+        "Overlapping final Verint Activities are counted once inside the shrinkage view. Do not add this table to Absence Components.",
         shrinkage_headers, shrinkage_components,
     )
     _add_absence_component_view(book)
@@ -3709,8 +3709,8 @@ def build_final_absence_product_workbook(
         [data_start, latest],
     )
     book.table(
-        "ACTIVITY_DETAIL", "Reviewed attendance component detail",
-        "Exact classified decision and PTO/Away intervals. Use component sheets or ABSENCE_DATA for totals.",
+        "ACTIVITY_DETAIL", "Final Verint activity detail",
+        "Exact mapped Verint Activities intervals. Use component sheets or ABSENCE_DATA for totals.",
         activity_headers, activity_rows,
     )
 
@@ -3742,27 +3742,27 @@ def build_final_absence_product_workbook(
         "HELP", "How to use this report", "A short operating guide for the shared workbook.",
         ["Step", "What to do", "Why"],
         [
-            (1, "Run WFM Hub refresh and confirm the latest source date.", "Updates Agent Status, LILO, schedules and clean feeds."),
-            (2, "Build Attendance Review, classify exact gaps and import the saved workbook.", "Turns observed gaps into reviewed components."),
-            (3, "Use TEAM_VIEW for period, LOB, Team Leader and Agent selection.", "Agent results, cases and components follow one selection."),
-            (4, "For a permanent shared file, connect ABSENCE_DATA, ACTION_QUEUE and ACTIVITY_DETAIL once to the fixed CSV feeds.", "Data > Refresh All updates facts without replacing the workbook."),
-            (5, "Review Finalized coverage and unresolved cases before sharing totals.", "Open decisions must not dilute the rate."),
-            (6, "Use COMPONENT_VIEW for totals and ACTIVITY_DETAIL for exact intervals.", "Raw intervals may overlap; KPI components remain separate."),
+            (1, "Run WFM Hub refresh and confirm StartEndTimes and Activities are current.", "Rebuilds the separate final post-day ledger without using Activities as presence."),
+            (2, "Use TEAM_VIEW for period, LOB, Team Leader and Agent selection.", "Agent results, cases and components follow one selection."),
+            (3, "Review Finalized coverage and every non-final ledger status before sharing totals.", "Empty, unmapped, provisional and partial rows must not dilute the rate."),
+            (4, "Use COMPONENT_VIEW for totals and ACTIVITY_DETAIL for exact intervals.", "Raw intervals may overlap; KPI components remain separate."),
+            (5, "Use Attendance Review separately when operational Agent Status gaps need diagnosis.", "Observed gaps do not overwrite the final Verint coding."),
+            (6, "For a permanent shared file, connect ABSENCE_DATA, ACTION_QUEUE and ACTIVITY_DETAIL once to the fixed CSV feeds.", "Data > Refresh All updates facts without replacing the workbook."),
         ],
     )
     book.definitions([
         ("Absence rate", "Final absence minutes / finalized planned net minutes", "Payroll and attendance result", "Incomplete cases are shown separately"),
         ("Shrinkage rate", "Final shrinkage minutes / finalized planned net minutes", "Capacity loss", "A parallel view; do not add to absence rate"),
         ("Finalized coverage", "Finalized planned minutes / all planned minutes", "Confidence in the headline", "Review when below 100%"),
-        ("Pending review", "Observed exact gap with no imported Approved or Dismissed decision", "Review completeness", "Never treated as zero absence"),
-        ("Component", "One exclusive activity classification inside its KPI view", "Management breakdown", "Raw overlapping intervals are counted once"),
+        ("Review status", "Final ledger row with incomplete, unsupported or unmapped Verint coding", "Review completeness", "Never treated as zero absence"),
+        ("Component", "One exclusive final Verint activity classification inside its KPI view", "Management breakdown", "Raw overlapping intervals are counted once"),
     ])
     _add_absence_lookups(book)
     book.audit(_audit_rows(
         conn, config, "absence", start, end,
         (
             ("Shared feed", str(config.feed / "Absenteeism"), "Updated with this report"),
-            ("Template version", "absence-2026.09.2", "Collaboration report contract"),
+            ("Template version", "absence-2026.09.3", "Activities-final collaboration report contract"),
             ("All planned hours", all_planned / 60, f"{agent_days:,} agent-day row(s)"),
             ("All absence hours", all_absence / 60, "Includes review rows"),
             ("All shrinkage hours", all_shrinkage / 60, "Includes review rows"),

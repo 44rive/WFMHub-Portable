@@ -32,7 +32,7 @@ Technical files live under `_system`. You normally do not open that folder.
 | Staffing & Capacity Plan | Where is capacity missing now, and where will forecast demand exceed net schedules in future weeks? |
 | Realisations | How did actual volume, service, forecast, staffing, absence, and shrinkage perform across every mapped LOB and period? |
 | Attendance Review | Which exact completed-day gaps need an Approved or Dismissed human decision? |
-| Final Absenteeism | What do the reviewed decisions and PTO/Away registers produce for absence and shrinkage? |
+| Final Absenteeism | What has Verint finally coded for absence/shrinkage, and which shifts remain incomplete? |
 | Bonus Management | What did Bonus Matrix v1.2 calculate, and is it safe to release? |
 | PCS Report & Coaching | How are PCS, participation, low scores, and coaching moving by date, month, LOB, team, and agent? |
 
@@ -53,6 +53,7 @@ Rate never means agent availability.
 | Verint StartEndTimes | Preferred scheduled start/end and assignment boundaries |
 | Storm LILO | First/last presence evidence, including loaded blank rows |
 | Storm Agent Status | Observed attendance and interval staffing evidence |
+| Verint Activities | Final post-day absence/shrinkage codes only |
 | Verint Forecast | Forecast only |
 | Storm Call by Call | All mapped service actuals, Flash demand/service, agent call performance, and PCS |
 | Bonus Matrix v1.2 | Bonus inputs, KPI configuration, and source reconciliation |
@@ -63,8 +64,8 @@ a false no-show or zero.
 
 If a dedicated StartEndTimes file is unavailable, WFMHub can use a successfully
 parsed Shift Assignment boundary from an Activities export and raises a visible
-review finding. Activity intervals are not used for attendance, correction
-reconciliation, absence, or shrinkage.
+review finding. Activity intervals are never used as attendance or presence;
+they feed only the separate final post-day absence/shrinkage ledger.
 
 FTE scope is effective-dated: `Active` rows are admitted; `Leaver` rows are
 admitted only through `End date if leaver`; other statuses and undated leavers
@@ -85,7 +86,8 @@ attendance gaps are classified through the imported Attendance Review ledger.
 ## Windows quick start
 
 1. Download the portable release and choose **Extract All**.
-2. Double-click `SETUP.cmd` once.
+2. Double-click `SETUP.cmd` once. For a later release extracted into a different
+   folder, use `UPGRADE.cmd` and point it to the previous WFMHub folder.
 3. Paste the folder containing `FTE`, `Storm`, and `Verint`.
 4. Double-click `WFMHub.cmd`.
 5. Choose **Refresh source data once**.
@@ -96,6 +98,9 @@ attendance gaps are classified through the imported Attendance Review ledger.
 See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
 [Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the one-time PCS Power
 Query installation and the optional shared-Absenteeism setup.
+The [Power BI direction](docs/POWERBI_WFMHUB_PERSPECTIVE.md) and
+[premium page specification](docs/POWERBI_PREMIUM_DESIGN_V1.md) describe the
+governed `Feed\PowerBI` model and seven approved pages.
 
 The approved visual contract is in the
 [report design system](docs/REPORT_DESIGN_SYSTEM.md), with a data-free
@@ -105,7 +110,7 @@ developers and assistants must start with [AI_CONTEXT.md](AI_CONTEXT.md).
 ## RTM Daily Control
 
 `Reports\RTM Daily Control.xlsx` is the single same-day operating file. It
-reconstructs the four visual references in `TOLEARN\Book1.xlsx` as native Excel
+implements the approved four-LOB Flash layout as native Excel
 sheets for RSA NL, RSA BE, Ford NL, and Ford OEM France. `CONTROL` gives the
 cross-LOB state. Each LOB sheet contains its hourly service table and its own
 reconciling attendance/call list. `ISSUES & DRIVERS` contains only actionable
@@ -116,10 +121,10 @@ Actual demand comes from exact queues in `queue_mapping.csv`. WFMHub counts each
 mapped inbound queue entry, matching Storm `Total Entered`; outbound companion
 legs are ignored. A transfer entering another displayed queue is therefore a
 new queue entry. Each Flash uses an exact reviewed queue allowlist: RSA NL has
-30 queues, RSA BE has its 36 reviewed queues plus six transferred Ford-FR
-queues, Ford NL has six queues, and Ford FR/OEM now keeps only
-`APFR_PAR_RSA_CSTRUCTR_FORD_ASSISTANCE_FR`. PCS stays limited to the
-effective-dated FTE roster.
+the 23 queues marked `SL Related = Y` in the supplied reference, RSA BE has 43
+queues, Ford NL has six queues, and Ford FR/OEM has the exact Ford Assistance,
+Toyota/Lexus and Chery Assistance queues. PCS stays limited to the effective-
+dated FTE roster.
 
 Verint Forecast supplies forecast only. New 15-minute exports stay at their
 native grain for Staffing and are rolled into hours for RTM. Hourly
@@ -206,7 +211,8 @@ hidden by default because normal reviewers do not need to operate those sheets.
 them with the configurable break and meal allowances, and raises an overrun
 only when source coverage is sufficient.
 
-`Reports\Final Absenteeism.xlsx` follows the same long-lived-file principle.
+`Reports\Final Absenteeism.xlsx` follows the same long-lived-file principle and
+uses final mapped Verint Activities, clipped to StartEndTimes shifts.
 `TEAM_VIEW` filters agent results and review cases; `COMPONENT_VIEW` explains
 absence and shrinkage by reviewed category; `ACTIVITY_DETAIL` holds exact
 start/end evidence. The blue `ACTIONS` table is the permanent team-owned log
@@ -245,6 +251,8 @@ its metric, comparison, and evidence filter.
 
 Attendance/absence refreshes update the fixed Absenteeism CSV feeds under
 `Feed`. PCS updates its own six governed fixed CSV feeds under `Feed\PCS`.
+Every complete update also replaces the fixed star-model feeds under
+`Feed\PowerBI`; Power BI only refreshes those governed outputs.
 **Export clean data** produces any additional CSV or
 XLSX dataset you request for a selected period. Large call datasets should use
 CSV. The original extract is unchanged.

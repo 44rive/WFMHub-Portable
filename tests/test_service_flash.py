@@ -7,6 +7,8 @@ from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
+from openpyxl import load_workbook
+
 from wfmhub.database import DatabaseConnection, _migration_statements
 from wfmhub.mapping import load_queue_mapping
 from wfmhub.metrics import evaluate_metric, load_metric_catalog
@@ -33,6 +35,32 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class CallServiceModelTests(unittest.TestCase):
+    def test_rsa_nl_flash_matches_supplied_sl_related_reference_exactly(self):
+        reference = load_workbook(
+            REPO / "attachments" / "REF.xlsx", read_only=True, data_only=True,
+        )
+        try:
+            rows = reference["Queues Ref"].iter_rows(values_only=True)
+            headers = [str(value or "").strip() for value in next(rows)]
+            queue_col = headers.index("Queue")
+            lob_col = headers.index("LOB")
+            related_col = headers.index("SL Related")
+            expected = {
+                str(row[queue_col]).strip()
+                for row in rows
+                if str(row[lob_col] or "").strip() == "RSA NL"
+                and str(row[related_col] or "").strip().upper() == "Y"
+            }
+        finally:
+            reference.close()
+        catalog = load_service_profiles(
+            REPO, REPO / "config" / "default_service_profiles.toml",
+        )
+        self.assertEqual(
+            set(catalog.select("rsa_nl", date(2026, 9, 1)).flash_queues),
+            expected,
+        )
+
     def test_attendance_pulse_counts_only_reliable_current_gaps(self):
         raw = sqlite3.connect(
             ":memory:",
@@ -283,15 +311,21 @@ class CallServiceModelTests(unittest.TestCase):
             ford_nl, {"queue": "APBN_BRU_MOBILITY_Ford_Assistance_FR"},
         ))
         rsa_nl = catalog.select("rsa_nl", date(2026, 9, 1))
-        self.assertEqual(len(rsa_nl.flash_queues), 30)
+        self.assertEqual(len(rsa_nl.flash_queues), 23)
         self.assertTrue(_included_in_flash_total(
             rsa_nl, {"queue": "APBN_AMS_MOBILITY_INSURAN_Front_NL"},
         ))
         self.assertTrue(_included_in_flash_total(
-            rsa_nl, {"queue": "APBN_AMS_MOBILITY_PROVIDER_Local_NL"},
+            rsa_nl, {"queue": "APBN_AMS_MOBILITY_INSURAN_AllianzNetherlandsAlarm_NL"},
         ))
         self.assertTrue(_included_in_flash_total(
             rsa_nl, {"queue": "APBN_AMS_RSA_Ford_Assistance_NL"},
+        ))
+        self.assertTrue(_included_in_flash_total(
+            rsa_nl, {"queue": "APBN_AMS_RSA_OEM_Toyota_NL"},
+        ))
+        self.assertFalse(_included_in_flash_total(
+            rsa_nl, {"queue": "APBN_AMS_MOBILITY_PROVIDER_Local_NL"},
         ))
         self.assertFalse(_included_in_flash_total(
             rsa_nl, {"queue": "APBN_AMS_MOBILITY_VARIOUS_VariousAssist_NL"},

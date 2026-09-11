@@ -2537,65 +2537,6 @@ def _build_absence(
     return len(day_rows), len(event_rows)
 
 
-def _sync_reviewed_absence_compatibility(conn: DatabaseConnection) -> tuple[int, int]:
-    """Keep old table contracts readable while reviewed marts are authoritative.
-
-    These physical tables used to be built from Verint Activities.  They now
-    contain a transparent projection of the decision-led attendance ledger so
-    existing reports and Excel feeds can transition without a flag day.
-    """
-
-    conn.execute("DELETE FROM mart.verint_final_absence_event")
-    conn.execute("DELETE FROM mart.verint_final_absence_agent_day")
-    conn.execute(
-        """INSERT INTO mart.verint_final_absence_event (
-               event_key, agent_day_key, business_date, agent_id, agent_name,
-               team_leader, ops_manager, lob, market, language, location,
-               activity, category, event_start, event_end, minutes, hours,
-               counts_as_absence, counts_as_vacation, counts_as_unpaid,
-               counts_as_shrinkage, mapped, evidence_type, source_file,
-               rule_version, rule_sha256
-           )
-           SELECT event_key, agent_day_key, business_date, agent_id, agent_name,
-                  team_leader, ops_manager, lob, market, language, location,
-                  activity, category, event_start, event_end, minutes, hours,
-                  counts_as_absence, counts_as_vacation, counts_as_unpaid,
-                  counts_as_shrinkage, mapped, evidence_type, source_file,
-                  rule_version, rule_sha256
-           FROM mart.absence_event"""
-    )
-    conn.execute(
-        """INSERT INTO mart.verint_final_absence_agent_day (
-               agent_day_key, business_date, agent_id, agent_name, team_leader,
-               ops_manager, lob, market, language, location, scheduled_minutes,
-               planned_net_minutes, final_absence_minutes,
-               final_vacation_minutes, final_unpaid_minutes,
-               final_shrinkage_minutes, final_unmapped_minutes,
-               final_absence_hours, final_absence_rate, final_absence_day,
-               final_ledger_status, rule_version, rule_sha256
-           )
-           SELECT d.agent_day_key, d.business_date, d.agent_id, d.agent_name,
-                  d.team_leader, d.ops_manager, d.lob, d.market, d.language,
-                  d.location, d.scheduled_minutes, d.planned_net_minutes,
-                  d.absence_minutes, d.vacation_minutes, d.unpaid_minutes,
-                  d.shrinkage_minutes, d.unverified_minutes,
-                  d.absence_minutes/60.0, d.absence_rate, d.absence_day,
-                  CASE
-                    WHEN coalesce(a.is_provisional,false) THEN 'PROVISIONAL_DAY'
-                    WHEN d.unverified_minutes>0 THEN 'PENDING_REVIEW'
-                    WHEN d.absence_minutes>0 THEN 'ABSENCE_RECORDED'
-                    ELSE 'CLEAR'
-                  END,
-                  d.rule_version, d.rule_sha256
-           FROM mart.absence_agent_day d
-           LEFT JOIN mart.attendance_agent_day a
-             ON a.agent_day_key=d.agent_day_key"""
-    )
-    events = conn.execute("SELECT count(*) FROM mart.verint_final_absence_event").fetchone()[0]
-    days = conn.execute("SELECT count(*) FROM mart.verint_final_absence_agent_day").fetchone()[0]
-    return events, days
-
-
 SERVICE_COLUMNS = [
     "business_date", "interval_start", "hour_start", "source_system", "queue",
     "business_partner", "lob", "language", "offered", "answered", "abandoned",
@@ -3295,8 +3236,10 @@ def refresh_models(
         absence, absence_events = _build_absence(
             conn, config, rulebook, metric_catalog, attendance, corrections,
         )
-        stage(16, "Publishing reviewed attendance ledger")
-        final_absence_events, final_absence = _sync_reviewed_absence_compatibility(conn)
+        stage(16, "Building final absence from Verint Activities")
+        final_absence_events, final_absence = _build_verint_final_absence(
+            conn, rulebook, metric_catalog, start, end, evaluation_as_of,
+        )
         stage(17, "Building Call-by-Call service performance and flashes")
         call_service = _build_call_service(
             conn, rulebook, metric_catalog, mapping, start, end,

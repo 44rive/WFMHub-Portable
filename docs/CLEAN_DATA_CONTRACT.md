@@ -14,14 +14,16 @@ eligible through their populated leave date.
 | Storm Agent Status | Primary within-shift attendance evidence |
 | Storm LILO | Missing-coverage fallback and first/last/blank-row control |
 | Attendance Review decisions | Human category for one exact observed gap |
+| Verint Activities | Final post-day absence/shrinkage codes; never observed presence |
 | Verint Forecast | Forecast and required staffing only; native 15/60-minute grain retained |
 | Storm Call by Call | All mapped service actuals, Flashes, agent call performance and PCS |
 
 APBE, APFR and APDE are retired: no directory is discovered, required, loaded or
 calculated. Historical raw tables remain physically readable so upgrading is
-non-destructive. Activities intervals are ignored. A parsed Activities Shift
-Assignment may be used only as a visibly flagged emergency schedule boundary
-when StartEndTimes is missing.
+non-destructive. Activities event intervals are excluded from Attendance/RTM
+and are used only by the separate final post-day absence ledger. A parsed
+Activities Shift Assignment may also be used as a visibly flagged emergency
+schedule boundary when StartEndTimes is missing.
 
 ## Key datasets
 
@@ -50,8 +52,9 @@ fixed schemas to `_PCS_FILTERS`, `_PCS_LOB`, `_PCS_AGENT`, `_PCS_DAILY`,
 
 Legacy-named exports remain callable so existing jobs do not break.
 `yesterday_gap_actions` covers the entire selected completed period, not only
-yesterday. `mart.verint_final_absence_*` is currently a compatibility projection
-of `mart.absence_*`; Verint Activities do not supply its values.
+yesterday. `mart.verint_final_absence_*` is sourced from mapped Verint Activities
+inside the StartEndTimes shift boundary. It stays separate from the observed,
+decision-led `mart.absence_*` control tables.
 
 ## Attendance and decision semantics
 

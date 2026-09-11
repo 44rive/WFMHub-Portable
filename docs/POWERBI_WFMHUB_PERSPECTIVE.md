@@ -56,12 +56,12 @@ conflicting results.
 - `DimEmployee`
 - `DimLOB`
 - `DimQueue`
-- `FactService15Min`
-- `FactForecast15Min`
+- `FactServiceHour`
+- `FactForecastInterval`
 - `FactAttendanceDay`
 - `FactAttendanceGap`
 - `FactPCSAgentDay`
-- `FactPCSCall`
+- `FactPCSCoaching`
 - `FactTimeOff`
 - `FactStaffing15Min`
 - `FactBonusMonth`
@@ -76,6 +76,15 @@ Absence % = SUM(Absence Hours) / SUM(Scheduled Hours)
 ```
 
 Percentages must be recalculated from summed components, never averaged.
+
+## Implemented output
+
+Every complete Hub update now atomically refreshes `Feed\PowerBI` with fixed
+dimension/fact CSVs and writes `POWERBI_MANIFEST_CURRENT.csv` last. The
+`_SETUP` subfolder contains the premium WFMHub theme, governed DAX measures and
+the seven-page build map. Power BI Desktop setup is one-time; daily operation is
+Hub **UPDATE**, then Power BI **Refresh**. The binary PBIX remains a Power BI
+Desktop-owned file and is not synthesized by the portable Python runtime.
 
 ## What should remain in Excel
 

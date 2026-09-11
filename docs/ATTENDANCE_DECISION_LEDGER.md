@@ -61,11 +61,11 @@ white evidence cell in Excel cannot alter the stored gap.
 - Overlapping intervals are unioned before totals; they are never added twice.
 - Absence and shrinkage are parallel measures and must not be added together.
 
-The authoritative outputs are `mart.absence_event` at exact interval grain and
-`mart.absence_agent_day` at agent/day grain. Tables whose names begin
-`mart.verint_final_absence_` are temporary compatibility projections of those
-reviewed marts for existing Excel feeds; Verint Activities no longer supply
-their values.
+The observed-review outputs are `mart.absence_event` at exact interval grain
+and `mart.absence_agent_day` at agent/day grain. The separate
+`mart.verint_final_absence_*` tables use final mapped Verint Activities after
+the day. Attendance Review decisions diagnose and document operational gaps;
+they do not overwrite or masquerade as the final Verint coding.
 
 ## Audit controls
 

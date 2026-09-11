@@ -12,7 +12,10 @@ from unittest.mock import patch
 from openpyxl import Workbook
 
 from wfmhub.config import ensure_user_config, load_config, write_source_root
-from wfmhub.database import DatabaseFormatError, backup_database, connect, migrate, write_session
+from wfmhub.database import (
+    DatabaseFormatError, adopt_portable_install, backup_database, connect,
+    migrate, write_session,
+)
 from wfmhub.ingestion import AgentScope, ingest_all
 from wfmhub.models import _build_agents
 
@@ -171,6 +174,54 @@ class AgentScopeTests(unittest.TestCase):
 
 
 class SQLiteLifecycleTests(unittest.TestCase):
+    def test_new_release_adopts_existing_database_without_rebuild(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            old_home = root / "WFMHub-old"
+            new_home = root / "WFMHub-new"
+            for home in (old_home, new_home):
+                (home / "config").mkdir(parents=True)
+                for name in (
+                    "default.toml", "default_rules.toml", "default_metrics.toml",
+                    "default_analytics.toml", "default_reports.toml",
+                    "default_queue_mapping.csv", "default_service_profiles.toml",
+                ):
+                    shutil.copy2(REPO / "config" / name, home / "config" / name)
+                shutil.copytree(REPO / "sql", home / "sql")
+            old_config_file = ensure_user_config(old_home)
+            write_source_root(old_config_file, root / "extracts")
+            old_config = load_config(old_home)
+            migrate(old_config)
+            with write_session(old_config) as conn:
+                conn.execute(
+                    "INSERT INTO core.correction_action VALUES (?, NULL, 'Open', NULL, NULL, NULL, ?, 'persistent')",
+                    ["keep-between-releases", datetime.now()],
+                )
+            old_report = old_home / "Reports" / "PCS Live Tracker.xlsx"
+            old_report.parent.mkdir(parents=True, exist_ok=True)
+            old_report.write_bytes(b"human-owned tracker")
+
+            database, applied = adopt_portable_install(new_home, old_home)
+
+            self.assertTrue(database.is_file())
+            self.assertEqual(applied, [])
+            new_config = load_config(new_home)
+            copied = connect(new_config, read_only=True)
+            try:
+                self.assertEqual(
+                    copied.execute(
+                        "SELECT count(*) FROM core.correction_action WHERE correction_id='keep-between-releases'"
+                    ).fetchone()[0],
+                    1,
+                )
+            finally:
+                copied.close()
+            self.assertEqual(
+                (new_home / "Reports" / old_report.name).read_bytes(),
+                b"human-owned tracker",
+            )
+            self.assertTrue(old_config.database.is_file())
+
     def test_v051_database_upgrades_additively_to_governed_exports(self):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "hub"

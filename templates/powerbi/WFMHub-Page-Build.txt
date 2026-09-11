@@ -1,0 +1,38 @@
+WFMHUB PREMIUM PAGE BUILD
+=========================
+
+GLOBAL
+Use 16:9. Navy header #0B1F33, teal #007C83, gold #D6A84B, canvas #F4F7F9.
+Keep Date, LOB and Team slicers in the same upper band and sync them across
+pages. Each page uses one decision question and no more than six headline KPIs.
+
+1 EXECUTIVE OVERVIEW
+Cards: Service Level, Routing Availability, Staffing Gap, No Show HC,
+PCS Average, Final Absence. Trend: SL and volume by date. Matrix: LOB pulse.
+
+2 SERVICE & FORECAST
+Cards: Offered, Answered, SL, AHT, Volume Variance. Line/column: hourly forecast
+volume vs actual offered; forecast-only drill retains native 15-minute rows.
+Matrix: Service Scope > Queue by hour.
+
+3 ATTENDANCE CONTROL
+Cards: Scheduled HC, Present HC, No Show HC, Callout HC, Late Minutes,
+Early Leave Minutes. Table: exact agent callout list. Timeline/detail:
+FactAttendanceGap with exact gap start/end.
+
+4 PCS PERFORMANCE & COACHING
+Cards: PCS Average, Participation, Valid PCS, Low Scores. Bar: LOB then agent
+PCS. Trend: daily PCS. Detail: FactPCSCoaching with Call ID and comment.
+
+5 STAFFING & CAPACITY
+Cards: Scheduled FTE, Observed FTE, Gap FTE. Combo chart by 15-minute interval.
+Matrix by LOB/language. Forecast FTE remains blank when source has volume only.
+
+6 ABSENCE & SHRINKAGE
+Cards: Final Absence %, Final Shrinkage %, Absence Minutes, Review HC. Stacked
+bar by Activities category. Detail lists empty shifts, unmapped activities and
+uncorrected/partial cases using Final Ledger Status.
+
+7 DATA QUALITY & GOVERNANCE
+Cards: latest data date, quality issues, critical issues. Source status table.
+Issue table. Finding table. Show manifest/schema/rule versions in an info panel.

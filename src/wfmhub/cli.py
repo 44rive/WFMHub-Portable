@@ -15,7 +15,10 @@ from .analytics import load_analytics_rules, validate_analytics_rules
 from .actions import import_attendance_decisions
 from .bonus import import_bonus_matrix
 from .config import ConfigError, ensure_user_config, load_config, write_source_root
-from .database import HubLockedError, backup_database, connect, migrate, write_session
+from .database import (
+    HubLockedError, adopt_portable_install, backup_database, connect, migrate,
+    write_session,
+)
 from .doctor import run_doctor
 from .exports import DATASETS, export_dataset
 from .ingestion import ingest_all
@@ -133,6 +136,18 @@ def setup(home: Path, source_root: Path | None, non_interactive: bool) -> int:
         "Setup complete source_root=%s database=%s migrations=%s",
         config.source_root, config.database, len(migrations),
     )
+    return 0
+
+
+def upgrade_install(home: Path, old_home: Path) -> int:
+    database, migrations = adopt_portable_install(home, old_home)
+    print("\nUpgrade complete.")
+    print(f"Database : {database}")
+    print(
+        "Migrations: " + (", ".join(migrations) if migrations else "already current")
+    )
+    print("The previous WFMHub folder and all source extracts were left unchanged.")
+    print("You can now use WFMHub.cmd in this new folder.")
     return 0
 
 
@@ -598,7 +613,7 @@ def import_attendance_decisions_tool(home: Path, workbook: Path) -> int:
                 imported.start, imported.end, False,
                 _phase_progress(bar, 0.15, 0.75),
             )
-            bar.update(0.78, "Updating reviewed absence feeds")
+            bar.update(0.78, "Updating final absence and Power BI feeds")
             publish_shared_feeds(conn, config, model.start, model.end)
             bar.update(0.88, "Rebuilding Attendance Review")
             report = build_report_pack(
@@ -1008,6 +1023,10 @@ def parser() -> argparse.ArgumentParser:
     setup_p = commands.add_parser("setup", help="Create config and database")
     setup_p.add_argument("--source-root", type=Path)
     setup_p.add_argument("--non-interactive", action="store_true")
+    upgrade_p = commands.add_parser(
+        "upgrade-install", help="Adopt the database and user files from an older portable folder",
+    )
+    upgrade_p.add_argument("--from", dest="old_home", type=Path, required=True)
     refresh_p = commands.add_parser("refresh", help="Ingest, model and report")
     refresh_p.add_argument("--start", type=_date)
     refresh_p.add_argument("--end", type=_date)
@@ -1073,6 +1092,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "setup":
             return setup(home, args.source_root, args.non_interactive)
+        if args.command == "upgrade-install":
+            return upgrade_install(home, args.old_home)
         if args.command == "refresh":
             packs = () if args.no_report else IMPLEMENTED_REPORT_PACK_KEYS if args.all_packs else tuple(args.pack or ["service"])
             return refresh(home, args.start, args.end, packs, args.source_group, service_profile=args.service_profile)

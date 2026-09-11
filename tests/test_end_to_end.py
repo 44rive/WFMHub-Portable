@@ -25,6 +25,7 @@ from wfmhub.models import (
 )
 from wfmhub.on_demand_analysis import build_analysis_workbook
 from wfmhub.pcs_tracker import PCS_TRACKER_FILENAME
+from wfmhub.powerbi import publish_powerbi_feeds
 from wfmhub.shared_feeds import (
     PCS_AGENT_SCORECARD_HEADERS,
     PCS_COACHING_HEADERS,
@@ -500,7 +501,7 @@ class EndToEndTests(unittest.TestCase):
                         "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day "
                         "WHERE business_date='2026-08-01' AND agent_id='200'"
                     ).fetchone()[0],
-                    "CLEAR",
+                    "PLANNED_TIME_OFF_NOT_IN_VERINT",
                 )
                 active_away = conn.execute(
                     """SELECT attendance_result, planned_work_minutes,
@@ -532,7 +533,7 @@ class EndToEndTests(unittest.TestCase):
                            FROM mart.verint_final_absence_agent_day
                            WHERE business_date='2026-08-02' AND agent_id='300'"""
                     ).fetchone(),
-                    ("ABSENCE_RECORDED", 480, 480),
+                    ("PLANNED_TIME_OFF_NOT_IN_VERINT", 0, 0),
                 )
 
     def test_refresh_builds_safe_attendance_gaps_and_excel(self):
@@ -587,6 +588,13 @@ class EndToEndTests(unittest.TestCase):
                     progress=lambda current, total, label: model_progress.append((current, total, label)),
                 )
                 self.assertEqual(model_progress[-1], (22, 22, "Models ready"))
+                powerbi = publish_powerbi_feeds(
+                    conn, config, model.start, model.end,
+                )
+                self.assertEqual(powerbi.family, "POWERBI")
+                self.assertTrue((config.feed / "PowerBI" / "FactServiceHour.csv").is_file())
+                self.assertTrue((config.feed / "PowerBI" / "FactFinalAbsenceDay.csv").is_file())
+                self.assertTrue((config.feed / "PowerBI" / "POWERBI_MANIFEST_CURRENT.csv").is_file())
                 attendance_before_pcs = conn.execute(
                     "SELECT agent_day_key, attendance_result "
                     "FROM mart.attendance_agent_day ORDER BY agent_day_key"
@@ -701,13 +709,13 @@ class EndToEndTests(unittest.TestCase):
                     conn.execute(
                         "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_day_key='20260801-200'"
                     ).fetchone()[0],
-                    "PENDING_REVIEW",
+                    "UNCODED_EMPTY_SHIFT",
                 )
                 self.assertEqual(
                     conn.execute(
                         "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_day_key='20260801-100'"
                     ).fetchone()[0],
-                    "PENDING_REVIEW",
+                    "PARTIAL_CORRECTION_REVIEW",
                 )
                 self.assertEqual(
                     conn.execute("SELECT count(*) FROM mart.absence_event WHERE evidence_type IN ('SHIFT_EVENT','SHIFT_ASSIGNMENT')").fetchone()[0],
@@ -725,7 +733,7 @@ class EndToEndTests(unittest.TestCase):
                     conn.execute(
                         "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_day_key='20260801-300'"
                     ).fetchone()[0],
-                    "CLEAR",
+                    "ABSENCE_RECORDED",
                 )
                 service = conn.execute(
                     "SELECT sum(answered), sum(offered), sum(handled_seconds) FROM mart.service_interval"
@@ -1131,7 +1139,10 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertTrue(focused_pcs_book["OVERVIEW"]["A6"].value.startswith("=IFERROR(INDEX("))
                 self.assertEqual(focused_pcs_book["OVERVIEW"]["A2"].value, "PERIOD")
-                self.assertEqual(focused_pcs_book["OVERVIEW"]["C2"].value, "Current MTD")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["A3"].value, "Current MTD")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["H3"].value, "All")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["O3"].value, "All")
+                self.assertEqual(focused_pcs_book["OVERVIEW"]["V3"].value, "All")
                 self.assertEqual(focused_pcs_book["OVERVIEW"]["H2"].value, "LOB")
                 self.assertEqual(focused_pcs_book["OVERVIEW"]["O2"].value, "TEAM LEADER")
                 self.assertEqual(focused_pcs_book["OVERVIEW"]["V2"].value, "AGENT")

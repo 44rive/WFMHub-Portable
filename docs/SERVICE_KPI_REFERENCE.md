@@ -55,8 +55,9 @@ data-quality issue instead of being hidden by a spreadsheet formula.
 The Storm screenshots are the sole authority for Flash membership. Exact queue
 allowlists live under `flash_queues` in `config\service_profiles.toml`:
 
-- RSA NL includes all 30 queues displayed in `TOLEARN\RSA NL.png`, including
-  its Provider and RSA Ford-labelled rows.
+- RSA NL includes exactly the 23 queues marked `SL Related = Y` in the supplied
+  `attachments/REF.xlsx`. Rows marked `N` remain available in clean mapped data
+  but are excluded from the Flash total.
 - RSA BE includes exactly 43 supplied queues. Four of them are also explicitly
   present in the Ford NL Flash allowlist; this dual-Flash membership is
   intentional and is represented by the two exact allowlists.

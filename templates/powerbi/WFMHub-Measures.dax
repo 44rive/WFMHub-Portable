@@ -1,0 +1,49 @@
+// Create a dedicated table named _Measures, then add these measures.
+// Rates are calculated from summed governed counters. Never average row rates.
+
+Offered = SUM ( FactServiceHour[Offered] )
+Answered = SUM ( FactServiceHour[Answered] )
+Abandoned = SUM ( FactServiceHour[Abandoned] )
+Handled In SL = SUM ( FactServiceHour[Answered Within Target] )
+SLA Denominator = SUM ( FactServiceHour[SLA Denominator] )
+Service Level % = DIVIDE ( [Handled In SL], [SLA Denominator] )
+Routing Availability % = DIVIDE ( [Answered], [Offered] )
+Abandon Rate % = DIVIDE ( [Abandoned], [Offered] )
+AHT Seconds = DIVIDE ( SUM ( FactServiceHour[Handled Seconds] ), [Answered] )
+Volume Forecast = SUM ( FactForecastInterval[Volume Forecast] )
+Volume Variance = [Offered] - [Volume Forecast]
+Volume Variance % = DIVIDE ( [Volume Variance], [Volume Forecast] )
+
+Scheduled FTE = AVERAGEX ( VALUES ( FactStaffing15Min[Interval Start] ), CALCULATE ( SUM ( FactStaffing15Min[Scheduled FTE] ) ) )
+Observed FTE = AVERAGEX ( VALUES ( FactStaffing15Min[Interval Start] ), CALCULATE ( SUM ( FactStaffing15Min[Observed FTE] ) ) )
+Staffing Gap FTE = AVERAGEX ( VALUES ( FactStaffing15Min[Interval Start] ), CALCULATE ( SUM ( FactStaffing15Min[Staffing Gap FTE] ) ) )
+Scheduled FTE Hours = DIVIDE ( SUM ( FactStaffing15Min[Scheduled FTE] ), 4 )
+Observed FTE Hours = DIVIDE ( SUM ( FactStaffing15Min[Observed FTE] ), 4 )
+No Show HC = CALCULATE ( DISTINCTCOUNT ( FactAttendanceDay[Agent ID] ), FactAttendanceDay[Attendance Result] = "No show" )
+Callout HC = CALCULATE ( DISTINCTCOUNT ( FactAttendanceDay[Agent ID] ), FactAttendanceDay[Requires Call] = TRUE () )
+Late Minutes = SUM ( FactAttendanceDay[Late Minutes] )
+Early Leave Minutes = SUM ( FactAttendanceDay[Early Leave Minutes] )
+Gap Minutes = SUM ( FactAttendanceGap[Gap Minutes] )
+
+PCS Score Sum = SUM ( FactPCSAgentDay[PCS Score Sum] )
+Valid PCS = SUM ( FactPCSAgentDay[Valid PCS] )
+PCS Average = DIVIDE ( [PCS Score Sum], [Valid PCS] )
+PCS Participation % = DIVIDE ( SUM ( FactPCSAgentDay[PCS Participation Responses] ), SUM ( FactPCSAgentDay[PCS Status Calls] ) )
+Low Score Responses = SUM ( FactPCSAgentDay[Low Score Responses] )
+Top Box Responses = SUM ( FactPCSAgentDay[Top Box Responses] )
+
+Final Absence Minutes = SUM ( FactFinalAbsenceDay[Absence Minutes] )
+Final Vacation Minutes = SUM ( FactFinalAbsenceDay[Vacation Minutes] )
+Final Shrinkage Minutes = SUM ( FactFinalAbsenceDay[Shrinkage Minutes] )
+Final Planned Net Minutes = SUM ( FactFinalAbsenceDay[Planned Net Minutes] )
+Final Absence % = DIVIDE ( [Final Absence Minutes], [Final Planned Net Minutes] )
+Final Shrinkage % = DIVIDE ( [Final Shrinkage Minutes], [Final Planned Net Minutes] )
+Final Review HC = CALCULATE ( DISTINCTCOUNT ( FactFinalAbsenceDay[Agent ID] ), NOT ( FactFinalAbsenceDay[Final Ledger Status] IN { "CLEAR", "ABSENCE_RECORDED" } ) )
+
+Scenario Payout = SUM ( FactBonusMonth[Scenario Payout] )
+Released Payout = SUM ( FactBonusMonth[Released Payout] )
+Bonus Ready HC = CALCULATE ( DISTINCTCOUNT ( FactBonusMonth[Agent ID] ), FactBonusMonth[Release Status] = "READY" )
+
+Quality Issues = COUNTROWS ( FactQualityIssue )
+Critical Quality Issues = CALCULATE ( [Quality Issues], FactQualityIssue[Severity] IN { "ERROR", "CRITICAL" } )
+Last Data Date = MAX ( DimDate[Date] )

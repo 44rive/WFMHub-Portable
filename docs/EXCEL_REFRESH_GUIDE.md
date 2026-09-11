@@ -18,7 +18,7 @@ The idea is simple:
    `Feed\PCS`, refresh them, save, and close the workbook.
 5. Open the tracker. `SETUP` should show `Power Query Installed = YES`.
 
-For tracker contract `2026.11.2` and later, Install/repair first rebuilds an
+For tracker contract `2026.11.3` and later, Install/repair first rebuilds an
 outdated or damaged tracker, archives its prior copy, and carries keyed coaching
 actions forward. Dashboard formulas read stable sheet-backed workbook names, so
 replacing the six starter tables cannot turn their references into `#REF!`.

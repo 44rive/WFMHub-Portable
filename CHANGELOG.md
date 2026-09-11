@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.28.0 — 2026-09-11
+
+- Keeps the same SQLite database across releases. `SETUP.cmd` performs safe
+  in-place additive migrations; the new `UPGRADE.cmd` adopts database, user
+  configuration, reports and custom jobs when a release is extracted into a
+  new folder. Both paths validate SQLite and never reload history just because
+  application code changed.
+- Adds a fixed-schema Power BI star-model feed under `Feed\PowerBI`, written
+  from governed marts with a last-written manifest, premium WFMHub theme,
+  ratio-of-sums DAX measures, seven-page build map and beginner setup guide.
+- Restores the correct final-absence source boundary: Agent Status remains
+  RTM/attendance authority, while mapped Verint Activities alone populate the
+  separate final post-day absence and shrinkage ledger. Empty, unmapped,
+  provisional, missing-PTO and partial-correction cases remain visible.
+- Reconciles RSA NL Flash membership to the 23 exact queues marked
+  `SL Related = Y` in the supplied `REF.xlsx`, adds the two newly supplied queue
+  identities, and leaves N/absent rows outside the Flash without deleting clean
+  history.
+- Confirms the four supplied September forecasts are 15-minute volume-only
+  extracts. Native intervals are retained and absent FTE requirement fields stay
+  blank rather than being inferred.
+- Advances PCS to tracker contract `2026.11.3`, separates selector labels from
+  selected values in dedicated cells, and updates all formulas/named ranges so
+  Power Query refreshes cannot visually mix adjacent selections.
+
 ## 0.27.4 — 2026-09-10
 
 - Reconciles the four Service Flash allowlists to the supplied queue authority:

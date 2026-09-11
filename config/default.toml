@@ -30,6 +30,8 @@ fte_file = "FTE/FTE Count.xlsx"
 lilo_folder = "Storm/LILO"
 agent_status_folder = "Storm/Agent Status"
 schedule_folder = "Verint/Schedules & Activities"
+# StartEndTimes supplies shift boundaries. Activities supplies final post-day
+# absence/shrinkage codes only and never proves attendance or presence.
 # Verint forecast exports may be 15- or 60-minute. Native intervals are kept
 # for staffing; WFMHub derives hourly totals for Flash and daily reporting.
 forecast_folder = "Verint/Forecast"

@@ -253,9 +253,9 @@ def ensure_rulebook(home: Path) -> Path:
         shipped_meta = shipped.get("rulebook", {})
         if (
             str(current_meta.get("version", "")) in {
-                "2026.08.2", "2026.08.3", "2026.09.1",
+                "2026.08.2", "2026.08.3", "2026.09.1", "2026.09.2",
             }
-            and str(shipped_meta.get("version", "")) == "2026.09.2"
+            and str(shipped_meta.get("version", "")) == "2026.09.3"
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             backup = target.with_name(
@@ -267,7 +267,7 @@ def ensure_rulebook(home: Path) -> Path:
             content = target.read_text(encoding="utf-8")
             current_version = str(current_meta.get("version", ""))
             content = content.replace(
-                f'version = "{current_version}"', 'version = "2026.09.2"', 1,
+                f'version = "{current_version}"', 'version = "2026.09.3"', 1,
             )
             if int(current.get("service", {}).get("target_seconds", 20)) == 20:
                 content = content.replace("target_seconds = 20", "target_seconds = 30", 1)

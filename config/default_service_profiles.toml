@@ -5,7 +5,7 @@
 # follow Storm and reset at midnight.
 
 [catalog]
-version = "2026.09.12"
+version = "2026.09.13"
 default_profile = "ford_oem_fr"
 description = "Effective-dated service and Book1 Flash profiles for RSA Netherlands, RSA Belgium, Ford Netherlands, and Ford OEM France."
 
@@ -160,26 +160,19 @@ display_order = 1
 flash_total_groups = ["RSA", "Provider"]
 flash_queues = [
   "APBN_AMS_MOBILITY_BIKE_Bike_NL",
-  "APBN_AMS_MOBILITY_CRM_ConciergeBBH_NL",
+  "APBN_AMS_MOBILITY_INSURAN_AllianzNetherlandsAlarm_NL",
   "APBN_AMS_MOBILITY_INSURAN_AllianzNetherlandsOEM_NL",
   "APBN_AMS_MOBILITY_INSURAN_FollowUp_NL",
   "APBN_AMS_MOBILITY_INSURAN_Front_EN",
   "APBN_AMS_MOBILITY_INSURAN_Front_NL",
   "APBN_AMS_MOBILITY_INTERNAT_FollowUp_NL",
   "APBN_AMS_MOBILITY_INTERNAT_Front_NL",
-  "APBN_AMS_MOBILITY_LEASE-RE_FollowUp_NL",
   "APBN_AMS_MOBILITY_LEASE-RE_Front_NL",
-  "APBN_AMS_MOBILITY_NIGHT_NightShift_NL",
   "APBN_AMS_MOBILITY_OEM-CONS_FollowUp_NL",
   "APBN_AMS_MOBILITY_OEM-CONS_Front_NL",
-  "APBN_AMS_MOBILITY_PROVIDER_Interco_NL",
-  "APBN_AMS_MOBILITY_PROVIDER_Local_NL",
-  "APBN_AMS_MOBILITY_PROVIDER_Morocco_NL",
   "APBN_AMS_MOBILITY_VIP_FollowUp_NL",
   "APBN_AMS_MOBILITY_VIP_Front_NL",
-  "APBN_AMS_RSA_CRM_ConciergeBBH_NL",
   "APBN_AMS_RSA_Ford_Assistance_NL",
-  "APBN_AMS_RSA_Ford_Dealers_NL",
   "APBN_AMS_RSA_INSURAN_All_EN",
   "APBN_AMS_RSA_INSURAN_All_NL",
   "APBN_AMS_RSA_INSURAN_AzN_NL",
@@ -187,8 +180,8 @@ flash_queues = [
   "APBN_AMS_RSA_INTERNAT_All_NL",
   "APBN_AMS_RSA_OEM_All_EN",
   "APBN_AMS_RSA_OEM_All_NL",
-  "APBN_AMS_RSA_PROVIDER_All_NL",
   "APBN_AMS_RSA_VIP_All_NL",
+  "APBN_AMS_RSA_OEM_Toyota_NL",
 ]
 service_level_metric = "service_level"
 availability_metric = "service_availability_business"

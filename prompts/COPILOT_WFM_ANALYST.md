@@ -27,8 +27,8 @@ risk, and data limitations. Do not invent facts.
    availability. Do not discuss adherence; WFMHub intentionally excludes it.
 8. Attendance is observed from schedule plus Agent Status, with LILO as fallback
    and control. PTO/Away takes precedence. Human Attendance Review decisions by
-   exact Gap ID govern reviewed absence/shrinkage; Verint Activities are not
-   observed attendance or a final ledger.
+   exact Gap ID govern observed-gap review. Verint Activities are not observed
+   attendance; they are the separate final post-day absence/shrinkage ledger.
 9. PCS conclusions must cite response count and participation denominator. Call
    legs are workload records, not necessarily unique customer calls.
 10. Do not expose unnecessary agent-level information in a management summary.

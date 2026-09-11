@@ -986,7 +986,7 @@ def publish_absence_feeds(
     fallback_start: date,
     fallback_end: date,
 ) -> SharedFeedResult:
-    """Publish reviewed attendance-led absence, component and case feeds."""
+    """Publish Activities-final absence, component and completeness feeds."""
 
     start, end = _available_period(
         conn, "mart.verint_final_absence_agent_day", fallback_start, fallback_end,
@@ -1080,5 +1080,12 @@ def publish_shared_feeds(
     """Refresh every stable collaboration feed after the Hub models finish."""
 
     # PCS publishes its six focused feeds inside its targeted report builder.
-    # Only Absenteeism uses the generic collaboration-feed workflow.
-    return (publish_absence_feeds(conn, config, start, end),)
+    # Generic full refreshes publish Absenteeism and Power BI together.
+    # Local import avoids a module cycle: the Power BI publisher reuses the
+    # atomic CSV and manifest primitives defined above.
+    from .powerbi import publish_powerbi_feeds
+
+    return (
+        publish_absence_feeds(conn, config, start, end),
+        publish_powerbi_feeds(conn, config, start, end),
+    )

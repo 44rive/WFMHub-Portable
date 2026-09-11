@@ -5,7 +5,7 @@
 # every change. All percentages are stored as decimals (0.80 = 80%).
 
 [rulebook]
-version = "2026.09.2"
+version = "2026.09.3"
 effective_from = "2026-01-01"
 description = "Canonical WFM rules learned from the August Verint, Storm, PCS and reporting references."
 

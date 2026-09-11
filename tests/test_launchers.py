@@ -9,7 +9,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 class LauncherTests(unittest.TestCase):
     def test_windows_launchers_only_use_embedded_python(self):
-        for name in ("SETUP.cmd", "WFMHub.cmd"):
+        for name in ("SETUP.cmd", "WFMHub.cmd", "UPGRADE.cmd"):
             text = (REPO / name).read_text(encoding="utf-8").lower()
             self.assertIn(r"_system\runtime\python.exe", text)
             self.assertNotIn("py -3", text)

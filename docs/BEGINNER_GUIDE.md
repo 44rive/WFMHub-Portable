@@ -13,6 +13,7 @@ You do not need to install Python, SQLite, DuckDB, ODBC, or Power BI.
 ## The two files you click
 
 - `SETUP.cmd`: use it once after extracting WFMHub.
+- `UPGRADE.cmd`: use it only when a new release was extracted into a different folder.
 - `WFMHub.cmd`: use it for normal work.
 
 Never move only the `.cmd` file. Keep the full WFMHub folder together.
@@ -27,6 +28,20 @@ Never move only the `.cmd` file. Keep the full WFMHub folder together.
 6. Double-click `WFMHub.cmd`.
 
 Your source files stay where they are. WFMHub does not edit them.
+
+## Updating WFMHub without rebuilding the database
+
+- If you replace the program files inside the same WFMHub folder, run
+  `SETUP.cmd`. It keeps the SQLite history, makes a safety backup, and applies
+  only missing numbered migrations.
+- If you extracted the new release into another folder, double-click
+  `UPGRADE.cmd` in the new folder and paste the previous WFMHub folder path.
+  It copies the database, user configuration, reports and custom jobs without
+  changing the old folder, then applies only missing migrations.
+
+You do not need to reload historical extracts merely because code, a report or
+SQL changed. A full re-ingestion is needed only when source data or its governed
+scope actually changes.
 
 ## Who counts as an agent
 
@@ -46,8 +61,9 @@ Active/Closed Away are removed from expected-work minutes, attendance calls,
 correction gaps, and net staffing. Planned Away changes future staffing only;
 it never hides a current or historical no-show. Partial-day PTO uses its exact
 start/end time. Pending or Cancelled records have no calculation effect.
-Reviewed Attendance decisions plus these registers drive the Hub
-absence/shrinkage ledger.
+These registers change attendance expectations and staffing. Attendance Review
+decisions govern the observed-gap control. Final Absenteeism is separately read
+from mapped Verint Activities after the day.
 
 ## The normal daily routine
 
@@ -216,10 +232,12 @@ the Hub deliberately refused to judge that agent-day.
 
 ## Final Absenteeism
 
-This report uses imported Attendance Review decisions plus PTO/Away registers.
-`PENDING_REVIEW` means at least one exact gap is still Open. `PROVISIONAL_DAY`
-means the shift is not complete. Both remain incomplete and are never allowed
-to dilute the headline rate as silent zero absence.
+This report uses mapped Verint Activities as the final post-day coding source,
+clipped to StartEndTimes shift boundaries. Agent Status still owns attendance;
+Activities never proves that an agent was present. `PROVISIONAL_DAY` means the
+shift is not complete. `UNCODED_EMPTY_SHIFT`, `UNMAPPED_REVIEW`,
+`PLANNED_TIME_OFF_NOT_IN_VERINT` and partial-correction states require review
+and are never allowed to dilute the headline rate as silent zero absence.
 
 These rows are never allowed to dilute the headline rate as silent zero absence.
 

@@ -48,7 +48,7 @@ from .shared_feeds import (
 
 
 PCS_TRACKER_FILENAME = "PCS Live Tracker.xlsx"
-PCS_TRACKER_VERSION = "2026.11.2"
+PCS_TRACKER_VERSION = "2026.11.3"
 COACHING_ACTION_HEADERS = (
     "Coaching Key", "Call ID", "Coaching Status", "Coach",
     "Coaching Date", "Due Date", "Coaching Comment",
@@ -360,9 +360,9 @@ def _table_lookup(table: str, header: str, key_expression: str) -> str:
 def _selected_key(*, sheet: str | None = None) -> str:
     prefix = f"'{sheet}'!" if sheet else ""
     return (
-        f'{prefix}$C$2&"|"&SUBSTITUTE({prefix}$J$2,"|","/")&"|"&'
-        f'SUBSTITUTE({prefix}$Q$2,"|","/")&"|"&'
-        f'SUBSTITUTE({prefix}$X$2,"|","/")'
+        f'{prefix}$A$3&"|"&SUBSTITUTE({prefix}$H$3,"|","/")&"|"&'
+        f'SUBSTITUTE({prefix}$O$3,"|","/")&"|"&'
+        f'SUBSTITUTE({prefix}$V$3,"|","/")'
     )
 
 
@@ -377,14 +377,14 @@ def _add_filter_names(workbook) -> None:
         "PCS_LOB_LIST",
         f'=OFFSET({values},MATCH("LOB",{keys},0)-1,0,COUNTIF({keys},"LOB"),1)',
     )
-    team_group = '"TL|"&SUBSTITUTE(OVERVIEW!$J$2,"|","/")'
+    team_group = '"TL|"&SUBSTITUTE(OVERVIEW!$H$3,"|","/")'
     workbook.define_name(
         "PCS_TL_ACTIVE",
         f'=OFFSET({values},MATCH({team_group},{keys},0)-1,0,COUNTIF({keys},{team_group}),1)',
     )
     agent_group = (
-        '"AGENT|"&SUBSTITUTE(OVERVIEW!$J$2,"|","/")&"|"&'
-        'SUBSTITUTE(OVERVIEW!$Q$2,"|","/")'
+        '"AGENT|"&SUBSTITUTE(OVERVIEW!$H$3,"|","/")&"|"&'
+        'SUBSTITUTE(OVERVIEW!$O$3,"|","/")'
     )
     workbook.define_name(
         "PCS_AGENT_ACTIVE",
@@ -419,7 +419,7 @@ def _add_overview(
     configure_v2_cell_canvas(worksheet, formats, zoom=82)
     worksheet.hide_row_col_headers()
     worksheet.set_tab_color(COLORS["gold"])
-    worksheet.freeze_panes(2, 0)
+    worksheet.freeze_panes(3, 0)
     write_v2_header(
         worksheet, formats, "PCS PERFORMANCE & COACHING",
         status="LIVE FILTERS", status_kind="LIVE",
@@ -434,16 +434,17 @@ def _add_overview(
     )
     for block, (label, value, source) in enumerate(filters):
         first = block * 7
-        worksheet.merge_range(1, first, 1, first + 1, label, formats.filter_label)
-        worksheet.merge_range(1, first + 2, 1, first + 6, value, formats.filter_value)
-        worksheet.data_validation(1, first + 2, 1, first + 2, {
+        worksheet.merge_range(1, first, 1, first + 6, label, formats.filter_label)
+        worksheet.merge_range(2, first, 2, first + 6, value, formats.filter_value)
+        worksheet.data_validation(2, first, 2, first, {
             "validate": "list", "source": source,
             "input_title": label,
             "input_message": "Choose a governed value; reset child filters to All after changing a parent.",
             "error_title": "Invalid filter",
             "error_message": "Choose a value from the dropdown list.",
         })
-    worksheet.set_row_pixels(1, 52)
+    worksheet.set_row_pixels(1, 20)
+    worksheet.set_row_pixels(2, 32)
 
     selected = _selected_key()
     default_key = "|".join(defaults)

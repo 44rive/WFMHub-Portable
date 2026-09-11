@@ -20,6 +20,7 @@ files are never edited.
 WFMHub/
 ├── WFMHub.cmd                  daily menu
 ├── SETUP.cmd                   system check and first setup
+├── UPGRADE.cmd                 adopt an older portable database into a new folder
 ├── Reports/                    fixed-name reports + dated archive
 ├── Feed/                       explicit clean CSV/XLSX exports
 ├── config/default.toml         shipped defaults
@@ -55,6 +56,15 @@ SQLite uses WAL, `synchronous=FULL`, integrity checks, a 30-second busy timeout,
 and online backups. WFMHub must stay on a local writable disk, not a network or
 sync-managed folder. A process lock permits one writer; report-only readers are
 opened read-only.
+
+Program releases never ship a database or user configuration. An in-place
+release keeps `_system/database/wfm.sqlite3`; `SETUP.cmd` backs it up when a
+numbered migration is pending and applies only the missing SQL files. When a
+release is extracted into a new folder, `UPGRADE.cmd` uses the SQLite backup API
+to adopt the previous database, copies user-owned config/reports/custom jobs
+without overwriting a destination file, runs `quick_check`, and then applies
+only missing migrations. Historical extracts are not re-ingested merely because
+application code or a report template changed.
 
 Logical names such as `raw.lilo` are translated by the database facade into
 SQLite tables such as `raw_lilo`. Business code stays readable and backend
@@ -100,8 +110,8 @@ details remain in one module.
 | `mart.forecast_hour` | One raw forecast queue/hour plus mapped scopes |
 | `mart.intraday_queue_interval` | Retired AP compatibility table; cleared during refresh |
 | `mart.agent_pcs_day` | One admitted Agent ID/day with call and PCS measures |
-| `mart.verint_final_absence_event` | Compatibility projection of reviewed `mart.absence_event` |
-| `mart.verint_final_absence_agent_day` | Compatibility projection of reviewed `mart.absence_agent_day` |
+| `mart.verint_final_absence_event` | One mapped Verint Activities final component interval |
+| `mart.verint_final_absence_agent_day` | One Activities-final absence/shrinkage result per Agent ID/day |
 | `mart.absence_event` | One reviewed gap or PTO/Away exact component interval |
 | `mart.absence_agent_day` | One reviewed absence/vacation/shrinkage result per Agent ID/day |
 | `mart.service_interval` | Stable semantic projection of Call-by-Call queue/hour counters |
@@ -125,7 +135,7 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `staffing` | `Reports/Staffing Gaps.xlsx` | Full-period actual staffing control and future capacity planning |
 | `attendance` | `_system/legacy_reports/Legacy Attendance Callout.xlsx` | Compatibility-only callout builder; absent from the normal menu |
 | `corrections` | `Reports/Attendance Review.xlsx` | Selected-period exact gaps, visual decisions, and evidence-gated break/meal control |
-| `absence` | `Reports/Final Absenteeism.xlsx` | Reviewed attendance-decision absence/shrinkage ledger |
+| `absence` | `Reports/Final Absenteeism.xlsx` | Verint Activities final absence/shrinkage ledger and completeness review |
 
 Products share the same visual identity but use purpose-specific layouts.
 The approved identity is versioned as `WFMHUB-DESIGN` in
@@ -170,6 +180,10 @@ Final Absenteeism uses the same collaboration boundary. Power Query may replace
 `tblAbsenceData`, `tblActionQueue`, and `tblActivityDetail` from stable CSVs;
 it must never load into permanent `tblActions`. `TEAM_VIEW` and
 `COMPONENT_VIEW` read the refreshed tables directly.
+
+Power BI receives fixed additive facts under `Feed\PowerBI`. Python/SQLite owns
+classification and counters; Power BI owns relationships, measures, slicers and
+visuals. `POWERBI_MANIFEST_CURRENT.csv` is written last as the refresh receipt.
 
 ## Agent scope and identity
 
@@ -350,9 +364,10 @@ spell grouping remain tested engine primitives rather than editable formulas.
 Activities and wide StartEndTimes can both normalize into `raw.schedule_shift`,
 but `meta.source_file.source_variant` keeps them separated. Data Source IDs is
 the primary operational Agent ID. StartEndTimes is the preferred plan boundary.
-LILO and Agent Status are actual evidence. Activities intervals are ignored.
+LILO and Agent Status are actual evidence. Activities intervals never become
+attendance evidence. They feed only the final post-day absence/shrinkage ledger.
 When StartEndTimes is absent for an agent/day, a parsed Activities Shift
-Assignment is an explicit boundary-only fallback and raises a review finding.
+Assignment is also an explicit boundary-only fallback and raises a review finding.
 
 The absence engine:
 
@@ -365,6 +380,12 @@ The absence engine:
 7. caps planned net minutes at the configured standard day;
 8. groups consecutive absence days into spells and calculates Bradford;
 9. surfaces Open decisions and missing evidence for review.
+
+Separately, the final-absence builder clips mapped Verint Activities to the
+planned shift, unions overlapping components, caps ratios to planned net time,
+and flags unmapped, empty, provisional, missing-planned-time-off and partial
+correction cases. This separation prevents a final coding export from proving
+same-day presence.
 
 An Open gap is `PENDING_REVIEW`; an unfinished shift is `PROVISIONAL_DAY`.
 Both block final-ready status without inventing a reason. Headline ratios use
