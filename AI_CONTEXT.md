@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
 Context version: `1.7.0`
-Applies to: WFMHub `0.30.0` and later
+Applies to: WFMHub `0.30.1` and later
 Last reviewed: `2026-09-11`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -197,6 +197,18 @@ under `Reports\Power BI`, sets only the `HubRoot` parameter, and opens it in
 Desktop. A PBIX remains a Desktop-saved publishable snapshot rather than a
 binary fabricated by Python.
 
+Power BI project contract 4 is WFM-only. Its pages are Daily WFM Command,
+Service & SL Drivers, Staff Preparation, Workforce Realisation, Schedule
+Integrity & Patterns, Forecast Accuracy, and Data Readiness. PCS remains the
+separate permanent collaborative Excel tracker. Actual service is exported at
+native 15-minute grain for analysis while the validated hourly Flash mart and
+workbooks remain unchanged. Schedule Integrity is not adherence: it compares
+completed published shifts with sustained Agent Status presence, falls back to
+LILO only when needed, excludes PTO/Away and incomplete shifts, and applies the
+thresholds in `[schedule_integrity]` in `config/default_rules.toml`. Driver
+signals are auditable pressure indicators; they are never presented as exact
+causal SL-point attribution.
+
 StartEndTimes is scheduled-capacity authority. The Power BI staffing feed keeps
 scheduled/observed headcount separate from interval capacity. Required FTE
 comes only from Verint `Full Time Equivalents (Absolute Req)`; if it is absent,
@@ -253,6 +265,7 @@ Documentation:
 - `docs/REPORT_DESIGN_SYSTEM.md`
 - `docs/POWERBI_WFMHUB_PERSPECTIVE.md`
 - `docs/POWERBI_PREMIUM_DESIGN_V1.md`
+- `docs/POWERBI_WFM_CONTROL_TOWER_V2.md`
 - `docs/POWERBI_BEGINNER_GUIDE.md`
 
 ## Safe change protocol

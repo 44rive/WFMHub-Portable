@@ -1,0 +1,122 @@
+/// Two-row published/observed placement bridge used by the native Gantt-style chart.
+table 'Shift Placement'
+
+	/// Hours after midnight before the placement bar starts.
+	measure 'Start Hour Value' = ```
+			SUM('Shift Placement'[Start Hour])
+			```
+		formatString: 0.0
+		displayFolder: 'Schedule integrity'
+
+	/// Published shift duration for the placement chart.
+	measure 'Published Placement Hours' = ```
+			SUM('Shift Placement'[Published Hours])
+			```
+		formatString: 0.0
+		displayFolder: 'Schedule integrity'
+
+	/// Observed presence span for the placement chart.
+	measure 'Observed Placement Hours' = ```
+			SUM('Shift Placement'[Observed Hours])
+			```
+		formatString: 0.0
+		displayFolder: 'Schedule integrity'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Placement Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Placement Key
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Placement'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Placement
+
+	column 'Placement Label'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Placement Label
+
+	column 'Start Hour'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Start Hour
+
+	column 'Duration Hours'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Duration Hours
+
+	column 'Published Hours'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Published Hours
+
+	column 'Observed Hours'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Observed Hours
+
+	column 'Classification'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Classification
+
+	column 'Requires Review'
+		dataType: int64
+		sourceColumn: Requires Review
+
+	partition 'Shift Placement' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactShiftPlacement.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Placement Key", "Agent ID", "Agent", "Team Leader", "Management LOB", "Placement", "Placement Label", "Start Hour", "Duration Hours", "Published Hours", "Observed Hours", "Classification", "Requires Review"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Start Hour", "Duration Hours", "Published Hours", "Observed Hours", "Requires Review"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Placement Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Management LOB", type text}, {"Placement", type text}, {"Placement Label", type text}, {"Start Hour", type number}, {"Duration Hours", type number}, {"Published Hours", type number}, {"Observed Hours", type number}, {"Classification", type text}, {"Requires Review", Int64.Type}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

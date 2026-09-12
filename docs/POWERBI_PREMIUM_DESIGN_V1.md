@@ -1,6 +1,7 @@
 # WFMHub Power BI — premium design proposal V1
 
-Status: **implemented as the source-controlled `WFMHub BI.pbip` project**
+Status: **superseded by `POWERBI_WFM_CONTROL_TOWER_V2.md` and retained as a
+historical design reference**
 
 The existing Excel reports remain part of WFMHub. Power BI is a separate
 analytical and management layer. Prototype values shown below are illustrative;

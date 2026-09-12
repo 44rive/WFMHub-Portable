@@ -99,7 +99,7 @@ See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
 [Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the one-time PCS Power
 Query installation and the optional shared-Absenteeism setup.
 The [Power BI direction](docs/POWERBI_WFMHUB_PERSPECTIVE.md) and
-[premium page specification](docs/POWERBI_PREMIUM_DESIGN_V1.md) describe the
+[implemented control-tower specification](docs/POWERBI_WFM_CONTROL_TOWER_V2.md) describe the
 governed `Feed\PowerBI` model and seven implemented pages. Run a full update,
 then double-click `POWERBI.cmd`; the [beginner Power BI guide](docs/POWERBI_BEGINNER_GUIDE.md)
 explains the two-refresh routine.

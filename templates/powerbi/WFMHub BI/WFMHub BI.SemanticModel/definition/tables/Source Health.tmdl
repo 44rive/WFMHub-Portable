@@ -8,9 +8,9 @@ table 'Source Health'
 		formatString: #,##0
 		displayFolder: 'Data quality'
 
-	/// Source families reporting a ready status.
+	/// Source families reporting a successful or ready status.
 	measure 'Sources Ready' = ```
-			CALCULATE(COUNTROWS('Source Health'), 'Source Health'[Status] IN {"OK", "READY", "LOADED"})
+			CALCULATE(COUNTROWS('Source Health'), 'Source Health'[Status] IN {"SUCCESS", "OK", "READY", "LOADED"})
 			```
 		formatString: #,##0
 		displayFolder: 'Data quality'
@@ -27,6 +27,26 @@ table 'Source Health'
 			MAX('Source Health'[Newest Date])
 			```
 		formatString: dd mmm yyyy
+		displayFolder: 'Data quality'
+
+	/// Accepted source rows divided by accepted plus rejected rows.
+	measure 'Rows Accepted %' = ```
+			DIVIDE(SUM('Source Health'[Rows]), SUM('Source Health'[Rows]) + SUM('Source Health'[Rejected]))
+			```
+		formatString: 0.0%
+		displayFolder: 'Data quality'
+
+	/// Imported semantic tables in Power BI project contract 4.
+	measure 'Models Built' = ```
+			22
+			```
+		formatString: #,##0
+		displayFolder: 'Data quality'
+
+	/// HOLD when blocking quality issues exist; READY otherwise.
+	measure 'Manifest State' = ```
+			IF([Critical Quality Issues] > 0, "HOLD", "READY")
+			```
 		displayFolder: 'Data quality'
 
 	column 'Source Family'

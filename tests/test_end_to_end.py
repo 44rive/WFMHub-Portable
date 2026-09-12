@@ -593,10 +593,12 @@ class EndToEndTests(unittest.TestCase):
                     conn, config, model.start, model.end,
                 )
                 self.assertEqual(powerbi.family, "POWERBI")
-                self.assertTrue((config.feed / "PowerBI" / "FactServiceHour.csv").is_file())
+                self.assertTrue((config.feed / "PowerBI" / "FactService15Min.csv").is_file())
+                self.assertTrue((config.feed / "PowerBI" / "FactStatusInterval.csv").is_file())
+                self.assertTrue((config.feed / "PowerBI" / "FactScheduleIntegrity.csv").is_file())
                 self.assertTrue((config.feed / "PowerBI" / "FactFinalAbsenceDay.csv").is_file())
                 self.assertTrue((config.feed / "PowerBI" / "POWERBI_MANIFEST_CURRENT.csv").is_file())
-                with (config.feed / "PowerBI" / "FactServiceHour.csv").open(
+                with (config.feed / "PowerBI" / "FactService15Min.csv").open(
                     encoding="utf-8-sig", newline="",
                 ) as handle:
                     service_feed = list(csv.DictReader(handle))

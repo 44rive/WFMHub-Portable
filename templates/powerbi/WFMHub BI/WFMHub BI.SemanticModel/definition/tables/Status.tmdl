@@ -1,0 +1,309 @@
+/// Agent Status-first governed shift segments with reviewed AUX classification.
+table 'Status'
+
+	/// Completed scheduled minutes excluding governed PTO/Away.
+	measure 'Elapsed Scheduled Minutes' = ```
+			CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = "COMPLETE", 'Status'[Is Planned Time Off] = 0)
+			```
+		formatString: #,##0
+		displayFolder: 'Workforce realisation'
+
+	/// Completed elapsed minutes with observed connected evidence.
+	measure 'Observed Minutes' = ```
+			CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = "COMPLETE", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Observed] = 1)
+			```
+		formatString: #,##0
+		displayFolder: 'Workforce realisation'
+
+	/// Completed voice, BO and other governed productive minutes; Available remains separate.
+	measure 'Productive Minutes' = ```
+			CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = "COMPLETE", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Productive] = 1)
+			```
+		formatString: #,##0
+		displayFolder: 'Workforce realisation'
+
+	/// Completed scheduled minutes with logged-off, no-activity or missing-status evidence.
+	measure 'Unexplained Minutes' = ```
+			CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = "COMPLETE", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Unexplained] = 1)
+			```
+		formatString: #,##0
+		displayFolder: 'Workforce realisation'
+
+	/// Completed elapsed scheduled hours excluding governed PTO/Away.
+	measure 'Elapsed Scheduled Hours' = ```
+			DIVIDE([Elapsed Scheduled Minutes], 60)
+			```
+		formatString: #,##0.0
+		displayFolder: 'Workforce realisation'
+
+	/// Observed connected hours in completed shifts.
+	measure 'Observed Hours' = ```
+			DIVIDE([Observed Minutes], 60)
+			```
+		formatString: #,##0.0
+		displayFolder: 'Workforce realisation'
+
+	/// Governed productive hours in completed shifts.
+	measure 'Productive Hours' = ```
+			DIVIDE([Productive Minutes], 60)
+			```
+		formatString: #,##0.0
+		displayFolder: 'Workforce realisation'
+
+	/// Unexplained scheduled hours requiring evidence review.
+	measure 'Unexplained Hours' = ```
+			DIVIDE([Unexplained Minutes], 60)
+			```
+		formatString: #,##0.0
+		displayFolder: 'Workforce realisation'
+
+	/// Observed minutes divided by elapsed scheduled minutes.
+	measure 'Presence Realisation %' = ```
+			DIVIDE([Observed Minutes], [Elapsed Scheduled Minutes])
+			```
+		formatString: 0.0%
+		displayFolder: 'Workforce realisation'
+
+	/// Governed productive minutes divided by observed minutes.
+	measure 'Productive Realisation %' = ```
+			DIVIDE([Productive Minutes], [Observed Minutes])
+			```
+		formatString: 0.0%
+		displayFolder: 'Workforce realisation'
+
+	/// Governed productive minutes divided by elapsed scheduled minutes.
+	measure 'Capacity Delivered %' = ```
+			DIVIDE([Productive Minutes], [Elapsed Scheduled Minutes])
+			```
+		formatString: 0.0%
+		displayFolder: 'Workforce realisation'
+
+	/// Hours in the selected governed operational category.
+	measure 'Status Hours' = ```
+			DIVIDE(SUM('Status'[Minutes]), 60)
+			```
+		formatString: #,##0.0
+		displayFolder: 'Workforce realisation'
+
+	/// Mapped Agent Status minutes divided by Agent Status minutes.
+	measure 'Status Mapped %' = ```
+			DIVIDE(CALCULATE(SUM('Status'[Minutes]), 'Status'[Observed Source] = "AGENT_STATUS", 'Status'[Is Status Mapped] = 1), CALCULATE(SUM('Status'[Minutes]), 'Status'[Observed Source] = "AGENT_STATUS"))
+			```
+		formatString: 0.0%
+		displayFolder: 'Data quality'
+
+	/// Elapsed scheduled hours not delivered as governed productive hours.
+	measure 'Capacity Loss Hours' = ```
+			MAX([Elapsed Scheduled Hours] - [Productive Hours], 0)
+			```
+		formatString: #,##0.0
+		displayFolder: 'Driver signals'
+
+	/// Auditable capacity bridge values by selected stage.
+	measure 'Capacity Bridge Hours' = ```
+			SWITCH(SELECTEDVALUE('Capacity Stage'[Capacity Stage]), "Elapsed scheduled", [Elapsed Scheduled Hours], "Absence / missing", -MAX([Elapsed Scheduled Hours]-[Observed Hours],0), "Observed", [Observed Hours], "AUX / available / breaks", -MAX([Observed Hours]-[Productive Hours],0), "Productive", [Productive Hours])
+			```
+		formatString: #,##0.0;[Red]-#,##0.0
+		displayFolder: 'Workforce realisation'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Segment Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Segment Key
+
+	column 'Agent Day Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent Day Key
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Ops Manager'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Ops Manager
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Language'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Language
+
+	column 'Scheduled Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Scheduled Start
+
+	column 'Scheduled End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Scheduled End
+
+	column 'Segment Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Segment Start
+
+	column 'Segment End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Segment End
+
+	column 'Time Slot'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Time Slot
+
+	column 'Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Minutes
+
+	column 'Planned State'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Planned State
+
+	column 'Actual Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Actual Status
+
+	column 'Attendance Category'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Attendance Category
+
+	column 'AUX Classification'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: AUX Classification
+
+	column 'Qualification 1'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Qualification 1
+
+	column 'Qualification 2'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Qualification 2
+
+	column 'Operational Category'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Operational Category
+
+	column 'Mismatch'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Mismatch
+
+	column 'Is Gap'
+		dataType: int64
+		sourceColumn: Is Gap
+
+	column 'Observed Source'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Observed Source
+
+	column 'Shift State'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Shift State
+
+	column 'Is Planned Time Off'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Is Planned Time Off
+
+	column 'Is Observed'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Is Observed
+
+	column 'Is Productive'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Is Productive
+
+	column 'Is Unexplained'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Is Unexplained
+
+	column 'Is Status Mapped'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Is Status Mapped
+
+	column 'Evaluation As Of'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Evaluation As Of
+
+	partition 'Status' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactStatusInterval.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Segment Key", "Agent Day Key", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Language", "Scheduled Start", "Scheduled End", "Segment Start", "Segment End", "Time Slot", "Minutes", "Planned State", "Actual Status", "Attendance Category", "AUX Classification", "Qualification 1", "Qualification 2", "Operational Category", "Mismatch", "Is Gap", "Observed Source", "Shift State", "Is Planned Time Off", "Is Observed", "Is Productive", "Is Unexplained", "Is Status Mapped", "Evaluation As Of"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Time Slot", "Minutes", "Is Gap", "Is Planned Time Off", "Is Observed", "Is Productive", "Is Unexplained", "Is Status Mapped"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Segment Key", type text}, {"Agent Day Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Language", type text}, {"Scheduled Start", type text}, {"Scheduled End", type text}, {"Segment Start", type text}, {"Segment End", type text}, {"Time Slot", Int64.Type}, {"Minutes", Int64.Type}, {"Planned State", type text}, {"Actual Status", type text}, {"Attendance Category", type text}, {"AUX Classification", type text}, {"Qualification 1", type text}, {"Qualification 2", type text}, {"Operational Category", type text}, {"Mismatch", type text}, {"Is Gap", Int64.Type}, {"Observed Source", type text}, {"Shift State", type text}, {"Is Planned Time Off", Int64.Type}, {"Is Observed", Int64.Type}, {"Is Productive", Int64.Type}, {"Is Unexplained", Int64.Type}, {"Is Status Mapped", Int64.Type}, {"Evaluation As Of", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

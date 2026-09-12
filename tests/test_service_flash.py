@@ -487,7 +487,9 @@ class CallServiceModelTests(unittest.TestCase):
                    language VARCHAR, lob VARCHAR, source_file VARCHAR
                )"""
         )
-        for migration_name in ("013_call_service_flash.sql",):
+        for migration_name in (
+            "013_call_service_flash.sql", "016_powerbi_wfm_control_tower.sql",
+        ):
             migration = (REPO / "sql" / "migrations" / migration_name).read_text(
                 encoding="utf-8",
             )
@@ -548,6 +550,11 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertAlmostEqual(result[10], 2 / 6)
         self.assertAlmostEqual(result[11], 4 / 6)
         self.assertAlmostEqual(result[12], 85.0)
+        interval_rows = conn.execute(
+            """SELECT strftime('%H:%M', interval_start), offered, answered
+               FROM mart.call_service_15min ORDER BY interval_start"""
+        ).fetchall()
+        self.assertEqual(interval_rows, [("09:00", 3, 1), ("09:15", 3, 1)])
         rsa_profile = load_service_profiles(
             REPO, REPO / "config" / "default_service_profiles.toml",
         ).select("rsa_nl", date(2026, 8, 1))

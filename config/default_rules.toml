@@ -5,7 +5,7 @@
 # every change. All percentages are stored as decimals (0.80 = 80%).
 
 [rulebook]
-version = "2026.09.3"
+version = "2026.09.4"
 effective_from = "2026-01-01"
 description = "Canonical WFM rules learned from the August Verint, Storm, PCS and reporting references."
 
@@ -38,6 +38,19 @@ low_score_maximum = 3
 target_seconds = 30
 # Call-by-Call interactions abandoned before this threshold are short abandons.
 short_abandon_seconds = 5
+
+[schedule_integrity]
+# Boundaries are evaluated from Agent Status first, with LILO only as fallback.
+# A self-shift requires both boundaries to move in the same direction while
+# preserving approximately the published shift length.
+start_tolerance_minutes = 10
+end_tolerance_minutes = 10
+displacement_threshold_minutes = 15
+paired_delta_tolerance_minutes = 30
+boundary_search_hours = 4
+boundary_minimum_minutes = 5
+rolling_scheduled_days = 20
+recurrence_threshold = 3
 
 # First matching rule wins. Keep specific activities above broad rules.
 # Flags drive absence, payroll and shrinkage marts without changing extracts.

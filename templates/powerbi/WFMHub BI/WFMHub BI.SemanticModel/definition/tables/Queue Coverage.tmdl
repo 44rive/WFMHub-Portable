@@ -1,0 +1,87 @@
+/// Inbound queue entries with explicit reviewed mapping status.
+table 'Queue Coverage'
+
+	/// Inbound Call-by-Call queue entries evaluated for mapping.
+	measure 'Inbound Queue Entries' = ```
+			SUM('Queue Coverage'[Inbound Entries])
+			```
+		formatString: #,##0
+		displayFolder: 'Data quality'
+
+	/// Inbound queue entries with an explicit governed mapping.
+	measure 'Mapped Inbound Queue Entries' = ```
+			SUM('Queue Coverage'[Mapped Inbound Entries])
+			```
+		formatString: #,##0
+		displayFolder: 'Data quality'
+
+	/// Mapped inbound queue entries divided by all inbound queue entries.
+	measure 'Queue Mapped %' = ```
+			DIVIDE([Mapped Inbound Queue Entries], [Inbound Queue Entries])
+			```
+		formatString: 0.0%
+		displayFolder: 'Data quality'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Queue'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Queue
+
+	column 'Service Scope'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Service Scope
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Comparison Scope'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Comparison Scope
+
+	column 'Mapping Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Mapping Status
+
+	column 'Inbound Entries'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Inbound Entries
+
+	column 'Mapped Inbound Entries'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Mapped Inbound Entries
+
+	partition 'Queue Coverage' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactQueueCoverage.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Queue", "Service Scope", "Management LOB", "Comparison Scope", "Mapping Status", "Inbound Entries", "Mapped Inbound Entries"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Inbound Entries", "Mapped Inbound Entries"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Queue", type text}, {"Service Scope", type text}, {"Management LOB", type text}, {"Comparison Scope", type text}, {"Mapping Status", type text}, {"Inbound Entries", Int64.Type}, {"Mapped Inbound Entries", Int64.Type}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

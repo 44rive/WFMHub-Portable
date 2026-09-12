@@ -1,0 +1,209 @@
+/// Completed published-versus-observed shift placement and supported recurrence evidence.
+table 'Schedule Integrity'
+
+	/// Completed supported shift-placement cases requiring review.
+	measure 'Displaced Shifts' = ```
+			CALCULATE(COUNTROWS('Schedule Integrity'), 'Schedule Integrity'[Requires Review] = 1)
+			```
+		formatString: #,##0
+		displayFolder: 'Schedule integrity'
+
+	/// Supported displaced or lost boundary minutes expressed as hours.
+	measure 'Capacity Displaced Hours' = ```
+			DIVIDE(CALCULATE(SUM('Schedule Integrity'[Displaced Minutes]), 'Schedule Integrity'[Requires Review] = 1), 60)
+			```
+		formatString: #,##0.0
+		displayFolder: 'Schedule integrity'
+
+	/// Agents reaching the configured supported recurrence threshold.
+	measure 'Recurring Agents' = ```
+			CALCULATE(DISTINCTCOUNT('Schedule Integrity'[Agent ID]), 'Schedule Integrity'[Is Recurring] = 1)
+			```
+		formatString: #,##0
+		displayFolder: 'Schedule integrity'
+
+	/// Completed supported early-leave cases.
+	measure 'Early Leaves' = ```
+			CALCULATE(COUNTROWS('Schedule Integrity'), 'Schedule Integrity'[Classification] IN {"Early leave", "Late start + early leave"})
+			```
+		formatString: #,##0
+		displayFolder: 'Schedule integrity'
+
+	/// Supported schedule-integrity rows requiring human review.
+	measure 'Integrity Cases' = ```
+			CALCULATE(COUNTROWS('Schedule Integrity'), 'Schedule Integrity'[Requires Review] = 1)
+			```
+		formatString: #,##0
+		displayFolder: 'Schedule integrity'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Integrity Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Integrity Key
+
+	column 'Agent Day Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent Day Key
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Ops Manager'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Ops Manager
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Language'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Language
+
+	column 'Scheduled Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Scheduled Start
+
+	column 'Scheduled End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Scheduled End
+
+	column 'Observed Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Observed Start
+
+	column 'Observed End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Observed End
+
+	column 'Scheduled Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Scheduled Minutes
+
+	column 'Observed Span Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Observed Span Minutes
+
+	column 'Start Delta Minutes'
+		dataType: int64
+		sourceColumn: Start Delta Minutes
+
+	column 'End Delta Minutes'
+		dataType: int64
+		sourceColumn: End Delta Minutes
+
+	column 'Displaced Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Displaced Minutes
+
+	column 'Internal Gap Minutes'
+		dataType: int64
+		sourceColumn: Internal Gap Minutes
+
+	column 'Internal Gap Count'
+		dataType: int64
+		sourceColumn: Internal Gap Count
+
+	column 'Classification'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Classification
+
+	column 'Pattern Family'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Pattern Family
+
+	column 'Recurrence Count'
+		dataType: int64
+		sourceColumn: Recurrence Count
+
+	column 'Eligible Day Count'
+		dataType: int64
+		sourceColumn: Eligible Day Count
+
+	column 'Is Recurring'
+		dataType: int64
+		sourceColumn: Is Recurring
+
+	column 'Requires Review'
+		dataType: int64
+		sourceColumn: Requires Review
+
+	column 'Evidence Basis'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Evidence Basis
+
+	column 'Confidence'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Confidence
+
+	column 'Evaluation As Of'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Evaluation As Of
+
+	partition 'Schedule Integrity' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactScheduleIntegrity.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Integrity Key", "Agent Day Key", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Language", "Scheduled Start", "Scheduled End", "Observed Start", "Observed End", "Scheduled Minutes", "Observed Span Minutes", "Start Delta Minutes", "End Delta Minutes", "Displaced Minutes", "Internal Gap Minutes", "Internal Gap Count", "Classification", "Pattern Family", "Recurrence Count", "Eligible Day Count", "Is Recurring", "Requires Review", "Evidence Basis", "Confidence", "Evaluation As Of"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Scheduled Minutes", "Observed Span Minutes", "Start Delta Minutes", "End Delta Minutes", "Displaced Minutes", "Internal Gap Minutes", "Internal Gap Count", "Recurrence Count", "Eligible Day Count", "Is Recurring", "Requires Review"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Integrity Key", type text}, {"Agent Day Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Language", type text}, {"Scheduled Start", type text}, {"Scheduled End", type text}, {"Observed Start", type text}, {"Observed End", type text}, {"Scheduled Minutes", Int64.Type}, {"Observed Span Minutes", Int64.Type}, {"Start Delta Minutes", Int64.Type}, {"End Delta Minutes", Int64.Type}, {"Displaced Minutes", Int64.Type}, {"Internal Gap Minutes", Int64.Type}, {"Internal Gap Count", Int64.Type}, {"Classification", type text}, {"Pattern Family", type text}, {"Recurrence Count", Int64.Type}, {"Eligible Day Count", Int64.Type}, {"Is Recurring", Int64.Type}, {"Requires Review", Int64.Type}, {"Evidence Basis", type text}, {"Confidence", type text}, {"Evaluation As Of", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

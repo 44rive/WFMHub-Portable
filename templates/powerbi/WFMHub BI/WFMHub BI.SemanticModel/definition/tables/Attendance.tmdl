@@ -8,16 +8,16 @@ table 'Attendance'
 		formatString: #,##0
 		displayFolder: 'Attendance'
 
-	/// Due agent-days with observed presence; late arrivals remain present.
+	/// Due agent-days with Agent Status-first observed presence; late arrivals and early leavers remain present.
 	measure 'Present HC' = ```
-			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0, 'Attendance'[First Login] <> BLANK(), 'Attendance'[First Login] <> "")
+			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0, 'Attendance'[Attendance Result] IN {"Present", "Present - partial time off", "Late", "Early leave", "Late + early leave", "Shift in progress", "Late - shift in progress"})
 			```
 		formatString: #,##0
 		displayFolder: 'Attendance'
 
 	/// Evidence-backed completed no-show agent-days only.
 	measure 'No Show HC' = ```
-			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Attendance Result] = "No show")
+			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Attendance Result] IN {"No show", "No show - partial time off"})
 			```
 		formatString: #,##0
 		displayFolder: 'Attendance'
@@ -31,7 +31,14 @@ table 'Attendance'
 
 	/// Attendance cases requiring an operational call or follow-up.
 	measure 'Callout HC' = ```
-			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Requires Call] = "1")
+			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Call Action] <> "NONE")
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance'
+
+	/// Confirmed no-show cases still surfaced for operational callout.
+	measure 'No Show Calls Open' = ```
+			CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Call Action] = "CALL_NO_SHOW")
 			```
 		formatString: #,##0
 		displayFolder: 'Attendance'

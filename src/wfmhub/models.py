@@ -39,8 +39,10 @@ class ModelSummary:
     absence_event_rows: int = 0
     service_rows: int = 0
     call_service_rows: int = 0
+    call_service_15min_rows: int = 0
     staffing_rows: int = 0
     timeline_rows: int = 0
+    schedule_integrity_rows: int = 0
     final_absence_rows: int = 0
     final_absence_event_rows: int = 0
     metric_rows: int = 0
@@ -1486,6 +1488,216 @@ def _build_shift_timeline(
     return len(output)
 
 
+SCHEDULE_INTEGRITY_COLUMNS = [
+    "integrity_key", "agent_day_key", "business_date", "agent_id",
+    "agent_name", "team_leader", "ops_manager", "lob", "language",
+    "scheduled_start", "scheduled_end", "observed_start", "observed_end",
+    "scheduled_minutes", "observed_span_minutes", "start_delta_minutes",
+    "end_delta_minutes", "displaced_minutes", "internal_gap_minutes",
+    "internal_gap_count", "classification", "pattern_family",
+    "recurrence_count", "eligible_day_count", "is_recurring",
+    "requires_review", "evidence_basis", "confidence", "evaluation_as_of",
+    "rule_version", "rule_sha256",
+]
+
+
+def _build_schedule_integrity(
+    conn: DatabaseConnection,
+    rulebook: Rulebook,
+    attendance: list[dict[str, Any]],
+    statuses_by_day: dict[tuple[date, str], list[dict[str, Any]]],
+    as_of: datetime,
+) -> int:
+    """Compare completed published shifts with physical Agent Status boundaries.
+
+    This is deliberately not an adherence score.  It detects a small set of
+    auditable boundary patterns, uses Agent Status first, and falls back to
+    LILO only when Agent Status cannot provide a sustained presence interval.
+    PTO/Away days and unfinished shifts are excluded from review counts.
+    """
+
+    candidates: list[dict[str, Any]] = []
+    search = timedelta(hours=rulebook.integrity_boundary_search_hours)
+    minimum = rulebook.integrity_boundary_minimum_minutes
+    gap_tolerance = rulebook.status_gap_tolerance_minutes
+
+    for row in attendance:
+        start, end = row.get("scheduled_start"), row.get("scheduled_end")
+        if (
+            not start or not end or end <= start
+            or row.get("shift_state") != "COMPLETE"
+            or row.get("assignment_type") in {"Off", "Planned absence"}
+            or int(row.get("planned_work_minutes") or 0) <= 0
+            or int(row.get("planning_overlay_minutes") or 0) > 0
+        ):
+            continue
+
+        window_start = start - search
+        window_end = min(end + search, as_of)
+        statuses = _statuses_for_shift(
+            row["agent_id"], window_start, window_end, statuses_by_day,
+        )
+        _, _, exclusive = _exclusive_category_minutes(
+            window_start, window_end, statuses,
+        ) if statuses and window_end > window_start else ({}, 0, [])
+        presence_runs = merge_intervals(
+            (item["interval_start"], item["interval_end"])
+            for item in exclusive if item["actual_category"] != "Logged Off"
+        )
+        presence_runs = [
+            (left, right) for left, right in presence_runs
+            if (right - left).total_seconds() >= minimum * 60
+        ]
+
+        if presence_runs:
+            observed_start = presence_runs[0][0]
+            observed_end = presence_runs[-1][1]
+            evidence_basis = "AGENT_STATUS"
+            confidence = "High"
+        else:
+            observed_start = row.get("first_login")
+            observed_end = row.get("last_logout")
+            evidence_basis = "LILO" if observed_start or observed_end else "NONE"
+            confidence = "Review" if evidence_basis == "LILO" else "Insufficient"
+
+        usable_pair = bool(
+            observed_start and observed_end and observed_end > observed_start
+        )
+        scheduled_minutes = int((end - start).total_seconds() // 60)
+        observed_span = (
+            int((observed_end - observed_start).total_seconds() // 60)
+            if usable_pair else None
+        )
+        start_delta = (
+            int((observed_start - start).total_seconds() // 60)
+            if observed_start is not None else None
+        )
+        end_delta = (
+            int((observed_end - end).total_seconds() // 60)
+            if observed_end is not None else None
+        )
+
+        explicit_disconnects = merge_intervals(
+            (max(item["interval_start"], start), min(item["interval_end"], end))
+            for item in exclusive
+            if (
+                usable_pair
+                and item["actual_category"] == "Logged Off"
+                and item["interval_end"] > max(start, observed_start)
+                and item["interval_start"] < min(end, observed_end)
+            )
+        )
+        explicit_disconnects = [
+            (left, right) for left, right in explicit_disconnects
+            if right > left and (right - left).total_seconds() > gap_tolerance * 60
+        ]
+        internal_gap_minutes = sum(
+            int((right - left).total_seconds() // 60)
+            for left, right in explicit_disconnects
+        )
+        internal_gap_count = len(explicit_disconnects)
+
+        displaced = 0
+        review = False
+        if not usable_pair:
+            classification = "No observed shift"
+            family = "Insufficient evidence"
+        else:
+            paired = abs(start_delta - end_delta) <= rulebook.integrity_paired_delta_tolerance_minutes
+            duration_preserved = abs(observed_span - scheduled_minutes) <= rulebook.integrity_paired_delta_tolerance_minutes
+            threshold = rulebook.integrity_displacement_threshold_minutes
+            if start_delta <= -threshold and end_delta <= -threshold and paired and duration_preserved:
+                classification = "Shifted early"
+                family = "Self-shifted early"
+                displaced = min(abs(start_delta), abs(end_delta))
+                review = True
+            elif start_delta >= threshold and end_delta >= threshold and paired and duration_preserved:
+                classification = "Shifted late"
+                family = "Self-shifted late"
+                displaced = min(abs(start_delta), abs(end_delta))
+                review = True
+            elif (
+                start_delta > rulebook.integrity_start_tolerance_minutes
+                and end_delta < -rulebook.integrity_end_tolerance_minutes
+            ):
+                classification = "Late start + early leave"
+                family = "Boundary loss"
+                displaced = start_delta + abs(end_delta)
+                review = True
+            elif start_delta > rulebook.integrity_start_tolerance_minutes:
+                classification = "Late start"
+                family = "Late start"
+                displaced = start_delta
+                review = True
+            elif end_delta < -rulebook.integrity_end_tolerance_minutes:
+                classification = "Early leave"
+                family = "Early leave"
+                displaced = abs(end_delta)
+                review = True
+            elif internal_gap_minutes > gap_tolerance:
+                classification = "Fragmented shift"
+                family = "Internal disconnect"
+                displaced = internal_gap_minutes
+                review = True
+            else:
+                classification = "Published shift respected"
+                family = "Aligned"
+
+        integrity_key = hashlib.sha256(
+            f"{row['agent_day_key']}|{start}|{end}|{observed_start}|{observed_end}".encode("utf-8")
+        ).hexdigest()
+        candidates.append({
+            "integrity_key": integrity_key,
+            "agent_day_key": row["agent_day_key"],
+            "business_date": row["business_date"],
+            "agent_id": row["agent_id"], "agent_name": row.get("agent_name"),
+            "team_leader": row.get("team_leader"),
+            "ops_manager": row.get("ops_manager"), "lob": row.get("lob"),
+            "language": row.get("language"), "scheduled_start": start,
+            "scheduled_end": end, "observed_start": observed_start,
+            "observed_end": observed_end, "scheduled_minutes": scheduled_minutes,
+            "observed_span_minutes": observed_span,
+            "start_delta_minutes": start_delta, "end_delta_minutes": end_delta,
+            "displaced_minutes": displaced,
+            "internal_gap_minutes": internal_gap_minutes,
+            "internal_gap_count": internal_gap_count,
+            "classification": classification, "pattern_family": family,
+            "recurrence_count": 0, "eligible_day_count": 0,
+            "is_recurring": False, "requires_review": review,
+            "evidence_basis": evidence_basis, "confidence": confidence,
+            "evaluation_as_of": as_of, "rule_version": rulebook.version,
+            "rule_sha256": rulebook.sha256,
+        })
+
+    by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in candidates:
+        by_agent[item["agent_id"]].append(item)
+    for rows in by_agent.values():
+        rows.sort(key=lambda item: (item["business_date"], item["integrity_key"]))
+        for index, item in enumerate(rows):
+            window = rows[max(0, index + 1 - rulebook.integrity_rolling_scheduled_days): index + 1]
+            item["eligible_day_count"] = len(window)
+            item["recurrence_count"] = sum(
+                candidate["requires_review"]
+                and candidate["pattern_family"] == item["pattern_family"]
+                for candidate in window
+            )
+            item["is_recurring"] = bool(
+                item["requires_review"]
+                and item["recurrence_count"] >= rulebook.integrity_recurrence_threshold
+            )
+
+    candidates.sort(
+        key=lambda item: (item["business_date"], item["agent_id"], item["integrity_key"]),
+    )
+    conn.execute("DELETE FROM mart.schedule_integrity_agent_day")
+    _insert_dicts(
+        conn, "mart.schedule_integrity_agent_day",
+        SCHEDULE_INTEGRITY_COLUMNS, candidates,
+    )
+    return len(candidates)
+
+
 FINAL_ABSENCE_EVENT_COLUMNS = [
     "event_key", "agent_day_key", "business_date", "agent_id", "agent_name",
     "team_leader", "ops_manager", "lob", "market", "language", "location",
@@ -2559,6 +2771,17 @@ CALL_SERVICE_COLUMNS = [
     "rule_version", "rule_sha256",
 ]
 
+CALL_SERVICE_15_COLUMNS = [
+    "business_date", "interval_start", "interval_end", "source_system",
+    "service_scope", "comparison_scope", "queue", "designation", "language",
+    "offered", "answered", "abandoned", "short_abandoned",
+    "abandoned_within_target", "answered_within_target", "talk_seconds",
+    "hold_seconds", "wrap_seconds", "handled_seconds", "service_level",
+    "service_availability", "abandon_rate", "aht_seconds", "call_legs",
+    "transferred_legs", "source_files", "mapping_sha256", "rule_version",
+    "rule_sha256",
+]
+
 
 def _build_call_service(
     conn: DatabaseConnection,
@@ -2577,6 +2800,7 @@ def _build_call_service(
     """
 
     conn.execute("DELETE FROM mart.call_service_hour")
+    conn.execute("DELETE FROM mart.call_service_15min")
     rows = _dicts(conn.execute(
         """
         SELECT business_date, interaction_key, call_key, call_start,
@@ -2590,6 +2814,41 @@ def _build_call_service(
         [start, end],
     ))
     aggregates: dict[tuple[Any, ...], dict[str, Any]] = {}
+    interval_aggregates: dict[tuple[Any, ...], dict[str, Any]] = {}
+
+    def add_to_bucket(
+        store: dict[tuple[Any, ...], dict[str, Any]],
+        key: tuple[Any, ...],
+        selected: dict[str, Any],
+        answered: int,
+        short_abandoned: int,
+        abandoned_within_target: int,
+        within_target: int,
+    ) -> None:
+        bucket = store.setdefault(key, {
+            "offered": 0, "answered": 0, "abandoned": 0,
+            "short_abandoned": 0, "abandoned_within_target": 0,
+            "answered_within_target": 0,
+            "talk_seconds": 0.0, "hold_seconds": 0.0,
+            "wrap_seconds": 0.0, "handled_seconds": 0.0,
+            "call_legs": 0, "transferred_legs": 0,
+            "source_files": set(),
+        })
+        bucket["offered"] += 1
+        bucket["answered"] += answered
+        bucket["abandoned"] += 1 - answered
+        bucket["short_abandoned"] += short_abandoned
+        bucket["abandoned_within_target"] += abandoned_within_target
+        bucket["answered_within_target"] += within_target
+        for name in ("talk_seconds", "hold_seconds", "wrap_seconds"):
+            bucket[name] += float(selected.get(name) or 0)
+        bucket["handled_seconds"] = (
+            bucket["talk_seconds"] + bucket["hold_seconds"] + bucket["wrap_seconds"]
+        )
+        bucket["call_legs"] += 1
+        bucket["transferred_legs"] += int(bool(selected.get("transferred")))
+        if selected.get("source_file"):
+            bucket["source_files"].add(str(selected["source_file"]))
     for selected in rows:
         if str(selected.get("call_direction") or "").strip().upper() != "I":
             continue
@@ -2629,6 +2888,9 @@ def _build_call_service(
             continue
         business_date = selected["business_date"]
         hour_start = call_start.replace(minute=0, second=0, microsecond=0)
+        interval_start = call_start.replace(
+            minute=(call_start.minute // 15) * 15, second=0, microsecond=0,
+        )
         queue = str(selected.get("queue") or "UNNAMED MAPPED QUEUE")
         suffix = mapped.service_scope.rsplit(" ", 1)[-1].upper()
         language = (
@@ -2640,79 +2902,81 @@ def _build_call_service(
             business_date, hour_start, mapped.service_scope,
             mapped.comparison_scope, queue, mapped.designation, language,
         )
-        bucket = aggregates.setdefault(key, {
-            "offered": 0, "answered": 0, "abandoned": 0,
-            "short_abandoned": 0, "abandoned_within_target": 0,
-            "answered_within_target": 0,
-            "talk_seconds": 0.0, "hold_seconds": 0.0,
-            "wrap_seconds": 0.0, "handled_seconds": 0.0,
-            "call_legs": 0, "transferred_legs": 0,
-            "source_files": set(),
-        })
-        bucket["offered"] += 1
-        bucket["answered"] += answered
-        bucket["abandoned"] += 1 - answered
-        bucket["short_abandoned"] += short_abandoned
-        bucket["abandoned_within_target"] += abandoned_within_target
-        bucket["answered_within_target"] += within_target
-        for name in ("talk_seconds", "hold_seconds", "wrap_seconds"):
-            bucket[name] += float(selected.get(name) or 0)
-        bucket["handled_seconds"] = (
-            bucket["talk_seconds"] + bucket["hold_seconds"] + bucket["wrap_seconds"]
+        add_to_bucket(
+            aggregates, key, selected, answered, short_abandoned,
+            abandoned_within_target, within_target,
         )
-        bucket["call_legs"] += 1
-        bucket["transferred_legs"] += int(bool(selected.get("transferred")))
-        if selected.get("source_file"):
-            bucket["source_files"].add(str(selected["source_file"]))
+        interval_key = (
+            business_date, interval_start, mapped.service_scope,
+            mapped.comparison_scope, queue, mapped.designation, language,
+        )
+        add_to_bucket(
+            interval_aggregates, interval_key, selected, answered,
+            short_abandoned, abandoned_within_target, within_target,
+        )
 
-    output: list[dict[str, Any]] = []
-    for key, values in sorted(
-        aggregates.items(), key=lambda item: tuple(str(value or "") for value in item[0]),
-    ):
-        business_date, hour_start, service_scope, comparison_scope, queue, designation, language = key
-        components = {
-            name: values[name]
-            for name in (
-                "offered", "answered", "abandoned", "short_abandoned",
-                "abandoned_within_target", "answered_within_target",
-                "handled_seconds",
+    def materialize(
+        store: dict[tuple[Any, ...], dict[str, Any]], *, quarter_hour: bool,
+    ) -> list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
+        for key, values in sorted(
+            store.items(), key=lambda item: tuple(str(value or "") for value in item[0]),
+        ):
+            business_date, bucket_start, service_scope, comparison_scope, queue, designation, language = key
+            components = {
+                name: values[name]
+                for name in (
+                    "offered", "answered", "abandoned", "short_abandoned",
+                    "abandoned_within_target", "answered_within_target",
+                    "handled_seconds",
+                )
+            }
+            dimensions = {
+                "source_system": "CALL_BY_CALL", "queue": queue,
+                "lob": service_scope, "language": language,
+            }
+            service_level = _metric_evaluation(
+                metric_catalog, "service_level", business_date, dimensions, components,
             )
-        }
-        dimensions = {
-            "source_system": "CALL_BY_CALL", "queue": queue,
-            "lob": service_scope, "language": language,
-        }
-        service_level = _metric_evaluation(
-            metric_catalog, "service_level", business_date, dimensions, components,
-        )
-        availability = _metric_evaluation(
-            metric_catalog, "service_availability_business", business_date, dimensions, components,
-        )
-        abandon = _metric_evaluation(
-            metric_catalog, "abandon_rate", business_date, dimensions, components,
-        )
-        aht = _metric_evaluation(
-            metric_catalog, "aht_seconds", business_date, dimensions, components,
-        )
-        output.append({
-            "business_date": business_date, "hour_start": hour_start,
-            "source_system": "CALL_BY_CALL", "service_scope": service_scope,
-            "comparison_scope": comparison_scope, "queue": queue,
-            "designation": designation, "language": language,
-            **{name: values[name] for name in (
-                "offered", "answered", "abandoned", "short_abandoned",
-                "abandoned_within_target", "answered_within_target",
-                "talk_seconds", "hold_seconds",
-                "wrap_seconds", "handled_seconds", "call_legs", "transferred_legs",
-            )},
-            "service_level": service_level.value,
-            "service_availability": availability.value,
-            "abandon_rate": abandon.value, "aht_seconds": aht.value,
-            "source_files": " | ".join(sorted(values["source_files"])),
-            "mapping_sha256": mapping.sha256,
-            "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
-        })
+            availability = _metric_evaluation(
+                metric_catalog, "service_availability_business", business_date, dimensions, components,
+            )
+            abandon = _metric_evaluation(
+                metric_catalog, "abandon_rate", business_date, dimensions, components,
+            )
+            aht = _metric_evaluation(
+                metric_catalog, "aht_seconds", business_date, dimensions, components,
+            )
+            time_fields = (
+                {"interval_start": bucket_start, "interval_end": bucket_start + timedelta(minutes=15)}
+                if quarter_hour else {"hour_start": bucket_start}
+            )
+            output.append({
+                "business_date": business_date, **time_fields,
+                "source_system": "CALL_BY_CALL", "service_scope": service_scope,
+                "comparison_scope": comparison_scope, "queue": queue,
+                "designation": designation, "language": language,
+                **{name: values[name] for name in (
+                    "offered", "answered", "abandoned", "short_abandoned",
+                    "abandoned_within_target", "answered_within_target",
+                    "talk_seconds", "hold_seconds", "wrap_seconds",
+                    "handled_seconds", "call_legs", "transferred_legs",
+                )},
+                "service_level": service_level.value,
+                "service_availability": availability.value,
+                "abandon_rate": abandon.value, "aht_seconds": aht.value,
+                "source_files": " | ".join(sorted(values["source_files"])),
+                "mapping_sha256": mapping.sha256,
+                "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
+            })
+        return output
+
+    output = materialize(aggregates, quarter_hour=False)
+    interval_output = materialize(interval_aggregates, quarter_hour=True)
     _insert_dicts(conn, "mart.call_service_hour", CALL_SERVICE_COLUMNS, output)
+    _insert_dicts(
+        conn, "mart.call_service_15min", CALL_SERVICE_15_COLUMNS, interval_output,
+    )
     return len(output)
 
 
@@ -3218,6 +3482,9 @@ def refresh_models(
         staffing = _build_staffing(conn, attendance, evaluation_as_of)
         stage(11, "Building shift evidence timelines")
         timeline = _build_shift_timeline(conn, attendance, evaluation_as_of)
+        schedule_integrity = _build_schedule_integrity(
+            conn, rulebook, attendance, statuses, evaluation_as_of,
+        )
         stage(12, "Keeping legacy RTA disabled")
         conn.execute("DELETE FROM mart.rta_snapshot")
         rta = []
@@ -3244,6 +3511,9 @@ def refresh_models(
         call_service = _build_call_service(
             conn, rulebook, metric_catalog, mapping, start, end,
         )
+        call_service_15min = conn.execute(
+            "SELECT count(*) FROM mart.call_service_15min"
+        ).fetchone()[0]
         service = _build_service(conn, rulebook, metric_catalog, mapping, start, end)
         _record_rule_application(conn, run_id, rulebook)
         _record_mapping_application(conn, run_id, mapping)
@@ -3265,7 +3535,9 @@ def refresh_models(
             intraday_rows=actual, pcs_rows=pcs, quality_rows=quality,
             absence_rows=absence, absence_event_rows=absence_events,
             service_rows=service, call_service_rows=call_service,
+            call_service_15min_rows=call_service_15min,
             staffing_rows=staffing, timeline_rows=timeline,
+            schedule_integrity_rows=schedule_integrity,
             final_absence_rows=final_absence,
             final_absence_event_rows=final_absence_events,
             metric_rows=metric_rows, finding_rows=finding_rows,

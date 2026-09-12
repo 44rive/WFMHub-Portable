@@ -59,6 +59,14 @@ class Rulebook:
     short_abandon_seconds: int
     activity_rules: tuple[ActivityRule, ...]
     status_rules: tuple[StatusRule, ...]
+    integrity_start_tolerance_minutes: int
+    integrity_end_tolerance_minutes: int
+    integrity_displacement_threshold_minutes: int
+    integrity_paired_delta_tolerance_minutes: int
+    integrity_boundary_search_hours: int
+    integrity_boundary_minimum_minutes: int
+    integrity_rolling_scheduled_days: int
+    integrity_recurrence_threshold: int
     pcs_scored_questions: tuple[int, ...]
     pcs_comment_questions: tuple[int, ...]
     pcs_survey_mode: str
@@ -254,20 +262,22 @@ def ensure_rulebook(home: Path) -> Path:
         if (
             str(current_meta.get("version", "")) in {
                 "2026.08.2", "2026.08.3", "2026.09.1", "2026.09.2",
+                "2026.09.3",
             }
-            and str(shipped_meta.get("version", "")) == "2026.09.3"
+            and str(shipped_meta.get("version", "")) == "2026.09.4"
         ):
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             backup = target.with_name(
-                f"{target.stem}_pre_storm_service_{stamp}{target.suffix}"
+                f"{target.stem}_pre_integrity_rules_{stamp}{target.suffix}"
             )
             shutil.copy2(target, backup)
-            # Keep local activity and PCS changes. Only migrate the two shipped
-            # business values required by the supplied Storm equation.
+            # Keep local activity and PCS changes. Migrate the reviewed Storm
+            # timing references and add schedule-integrity defaults only when
+            # the user has not already created that section.
             content = target.read_text(encoding="utf-8")
             current_version = str(current_meta.get("version", ""))
             content = content.replace(
-                f'version = "{current_version}"', 'version = "2026.09.3"', 1,
+                f'version = "{current_version}"', 'version = "2026.09.4"', 1,
             )
             if int(current.get("service", {}).get("target_seconds", 20)) == 20:
                 content = content.replace("target_seconds = 20", "target_seconds = 30", 1)
@@ -276,6 +286,11 @@ def ensure_rulebook(home: Path) -> Path:
                 shipped_content = default.read_text(encoding="utf-8")
                 if marker in shipped_content:
                     content = content.rstrip() + "\n\n" + marker + shipped_content.split(marker, 1)[1]
+            if not current.get("schedule_integrity"):
+                shipped_section = shipped.get("schedule_integrity", {})
+                content = content.rstrip() + "\n\n[schedule_integrity]\n" + "\n".join(
+                    f"{key} = {int(value)}" for key, value in shipped_section.items()
+                ) + "\n"
             target.write_text(content, encoding="utf-8")
     return target
 
@@ -298,6 +313,9 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
     absence = _required_table(raw, "absence")
     service = _required_table(raw, "service")
     pcs = _required_table(raw, "pcs")
+    integrity = raw.get("schedule_integrity", {})
+    if not isinstance(integrity, dict):
+        raise RulebookError("[schedule_integrity] must be a table")
     try:
         effective_from = date.fromisoformat(str(meta["effective_from"]))
         version = str(meta["version"]).strip()
@@ -313,6 +331,31 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
     for key in ("late_tolerance_minutes", "status_gap_tolerance_minutes", "verint_match_tolerance_minutes"):
         if not 0 <= int(absence.get(key, 5)) <= 120:
             raise RulebookError(f"absence.{key} must be between 0 and 120")
+    integrity_values = {
+        "start_tolerance_minutes": int(integrity.get("start_tolerance_minutes", 10)),
+        "end_tolerance_minutes": int(integrity.get("end_tolerance_minutes", 10)),
+        "displacement_threshold_minutes": int(integrity.get("displacement_threshold_minutes", 15)),
+        "paired_delta_tolerance_minutes": int(integrity.get("paired_delta_tolerance_minutes", 30)),
+        "boundary_search_hours": int(integrity.get("boundary_search_hours", 4)),
+        "boundary_minimum_minutes": int(integrity.get("boundary_minimum_minutes", 5)),
+        "rolling_scheduled_days": int(integrity.get("rolling_scheduled_days", 20)),
+        "recurrence_threshold": int(integrity.get("recurrence_threshold", 3)),
+    }
+    for key in (
+        "start_tolerance_minutes", "end_tolerance_minutes",
+        "displacement_threshold_minutes", "paired_delta_tolerance_minutes",
+        "boundary_minimum_minutes",
+    ):
+        if not 0 <= integrity_values[key] <= 240:
+            raise RulebookError(f"schedule_integrity.{key} must be between 0 and 240")
+    if not 1 <= integrity_values["boundary_search_hours"] <= 12:
+        raise RulebookError("schedule_integrity.boundary_search_hours must be between 1 and 12")
+    if not 5 <= integrity_values["rolling_scheduled_days"] <= 120:
+        raise RulebookError("schedule_integrity.rolling_scheduled_days must be between 5 and 120")
+    if not 2 <= integrity_values["recurrence_threshold"] <= integrity_values["rolling_scheduled_days"]:
+        raise RulebookError(
+            "schedule_integrity.recurrence_threshold must be between 2 and rolling_scheduled_days"
+        )
     if not 1 <= target_seconds <= 600:
         raise RulebookError("service.target_seconds must be between 1 and 600")
     if not 0 <= short_abandon_seconds <= target_seconds:
@@ -422,6 +465,14 @@ def load_rulebook(home: Path, file: Path | None = None) -> Rulebook:
         short_abandon_seconds=short_abandon_seconds,
         activity_rules=tuple(activity_rules),
         status_rules=tuple(status_rules),
+        integrity_start_tolerance_minutes=integrity_values["start_tolerance_minutes"],
+        integrity_end_tolerance_minutes=integrity_values["end_tolerance_minutes"],
+        integrity_displacement_threshold_minutes=integrity_values["displacement_threshold_minutes"],
+        integrity_paired_delta_tolerance_minutes=integrity_values["paired_delta_tolerance_minutes"],
+        integrity_boundary_search_hours=integrity_values["boundary_search_hours"],
+        integrity_boundary_minimum_minutes=integrity_values["boundary_minimum_minutes"],
+        integrity_rolling_scheduled_days=integrity_values["rolling_scheduled_days"],
+        integrity_recurrence_threshold=integrity_values["recurrence_threshold"],
         pcs_scored_questions=scored_questions, pcs_comment_questions=comment_questions,
         pcs_survey_mode=str(pcs.get("survey_mode", "2")),
         pcs_primary_score_question=pcs_primary_question,

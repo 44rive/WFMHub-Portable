@@ -7,6 +7,11 @@ Queue Count = DISTINCTCOUNT('Queue'[Queue])
 Mapped Queue Count = CALCULATE(DISTINCTCOUNT('Queue'[Queue]), 'Queue'[Mapping Status] = "MAPPED")
 Queue Mapping % = DIVIDE([Mapped Queue Count], [Queue Count])
 
+// Queue Coverage
+Inbound Queue Entries = SUM('Queue Coverage'[Inbound Entries])
+Mapped Inbound Queue Entries = SUM('Queue Coverage'[Mapped Inbound Entries])
+Queue Mapped % = DIVIDE([Mapped Inbound Queue Entries], [Inbound Queue Entries])
+
 // Service
 Offered Calls = SUM('Service'[Offered])
 Answered Calls = SUM('Service'[Answered])
@@ -14,6 +19,11 @@ Abandoned Calls = SUM('Service'[Abandoned])
 Handled in SL = SUM('Service'[Answered Within Target])
 SLA Eligible Calls = SUM('Service'[SLA Denominator])
 Service Level % = DIVIDE([Handled in SL], [SLA Eligible Calls])
+SL Target % = MAX('Service'[SL Target])
+SL Gap Points = ([Service Level %] - [SL Target %]) * 100
+LOBs With Service = COUNTROWS(FILTER(VALUES('Management LOB'[Management LOB]), NOT ISBLANK([Service Level %])))
+LOBs On Target = COUNTROWS(FILTER(VALUES('Management LOB'[Management LOB]), NOT ISBLANK([Service Level %]) && [Service Level %] >= [SL Target %]))
+LOBs On Target Label = FORMAT([LOBs On Target], "0") & " / " & FORMAT([LOBs With Service], "0")
 Routing Availability % = DIVIDE([Answered Calls], [Offered Calls])
 Abandon Rate % = DIVIDE([Abandoned Calls], [Offered Calls])
 AHT Seconds = DIVIDE(SUM('Service'[Handled Seconds]), [Answered Calls])
@@ -22,7 +32,7 @@ Volume Variance % = DIVIDE([Volume Variance], [Forecast Volume])
 Forecast Accuracy % = VAR Grain =
 SUMMARIZECOLUMNS(
     'Date'[Date],
-    'Time'[Hour],
+    'Time'[Quarter Hour Index],
     'Management LOB'[Management LOB],
     "Actual Volume", [Offered Calls],
     "Forecast Volume At Grain", [Forecast Volume]
@@ -31,14 +41,47 @@ VAR Comparable = FILTER(Grain, NOT ISBLANK([Forecast Volume At Grain]))
 VAR ForecastTotal = SUMX(Comparable, [Forecast Volume At Grain])
 VAR AbsoluteError = SUMX(Comparable, ABS(COALESCE([Actual Volume], 0) - [Forecast Volume At Grain]))
 RETURN IF(ForecastTotal <= 0, BLANK(), MAX(0, 1 - DIVIDE(AbsoluteError, ForecastTotal)))
+Forecast Bias % = DIVIDE([Offered Calls] - [Forecast Volume], [Forecast Volume])
+AHT Error Seconds = [AHT Seconds] - [Forecast AHT Seconds]
+Peak Accuracy % = VAR Grain =
+SUMMARIZECOLUMNS(
+    'Date'[Date], 'Time'[Quarter Hour Index], 'Management LOB'[Management LOB],
+    "Actual", [Offered Calls], "Forecast", [Forecast Volume]
+)
+VAR Comparable = FILTER(Grain, NOT ISBLANK([Forecast]) && [Forecast] > 0)
+VAR PeakThreshold = PERCENTILEX.INC(Comparable, [Forecast], 0.9)
+VAR Peak = FILTER(Comparable, [Forecast] >= PeakThreshold)
+VAR ForecastTotal = SUMX(Peak, [Forecast])
+VAR AbsoluteError = SUMX(Peak, ABS(COALESCE([Actual], 0) - [Forecast]))
+RETURN IF(ForecastTotal <= 0, BLANK(), MAX(0, 1 - DIVIDE(AbsoluteError, ForecastTotal)))
+Demand Pressure % = ABS([Volume Variance %])
+Schedule Pressure % = IF(ISBLANK([Required FTE]), BLANK(), MAX(DIVIDE([Required FTE] - [Average Scheduled FTE], [Required FTE]), 0))
+Attendance Pressure % = MAX(1 - [Presence Realisation %], 0)
+AUX Pressure % = MAX(1 - [Productive Realisation %], 0)
+AHT Pressure % = ABS(DIVIDE([AHT Error Seconds], [Forecast AHT Seconds]))
+Driver Pressure % = SWITCH(SELECTEDVALUE('Driver'[Driver]), "Demand", [Demand Pressure %], "Schedule", [Schedule Pressure %], "Attendance", [Attendance Pressure %], "AUX", [AUX Pressure %], "AHT", [AHT Pressure %])
+Primary Driver = VAR Signals =
+UNION(
+    ROW("Driver", "DEMAND", "Signal", [Demand Pressure %]),
+    ROW("Driver", "SCHEDULE", "Signal", [Schedule Pressure %]),
+    ROW("Driver", "ATTENDANCE", "Signal", [Attendance Pressure %]),
+    ROW("Driver", "AUX", "Signal", [AUX Pressure %]),
+    ROW("Driver", "AHT", "Signal", [AHT Pressure %])
+)
+RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Driver], ASC), [Driver])
 
 // Forecast
 Forecast Volume = SUM('Forecast'[Volume Forecast])
+Forecast AHT Seconds = DIVIDE(SUMX('Forecast', 'Forecast'[Volume Forecast] * 'Forecast'[AHT Forecast Seconds]), [Forecast Volume])
 Required FTE = AVERAGEX(SUMMARIZE('Forecast', 'Forecast'[Date], 'Forecast'[Time Slot], "Interval FTE", SUM('Forecast'[FTE Required])), [Interval FTE])
 Requirement Intervals = COUNT('Forecast'[FTE Required])
+Peak Required FTE = MAXX(SUMMARIZE('Forecast', 'Forecast'[Date], 'Forecast'[Time Slot], "Interval FTE", SUM('Forecast'[FTE Required])), [Interval FTE])
 
 // Staffing
 Average Scheduled FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Scheduled FTE])), [Interval FTE])
+Peak Net Scheduled FTE = MAXX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Scheduled FTE])), [Interval FTE])
+Average Elapsed Scheduled FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Elapsed Scheduled FTE])), [Interval FTE])
+PTO / Away FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Planned Time Off FTE])), [Interval FTE])
 Average Observed FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Observed FTE])), [Interval FTE])
 Average Productive FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Productive FTE])), [Interval FTE])
 Average Scheduled HC = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval HC", SUM('Staffing'[Scheduled HC])), [Interval HC])
@@ -47,34 +90,54 @@ Capacity Gap FTE = IF(ISBLANK([Required FTE]), BLANK(), MAX([Required FTE] - [Av
 Net Capacity Gap FTE = IF(ISBLANK([Required FTE]), BLANK(), [Average Scheduled FTE] - [Required FTE])
 Observed Gap FTE = MAX([Average Scheduled FTE] - [Average Observed FTE], 0)
 Coverage % = IF(ISBLANK([Required FTE]), BLANK(), DIVIDE([Average Scheduled FTE], [Required FTE]))
+Peak Shortage FTE = MINX(SUMMARIZECOLUMNS('Date'[Date], 'Time'[Quarter Hour Index], "Gap", IF(ISBLANK([Required FTE]), BLANK(), [Average Scheduled FTE] - [Required FTE])), [Gap])
+Critical Intervals = COUNTROWS(FILTER(SUMMARIZECOLUMNS('Date'[Date], 'Time'[Quarter Hour Index], "Gap", IF(ISBLANK([Required FTE]), BLANK(), [Average Scheduled FTE] - [Required FTE])), NOT ISBLANK([Gap]) && [Gap] < -1))
+Current Productive Gap FTE = IF(ISBLANK([Required FTE]), BLANK(), [Average Productive FTE] - [Required FTE])
 
 // Attendance
 Due HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0)
-Present HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0, 'Attendance'[First Login] <> BLANK(), 'Attendance'[First Login] <> "")
-No Show HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Attendance Result] = "No show")
+Present HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0, 'Attendance'[Attendance Result] IN {"Present", "Present - partial time off", "Late", "Early leave", "Late + early leave", "Shift in progress", "Late - shift in progress"})
+No Show HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Attendance Result] IN {"No show", "No show - partial time off"})
 Unknown / Possible No Show HC = MAX([Due HC] - [Present HC] - [No Show HC], 0)
-Callout HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Requires Call] = "1")
+Callout HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Call Action] <> "NONE")
+No Show Calls Open = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Call Action] = "CALL_NO_SHOW")
 Late HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Late Minutes] > 0)
 Early Leave HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Early Leave Minutes] > 0)
 On Time HC = MAX([Present HC] - [Late HC], 0)
 Attendance % = DIVIDE([Present HC], [Due HC])
 Status Evidence Coverage % = DIVIDE(SUM('Attendance'[Status Covered Minutes]), SUM('Attendance'[Planned Work Minutes]))
 
+// Status
+Elapsed Scheduled Minutes = CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = "COMPLETE", 'Status'[Is Planned Time Off] = 0)
+Observed Minutes = CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = "COMPLETE", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Observed] = 1)
+Productive Minutes = CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = "COMPLETE", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Productive] = 1)
+Unexplained Minutes = CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = "COMPLETE", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Unexplained] = 1)
+Elapsed Scheduled Hours = DIVIDE([Elapsed Scheduled Minutes], 60)
+Observed Hours = DIVIDE([Observed Minutes], 60)
+Productive Hours = DIVIDE([Productive Minutes], 60)
+Unexplained Hours = DIVIDE([Unexplained Minutes], 60)
+Presence Realisation % = DIVIDE([Observed Minutes], [Elapsed Scheduled Minutes])
+Productive Realisation % = DIVIDE([Productive Minutes], [Observed Minutes])
+Capacity Delivered % = DIVIDE([Productive Minutes], [Elapsed Scheduled Minutes])
+Status Hours = DIVIDE(SUM('Status'[Minutes]), 60)
+Status Mapped % = DIVIDE(CALCULATE(SUM('Status'[Minutes]), 'Status'[Observed Source] = "AGENT_STATUS", 'Status'[Is Status Mapped] = 1), CALCULATE(SUM('Status'[Minutes]), 'Status'[Observed Source] = "AGENT_STATUS"))
+Capacity Loss Hours = MAX([Elapsed Scheduled Hours] - [Productive Hours], 0)
+Capacity Bridge Hours = SWITCH(SELECTEDVALUE('Capacity Stage'[Capacity Stage]), "Elapsed scheduled", [Elapsed Scheduled Hours], "Absence / missing", -MAX([Elapsed Scheduled Hours]-[Observed Hours],0), "Observed", [Observed Hours], "AUX / available / breaks", -MAX([Observed Hours]-[Productive Hours],0), "Productive", [Productive Hours])
+
+// Schedule Integrity
+Displaced Shifts = CALCULATE(COUNTROWS('Schedule Integrity'), 'Schedule Integrity'[Requires Review] = 1)
+Capacity Displaced Hours = DIVIDE(CALCULATE(SUM('Schedule Integrity'[Displaced Minutes]), 'Schedule Integrity'[Requires Review] = 1), 60)
+Recurring Agents = CALCULATE(DISTINCTCOUNT('Schedule Integrity'[Agent ID]), 'Schedule Integrity'[Is Recurring] = 1)
+Early Leaves = CALCULATE(COUNTROWS('Schedule Integrity'), 'Schedule Integrity'[Classification] IN {"Early leave", "Late start + early leave"})
+Integrity Cases = CALCULATE(COUNTROWS('Schedule Integrity'), 'Schedule Integrity'[Requires Review] = 1)
+
+// Shift Placement
+Start Hour Value = SUM('Shift Placement'[Start Hour])
+Published Placement Hours = SUM('Shift Placement'[Published Hours])
+Observed Placement Hours = SUM('Shift Placement'[Observed Hours])
+
 // Attendance Gap
 Total Gap Minutes = SUM('Attendance Gap'[Gap Minutes])
-
-// PCS
-PCS Average = DIVIDE(SUM('PCS'[PCS Score Sum]), SUM('PCS'[Valid PCS]))
-PCS Participation % = DIVIDE(SUM('PCS'[PCS Participation Responses]), SUM('PCS'[PCS Status Calls]))
-Valid PCS Responses = SUM('PCS'[Valid PCS])
-Low Score Response Count = SUM('PCS'[Low Score Responses])
-Top Box Response Count = SUM('PCS'[Top Box Responses])
-PCS Index % = DIVIDE([PCS Average], 5)
-Prior Month PCS Average = CALCULATE([PCS Average], DATEADD('Date'[Date], -1, MONTH))
-PCS Change = [PCS Average] - [Prior Month PCS Average]
-
-// PCS Coaching
-Coaching Cases = COUNTROWS('PCS Coaching')
 
 // Time Off
 PTO / Away HC = DISTINCTCOUNT('Time Off'[Agent Day Key])
@@ -98,9 +161,12 @@ Finding Count = COUNTROWS('Finding')
 
 // Source Health
 Source Count = COUNTROWS('Source Health')
-Sources Ready = CALCULATE(COUNTROWS('Source Health'), 'Source Health'[Status] IN {"OK", "READY", "LOADED"})
+Sources Ready = CALCULATE(COUNTROWS('Source Health'), 'Source Health'[Status] IN {"SUCCESS", "OK", "READY", "LOADED"})
 Sources Ready % = DIVIDE([Sources Ready], [Source Count])
 Latest Data Date = MAX('Source Health'[Newest Date])
+Rows Accepted % = DIVIDE(SUM('Source Health'[Rows]), SUM('Source Health'[Rows]) + SUM('Source Health'[Rejected]))
+Models Built = 22
+Manifest State = IF([Critical Quality Issues] > 0, "HOLD", "READY")
 
 // Quality Issue
 Quality Issues = COUNTROWS('Quality Issue')

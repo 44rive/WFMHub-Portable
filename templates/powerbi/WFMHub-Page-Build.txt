@@ -1,39 +1,48 @@
-WFMHUB PREMIUM PBIP CONTRACT
-============================
+WFMHUB WFM CONTROL TOWER — PBIP CONTRACT 4
+==========================================
 
 GLOBAL
-Use 16:9. Navy header #0B1F33, teal #007C83, gold #D6A84B, canvas #F4F7F9.
-The live implementation is templates\powerbi\WFMHub BI\WFMHub BI.pbip.
+1680x945 canvas. Fixed 178px navy navigation, 58px navy title bar, teal
+separator, four compact selectors, four aligned KPI cards, two analytical
+panels, one evidence/action table and Prepared by Anass ASSRI | WFM footer.
+Use only the WFMHub palette. Do not add AI branding or decorative visuals.
+
+The live source is templates\powerbi\WFMHub BI\WFMHub BI.pbip.
 Regenerate it deterministically with tools\build_powerbi_project.py.
-Every 1280x720 page uses: 136px left rail, 52px header, four 260px slicers,
-four 260x94 KPI cards, two 544x260 charts, one 1116x166 action table and the
-Prepared by Anass ASSRI | WFM footer. Do not add AI branding.
+The model reads Feed\PowerBI only. It never reads SQLite or extracts.
 
-1 EXECUTIVE OVERVIEW
-Cards: Service Level, Attendance, PCS Average, Capacity Gap. Trend and LOB pulse.
+1 DAILY WFM COMMAND
+Cards: LOBs on target, demand vs forecast, confirmed no show, current
+productive capacity gap. Charts: service level by management LOB and required /
+observed / productive 15-minute capacity. Bottom: ordered WFM findings.
 
-2 SERVICE & FORECAST
-Cards: Service Level, Offered, Volume Variance, Routing Availability. Line: forecast
-volume vs actual offered; forecast-only drill retains native 15-minute rows.
-Matrix: Service Scope > Queue by hour.
+2 SERVICE & SL DRIVERS
+Cards: SL, demand variance, capacity loss and primary supported pressure signal.
+Charts: 15-minute SL/demand and five pressure signals. Bottom: exact interval /
+queue evidence. Signals are review leads, not causal SL-point attribution.
 
-3 ATTENDANCE CONTROL
-Cards: Due HC, Present HC, No Show HC, Callout HC. Table: exact agent callout list. Timeline/detail:
-FactAttendanceGap with exact gap start/end.
+3 STAFF PREPARATION
+Cards: peak required FTE, net scheduled FTE, peak shortage and critical
+intervals. Charts: required vs scheduled and LOB/day coverage. PTO/Away is
+deducted. Missing required FTE stays blank. No language eligibility is guessed.
 
-4 PCS PERFORMANCE & COACHING
-Cards: PCS Average, Participation, Valid PCS, Low Scores. Bar: LOB then agent
-PCS. Trend: daily PCS. Detail: FactPCSCoaching with Call ID and comment.
+4 WORKFORCE REALISATION
+Cards: observed/elapsed, productive/observed, productive/elapsed and unexplained
+hours. Charts: governed status composition and auditable capacity bridge.
 
-5 STAFFING & CAPACITY
-Cards: Scheduled FTE, Observed FTE, Gap FTE. Combo chart by 15-minute interval.
-Matrix by LOB/language. Forecast FTE remains blank when source has volume only.
+5 SCHEDULE INTEGRITY
+Cards: displaced shifts/hours, recurring agents and early leaves. Charts:
+published vs observed placement and supported patterns. Agent Status first,
+LILO fallback, completed days only; PTO/Away excluded. Not adherence.
 
-6 ABSENCE & SHRINKAGE
-Cards: Final Absence %, Final Shrinkage %, Absence Minutes, Review HC. Stacked
-bar by Activities category. Detail lists empty shifts, unmapped activities and
-uncorrected/partial cases using Final Ledger Status.
+6 FORECAST ACCURACY
+Cards: 15-minute WAPE accuracy, bias, weighted AHT error and top-demand-decile
+accuracy. Charts: actual vs forecast and LOB/weekday accuracy. Bottom: misses.
 
-7 DATA QUALITY & GOVERNANCE
-Cards: latest data date, quality issues, critical issues. Source status table.
-Issue table. Finding table. Show manifest/schema/rule versions in an info panel.
+7 DATA READINESS
+Cards: fresh sources, inbound-entry queue mapping, observed-minute status
+mapping and blocking issues. Charts: freshness and governed update pipeline.
+
+PCS
+PCS is intentionally absent from Power BI. It remains the permanent shared
+Excel tracker because coaching actions are human-owned and must persist.

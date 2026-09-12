@@ -1,11 +1,21 @@
 # Changelog
 
-## 0.30.0 - 2026-09-12
+## 0.30.1 - 2026-09-12
 
 - Rebuild the source-controlled Power BI report as seven page-specific premium
   1680x945 management views matching the approved WFMHub design: compact
   selectors, aligned KPI cards, purposeful analytical panels and operational
   action tables rather than a repeated generic page skeleton.
+- Replace the old cross-domain Power BI pages with the approved WFM-only
+  control tower: Daily Command, SL Drivers, Staff Preparation, Workforce
+  Realisation, Schedule Integrity, Forecast Accuracy and Data Readiness. PCS
+  remains the permanent collaborative Excel workflow.
+- Add a separate 15-minute Call-by-Call service mart for comparable forecast
+  analysis without changing the validated hourly Flash mart or its formulas.
+- Add governed Agent Status realisation segments and completed-shift integrity
+  cases with configurable tolerances, LILO fallback, PTO/Away exclusion and
+  supported rolling recurrence. The dashboard exposes pressure signals rather
+  than claiming unsupported causal SL-point attribution.
 - Add schedule-derived headcount alongside interval capacity, keep Verint
   required FTE explicitly separate, and return blank gaps/coverage when an FTE
   requirement was not supplied instead of displaying a misleading zero.
@@ -20,7 +30,7 @@
   automatically, so a portable upgrade cannot fail merely because an older
   Feed folder is missing `POWER_QUERY_PCS_FILTERS_LOCAL.txt`.
 - Advance the PCS tracker contract to `2026.11.4`, the Power BI feed schema to
-  `3`, and the installed PBIP project contract to `3`.
+  `4`, and the installed PBIP project contract to `4`.
 
 ## 0.29.2 - 2026-09-11
 

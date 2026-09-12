@@ -1,0 +1,28 @@
+/// Disconnected capacity bridge stages in approved display order.
+table 'Capacity Stage'
+
+	column 'Capacity Stage'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Capacity Stage
+
+	column 'Sort Order'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Sort Order
+
+	partition 'Capacity Stage' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\DimCapacityStage.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Capacity Stage", "Sort Order"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Sort Order"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Capacity Stage", type text}, {"Sort Order", Int64.Type}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

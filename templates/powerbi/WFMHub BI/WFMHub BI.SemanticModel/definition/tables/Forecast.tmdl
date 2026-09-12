@@ -8,6 +8,13 @@ table 'Forecast'
 		formatString: #,##0
 		displayFolder: 'Forecast'
 
+	/// Volume-weighted forecast AHT at native interval grain.
+	measure 'Forecast AHT Seconds' = ```
+			DIVIDE(SUMX('Forecast', 'Forecast'[Volume Forecast] * 'Forecast'[AHT Forecast Seconds]), [Forecast Volume])
+			```
+		formatString: #,##0
+		displayFolder: 'Forecast'
+
 	/// Average summed required FTE across selected date/time intervals.
 	measure 'Required FTE' = ```
 			AVERAGEX(SUMMARIZE('Forecast', 'Forecast'[Date], 'Forecast'[Time Slot], "Interval FTE", SUM('Forecast'[FTE Required])), [Interval FTE])
@@ -20,6 +27,13 @@ table 'Forecast'
 			COUNT('Forecast'[FTE Required])
 			```
 		formatString: #,##0
+		displayFolder: 'Forecast'
+
+	/// Peak summed explicit required FTE in the selected horizon.
+	measure 'Peak Required FTE' = ```
+			MAXX(SUMMARIZE('Forecast', 'Forecast'[Date], 'Forecast'[Time Slot], "Interval FTE", SUM('Forecast'[FTE Required])), [Interval FTE])
+			```
+		formatString: #,##0.0
 		displayFolder: 'Forecast'
 
 	column 'Date'

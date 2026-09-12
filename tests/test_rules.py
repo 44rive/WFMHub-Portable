@@ -48,7 +48,7 @@ class RulebookTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (config / "default_rules.toml").write_text(default, encoding="utf-8")
-            current = default.replace('version = "2026.09.3"', 'version = "2026.08.3"', 1)
+            current = default.replace('version = "2026.09.4"', 'version = "2026.08.3"', 1)
             current = current.split("# Agent Status and AUX reference supplied by Operations.", 1)[0]
             current = current.replace("target_seconds = 30", "target_seconds = 20", 1)
             current = current.replace(
@@ -57,11 +57,11 @@ class RulebookTests(unittest.TestCase):
             (config / "wfm_rules.toml").write_text(current, encoding="utf-8")
             target = ensure_rulebook(home)
             migrated = target.read_text(encoding="utf-8")
-            self.assertIn('version = "2026.09.3"', migrated)
+            self.assertIn('version = "2026.09.4"', migrated)
             self.assertIn("target_seconds = 30", migrated)
             self.assertIn("Locally reviewed WFM rules learned", migrated)
             self.assertIn('status = "Disponible"', migrated)
-            self.assertEqual(len(list(config.glob("wfm_rules_pre_storm_service_*.toml"))), 1)
+            self.assertEqual(len(list(config.glob("wfm_rules_pre_integrity_rules_*.toml"))), 1)
 
     def test_invalid_metric_formula_is_rejected_before_refresh(self):
         with tempfile.TemporaryDirectory() as folder:

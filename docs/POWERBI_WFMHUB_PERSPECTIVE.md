@@ -17,15 +17,12 @@ Power BI semantic model and dashboards
 
 ## What should change
 
-Power BI should gradually replace most complicated generated management
-workbooks:
+Power BI should gradually replace read-only WFM analysis workbooks:
 
 - Service performance and historical Flashes
-- PCS monitoring
 - Absenteeism and shrinkage analysis
 - Staffing and forecast comparison
 - Realisations
-- Bonus analytics
 - Management dashboards
 
 This provides proper slicers, cross-filtering, drill-through, mobile access,
@@ -56,15 +53,15 @@ conflicting results.
 - `DimEmployee`
 - `DimLOB`
 - `DimQueue`
-- `FactServiceHour`
+- `FactService15Min`
 - `FactForecastInterval`
 - `FactAttendanceDay`
 - `FactAttendanceGap`
-- `FactPCSAgentDay`
-- `FactPCSCoaching`
+- `FactStatusInterval`
+- `FactScheduleIntegrity`
+- `FactShiftPlacement`
 - `FactTimeOff`
 - `FactStaffing15Min` (scheduled/observed HC plus interval capacity)
-- `FactBonusMonth`
 
 WFMHub exports these as stable clean Power BI feeds. Power BI performs only
 safe aggregation measures such as:
@@ -106,15 +103,19 @@ write-back, but the app and report have separate sharing and refresh concerns.
 
 ## Simplest first version
 
-Start with one Power BI report containing:
+The implemented WFM-only Power BI report contains:
 
-1. Executive Overview
-2. Service and Forecast
-3. RTM History
-4. PCS
-5. Attendance and Absence
-6. Staffing
-7. Data Quality
+1. Daily WFM Command
+2. Service & SL Drivers
+3. Staff Preparation
+4. Workforce Realisation
+5. Schedule Integrity & Patterns
+6. Forecast Accuracy
+7. Data Readiness
+
+PCS stays in its permanent Excel tracker because Quality and team leaders must
+enter and preserve coaching actions. That collaboration/write-back need is a
+poor fit for this read-only WFM dashboard.
 
 WFMHub creates a dedicated fixed-name `PowerBI` feed folder. The user runs Hub
 Update and then refreshes the PBIX. This avoids SQLite drivers, ODBC, and another

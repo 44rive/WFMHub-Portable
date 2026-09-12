@@ -1,0 +1,28 @@
+/// Disconnected deterministic driver labels used by the pressure signal visual.
+table 'Driver'
+
+	column 'Driver'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Driver
+
+	column 'Sort Order'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Sort Order
+
+	partition 'Driver' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\DimDriver.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Driver", "Sort Order"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Sort Order"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Driver", type text}, {"Sort Order", Int64.Type}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

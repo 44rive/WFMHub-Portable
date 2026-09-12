@@ -37,13 +37,19 @@ finished successfully.
 
 ## The seven pages
 
-1. **Executive Overview** — management pulse across the main domains.
-2. **Service & Forecast** — service result, volume and queue drivers.
-3. **Attendance Control** — due, present, no-show, unknown and callout cases.
-4. **PCS Performance & Coaching** — PCS, participation and low-score Call IDs.
-5. **Staffing & Capacity** — required, scheduled and observed interval FTE.
-6. **Absence & Shrinkage** — final Verint Activities results and components.
-7. **Data Quality & Governance** — source freshness and exact data issues.
+1. **Daily WFM Command** — today’s service, attendance and capacity decisions.
+2. **Service & SL Drivers** — 15-minute pressure signals and queue evidence.
+3. **Staff Preparation** — future required capacity versus published schedules,
+   after approved PTO/Away.
+4. **Workforce Realisation** — presence, productive delivery and governed AUX
+   composition. These are three separate rates, not one synthetic score.
+5. **Schedule Integrity & Patterns** — published versus observed shifts and
+   supported recurrence from completed Agent Status evidence.
+6. **Forecast Accuracy** — comparable 15-minute volume and AHT accuracy.
+7. **Data Readiness** — source freshness, mapped status time and exact issues.
+
+PCS is intentionally not inside Power BI. Keep using the permanent PCS Excel
+tracker for the shared coaching workflow.
 
 Use the four controls at the top of a page to filter. Use the left navigation
 to move between pages. A blank KPI means its governed source or denominator is
@@ -57,3 +63,5 @@ not available; the report does not invent a replacement value.
 - If a future release upgrades the Power BI project contract, WFMHub archives
   the previous project under `Reports\Archive\Power BI` before installing the
   new one.
+- This release advances that contract to version 4. The first open therefore
+  archives the older project and installs the seven-page WFM control tower.

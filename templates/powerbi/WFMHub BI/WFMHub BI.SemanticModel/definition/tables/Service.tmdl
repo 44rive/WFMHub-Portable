@@ -1,4 +1,4 @@
-/// Additive service counters at date, hour and queue grain.
+/// Additive service counters at date, 15-minute interval and queue grain.
 table 'Service'
 
 	/// Calls offered to the governed queue scope.
@@ -43,6 +43,40 @@ table 'Service'
 		formatString: 0.0%
 		displayFolder: 'Service'
 
+	/// Configured service target in the current single-LOB context.
+	measure 'SL Target %' = ```
+			MAX('Service'[SL Target])
+			```
+		formatString: 0.0%
+		displayFolder: 'Service'
+
+	/// Actual service level less the configured target, expressed in percentage points.
+	measure 'SL Gap Points' = ```
+			([Service Level %] - [SL Target %]) * 100
+			```
+		formatString: 0.0;[Red]-0.0
+		displayFolder: 'Service'
+
+	/// Management LOBs with governed service demand in context.
+	measure 'LOBs With Service' = ```
+			COUNTROWS(FILTER(VALUES('Management LOB'[Management LOB]), NOT ISBLANK([Service Level %])))
+			```
+		formatString: #,##0
+		displayFolder: 'Service'
+
+	/// Management LOBs meeting their configured service target.
+	measure 'LOBs On Target' = ```
+			COUNTROWS(FILTER(VALUES('Management LOB'[Management LOB]), NOT ISBLANK([Service Level %]) && [Service Level %] >= [SL Target %]))
+			```
+		formatString: #,##0
+		displayFolder: 'Service'
+
+	/// Compact on-target LOB count for the daily command card.
+	measure 'LOBs On Target Label' = ```
+			FORMAT([LOBs On Target], "0") & " / " & FORMAT([LOBs With Service], "0")
+			```
+		displayFolder: 'Service'
+
 	/// Answered divided by offered; this is service routing availability, not agent availability.
 	measure 'Routing Availability %' = ```
 			DIVIDE([Answered Calls], [Offered Calls])
@@ -78,12 +112,12 @@ table 'Service'
 		formatString: 0.0%;[Red]-0.0%
 		displayFolder: 'Forecast comparison'
 
-	/// One minus WAPE across Date, Hour and Management LOB using only intervals with supplied forecast demand.
+	/// One minus WAPE across Date, native 15-minute slot and Management LOB using only intervals with supplied forecast demand.
 	measure 'Forecast Accuracy %' = ```
 			VAR Grain =
 			SUMMARIZECOLUMNS(
 			    'Date'[Date],
-			    'Time'[Hour],
+			    'Time'[Quarter Hour Index],
 			    'Management LOB'[Management LOB],
 			    "Actual Volume", [Offered Calls],
 			    "Forecast Volume At Grain", [Forecast Volume]
@@ -96,12 +130,109 @@ table 'Service'
 		formatString: 0.0%
 		displayFolder: 'Forecast comparison'
 
+	/// Signed actual-minus-forecast demand divided by forecast demand.
+	measure 'Forecast Bias %' = ```
+			DIVIDE([Offered Calls] - [Forecast Volume], [Forecast Volume])
+			```
+		formatString: 0.0%;[Red]-0.0%
+		displayFolder: 'Forecast comparison'
+
+	/// Actual weighted AHT less forecast weighted AHT.
+	measure 'AHT Error Seconds' = ```
+			[AHT Seconds] - [Forecast AHT Seconds]
+			```
+		formatString: #,##0;[Red]-#,##0
+		displayFolder: 'Forecast comparison'
+
+	/// One minus WAPE for the top forecast-demand decile in the selected context.
+	measure 'Peak Accuracy %' = ```
+			VAR Grain =
+			SUMMARIZECOLUMNS(
+			    'Date'[Date], 'Time'[Quarter Hour Index], 'Management LOB'[Management LOB],
+			    "Actual", [Offered Calls], "Forecast", [Forecast Volume]
+			)
+			VAR Comparable = FILTER(Grain, NOT ISBLANK([Forecast]) && [Forecast] > 0)
+			VAR PeakThreshold = PERCENTILEX.INC(Comparable, [Forecast], 0.9)
+			VAR Peak = FILTER(Comparable, [Forecast] >= PeakThreshold)
+			VAR ForecastTotal = SUMX(Peak, [Forecast])
+			VAR AbsoluteError = SUMX(Peak, ABS(COALESCE([Actual], 0) - [Forecast]))
+			RETURN IF(ForecastTotal <= 0, BLANK(), MAX(0, 1 - DIVIDE(AbsoluteError, ForecastTotal)))
+			```
+		formatString: 0.0%
+		displayFolder: 'Forecast comparison'
+
+	/// Absolute demand variance used as an evidence signal, not an SL-point attribution.
+	measure 'Demand Pressure %' = ```
+			ABS([Volume Variance %])
+			```
+		formatString: 0.0%
+		displayFolder: 'Driver signals'
+
+	/// Relative required-versus-scheduled shortage signal.
+	measure 'Schedule Pressure %' = ```
+			IF(ISBLANK([Required FTE]), BLANK(), MAX(DIVIDE([Required FTE] - [Average Scheduled FTE], [Required FTE]), 0))
+			```
+		formatString: 0.0%
+		displayFolder: 'Driver signals'
+
+	/// Relative elapsed scheduled capacity not observed.
+	measure 'Attendance Pressure %' = ```
+			MAX(1 - [Presence Realisation %], 0)
+			```
+		formatString: 0.0%
+		displayFolder: 'Driver signals'
+
+	/// Observed time not classified as governed productive work.
+	measure 'AUX Pressure %' = ```
+			MAX(1 - [Productive Realisation %], 0)
+			```
+		formatString: 0.0%
+		displayFolder: 'Driver signals'
+
+	/// Absolute relative AHT variance signal.
+	measure 'AHT Pressure %' = ```
+			ABS(DIVIDE([AHT Error Seconds], [Forecast AHT Seconds]))
+			```
+		formatString: 0.0%
+		displayFolder: 'Driver signals'
+
+	/// Selected deterministic pressure signal; it is not an SL-point causal contribution.
+	measure 'Driver Pressure %' = ```
+			SWITCH(SELECTEDVALUE('Driver'[Driver]), "Demand", [Demand Pressure %], "Schedule", [Schedule Pressure %], "Attendance", [Attendance Pressure %], "AUX", [AUX Pressure %], "AHT", [AHT Pressure %])
+			```
+		formatString: 0.0%
+		displayFolder: 'Driver signals'
+
+	/// Largest supported pressure signal in context; retained as a review lead, not a causal score.
+	measure 'Primary Driver' = ```
+			VAR Signals =
+			UNION(
+			    ROW("Driver", "DEMAND", "Signal", [Demand Pressure %]),
+			    ROW("Driver", "SCHEDULE", "Signal", [Schedule Pressure %]),
+			    ROW("Driver", "ATTENDANCE", "Signal", [Attendance Pressure %]),
+			    ROW("Driver", "AUX", "Signal", [AUX Pressure %]),
+			    ROW("Driver", "AHT", "Signal", [AHT Pressure %])
+			)
+			RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Driver], ASC), [Driver])
+			```
+		displayFolder: 'Driver signals'
+
 	column 'Date'
 		dataType: dateTime
 		isHidden
 		isAvailableInMdx: false
 		summarizeBy: none
 		sourceColumn: Date
+
+	column 'Interval Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Interval Start
+
+	column 'Interval End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Interval End
 
 	column 'Time Slot'
 		dataType: int64
@@ -150,6 +281,20 @@ table 'Service'
 		summarizeBy: none
 		sourceColumn: Abandoned
 
+	column 'Short Abandoned'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Short Abandoned
+
+	column 'Abandoned Within Target'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Abandoned Within Target
+
 	column 'Answered Within Target'
 		dataType: int64
 		isHidden
@@ -171,6 +316,13 @@ table 'Service'
 		summarizeBy: none
 		sourceColumn: SLA Denominator
 
+	column 'SL Target'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: SL Target
+
 	column 'Source Files'
 		dataType: string
 		summarizeBy: none
@@ -180,11 +332,11 @@ table 'Service'
 		mode: import
 		source =
 			let
-			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactServiceHour.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactService15Min.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-			    Selected = Table.SelectColumns(Promoted, {"Date", "Time Slot", "Service Scope", "Management LOB", "Queue", "Offered", "Answered", "Abandoned", "Answered Within Target", "Handled Seconds", "SLA Denominator", "Source Files"}, MissingField.Error),
-			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Time Slot", "Offered", "Answered", "Abandoned", "Answered Within Target", "Handled Seconds", "SLA Denominator"}),
-			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Time Slot", Int64.Type}, {"Service Scope", type text}, {"Management LOB", type text}, {"Queue", type text}, {"Offered", Int64.Type}, {"Answered", Int64.Type}, {"Abandoned", Int64.Type}, {"Answered Within Target", Int64.Type}, {"Handled Seconds", Int64.Type}, {"SLA Denominator", Int64.Type}, {"Source Files", type text}}, "en-US")
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Interval Start", "Interval End", "Time Slot", "Service Scope", "Management LOB", "Queue", "Offered", "Answered", "Abandoned", "Short Abandoned", "Abandoned Within Target", "Answered Within Target", "Handled Seconds", "SLA Denominator", "SL Target", "Source Files"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Time Slot", "Offered", "Answered", "Abandoned", "Short Abandoned", "Abandoned Within Target", "Answered Within Target", "Handled Seconds", "SLA Denominator", "SL Target"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Interval Start", type text}, {"Interval End", type text}, {"Time Slot", Int64.Type}, {"Service Scope", type text}, {"Management LOB", type text}, {"Queue", type text}, {"Offered", Int64.Type}, {"Answered", Int64.Type}, {"Abandoned", Int64.Type}, {"Short Abandoned", Int64.Type}, {"Abandoned Within Target", Int64.Type}, {"Answered Within Target", Int64.Type}, {"Handled Seconds", Int64.Type}, {"SLA Denominator", Int64.Type}, {"SL Target", type number}, {"Source Files", type text}}, "en-US")
 			in
 			    Typed
 

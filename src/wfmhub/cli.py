@@ -231,10 +231,12 @@ def refresh(
     if not pcs_only:
         print(f"Attendance  : {model.attendance_rows:,} rows")
         print(f"Gaps        : {model.correction_rows:,} rows")
+        print(f"Shift check : {model.schedule_integrity_rows:,} completed integrity rows")
         print(f"Absence     : {model.absence_rows:,} agent-day + {model.absence_event_rows:,} evidence rows")
         print(
             f"Service     : {model.service_rows:,} governed Call-by-Call + "
             f"{model.call_service_rows:,} mapped queue/hour + "
+            f"{model.call_service_15min_rows:,} mapped queue/15-min + "
             f"{model.forecast_rows:,} forecast rows"
         )
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")

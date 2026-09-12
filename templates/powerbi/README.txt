@@ -27,7 +27,8 @@ SOURCE AUTHORITY
 - StartEndTimes: planned shift boundaries.
 - Verint Activities: final post-day absence/shrinkage codes only. It is never
   used to prove live presence.
-- Call by Call: service and PCS.
+- Call by Call: 15-minute service analysis; the separate PCS Excel workflow
+  uses its own fixed feeds.
 - Verint forecast: native interval volume; current supplied files are 15-minute.
   FTE Required remains blank when the source does not contain it.
 - FTE Count: active employee scope, hierarchy and PTO/Away overlays.
@@ -37,3 +38,8 @@ IMPORTANT
 Power BI is the presentation layer. Do not recreate business formulas in Power
 Query. Ratios must use the supplied additive counters and measures. Do not
 average per-row percentages.
+
+POWER BI PAGES
+--------------
+Daily Command, SL Drivers, Staff Prep, Realisation, Schedule Integrity,
+Forecast Accuracy and Data Readiness. PCS is intentionally not imported.

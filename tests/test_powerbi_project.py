@@ -58,15 +58,15 @@ class PowerBIProjectTests(unittest.TestCase):
                 for path in visuals
             ]
             self.assertEqual(visual_types.count("slicer"), 4)
-            self.assertEqual(visual_types.count("cardVisual"), 4)
+            expected_cards = 9 if page["displayName"] == "Data Readiness" else 4
+            self.assertEqual(visual_types.count("cardVisual"), expected_cards)
             self.assertIn("pageNavigator", visual_types)
             self.assertGreaterEqual(visual_types.count("shape"), 12)
         self.assertEqual(
             names,
             [
-                "Executive Overview", "Service & Forecast", "Attendance Control",
-                "PCS Performance & Coaching", "Staffing & Capacity",
-                "Absence & Shrinkage", "Data Quality & Governance",
+                "Daily Command", "SL Drivers", "Staff Prep", "Realisation",
+                "Schedule Integrity", "Forecast Accuracy", "Data Readiness",
             ],
         )
         expressions = TEMPLATE / f"{PROJECT_NAME}.SemanticModel" / "definition"
@@ -75,6 +75,10 @@ class PowerBIProjectTests(unittest.TestCase):
         self.assertIn('HubRoot & "\\Feed\\PowerBI\\', tmdl)
         for forbidden in ("sqlite", "raw\\", "source_root", "duckdb"):
             self.assertNotIn(forbidden, tmdl.lower())
+        self.assertNotIn("FactPCS", tmdl)
+        self.assertNotIn("table 'PCS'", tmdl)
+        self.assertIn("FactService15Min.csv", tmdl)
+        self.assertIn("FactScheduleIntegrity.csv", tmdl)
 
     def test_every_visual_binding_exists_in_the_semantic_model(self):
         model_root = TEMPLATE / f"{PROJECT_NAME}.SemanticModel" / "definition" / "tables"
