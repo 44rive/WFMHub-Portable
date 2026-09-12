@@ -12,7 +12,7 @@ WHAT YOU DO
 -----------
 1. Run UPDATE > All sources once in WFMHub.
 2. Double-click POWERBI.cmd, or choose ANALYZE > Open Power BI dashboard.
-3. Power BI Desktop opens the complete seven-page WFMHub BI.pbip project.
+3. Power BI Desktop opens the complete eight-page WFMHub BI.pbip project.
 4. Choose Home > Refresh. The HubRoot parameter already points to this WFMHub.
 5. Save a PBIX copy only when you want to publish or share a locked snapshot.
 

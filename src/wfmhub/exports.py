@@ -110,19 +110,17 @@ DATASETS: dict[str, ExportDataset] = {
            ORDER BY business_date, interval_start, lob, language""",
     ),
     "yesterday_gap_actions": ExportDataset(
-        "yesterday_gap_actions", "Uncovered observed gap segments ready for correction review and Verint injection.",
+        "yesterday_gap_actions", "Read-only observed residual intervals still missing from final Verint Activities.",
         """SELECT r.business_date, r.agent_id, c.agent_name, c.team_leader,
                   c.ops_manager, c.lob, c.scheduled_start, c.scheduled_end,
                   c.detected_issue, r.residual_start AS gap_start,
                   r.residual_end AS gap_end, r.residual_minutes AS gap_minutes,
                   c.confidence, r.suggested_activity, r.observed_source,
                   r.verint_reconciliation, c.verint_activity,
-                  c.verint_overlap_minutes, c.validation_status,
-                  c.owner, c.comment, c.injected_date, r.source_file
+                  c.verint_overlap_minutes, c.verint_source_file, r.source_file
            FROM mart.correction_residual_segment r
            JOIN mart.correction_candidate c ON c.correction_id=r.correction_id
            WHERE r.business_date BETWEEN ? AND ?
-             AND coalesce(c.validation_status,'Open') NOT IN ('Injected','Rejected')
            ORDER BY r.business_date, r.agent_id, r.residual_start""",
     ),
     "shift_evidence_timeline": ExportDataset(
@@ -132,19 +130,19 @@ DATASETS: dict[str, ExportDataset] = {
            ORDER BY business_date, agent_id, segment_start""",
     ),
     "absence_agent_day": ExportDataset(
-        "absence_agent_day", "Rule-versioned payroll absence, vacation and shrinkage per agent/day.",
+        "absence_agent_day", "Provisional observed gaps plus governed PTO/Away per agent/day; not the final ledger.",
         "SELECT * FROM mart.absence_agent_day WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id",
     ),
     "absence_events": ExportDataset(
-        "absence_events", "Reviewed attendance-gap and PTO/Away component intervals.",
+        "absence_events", "Residual attendance-gap and governed PTO/Away component intervals.",
         "SELECT * FROM mart.absence_event WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start",
     ),
     "gaps": ExportDataset(
-        "gaps", "Observed exact correction candidates and saved human decisions.",
+        "gaps", "Observed exact residual gaps after final Verint Activities reconciliation.",
         "SELECT * FROM mart.correction_candidate WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, gap_start",
     ),
     "verint_final_exceptions": ExportDataset(
-        "verint_final_exceptions", "Retired compatibility export; always empty.",
+        "verint_final_exceptions", "Final absence/vacation/unpaid activity portions unsupported by an observed gap or governed time off.",
         "SELECT * FROM mart.verint_final_exception WHERE business_date BETWEEN ? AND ? ORDER BY business_date, agent_id, event_start",
     ),
     "verint_final_absence_events": ExportDataset(

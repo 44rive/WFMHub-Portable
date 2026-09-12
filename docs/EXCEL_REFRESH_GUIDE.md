@@ -44,61 +44,25 @@ Power Query to the visible `tblCoachingQueue` or blue `tblCoachingActions`.
 Do not rebuild or replace the tracker for a normal update. Power Query is only
 transport; it does not calculate PCS.
 
-## Absenteeism: one-time connection setup
+## Final Absenteeism
 
-Make a backup copy before starting.
+1. Put the latest final Verint Activities export in its normal source folder.
+2. Run **WFMHub > Refresh source data once > Attendance/absence**.
+3. Build **Final Absenteeism / Shrinkage**.
+4. Open `Reports\Final Absenteeism.xlsx`.
+5. Use `TEAM_VIEW` for filtered agent results, `COMPONENT_VIEW` for category
+   totals and `ACTIVITY_DETAIL` for exact source intervals.
+6. Use `ACTION_QUEUE` as a read-only list of incomplete or inconsistent coding.
+   Correct the source in Verint, export Activities again and refresh.
 
-## Absenteeism: connect the clean ledger
-
-1. Run **WFMHub > Refresh source data once > Attendance/absence**.
-2. Confirm this file exists:
-   `Feed\Absenteeism\ABSENCE_AGENT_DAY_CURRENT.csv`.
-3. Open `Reports\Final Absenteeism.xlsx`.
-4. Create a Blank Query in desktop Excel from the generated Absenteeism M
-   script and load it as a table at `ABSENCE_DATA!$A$4`.
-5. Rename the new table exactly to `tblAbsenceData`.
-6. Set the `Date` column to **Date** in Power Query.
-7. Save the workbook.
-
-The `ACTIONS` sheet is the permanent review log. Do not load a query into it.
-Case ID keeps each comment attached to the correct agent and day.
-
-## Absenteeism: connect the review queue
-
-1. Confirm `Feed\Absenteeism\ABSENCE_REVIEW_CASE_CURRENT.csv` exists.
-2. Create a Blank Query from the generated review-queue M script, loading at
-   `ACTION_QUEUE!$A$4`.
-3. Rename the table exactly to `tblActionQueue`.
-4. Add one table column at the right named `Action Status`.
-5. In its first data row, enter:
-
-   ```excel
-   =IFERROR(XLOOKUP([@[Case ID]],tblActions[Case ID],tblActions[Review Status]),"Not started")
-   ```
-
-   Excel fills the formula down.
-6. Copy a new case into `ACTIONS` only when someone must own and comment on it.
-
-## Absenteeism: connect exact activity detail
-
-1. Confirm `Feed\Absenteeism\ABSENCE_COMPONENT_CURRENT.csv` exists.
-2. Create a Blank Query from the generated component-detail M script, loading at
-   `ACTIVITY_DETAIL!$A$4`.
-3. In Power Query set `Date` to **Date** and `Start`/`End` to **Date/Time**.
-4. Rename the table exactly to `tblActivityDetail`.
-
-`TEAM_VIEW` now follows the newest ledger date and shows filtered results and
-review cases. `COMPONENT_VIEW` follows the same selectors and explains absence
-and shrinkage by category. The `ACTIONS` sheet is the permanent review log;
-Power Query must never load into it. Case ID keeps each comment attached to the
-correct agent and day.
+The generated workbook does not accept attendance decisions and does not write
+anything back to WFMHub.
 
 ## Normal refresh after setup
 
 1. Put new untouched exports in the normal source folders.
-2. For Absenteeism, **Refresh All** updates `TEAM_VIEW`,
-   `COMPONENT_VIEW`, and the review queue. Do not rebuild the shared workbook
-   unless WFMHub ships a new workbook design.
+2. Rebuild the focused workbook you need. The Hub archives the prior copy before
+   replacing it.
 
 ## If Excel shows an error
 

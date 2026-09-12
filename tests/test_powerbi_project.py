@@ -33,7 +33,7 @@ class PowerBIProjectTests(unittest.TestCase):
                 expressions.read_text(encoding="utf-8"),
             )
 
-    def test_shipped_pbip_has_seven_valid_pages_and_governed_sources(self):
+    def test_shipped_pbip_has_eight_valid_pages_and_governed_sources(self):
         project = TEMPLATE / f"{PROJECT_NAME}.pbip"
         self.assertTrue(project.is_file())
         for path in TEMPLATE.rglob("*.json"):
@@ -43,7 +43,7 @@ class PowerBIProjectTests(unittest.TestCase):
             TEMPLATE / f"{PROJECT_NAME}.Report" / "definition" / "pages" / "pages.json"
         )
         pages = json.loads(pages_file.read_text(encoding="utf-8"))
-        self.assertEqual(len(pages["pageOrder"]), 7)
+        self.assertEqual(len(pages["pageOrder"]), 8)
         names = []
         for page_id in pages["pageOrder"]:
             page_root = pages_file.parent / page_id
@@ -66,7 +66,8 @@ class PowerBIProjectTests(unittest.TestCase):
             names,
             [
                 "Daily Command", "SL Drivers", "Staff Prep", "Realisation",
-                "Schedule Integrity", "Forecast Accuracy", "Data Readiness",
+                "Schedule Integrity", "Forecast Accuracy", "Absence & Shrinkage",
+                "Data Readiness",
             ],
         )
         expressions = TEMPLATE / f"{PROJECT_NAME}.SemanticModel" / "definition"

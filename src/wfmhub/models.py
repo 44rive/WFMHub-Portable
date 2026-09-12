@@ -1154,51 +1154,171 @@ def _build_corrections(
                     confidence = "High" if category == "Logged Off" else "Review"
                     add(row, issue, hit_start, hit_end, minutes, priority, confidence, "General Unavailability", "AGENT_STATUS", row["status_source"])
 
-    actions = {row["correction_id"]: row for row in _dicts(conn.execute("SELECT * FROM core.correction_action"))}
+    # Attendance Review is now a read-only residual queue.  Final Verint
+    # Activities are not attendance evidence: they can only close an already
+    # detected exact gap after the day.  Subtract their physical overlap and
+    # retain only the still-unexplained fragments.
+    attendance_by_key = {
+        f"{row['business_date']:%Y%m%d}-{row['agent_id']}": row
+        for row in attendance
+    }
+    raw_output = output
+    raw_intervals_by_key: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+    for item in raw_output:
+        if item["gap_start"] and item["gap_end"]:
+            raw_intervals_by_key[
+                f"{item['business_date']:%Y%m%d}-{item['agent_id']}"
+            ].append((item["gap_start"], item["gap_end"]))
+
     deduped: dict[str, dict[str, Any]] = {}
     residual_rows: list[dict[str, Any]] = []
-    for item in output:
-        action = actions.get(item["correction_id"], {})
-        decision_status = str(action.get("validation_status") or "Open").strip().title()
-        if decision_status not in {"Open", "Approved", "Dismissed"}:
-            decision_status = "Open"
-        decision_state = {
-            "Approved": "DECISION_APPROVED",
-            "Dismissed": "DECISION_DISMISSED",
-            "Open": "PENDING_REVIEW",
-        }[decision_status]
-        item.update({
-            "confirmed_activity": action.get("confirmed_activity"),
-            "validation_status": decision_status,
-            "owner": action.get("owner"), "comment": action.get("comment"), "injected_date": action.get("injected_date"),
-            # Legacy column names remain for database compatibility; their
-            # values now describe the human decision ledger, never Activities.
-            "verint_reconciliation": decision_state,
-            "verint_activity": None, "verint_category": None,
-            "verint_overlap_minutes": item["gap_minutes"] if decision_status != "Open" else 0,
-            "verint_source_file": None,
-        })
-        if item["gap_start"] and item["gap_end"]:
+    for raw_item in raw_output:
+        item = dict(raw_item)
+        agent_day_key = f"{item['business_date']:%Y%m%d}-{item['agent_id']}"
+        base = attendance_by_key.get(agent_day_key, {})
+        events = _final_verint_events(base, rulebook)
+        if not item["gap_start"] or not item["gap_end"]:
+            residuals: list[tuple[datetime | None, datetime | None]] = [(None, None)]
+            overlaps: list[dict[str, Any]] = []
+            overlap_minutes = 0
+            reconciliation = "NO_EXACT_INTERVAL"
+        else:
+            overlaps = [
+                event for event in events
+                if event["start"] < item["gap_end"]
+                and event["end"] > item["gap_start"]
+            ]
+            blocked = [(event["start"], event["end"]) for event in overlaps]
+            residuals = list(subtract_intervals(
+                item["gap_start"], item["gap_end"], blocked,
+            ))
+            residual_minutes = sum(
+                int((right - left).total_seconds() // 60)
+                for left, right in residuals
+            )
+            overlap_minutes = max(0, int(item["gap_minutes"] or 0) - residual_minutes)
+            reconciliation = (
+                "PARTIALLY_IN_VERINT" if overlap_minutes else "NOT_IN_VERINT"
+            )
+
+        # Full coverage deliberately creates no row: exporting the corrected
+        # Activities file on the next refresh makes the case disappear.
+        if not residuals:
+            continue
+        activities = "; ".join(sorted({
+            str(event.get("activity") or "").strip()
+            for event in overlaps if str(event.get("activity") or "").strip()
+        })) or None
+        categories = "; ".join(sorted({
+            str(event.get("category") or "").strip()
+            for event in overlaps if str(event.get("category") or "").strip()
+        })) or None
+        verint_sources = "; ".join(sorted({
+            value
+            for event in overlaps
+            for value in str(event.get("source_file") or "").split("; ")
+            if value
+        })) or None
+        for residual_start, residual_end in residuals:
+            residual = dict(item)
+            if residual_start is not None and residual_end is not None:
+                residual_minutes = int(
+                    (residual_end - residual_start).total_seconds() // 60
+                )
+                residual.update({
+                    "correction_id": _correction_id(
+                        residual, residual["detected_issue"],
+                        residual_start, residual_end,
+                    ),
+                    "gap_start": residual_start, "gap_end": residual_end,
+                    "gap_minutes": residual_minutes,
+                })
+            residual.update({
+                # Retained nullable columns keep the stable database contract;
+                # no workflow reads or writes human decisions anymore.
+                "confirmed_activity": None, "validation_status": "Residual",
+                "owner": None, "comment": None, "injected_date": None,
+                "verint_reconciliation": reconciliation,
+                "verint_activity": activities, "verint_category": categories,
+                "verint_overlap_minutes": overlap_minutes,
+                "verint_source_file": verint_sources,
+            })
+            deduped[residual["correction_id"]] = residual
+            if residual_start is None or residual_end is None:
+                continue
             segment_id = hashlib.sha256(
-                f"{item['correction_id']}|{item['gap_start']}|{item['gap_end']}".encode("utf-8")
+                f"{residual['correction_id']}|{residual_start}|{residual_end}".encode("utf-8")
             ).hexdigest()
             residual_rows.append({
-                "residual_id": segment_id, "correction_id": item["correction_id"],
-                "business_date": item["business_date"], "agent_id": item["agent_id"],
-                "residual_start": item["gap_start"], "residual_end": item["gap_end"],
-                "residual_minutes": item["gap_minutes"],
-                "suggested_activity": item["suggested_activity"],
-                "observed_source": item["observed_source"], "source_file": item["source_file"],
-                "verint_reconciliation": decision_state,
+                "residual_id": segment_id,
+                "correction_id": residual["correction_id"],
+                "business_date": residual["business_date"],
+                "agent_id": residual["agent_id"],
+                "residual_start": residual_start, "residual_end": residual_end,
+                "residual_minutes": residual["gap_minutes"],
+                "suggested_activity": residual["suggested_activity"],
+                "observed_source": residual["observed_source"],
+                "source_file": residual["source_file"],
+                "verint_reconciliation": reconciliation,
             })
-        deduped[item["correction_id"]] = item
     output = sorted(deduped.values(), key=lambda item: (item["business_date"], item["priority"], -item["gap_minutes"], item["agent_id"]))
     conn.execute("DELETE FROM mart.correction_candidate")
     _insert_dicts(conn, "mart.correction_candidate", CORRECTION_COLUMNS, output)
     conn.execute("DELETE FROM mart.correction_residual_segment")
     _insert_dicts(conn, "mart.correction_residual_segment", CORRECTION_RESIDUAL_COLUMNS, residual_rows)
 
+    # Final absence/vacation/unpaid codes must be supported either by an
+    # observed exact gap or by governed PTO/Away.  Shrinkage-only activities
+    # such as Training may correctly occur while the agent is connected and
+    # therefore do not need a gap.
+    exception_rows: dict[str, dict[str, Any]] = {}
+    for agent_day_key, base in attendance_by_key.items():
+        support = list(raw_intervals_by_key.get(agent_day_key, []))
+        support.extend(
+            (row["segment_start"], row["segment_end"])
+            for row in base.get("_planned_time_off_segments", [])
+        )
+        for event in _final_verint_events(base, rulebook):
+            rule = event["rule"]
+            if not (rule.absence or rule.vacation or rule.unpaid):
+                continue
+            for unsupported_start, unsupported_end in subtract_intervals(
+                event["start"], event["end"], support,
+            ):
+                minutes = int(
+                    (unsupported_end - unsupported_start).total_seconds() // 60
+                )
+                if minutes <= 0:
+                    continue
+                exception_key = hashlib.sha256(
+                    f"{agent_day_key}|{event['activity']}|{event['category']}|"
+                    f"{unsupported_start}|{unsupported_end}|VERINT_FINAL_WITHOUT_OBSERVED_GAP".encode("utf-8")
+                ).hexdigest()
+                exception_rows[exception_key] = {
+                    "exception_key": exception_key,
+                    "agent_day_key": agent_day_key,
+                    "business_date": base["business_date"],
+                    "agent_id": base["agent_id"],
+                    "agent_name": base["agent_name"],
+                    "activity": event["activity"], "category": event["category"],
+                    "event_start": unsupported_start,
+                    "event_end": unsupported_end, "minutes": minutes,
+                    "exception_type": "VERINT_FINAL_WITHOUT_OBSERVED_GAP",
+                    "source_file": event["source_file"],
+                    "rule_version": rulebook.version,
+                    "rule_sha256": rulebook.sha256,
+                }
     conn.execute("DELETE FROM mart.verint_final_exception")
+    _insert_dicts(
+        conn, "mart.verint_final_exception", VERINT_EXCEPTION_COLUMNS,
+        sorted(
+            exception_rows.values(),
+            key=lambda row: (
+                row["business_date"], row["agent_id"], row["event_start"],
+                row["exception_key"],
+            ),
+        ),
+    )
     return output
 
 
@@ -2511,7 +2631,12 @@ def _build_absence(
     attendance: list[dict[str, Any]],
     corrections: list[dict[str, Any]],
 ) -> tuple[int, int]:
-    """Build corrected absence/shrinkage from observed gaps and human decisions."""
+    """Build the provisional observed-gap view plus governed PTO/Away.
+
+    This compatibility mart is deliberately not a final absence ledger.  Its
+    residual gaps remain unclassified until the corrected activity is visible
+    in Verint; ``mart.verint_final_absence_*`` remains the final authority.
+    """
     conn.execute("DELETE FROM mart.absence_event")
     conn.execute("DELETE FROM mart.absence_agent_day")
     if not config.modules.get("absence", True):
@@ -2542,7 +2667,8 @@ def _build_absence(
             dismissed = decision_status == "Dismissed"
             activity = (
                 correction.get("confirmed_activity")
-                if approved else "Dismissed gap" if dismissed else "Pending review"
+                if approved else "Dismissed gap" if dismissed
+                else "Pending Verint correction"
             )
             final_rule = rulebook.classify_activity(activity) if approved else None
             if approved and final_rule is not None:
@@ -2558,7 +2684,7 @@ def _build_absence(
                 flags["mapped"] = True
             else:
                 flags = _rule_flags(
-                    None, "PENDING_REVIEW", absence=False, unpaid=False,
+                    None, "PENDING_VERINT", absence=False, unpaid=False,
                     shrinkage=False, working=False, planned=False,
                 )
             minutes = int((event_end - event_start).total_seconds() // 60)
@@ -3223,20 +3349,6 @@ def _build_quality(
                 "agent_status", None, business_date, None, "Low Agent Status coverage", "REVIEW",
                 f"{low_rows} agent-day rows have less than {config.rules.minimum_status_coverage:.0%} status coverage; LILO boundaries still remain usable.",
             )
-    for correction_id, imported_from in conn.execute(
-        """SELECT a.correction_id, a.imported_from
-           FROM core.correction_action a
-           LEFT JOIN mart.correction_candidate c
-             ON c.correction_id=a.correction_id
-           WHERE c.correction_id IS NULL
-             AND substr(a.correction_id,1,8) BETWEEN ? AND ?""",
-        [start.strftime("%Y%m%d"), end.strftime("%Y%m%d")],
-    ).fetchall():
-        add(
-            "attendance", imported_from, None, None,
-            "Stale attendance decision", "REVIEW",
-            f"Gap ID {correction_id} no longer matches a current exact interval; rebuild Attendance Review before deciding it again.",
-        )
     forecast_unmapped = conn.execute("SELECT count(*) FROM mart.forecast_hour WHERE mapping_status='UNMAPPED'").fetchone()[0]
     actual_unmapped = 0
     if forecast_unmapped or actual_unmapped:
@@ -3285,8 +3397,8 @@ def _build_quality(
         severity = "REVIEW"
         add(
             "absence", row["source_file"], row["business_date"], row["agent_id"],
-            "Observed gap awaiting decision", severity,
-            f"{row['activity']} -> {row['category']} ({row['minutes']} minutes). Classify it in Attendance Review and import the decisions.",
+            "Residual attendance gap not in final Verint", severity,
+            f"{row['activity']} -> {row['category']} ({row['minutes']} minutes). Correct the exact interval in Verint, export Activities, then refresh.",
         )
     for row in _dicts(conn.execute(
         """SELECT r.agent_id, r.source_sheet, r.source_row, r.start_date,
@@ -3321,8 +3433,8 @@ def _build_quality(
     )):
         add(
             "absence", row["source_file"], row["business_date"], row["agent_id"],
-            "Reviewed No Activity", "REVIEW",
-            f"No Activity covers {row['minutes']} scheduled minutes. Confirm the imported decision is intentional.",
+            "Residual No Activity", "REVIEW",
+            f"No Activity covers {row['minutes']} scheduled minutes and is not yet supported by final Verint Activities.",
         )
     for row in _dicts(conn.execute(
         """SELECT DISTINCT a.business_date, a.agent_id, a.agent_name,
@@ -3423,6 +3535,45 @@ def _build_source_health(conn: DatabaseConnection, config: Config) -> None:
         )
 
 
+def _schedule_integrity_history_start(
+    conn: DatabaseConnection,
+    requested_start: date,
+    end: date,
+    rolling_scheduled_days: int,
+) -> date:
+    """Return the earliest date needed for an exact rolling integrity window."""
+
+    value = conn.execute(
+        """WITH eligible_days AS (
+               SELECT DISTINCT r.agent_id, r.schedule_date
+               FROM raw.schedule_shift r
+               JOIN meta.source_file f ON f.file_id=r.source_file_id
+               WHERE f.active=true AND f.status='SUCCESS'
+                 AND f.source_variant IN ('START_END','ACTIVITIES')
+                 AND r.agent_id IS NOT NULL AND r.parse_ok=true
+                 AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL
+                 AND r.scheduled_end>r.scheduled_start
+                 AND r.schedule_date<=?
+                 AND coalesce(r.assignment_type,'') NOT IN ('Off','Planned absence')
+           ), ranked AS (
+               SELECT agent_id, schedule_date,
+                      row_number() OVER (
+                          PARTITION BY agent_id ORDER BY schedule_date DESC
+                      ) AS scheduled_day_rank
+               FROM eligible_days
+           )
+           SELECT min(schedule_date) FROM ranked WHERE scheduled_day_rank<=?""",
+        [end, rolling_scheduled_days],
+    ).fetchone()[0]
+    if value is None:
+        return requested_start
+    if isinstance(value, datetime):
+        value = value.date()
+    elif not isinstance(value, date):
+        value = date.fromisoformat(str(value)[:10])
+    return min(requested_start, value)
+
+
 def refresh_models(
     conn: DatabaseConnection,
     config: Config,
@@ -3451,21 +3602,24 @@ def refresh_models(
         evaluation_as_of = _evaluation_time(config.timezone, as_of)
         stage(1, "Selecting reporting period")
         start, end = resolve_period(conn, config, start, end, use_config_period)
-        stage(2, "Loading schedules")
-        schedules = _load_schedules(conn, start, end)
-        stage(3, "Keeping Verint Activities out of attendance logic")
-        events_by_agent: dict[str, list[dict[str, Any]]] = {}
+        integrity_start = _schedule_integrity_history_start(
+            conn, start, end, rulebook.integrity_rolling_scheduled_days,
+        )
+        stage(2, "Loading schedules and integrity history")
+        schedules = _load_schedules(conn, integrity_start, end)
+        stage(3, "Loading final Verint Activities for post-day reconciliation")
+        events_by_agent = _events_by_agent(_load_events(conn, start, end))
         stage(4, "Loading LILO")
-        lilo, loaded_dates, seen_ids = _load_lilo(conn, start, end)
+        lilo, loaded_dates, seen_ids = _load_lilo(conn, integrity_start, end)
         stage(5, "Loading Agent Status attendance evidence")
         if config.modules.get("agent_status", True):
-            statuses, status_loaded_dates = _load_statuses(conn, start, end)
+            statuses, status_loaded_dates = _load_statuses(conn, integrity_start, end)
         else:
             statuses, status_loaded_dates = {}, set()
         stage(6, "Building employee dimension")
         agents = _build_agents(conn)
         planned_time_off = _build_planned_time_off(
-            conn, schedules, agents, start, end, evaluation_as_of,
+            conn, schedules, agents, integrity_start, end, evaluation_as_of,
         )
         stage(7, "Building attendance")
         attendance = _build_attendance(
@@ -3473,15 +3627,18 @@ def refresh_models(
             agents, statuses, status_loaded_dates, planned_time_off, evaluation_as_of,
             config.rules.minimum_status_coverage,
         )
+        selected_attendance = [
+            row for row in attendance if start <= row["business_date"] <= end
+        ]
         stage(8, "Keeping adherence disabled")
         conn.execute("DELETE FROM mart.conformance_agent_day")
         conformance = []
-        stage(9, "Finding observed LILO and status gaps")
-        corrections = _build_corrections(conn, rulebook, attendance)
+        stage(9, "Reconciling observed gaps against final Verint Activities")
+        corrections = _build_corrections(conn, rulebook, selected_attendance)
         stage(10, "Building LOB and language staffing intervals")
-        staffing = _build_staffing(conn, attendance, evaluation_as_of)
+        staffing = _build_staffing(conn, selected_attendance, evaluation_as_of)
         stage(11, "Building shift evidence timelines")
-        timeline = _build_shift_timeline(conn, attendance, evaluation_as_of)
+        timeline = _build_shift_timeline(conn, selected_attendance, evaluation_as_of)
         schedule_integrity = _build_schedule_integrity(
             conn, rulebook, attendance, statuses, evaluation_as_of,
         )
@@ -3501,7 +3658,7 @@ def refresh_models(
         pcs = _build_pcs(conn, config, metric_catalog, pcs_start, end)
         stage(15, "Building observed absence and shrinkage")
         absence, absence_events = _build_absence(
-            conn, config, rulebook, metric_catalog, attendance, corrections,
+            conn, config, rulebook, metric_catalog, selected_attendance, corrections,
         )
         stage(16, "Building final absence from Verint Activities")
         final_absence_events, final_absence = _build_verint_final_absence(
@@ -3530,7 +3687,7 @@ def refresh_models(
             conn, metric_catalog, analytics_rules, run_id, start, end,
         )
         result = ModelSummary(
-            start=start, end=end, attendance_rows=len(attendance), conformance_rows=len(conformance),
+            start=start, end=end, attendance_rows=len(selected_attendance), conformance_rows=len(conformance),
             correction_rows=len(corrections), rta_rows=len(rta), forecast_rows=forecast,
             intraday_rows=actual, pcs_rows=pcs, quality_rows=quality,
             absence_rows=absence, absence_event_rows=absence_events,

@@ -31,14 +31,14 @@ Technical files live under `_system`. You normally do not open that folder.
 | RTM Daily Control | What is the live service state, and who needs attendance follow-up in each LOB? |
 | Staffing & Capacity Plan | Where is capacity missing now, and where will forecast demand exceed net schedules in future weeks? |
 | Realisations | How did actual volume, service, forecast, staffing, absence, and shrinkage perform across every mapped LOB and period? |
-| Attendance Review | Which exact completed-day gaps need an Approved or Dismissed human decision? |
+| Attendance Review | Which exact completed-day gaps are still missing from final Verint Activities? |
 | Final Absenteeism | What has Verint finally coded for absence/shrinkage, and which shifts remain incomplete? |
 | Bonus Management | What did Bonus Matrix v1.2 calculate, and is it safe to release? |
 | PCS Report & Coaching | How are PCS, participation, low scores, and coaching moving by date, month, LOB, team, and agent? |
 
 The products use one visual identity but not one generic layout. RTM combines
-service and its matching LOB attendance list, Attendance Review is an exact-gap
-decision board, and Final Absenteeism is a ledger.
+service and its matching LOB attendance list, Attendance Review is a read-only
+residual correction board, and Final Absenteeism is a ledger.
 
 Adherence is not calculated. Reported Routed Rate means **total routed / total
 entered**. Reported TSL means **connected within 30 seconds / (lost + connected
@@ -197,18 +197,15 @@ the same-version tracker. A versioned design migration archives the old copy
 and carries keyed coaching actions forward. There is no Data Model, Power
 Pivot, macro, raw-data sheet, or dynamic-array formula dependency.
 
-## Attendance decisions and shared absenteeism
+## Attendance reconciliation and final absenteeism
 
-`Reports\Attendance Review.xlsx` is the auditable decision input. Build it for
-the required completed dates, edit only the five blue columns on `REVIEW BOARD`,
-save it, then choose **Attendance Review > Import completed decisions**. Gap ID
-anchors the exact immutable start/end interval in SQLite; edited evidence is
-never trusted. Approved rows use the selected rulebook category, Dismissed rows
-count as no loss, and Open rows stay unverified. Every case has a SCHEDULE band
-directly above its ACTUAL band, so shift boundaries and PTO/Away can be compared
-with Logged, Break, Lunch, Gap and Unknown evidence. Decisions are edited only
-on the ACTUAL row. The stored decision ledger and exact source evidence remain
-hidden by default because normal reviewers do not need to operate those sheets.
+`Reports\Attendance Review.xlsx` is an auditable, read-only correction backlog.
+The Hub finds exact gaps from Schedule plus Agent Status/LILO, subtracts any
+exact overlap already present in final Verint Activities, and shows only the
+remaining fragments. Correct those intervals in Verint, export Activities and
+refresh; fully covered gaps disappear. Every case has a SCHEDULE band directly
+above its ACTUAL band so PTO/Away, Logged, Break, Lunch, Gap and Unknown evidence
+can be compared. Exact source evidence remains hidden by default.
 `BREAK & MEAL` totals completed-day Agent Status intervals per agent, compares
 them with the configurable break and meal allowances, and raises an overrun
 only when source coverage is sufficient.
@@ -216,10 +213,8 @@ only when source coverage is sufficient.
 `Reports\Final Absenteeism.xlsx` follows the same long-lived-file principle and
 uses final mapped Verint Activities, clipped to StartEndTimes shifts.
 `TEAM_VIEW` filters agent results and review cases; `COMPONENT_VIEW` explains
-absence and shrinkage by reviewed category; `ACTIVITY_DETAIL` holds exact
-start/end evidence. The blue `ACTIONS` table is the permanent team-owned log
-and is never a Power Query target. Link the three fixed Absenteeism feeds once,
-then use **Data > Refresh All** without regenerating the shared workbook.
+absence and shrinkage by final category; `ACTIVITY_DETAIL` holds exact
+start/end evidence. `ACTION_QUEUE` is a read-only completeness backlog.
 
 ## Staffing and Realisations
 
@@ -272,7 +267,6 @@ python3 -m wfmhub --home . setup --source-root /path/to/extracts --non-interacti
 python3 -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31 --no-report
 python3 -m wfmhub --home . report --pack service --start 2026-08-31 --end 2026-08-31
 python3 -m wfmhub --home . report --pack pcs --start 2026-08-01 --end 2026-08-31
-python3 -m wfmhub --home . import-attendance-decisions "Reports/Attendance Review.xlsx"
 python3 -m wfmhub --home . analyze pcs --start 2026-08-01 --end 2026-08-31 --comparison previous_month
 python3 -m unittest discover -s tests -v
 ```

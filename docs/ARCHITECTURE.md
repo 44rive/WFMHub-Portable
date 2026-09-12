@@ -102,18 +102,18 @@ details remain in one module.
 | `raw.bonus_policy` | One imported policy decision row |
 | `core.clean_call_leg` | Deduplicated active call-leg view by stable Call Key |
 | `core.dim_agent` | One operational Agent ID |
-| `core.correction_action` | Persistent human decision by exact Gap ID |
+| `core.correction_action` | Legacy compatibility storage; not written by the current menu/CLI |
 | `core.pcs_coaching_action` | Legacy compatibility table; permanent PCS coaching stays in the tracker |
 | `raw.fte_time_off` | One governed PTO/Away register row from the standard FTE workbook |
 | `mart.attendance_agent_day` | One scheduled Agent ID/day |
 | `mart.conformance_agent_day` | Legacy compatibility table; empty in v0.5 |
-| `mart.correction_candidate` | One exact observed Agent Status/LILO gap plus human decision |
-| `mart.correction_residual_segment` | Compatibility projection of one exact gap/decision state |
+| `mart.correction_candidate` | One exact residual Agent Status/LILO gap after final-Verint subtraction |
+| `mart.correction_residual_segment` | One exact residual interval with final-Verint reconciliation state |
 | `mart.staffing_interval` | One 15-minute roster LOB/language staffing interval |
 | `mart.shift_timeline_segment` | One exact planned-versus-observed timeline segment |
 | `mart.planned_time_off_segment` | One schedule-clipped, non-overlapping PTO/Away interval |
 | `mart.rta_snapshot` | Legacy compatibility table; empty in v0.5 |
-| `mart.verint_final_exception` | Retired compatibility table; cleared during refresh |
+| `mart.verint_final_exception` | One deterministic final-Verint completeness exception |
 | `mart.forecast_hour` | One raw forecast queue/hour plus mapped scopes |
 | `mart.intraday_queue_interval` | Retired AP compatibility table; cleared during refresh |
 | `mart.agent_pcs_day` | One admitted Agent ID/day with call and PCS measures |
@@ -141,7 +141,7 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `realisations` | `Reports/Realisations.xlsx` | All mapped LOB actual/forecast, service, staffing, absence and shrinkage results |
 | `staffing` | `Reports/Staffing Gaps.xlsx` | Full-period actual staffing control and future capacity planning |
 | `attendance` | `_system/legacy_reports/Legacy Attendance Callout.xlsx` | Compatibility-only callout builder; absent from the normal menu |
-| `corrections` | `Reports/Attendance Review.xlsx` | Selected-period exact gaps, visual decisions, and evidence-gated break/meal control |
+| `corrections` | `Reports/Attendance Review.xlsx` | Selected-period residual gaps, schedule/actual evidence, and break/meal control |
 | `absence` | `Reports/Final Absenteeism.xlsx` | Verint Activities final absence/shrinkage ledger and completeness review |
 
 Products share the same visual identity but use purpose-specific layouts.
@@ -161,8 +161,8 @@ RTM Daily Control begins with `CONTROL`, then provides four purpose-built LOB
 sheets. Each LOB combines the validated hourly service view with its own
 reconciling attendance/call list. `ISSUES & DRIVERS` replaces the separate
 exceptions and queue-diagnosis surfaces. Attendance Review pairs a scheduled
-band directly above the actual evidence band for every editable gap. Its stored
-`DECISION LEDGER` and exact `EVIDENCE` are hidden audit support. Each paired
+band directly above the actual evidence band for every residual gap. Exact
+`EVIDENCE` is hidden audit support. Each paired
 schedule/actual case has a short visual separator. Explicit Agent Status
 `Meal Aux` remains Lunch even when the LILO logout boundary falls inside it.
 `BREAK & MEAL`
@@ -324,8 +324,9 @@ The order is deliberate:
 4. Use exclusive Agent Status `Logged Off`/`Unavailable` intervals between those
    boundaries for mid-shift gap detection.
 5. Build one stable Gap ID from date, agent, issue and exact boundaries.
-6. Attach any stored `Open`, `Approved`, or `Dismissed` human decision.
-7. Apply the selected rulebook category only after approval.
+6. Clip mapped final Verint Activities to the same shift and subtract their
+   exact overlap from each raw gap.
+7. Publish only remaining fragments; a fully covered gap disappears.
 
 “No show” requires a completed scheduled working shift plus positive evidence:
 either a loaded daily LILO row with both boundaries blank, or sufficient Agent
@@ -338,8 +339,9 @@ early leave. Leading logout intervals are late; trailing logout intervals are
 early leave only after the scheduled end; multiple reconnect cycles remain
 separate gaps unless they are within the configured merge tolerance.
 
-Verint activity intervals are not read by this calculation. Rebuilding the
-model cannot erase the original problem or its stored human decision.
+Verint activity intervals never create attendance evidence. They are read only
+after gap detection to prove final coding overlap. The raw gap remains
+traceable while the user-facing backlog contains only unresolved fragments.
 
 ## Configuration boundaries and calculation audit
 
@@ -382,11 +384,12 @@ The absence engine:
 2. derives no-show/late/early from LILO plus active status evidence;
 3. derives mid-shift logged-off/unavailable gaps from exclusive status states;
 4. clips and unions only those observed gaps within the schedule;
-5. uses an imported Approved decision to classify the exact gap;
-6. unions intervals separately for absence, vacation, unpaid and shrinkage;
-7. caps planned net minutes at the configured standard day;
-8. groups consecutive absence days into spells and calculates Bradford;
-9. surfaces Open decisions and missing evidence for review.
+5. subtracts exact overlap already coded in final Verint Activities;
+6. keeps any remaining observed gap provisional rather than inventing a reason;
+7. unions governed PTO/Away separately for absence, vacation and unpaid totals;
+8. caps planned net minutes at the configured standard day;
+9. groups consecutive absence days into spells and calculates Bradford;
+10. surfaces residual gaps and missing evidence for review.
 
 Separately, the final-absence builder clips mapped Verint Activities to the
 planned shift, unions overlapping components, caps ratios to planned net time,
@@ -394,14 +397,13 @@ and flags unmapped, empty, provisional, missing-planned-time-off and partial
 correction cases. This separation prevents a final coding export from proving
 same-day presence.
 
-An Open gap is `PENDING_REVIEW`; an unfinished shift is `PROVISIONAL_DAY`.
-Both block final-ready status without inventing a reason. Headline ratios use
+An unresolved observed gap is `PENDING_VERINT`; an unfinished shift is
+`PROVISIONAL_DAY`. Both block final-ready status without inventing a reason. Headline ratios use
 only `CLEAR` and `ABSENCE_RECORDED` rows, so open/provisional rows cannot dilute
 the percentage.
 
-An observed gap is never silently assigned a sickness/vacation reason. Only an
-Approved human decision supplies the category; Dismissed explicitly counts as
-no loss.
+An observed gap is never silently assigned a sickness/vacation reason. Final
+business categories come from mapped Verint Activities or governed PTO/Away.
 
 ## Service model
 
@@ -483,8 +485,9 @@ only missing migrations. For a release extracted into a new folder,
 it, copies user-owned configuration/reports/custom jobs without overwriting,
 and applies only missing migrations. A code or report-template release does
 not require historical extracts to be rebuilt.
-Attendance Review is a validated two-way decision workbook: only the five blue
-fields are imported, while SQLite keeps authority over exact evidence.
+Attendance Review is a read-only residual reconciliation workbook. SQLite keeps
+authority over exact evidence; corrections are made in Verint and arrive in a
+later Activities extract.
 
 Within the SQLite generation, migrations are additive and never edited after
 release. Config upgrades create a timestamped TOML backup. Database upgrades

@@ -10,7 +10,7 @@
     "tabOrder": 300
   },
   "visual": {
-    "visualType": "stackedBarChart",
+    "visualType": "clusteredBarChart",
     "query": {
       "queryState": {
         "Category": {
@@ -33,20 +33,6 @@
         },
         "Y": {
           "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Shift Placement"
-                    }
-                  },
-                  "Property": "Start Hour Value"
-                }
-              },
-              "queryRef": "Shift Placement.Start Hour Value",
-              "nativeQueryRef": "Start Hour Value"
-            },
             {
               "field": {
                 "Measure": {
@@ -258,7 +244,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'PUBLISHED VS OBSERVED SHIFT PLACEMENT'"
+                  "Value": "'PUBLISHED VS OBSERVED SHIFT HOURS'"
                 }
               }
             },

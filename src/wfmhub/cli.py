@@ -12,7 +12,6 @@ from pathlib import Path
 
 from . import __version__
 from .analytics import load_analytics_rules, validate_analytics_rules
-from .actions import import_attendance_decisions
 from .bonus import import_bonus_matrix
 from .config import ConfigError, ensure_user_config, load_config, write_source_root
 from .database import (
@@ -600,40 +599,6 @@ def import_bonus_tool(
     return 0
 
 
-def import_attendance_decisions_tool(home: Path, workbook: Path) -> int:
-    """Import exact-gap decisions, recalculate the ledger and rebuild review."""
-
-    config = load_config(home)
-    _logging(config)
-    bar = ProgressBar()
-    try:
-        bar.update(0.05, "Validating Attendance Review decisions")
-        with write_session(config) as conn:
-            rulebook = load_rulebook(home, config.business_rules)
-            imported = import_attendance_decisions(conn, workbook, rulebook)
-            model = refresh_models(
-                conn, config, f"decisions-{uuid.uuid4().hex}",
-                imported.start, imported.end, False,
-                _phase_progress(bar, 0.15, 0.75),
-            )
-            bar.update(0.78, "Updating final absence and Power BI feeds")
-            publish_shared_feeds(conn, config, model.start, model.end)
-            bar.update(0.88, "Rebuilding Attendance Review")
-            report = build_report_pack(
-                "corrections", conn, config, model.start, model.end,
-            )
-        bar.finish("Attendance decisions imported")
-    except Exception as exc:
-        logging.exception("Attendance decision import failed")
-        bar.fail(str(exc))
-        raise
-    print(f"Decisions    : {imported.imported:,} imported")
-    print(f"Period       : {imported.start} to {imported.end}")
-    print(f"Review file  : {report}")
-    print("Extracts     : unchanged")
-    return 0
-
-
 def analyze_period(
     home: Path,
     domain: str,
@@ -932,19 +897,13 @@ def _advanced_menu(home: Path) -> None:
 
 def _attendance_review_menu(home: Path) -> None:
     print("\nATTENDANCE REVIEW")
-    print("1. Build or rebuild Attendance Review")
-    print("2. Import completed decisions and recalculate")
-    print("3. Back")
-    choice = input("Choose 1-3: ").strip()
+    print("1. Build or rebuild the residual Verint review")
+    print("2. Back")
+    choice = input("Choose 1-2: ").strip()
     if choice == "1":
         _build_menu_product(home, "corrections")
-    elif choice == "2":
-        config = load_config(home)
-        default = report_current_path(config, "corrections")
-        entered = input(f"Workbook path [{default}]: ").strip().strip('"')
-        import_attendance_decisions_tool(home, Path(entered) if entered else default)
-    elif choice != "3":
-        raise ValueError("Please choose a number from 1 to 3")
+    elif choice != "2":
+        raise ValueError("Please choose a number from 1 to 2")
 
 
 def menu(home: Path) -> int:
@@ -1063,11 +1022,6 @@ def parser() -> argparse.ArgumentParser:
     custom_p.add_argument("--end", type=_date)
     bonus_p = commands.add_parser("import-bonus", help="Import Bonus Matrix v1.2 without changing the source")
     bonus_p.add_argument("workbook", type=Path)
-    decisions_p = commands.add_parser(
-        "import-attendance-decisions",
-        help="Import Attendance Review decisions and recalculate",
-    )
-    decisions_p.add_argument("workbook", type=Path)
     pcs_p = commands.add_parser(
         "pcs", help="Update PCS CSV feeds, install Power Query, or open the permanent tracker",
     )
@@ -1112,8 +1066,6 @@ def main(argv: list[str] | None = None) -> int:
             return report_only(home, args.start, args.end, args.output, args.pack, service_profile=args.service_profile)
         if args.command == "import-bonus":
             return import_bonus_tool(home, args.workbook)
-        if args.command == "import-attendance-decisions":
-            return import_attendance_decisions_tool(home, args.workbook)
         if args.command == "pcs":
             if args.action == "build":
                 _build_latest_pcs_report(home)

@@ -85,15 +85,15 @@ Staffing page therefore displays a blank requirement/gap/coverage until a real
 Every complete Hub update now atomically refreshes `Feed\PowerBI` with fixed
 dimension/fact CSVs and writes `POWERBI_MANIFEST_CURRENT.csv` last. The
 `_SETUP` subfolder contains the premium WFMHub theme, governed DAX measures and
-the seven-page build map. Power BI Desktop setup is one-time; daily operation is
+the eight-page build map. Power BI Desktop setup is one-time; daily operation is
 Hub **UPDATE**, then Power BI **Refresh**. The binary PBIX remains a Power BI
 Desktop-owned file and is not synthesized by the portable Python runtime.
 
 ## What should remain in Excel
 
-Excel remains useful for workflows requiring human editing:
+Excel remains useful for focused operational workflows and collaboration:
 
-- Attendance Review decisions and exact gap treatment
+- Attendance Review residual-gap treatment in Verint
 - Coaching action entry, until SharePoint Lists or Power Apps are introduced
 - Temporary clean-data extracts that someone needs to send
 - Manual investigation tables
@@ -111,7 +111,8 @@ The implemented WFM-only Power BI report contains:
 4. Workforce Realisation
 5. Schedule Integrity & Patterns
 6. Forecast Accuracy
-7. Data Readiness
+7. Absence & Shrinkage
+8. Data Readiness
 
 PCS stays in its permanent Excel tracker because Quality and team leaders must
 enter and preserve coaching actions. That collaboration/write-back need is a

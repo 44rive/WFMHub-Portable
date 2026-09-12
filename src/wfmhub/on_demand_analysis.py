@@ -162,7 +162,7 @@ def _evidence(conn: DatabaseConnection, domain: str, start: date, end: date) -> 
                              d.unpaid_minutes, d.shrinkage_minutes, d.unverified_minutes,
                              d.absence_rate,
                              CASE WHEN coalesce(a.is_provisional,false) THEN 'PROVISIONAL_DAY'
-                                  WHEN d.unverified_minutes>0 THEN 'PENDING_REVIEW'
+                                  WHEN d.unverified_minutes>0 THEN 'PENDING_VERINT'
                                   WHEN d.absence_day THEN 'ABSENCE_RECORDED' ELSE 'CLEAR' END
                       FROM mart.absence_agent_day d
                       LEFT JOIN mart.attendance_agent_day a ON a.agent_day_key=d.agent_day_key

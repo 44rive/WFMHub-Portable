@@ -29,13 +29,13 @@ WFMHub refresh and Power BI refresh are two different jobs:
 - WFMHub reads changed extracts, keeps the same SQLite history, calculates the
   governed models, and atomically replaces `Feed\PowerBI` CSVs.
 - Power BI imports those already-clean CSVs into its local semantic model and
-  redraws the seven pages.
+  redraws the eight pages.
 
 Power BI never reads the SQLite file or a raw extract. The file
 `POWERBI_MANIFEST_CURRENT.csv` is the receipt proving that the complete feed
 finished successfully.
 
-## The seven pages
+## The eight pages
 
 1. **Daily WFM Command** — today’s service, attendance and capacity decisions.
 2. **Service & SL Drivers** — 15-minute pressure signals and queue evidence.
@@ -46,7 +46,9 @@ finished successfully.
 5. **Schedule Integrity & Patterns** — published versus observed shifts and
    supported recurrence from completed Agent Status evidence.
 6. **Forecast Accuracy** — comparable 15-minute volume and AHT accuracy.
-7. **Data Readiness** — source freshness, mapped status time and exact issues.
+7. **Absence & Shrinkage** — final Verint rates, component mix and exact
+   completeness cases by LOB and agent-day.
+8. **Data Readiness** — source freshness, mapped status time and exact issues.
 
 PCS is intentionally not inside Power BI. Keep using the permanent PCS Excel
 tracker for the shared coaching workflow.
@@ -63,5 +65,5 @@ not available; the report does not invent a replacement value.
 - If a future release upgrades the Power BI project contract, WFMHub archives
   the previous project under `Reports\Archive\Power BI` before installing the
   new one.
-- This release advances that contract to version 4. The first open therefore
-  archives the older project and installs the seven-page WFM control tower.
+- This release advances that contract to version 5. The first open therefore
+  archives the older project and installs the eight-page WFM control tower.

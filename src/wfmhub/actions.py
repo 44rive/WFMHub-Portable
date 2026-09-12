@@ -1,4 +1,9 @@
-"""Import audited human classifications from Attendance Review.xlsx."""
+"""Legacy Attendance Review importer.
+
+This module is retained only for database/test compatibility. The current CLI,
+menu and dispatched Attendance Review never call it: attendance correction is
+performed in Verint and reconciled from the next final Activities export.
+"""
 
 from __future__ import annotations
 

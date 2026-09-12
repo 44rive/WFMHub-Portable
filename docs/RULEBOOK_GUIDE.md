@@ -55,18 +55,17 @@ The flags answer separate questions. A category may count as both absence and
 shrinkage. WFMHub unions overlapping intervals before daily totals, so the same
 minute is not counted twice inside one category metric.
 
-## Add a decision category
+## Add or change an activity category
 
-1. Decide the plain-language value reviewers should choose in `REVIEW BOARD`.
-2. Use that exact wording as the first pattern.
-3. Add a specific rule above broad Production rules.
-4. Choose the flags with the payroll/process owner.
-5. Increase the version, validate, and refresh the same dates.
-6. Confirm an Approved test decision moved to its intended category.
+1. Use the exact Verint activity wording as the first pattern.
+2. Add a specific rule above broad Production rules.
+3. Choose the flags with the payroll/process owner.
+4. Increase the version, validate, and refresh the same dates.
+5. Confirm the mapped final Verint component moved to its intended category.
 
-Activity rules classify Approved human decisions and PTO/Away labels. They
-never invent the original gap; observed gaps come from schedule + Agent Status
-+ LILO.
+Activity rules classify final Verint Activities and governed PTO/Away labels.
+They never invent the original gap; observed gaps come from schedule + Agent
+Status + LILO.
 
 ## Engine rules that are not text configuration
 

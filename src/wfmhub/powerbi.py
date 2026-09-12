@@ -15,7 +15,7 @@ from .service_profiles import load_service_profiles
 from .shared_feeds import SharedFeedResult, _atomic_csv, _manifest
 
 
-POWERBI_SCHEMA_VERSION = "4"
+POWERBI_SCHEMA_VERSION = "5"
 
 
 def _query(
@@ -210,6 +210,7 @@ def publish_powerbi_feeds(
              UNION ALL SELECT business_date FROM mart.attendance_agent_day
              UNION ALL SELECT business_date FROM mart.verint_final_absence_agent_day
              UNION ALL SELECT business_date FROM mart.planned_time_off_segment
+             UNION ALL SELECT business_date FROM mart.schedule_integrity_agent_day
            )"""
     ).fetchone()
     def as_date(value: Any, fallback: date) -> date:
@@ -277,7 +278,7 @@ def publish_powerbi_feeds(
         dim_capacity, ("Capacity Stage", "Sort Order"),
         ((name, index) for index, name in enumerate((
             "Elapsed scheduled", "Absence / missing", "Observed",
-            "AUX / available / breaks", "Productive",
+            "AUX / breaks", "Productive",
         ), 1)),
     )
     files.append(dim_capacity)
@@ -324,34 +325,56 @@ def publish_powerbi_feeds(
         ),
         (
             "DimQueue.csv",
-            ("Queue", "Source System", "Service Scope", "Comparison Scope", "Designation", "Mapping Status"),
-            """SELECT queue, min(source_system), min(service_scope),
+            ("Service Key", "Queue", "Source System", "Service Scope", "Management LOB", "Comparison Scope", "Designation", "Mapping Status"),
+            """SELECT management_lob || '|' || coalesce(service_scope,'') || '|' || queue,
+                      queue, min(source_system), service_scope, management_lob,
                       min(comparison_scope), min(designation), min(mapping_status)
                FROM (
-                 SELECT queue, source_system, service_scope, comparison_scope,
-                        designation, mapping_status
-                 FROM mart.service_interval
+                 SELECT s.queue, s.source_system, s.service_scope,
+                        coalesce(m.management_lob,s.service_scope) AS management_lob,
+                        s.comparison_scope, s.designation, s.mapping_status
+                 FROM mart.service_interval s
+                 LEFT JOIN pbi_management_lob_map m
+                   ON m.source_kind='SERVICE'
+                  AND lower(trim(m.source_value))=lower(trim(s.service_scope))
+                  AND s.business_date>=m.effective_from
+                  AND (m.effective_to IS NULL OR s.business_date<=m.effective_to)
                  UNION ALL
-                 SELECT queue, 'CALL_BY_CALL', service_scope, comparison_scope,
-                        NULL, mapping_status
-                 FROM pbi_queue_coverage
+                 SELECT q.queue, 'CALL_BY_CALL', q.service_scope,
+                        coalesce(m.management_lob,q.service_scope),
+                        q.comparison_scope, NULL, q.mapping_status
+                 FROM pbi_queue_coverage q
+                 LEFT JOIN pbi_management_lob_map m
+                   ON m.source_kind='SERVICE'
+                  AND lower(trim(m.source_value))=lower(trim(q.service_scope))
+                  AND q.business_date>=m.effective_from
+                  AND (m.effective_to IS NULL OR q.business_date<=m.effective_to)
                  UNION ALL
-                 SELECT queue_name, 'VERINT_FORECAST', service_scope,
-                        comparison_scope, NULL, mapping_status
-                 FROM mart.forecast_interval
+                 SELECT f.queue_name, 'VERINT_FORECAST', f.service_scope,
+                        coalesce(m.management_lob,f.service_scope),
+                        f.comparison_scope, NULL, f.mapping_status
+                 FROM mart.forecast_interval f
+                 LEFT JOIN pbi_management_lob_map m
+                   ON m.source_kind='SERVICE'
+                  AND lower(trim(m.source_value))=lower(trim(f.service_scope))
+                  AND f.business_date>=m.effective_from
+                  AND (m.effective_to IS NULL OR f.business_date<=m.effective_to)
                ) q
                WHERE trim(coalesce(queue,''))<>''
-               GROUP BY queue ORDER BY min(service_scope), queue""",
+                 AND trim(coalesce(management_lob,''))<>''
+               GROUP BY management_lob, service_scope, queue
+               ORDER BY management_lob, service_scope, queue""",
         ),
         (
             "FactQueueCoverage.csv",
             (
-                "Date", "Queue", "Service Scope", "Management LOB",
+                "Date", "Service Key", "Queue", "Service Scope", "Management LOB",
                 "Comparison Scope", "Mapping Status", "Inbound Entries",
                 "Mapped Inbound Entries",
             ),
-            """SELECT q.business_date, q.queue, q.service_scope,
-                      coalesce(m.management_lob,q.service_scope),
+            """SELECT q.business_date,
+                      coalesce(m.management_lob,q.service_scope) || '|' || coalesce(q.service_scope,'') || '|' || q.queue,
+                      q.queue, q.service_scope, coalesce(m.management_lob,q.service_scope),
                       q.comparison_scope, q.mapping_status, q.inbound_entries,
                       CASE WHEN q.mapping_status='MAPPED' THEN q.inbound_entries ELSE 0 END
                FROM pbi_queue_coverage q
@@ -365,7 +388,7 @@ def publish_powerbi_feeds(
         (
             "FactService15Min.csv",
             (
-                "Date", "Interval Start", "Interval End", "Time Slot", "Source System", "Service Scope",
+                "Date", "Interval Start", "Interval End", "Time Slot", "Service Key", "Source System", "Service Scope",
                 "Management LOB", "Comparison Scope", "Queue", "Designation", "Offered",
                 "Answered", "Abandoned", "Short Abandoned",
                 "Abandoned Within Target", "Answered Within Target",
@@ -374,6 +397,7 @@ def publish_powerbi_feeds(
             """SELECT s.business_date, s.interval_start, s.interval_end,
                       cast(strftime('%H',s.interval_start) AS INTEGER)*4
                         + cast(strftime('%M',s.interval_start) AS INTEGER)/15,
+                      coalesce(m.management_lob,s.service_scope) || '|' || coalesce(s.service_scope,'') || '|' || s.queue,
                       s.source_system, s.service_scope,
                       coalesce(m.management_lob,s.service_scope),
                       s.comparison_scope, s.queue, s.designation,
@@ -409,7 +433,7 @@ def publish_powerbi_feeds(
             "FactForecastInterval.csv",
             (
                 "Date", "Interval Start", "Interval End", "Interval Minutes",
-                "Time Slot", "Queue", "Volume Forecast", "Abandons Forecast", "FTE Forecast",
+                "Time Slot", "Service Key", "Queue", "Volume Forecast", "Abandons Forecast", "FTE Forecast",
                 "FTE Required", "Headcount Forecast", "Net Staffing Forecast",
                 "SL Forecast", "SL Required", "AHT Forecast Seconds",
                 "Service Scope", "Management LOB", "Comparison Scope", "Mapping Status", "Source File",
@@ -418,6 +442,7 @@ def publish_powerbi_feeds(
                       f.interval_minutes,
                       cast(strftime('%H',f.interval_start) AS INTEGER)*4
                         + cast(strftime('%M',f.interval_start) AS INTEGER)/15,
+                      coalesce(m.management_lob,f.service_scope) || '|' || coalesce(f.service_scope,'') || '|' || f.queue_name,
                       f.queue_name, f.volume_forecast, f.abandons_forecast,
                       f.fte_forecast, f.fte_required, f.headcount_forecast,
                       f.net_staffing_forecast, f.sl_forecast, f.sl_required,
@@ -566,8 +591,8 @@ def publish_powerbi_feeds(
                       CASE WHEN t.actual_category IN (
                            'Productive','Auxiliary','Lunch','Break','Unavailable','LILO_PRESENT'
                       ) THEN 1 ELSE 0 END,
-                      CASE WHEN coalesce(r.aux_classification,'') IN ('Inbound','Outbound','BO')
-                             OR (t.actual_category='Productive' AND coalesce(r.aux_classification,'')<>'Available')
+                      CASE WHEN coalesce(r.aux_classification,'') IN ('Inbound','Outbound','BO','Available')
+                             OR t.actual_category='Productive'
                            THEN 1 ELSE 0 END,
                       CASE WHEN t.actual_category IN ('Logged Off','NO_ACTIVITY','NO_STATUS_EVIDENCE')
                            THEN 1 ELSE 0 END,

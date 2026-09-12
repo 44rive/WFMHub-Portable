@@ -15,7 +15,7 @@ table 'Status'
 		formatString: #,##0
 		displayFolder: 'Workforce realisation'
 
-	/// Completed voice, BO and other governed productive minutes; Available remains separate.
+	/// Completed voice, available, BO and other governed productive minutes.
 	measure 'Productive Minutes' = ```
 			CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = "COMPLETE", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Productive] = 1)
 			```
@@ -101,7 +101,7 @@ table 'Status'
 
 	/// Auditable capacity bridge values by selected stage.
 	measure 'Capacity Bridge Hours' = ```
-			SWITCH(SELECTEDVALUE('Capacity Stage'[Capacity Stage]), "Elapsed scheduled", [Elapsed Scheduled Hours], "Absence / missing", -MAX([Elapsed Scheduled Hours]-[Observed Hours],0), "Observed", [Observed Hours], "AUX / available / breaks", -MAX([Observed Hours]-[Productive Hours],0), "Productive", [Productive Hours])
+			SWITCH(SELECTEDVALUE('Capacity Stage'[Capacity Stage]), "Elapsed scheduled", [Elapsed Scheduled Hours], "Absence / missing", -MAX([Elapsed Scheduled Hours]-[Observed Hours],0), "Observed", [Observed Hours], "AUX / breaks", -MAX([Observed Hours]-[Productive Hours],0), "Productive", [Productive Hours])
 			```
 		formatString: #,##0.0;[Red]-#,##0.0
 		displayFolder: 'Workforce realisation'

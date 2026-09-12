@@ -1,3 +1,11 @@
+relationship 9484ceb7-023d-bbe7-420b-88d4fca08942
+	fromColumn: 'Employee'.'Management LOB'
+	toColumn: 'Management LOB'.'Management LOB'
+
+relationship b95b708b-8236-54a5-4eeb-d1d5604956ee
+	fromColumn: 'Queue'.'Management LOB'
+	toColumn: 'Management LOB'.'Management LOB'
+
 relationship e33279f5-243e-b7ae-1623-a4ef3853e424
 	fromColumn: 'Service'.'Date'
 	toColumn: 'Date'.'Date'
@@ -6,25 +14,17 @@ relationship 5ce038cf-a70a-dc32-6f29-8f7f9c61f00f
 	fromColumn: 'Service'.'Time Slot'
 	toColumn: 'Time'.'Quarter Hour Index'
 
-relationship 303b48b5-1109-e4de-ac2a-6b23395bea88
-	fromColumn: 'Service'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
-
-relationship 00b0e5ff-66af-f3fa-f256-22e016003297
-	fromColumn: 'Service'.'Queue'
-	toColumn: 'Queue'.'Queue'
+relationship 98cb0ff9-eb71-add0-9e94-b27cbcc7befc
+	fromColumn: 'Service'.'Service Key'
+	toColumn: 'Queue'.'Service Key'
 
 relationship ccbc2d10-d199-c77b-a431-21fdf5a4d980
 	fromColumn: 'Queue Coverage'.'Date'
 	toColumn: 'Date'.'Date'
 
-relationship bd30212c-4354-0bb5-9569-07e2fbe36ea3
-	fromColumn: 'Queue Coverage'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
-
-relationship 7bd848d6-3e56-cf6a-ecae-d0dcafbf4874
-	fromColumn: 'Queue Coverage'.'Queue'
-	toColumn: 'Queue'.'Queue'
+relationship edc4c140-eede-de8d-af0b-fa30ad567b0b
+	fromColumn: 'Queue Coverage'.'Service Key'
+	toColumn: 'Queue'.'Service Key'
 
 relationship 34580bee-446a-4500-577c-bb885bda3496
 	fromColumn: 'Forecast'.'Date'
@@ -34,13 +34,9 @@ relationship dce1ded1-0edc-8d2a-fbf1-3ed4db8f7bb8
 	fromColumn: 'Forecast'.'Time Slot'
 	toColumn: 'Time'.'Quarter Hour Index'
 
-relationship 886efc7a-f310-aa8b-a1e7-da71606bbd65
-	fromColumn: 'Forecast'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
-
-relationship c76214d6-39e1-3935-17c0-ccd364e28cee
-	fromColumn: 'Forecast'.'Queue'
-	toColumn: 'Queue'.'Queue'
+relationship bbbaaec2-8860-aead-3876-625929197774
+	fromColumn: 'Forecast'.'Service Key'
+	toColumn: 'Queue'.'Service Key'
 
 relationship 4aff964c-3d67-3785-53cd-af0ba588ef0d
 	fromColumn: 'Staffing'.'Date'
@@ -62,10 +58,6 @@ relationship bdf69956-d727-3ed6-38ce-0ddd79e4b116
 	fromColumn: 'Attendance'.'Agent ID'
 	toColumn: 'Employee'.'Agent ID'
 
-relationship 1a886bb0-18e4-36ec-fcd0-d254ace01256
-	fromColumn: 'Attendance'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
-
 relationship 373803ef-2b57-0225-ce90-39a81edb2126
 	fromColumn: 'Status'.'Date'
 	toColumn: 'Date'.'Date'
@@ -78,10 +70,6 @@ relationship 9193ac73-4b99-aadb-aca3-ce75f60a8c05
 	fromColumn: 'Status'.'Time Slot'
 	toColumn: 'Time'.'Quarter Hour Index'
 
-relationship 153287ed-fb6b-7cc7-6f2a-cab67112bad3
-	fromColumn: 'Status'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
-
 relationship 59d33b93-a4b9-f2f8-8867-25ee8ef8a644
 	fromColumn: 'Schedule Integrity'.'Date'
 	toColumn: 'Date'.'Date'
@@ -89,10 +77,6 @@ relationship 59d33b93-a4b9-f2f8-8867-25ee8ef8a644
 relationship 85dba80e-65fe-cb46-1bb7-146062d209c1
 	fromColumn: 'Schedule Integrity'.'Agent ID'
 	toColumn: 'Employee'.'Agent ID'
-
-relationship 408654a0-8217-1710-5b86-ece9cb130944
-	fromColumn: 'Schedule Integrity'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
 
 relationship 0bcdb9d0-ff76-5228-ec4e-ba48ec2e4b54
 	fromColumn: 'Shift Placement'.'Date'
@@ -102,10 +86,6 @@ relationship 990bf7e4-faf2-10af-bde2-00901260869a
 	fromColumn: 'Shift Placement'.'Agent ID'
 	toColumn: 'Employee'.'Agent ID'
 
-relationship 88c22ff2-5b80-cd75-8ce7-a3acbcd342de
-	fromColumn: 'Shift Placement'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
-
 relationship a03b850c-ae44-d1aa-6b63-ccc5f8c1ad62
 	fromColumn: 'Attendance Gap'.'Date'
 	toColumn: 'Date'.'Date'
@@ -113,10 +93,6 @@ relationship a03b850c-ae44-d1aa-6b63-ccc5f8c1ad62
 relationship 529bd439-64a3-6706-f016-a0c7c398c6d1
 	fromColumn: 'Attendance Gap'.'Agent ID'
 	toColumn: 'Employee'.'Agent ID'
-
-relationship 76f2595a-d8c3-351e-4cef-ca32cada0d78
-	fromColumn: 'Attendance Gap'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
 
 relationship a703d78f-145c-4d68-536f-a3239320ef4a
 	fromColumn: 'Time Off'.'Date'
@@ -126,10 +102,6 @@ relationship 952305e9-7fb3-6e0d-7887-f451c6f735c2
 	fromColumn: 'Time Off'.'Agent ID'
 	toColumn: 'Employee'.'Agent ID'
 
-relationship 3370651b-9816-639b-d0ba-680091050255
-	fromColumn: 'Time Off'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
-
 relationship 39da9cb0-bf4a-53f8-d45d-31dc1d190d22
 	fromColumn: 'Final Absence'.'Date'
 	toColumn: 'Date'.'Date'
@@ -137,10 +109,6 @@ relationship 39da9cb0-bf4a-53f8-d45d-31dc1d190d22
 relationship 7043ccad-51ba-6550-7292-ba9cfe927939
 	fromColumn: 'Final Absence'.'Agent ID'
 	toColumn: 'Employee'.'Agent ID'
-
-relationship 73509c2e-f246-5793-83e4-e56030bed1d7
-	fromColumn: 'Final Absence'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
 
 relationship f34a146e-369c-8548-0b5a-c58b52b4bc90
 	fromColumn: 'Absence Component'.'Date'
@@ -150,17 +118,9 @@ relationship 480364e6-9774-5b39-bf30-ff1c7b57cf4d
 	fromColumn: 'Absence Component'.'Agent ID'
 	toColumn: 'Employee'.'Agent ID'
 
-relationship 1243068f-5279-4ed0-a11e-e6fe3ec8226c
-	fromColumn: 'Absence Component'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
-
 relationship a778a6a6-1a64-4f38-aafc-363dcab2ab54
 	fromColumn: 'Finding'.'Period End'
 	toColumn: 'Date'.'Date'
-
-relationship 31486a88-7e5a-94b6-5f91-6c6b928fe94b
-	fromColumn: 'Finding'.'Agent ID'
-	toColumn: 'Employee'.'Agent ID'
 
 relationship 2fa74da6-efe9-42ff-e1c9-8b2fd2d7ff02
 	fromColumn: 'Finding'.'Management LOB'

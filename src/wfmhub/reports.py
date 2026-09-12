@@ -38,7 +38,7 @@ def _display_header(name: str) -> str:
         "rule_sha256": "Rule SHA-256", "rule_version": "Rule Version",
         "forecast_attainment": "Forecast Attainment %",
         "gross_sl_20s": "Gross SL 20s %", "adjusted_sl_20s": "Adjusted SL 20s %",
-        "verint_reconciliation": "Verint Final Check",
+        "verint_reconciliation": "Residual Status",
         "pcs_status": "PCS Status", "post_call_survey_mode": "Post Call Survey Mode",
         "pcs_status_1": "PCS Status 1", "q1_nonblank": "Q1 Nonblank",
         "valid_q1": "Valid Q1", "q1_score_sum": "Q1 Score Sum",

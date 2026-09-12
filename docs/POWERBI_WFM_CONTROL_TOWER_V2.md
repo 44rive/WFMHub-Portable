@@ -2,8 +2,8 @@
 
 | Field | Value |
 |---|---|
-| Report contract | `WFMHUB-PBI-4` |
-| Feed schema | `4` |
+| Report contract | `WFMHUB-PBI-5` |
+| Feed schema | `5` |
 | Canvas | `1680 × 945` |
 | Owner | Anass ASSRI / WFM |
 | Status | Implemented; final Power BI Desktop rendering acceptance required |
@@ -24,11 +24,15 @@ Every page has the same measured layout:
 - one full-width evidence/action table;
 - `Prepared by Anass ASSRI | WFM` footer.
 
+The left rail contains the native page navigator and an always-visible text
+fallback. Standard Power BI page tabs remain enabled. This makes navigation
+usable even when a Desktop build delays or fails to paint navigator captions.
+
 No custom visual is required. The report uses native Power BI cards, slicers,
 tables, matrices, bar/column, line and combo charts so it remains portable on a
 restricted work computer.
 
-## Seven pages and exact intent
+## Eight pages and exact intent
 
 1. **Daily WFM Command** — LOBs on target, demand variance, confirmed no-show,
    productive capacity gap, SL by LOB, capacity pulse and ordered findings.
@@ -43,7 +47,9 @@ restricted work computer.
    not a disciplinary score.
 6. **Forecast Accuracy** — ratio-of-sums 15-minute WAPE accuracy, signed bias,
    weighted AHT error, peak-demand accuracy and comparable-grain misses.
-7. **Data Readiness** — source freshness, queue reference coverage, mapped
+7. **Absence & Shrinkage** — final Verint absence/shrinkage rates, component
+   mix, LOB comparison and exact agent/day completeness evidence.
+8. **Data Readiness** — source freshness, queue reference coverage, mapped
    Agent Status minutes and blocking evidence.
 
 ## Data contract
@@ -56,6 +62,12 @@ Power BI imports only fixed CSVs from `Feed\PowerBI`. Important V2 additions:
 - `FactScheduleIntegrity.csv` — one completed integrity result per agent day;
 - `FactShiftPlacement.csv` — published and observed rows for the placement chart;
 - `DimDriver.csv` and `DimCapacityStage.csv` — stable display bridges.
+
+`DimQueue`, Service, Forecast and Queue Coverage also carry `Service Key`, a
+stable `management LOB|service scope|queue` composite. Relationships use that
+key so repeated display queue names cannot contaminate another LOB. Management
+LOB filters Employee and Queue, which then filter their downstream facts. This
+is the required cross-page filter path for LOB -> Team Leader -> Agent.
 
 The existing hourly service mart still powers validated Flash reports. PCS CSVs
 are retired from the Power BI contract only; the PCS Excel feed and permanent
@@ -84,9 +96,10 @@ new extracts -> WFMHub UPDATE -> SQLite marts -> Feed\PowerBI CSVs
              -> POWERBI.cmd -> Power BI Desktop Home > Refresh
 ```
 
-The first `POWERBI.cmd` run after this contract upgrade archives project V3 and
-installs V4. Later opens preserve the installed V4 project. Save a `.pbix` copy
-from Power BI Desktop only after the seven pages refresh without an error.
+The first `POWERBI.cmd` run after this contract upgrade archives the prior
+project and installs V5. Later opens preserve the installed V5 project. Save a
+`.pbix` copy from Power BI Desktop only after the eight pages refresh without an
+error.
 
 ## Validation boundary
 
@@ -97,6 +110,6 @@ Linux cannot render Power BI Desktop. The final release gate on the work PC is:
 1. run one complete Hub update;
 2. open with `POWERBI.cmd`;
 3. choose **Home > Refresh**;
-4. inspect all seven pages at Fit to page;
+4. inspect all eight pages at Fit to page;
 5. confirm slicers and cross-highlighting;
 6. save the working PBIX snapshot.

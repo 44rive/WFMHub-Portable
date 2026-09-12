@@ -29,6 +29,13 @@ table 'Queue Coverage'
 		summarizeBy: none
 		sourceColumn: Date
 
+	column 'Service Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Service Key
+
 	column 'Queue'
 		dataType: string
 		isHidden
@@ -78,9 +85,9 @@ table 'Queue Coverage'
 			let
 			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactQueueCoverage.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-			    Selected = Table.SelectColumns(Promoted, {"Date", "Queue", "Service Scope", "Management LOB", "Comparison Scope", "Mapping Status", "Inbound Entries", "Mapped Inbound Entries"}, MissingField.Error),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Service Key", "Queue", "Service Scope", "Management LOB", "Comparison Scope", "Mapping Status", "Inbound Entries", "Mapped Inbound Entries"}, MissingField.Error),
 			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Inbound Entries", "Mapped Inbound Entries"}),
-			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Queue", type text}, {"Service Scope", type text}, {"Management LOB", type text}, {"Comparison Scope", type text}, {"Mapping Status", type text}, {"Inbound Entries", Int64.Type}, {"Mapped Inbound Entries", Int64.Type}}, "en-US")
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Service Key", type text}, {"Queue", type text}, {"Service Scope", type text}, {"Management LOB", type text}, {"Comparison Scope", type text}, {"Mapping Status", type text}, {"Inbound Entries", Int64.Type}, {"Mapped Inbound Entries", Int64.Type}}, "en-US")
 			in
 			    Typed
 

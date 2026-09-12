@@ -36,7 +36,7 @@ table 'Source Health'
 		formatString: 0.0%
 		displayFolder: 'Data quality'
 
-	/// Imported semantic tables in Power BI project contract 4.
+	/// Imported semantic tables in Power BI project contract 5.
 	measure 'Models Built' = ```
 			22
 			```

@@ -13,8 +13,7 @@ eligible through their populated leave date.
 | Verint StartEndTimes | Preferred schedule start/end and assignment boundary |
 | Storm Agent Status | Primary within-shift attendance evidence |
 | Storm LILO | Missing-coverage fallback and first/last/blank-row control |
-| Attendance Review decisions | Human category for one exact observed gap |
-| Verint Activities | Final post-day absence/shrinkage codes; never observed presence |
+| Verint Activities | Final post-day absence/shrinkage codes and residual-gap reconciliation; never observed presence |
 | Verint Forecast | Forecast and required staffing only; native 15/60-minute grain retained |
 | Storm Call by Call | All mapped service actuals, Flashes, agent call performance and PCS |
 
@@ -30,7 +29,7 @@ schedule boundary when StartEndTimes is missing.
 | Dataset | Grain | Business use |
 |---|---|---|
 | `mart.attendance_agent_day` | Agent/day | Attendance callout and evidence result |
-| `mart.correction_candidate` | Exact continuous gap | Attendance Review decision row |
+| `mart.correction_candidate` | Exact residual continuous gap | Attendance Review correction backlog |
 | `mart.shift_timeline_segment` | Exact shift segment | Readable shift evidence |
 | `mart.planned_time_off_segment` | Schedule-clipped interval | PTO/Away planning overlay |
 | `mart.absence_event` | Reviewed or planned exact interval | Absence/shrinkage component audit |
@@ -53,10 +52,10 @@ fixed schemas to `_PCS_FILTERS`, `_PCS_LOB`, `_PCS_AGENT`, `_PCS_DAILY`,
 Legacy-named exports remain callable so existing jobs do not break.
 `yesterday_gap_actions` covers the entire selected completed period, not only
 yesterday. `mart.verint_final_absence_*` is sourced from mapped Verint Activities
-inside the StartEndTimes shift boundary. It stays separate from the observed,
-decision-led `mart.absence_*` control tables.
+inside the StartEndTimes shift boundary. It stays separate from the provisional
+observed-gap `mart.absence_*` control tables.
 
-## Attendance and decision semantics
+## Attendance and reconciliation semantics
 
 Agent Status has precedence. LILO fills only periods without reliable Status
 coverage and never overwrites explicit Logged Off or Unavailable states. A
@@ -70,15 +69,16 @@ Cancelled rows do nothing. Planned Away is future-capacity information only and
 cannot erase elapsed attendance evidence. RTM exposes registered time off while
 keeping it outside Due HC and all call/no-show counters.
 
-The Excel importer reads only Gap ID and the five editable decision columns.
-SQLite supplies the authoritative date, agent and exact start/end. Approved
-decisions use `config\wfm_rules.toml`; Dismissed counts as no loss; Open remains
-unverified. The import is atomic. PTO/Away intervals enter the same classified
-ledger without creating fake gaps.
+SQLite supplies the authoritative date, agent and exact start/end. After the raw
+gap is detected, mapped final Verint Activities are clipped to the same shift
+and their exact overlap is subtracted. Only residual fragments are exported to
+Attendance Review. The workbook is read-only; the operator corrects Verint,
+exports Activities again and refreshes. PTO/Away intervals remain governed
+planned evidence and never create fake gaps.
 
 Overlapping intervals are unioned before totals. Daily numerators are capped to
 planned net minutes, so rates cannot exceed 100%. Summary rates include only
-`CLEAR` and `ABSENCE_RECORDED` agent-days; `PENDING_REVIEW` and
+`CLEAR` and `ABSENCE_RECORDED` agent-days; `PENDING_VERINT` and
 `PROVISIONAL_DAY` cannot silently act as zero absence.
 
 ## Service semantics

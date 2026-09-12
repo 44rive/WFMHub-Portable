@@ -1,16 +1,16 @@
 /// Reviewed queue reference from the active service model.
 table 'Queue'
 
-	/// Distinct queues visible in the active governed model.
+	/// Distinct service-scope queue members visible in the active governed model.
 	measure 'Queue Count' = ```
-			DISTINCTCOUNT('Queue'[Queue])
+			DISTINCTCOUNT('Queue'[Service Key])
 			```
 		formatString: #,##0
 		displayFolder: 'Data quality'
 
-	/// Distinct queues explicitly mapped to a governed scope.
+	/// Distinct service-scope queue members explicitly mapped to a governed scope.
 	measure 'Mapped Queue Count' = ```
-			CALCULATE(DISTINCTCOUNT('Queue'[Queue]), 'Queue'[Mapping Status] = "MAPPED")
+			CALCULATE(DISTINCTCOUNT('Queue'[Service Key]), 'Queue'[Mapping Status] = "MAPPED")
 			```
 		formatString: #,##0
 		displayFolder: 'Data quality'
@@ -21,6 +21,13 @@ table 'Queue'
 			```
 		formatString: 0.0%
 		displayFolder: 'Data quality'
+
+	column 'Service Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Service Key
 
 	column 'Queue'
 		dataType: string
@@ -36,6 +43,13 @@ table 'Queue'
 		dataType: string
 		summarizeBy: none
 		sourceColumn: Service Scope
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
 
 	column 'Comparison Scope'
 		dataType: string
@@ -58,9 +72,9 @@ table 'Queue'
 			let
 			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\DimQueue.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-			    Selected = Table.SelectColumns(Promoted, {"Queue", "Source System", "Service Scope", "Comparison Scope", "Designation", "Mapping Status"}, MissingField.Error),
+			    Selected = Table.SelectColumns(Promoted, {"Service Key", "Queue", "Source System", "Service Scope", "Management LOB", "Comparison Scope", "Designation", "Mapping Status"}, MissingField.Error),
 			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {}),
-			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Queue", type text}, {"Source System", type text}, {"Service Scope", type text}, {"Comparison Scope", type text}, {"Designation", type text}, {"Mapping Status", type text}}, "en-US")
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Service Key", type text}, {"Queue", type text}, {"Source System", type text}, {"Service Scope", type text}, {"Management LOB", type text}, {"Comparison Scope", type text}, {"Designation", type text}, {"Mapping Status", type text}}, "en-US")
 			in
 			    Typed
 

@@ -17,7 +17,7 @@ portable Hub.
 - `SETUP.cmd`: use it once after extracting WFMHub.
 - `UPGRADE.cmd`: use it only when a new release was extracted into a different folder.
 - `WFMHub.cmd`: use it for normal work.
-- `POWERBI.cmd`: open the already-built seven-page Power BI project after a
+- `POWERBI.cmd`: open the already-built eight-page Power BI project after a
   full Hub update.
 
 Never move only the `.cmd` file. Keep the full WFMHub folder together.
@@ -219,18 +219,18 @@ control evidence.
 
 1. Open `REVIEW BOARD`.
 2. Each case uses two rows: SCHEDULE directly above ACTUAL, followed by a small
-   blank separator before the next case. White evidence cells are not imported;
-   edit only the five blue cells on the ACTUAL row.
-3. Choose `Approved` plus a category, `Dismissed`, or leave `Open`.
-4. Compare the paired timeline. Scheduled work is teal, PTO/Away is blue,
+   blank separator before the next case. The workbook is read-only.
+3. Compare the paired timeline. Scheduled work is teal, PTO/Away is blue,
    Logged is green, Break/Lunch is amber, dark red is the exact gap owned by the
    ACTUAL row, light red is another counted gap, and grey is inside tolerance.
    Exact support evidence remains in hidden sheets.
    Explicit `Meal Aux` Agent Status appears as Lunch. A LILO logout inside that
    interval does not turn the meal into a gap; any later gap starts only after
    the meal interval ends.
-5. Save and close the workbook.
-6. In WFMHub choose **Attendance Review > Import completed decisions**.
+4. Use Exact Start, Exact End and Suggested Verint Activity to correct the
+   residual interval in Verint.
+5. Export updated Verint Activities, refresh the Hub and rebuild the review.
+   A fully covered residual disappears automatically.
 
 Open `BREAK & MEAL` to check completed shifts. It totals all Agent Status break
 and meal spells inside the shift, compares them with the values in
@@ -248,11 +248,10 @@ and are never allowed to dilute the headline rate as silent zero absence.
 
 These rows are never allowed to dilute the headline rate as silent zero absence.
 
-For a long-lived team workbook, use `TEAM_VIEW` for filtered agent results and
-cases, `COMPONENT_VIEW` for absence/shrinkage categories, and
-`ACTIVITY_DETAIL` for exact reviewed intervals. The blue `ACTIONS` table is
-your permanent log. Link the three fixed feeds once with Power Query and use
-**Data > Refresh All**; never point Power Query at `ACTIONS`.
+Use `TEAM_VIEW` for filtered agent results and cases, `COMPONENT_VIEW` for
+absence/shrinkage categories, and `ACTIVITY_DETAIL` for exact reviewed
+intervals. `ACTION_QUEUE` is a read-only list of completeness issues; correct
+the source in Verint and refresh.
 
 ## Bonus Management
 

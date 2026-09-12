@@ -210,9 +210,9 @@ def add_review_board(
     segments: list[dict[str, Any]],
     period_start: date,
     period_end: date,
-    category_choices: list[str],
+    _legacy_category_choices: list[str] | None = None,
 ):
-    """Place the scheduled band directly above actual evidence for each gap."""
+    """Place schedule above actual evidence for each read-only residual gap."""
 
     ws = report.workbook.add_worksheet("REVIEW BOARD")
     ws.set_tab_color(COLORS["gold"])
@@ -264,10 +264,10 @@ def add_review_board(
         0, 0, 0, badge_start - 1,
         "ATTENDANCE REVIEW  /  VISUAL DECISION BOARD", report.title,
     )
-    ws.merge_range(0, badge_start, 0, last_column, "EDIT BLUE CELLS", review_badge)
+    ws.merge_range(0, badge_start, 0, last_column, "READ-ONLY EVIDENCE", review_badge)
     ws.merge_range(
         1, 0, 1, last_column,
-        f"Completed dates {period_start:%Y-%m-%d} to {period_end:%Y-%m-%d}  |  exact Agent Status/LILO evidence  |  decisions return to WFM Hub",
+        f"Completed dates {period_start:%Y-%m-%d} to {period_end:%Y-%m-%d}  |  exact Agent Status/LILO evidence minus final Verint Activities",
         report.subtitle,
     )
     ws.set_row(0, 34)
@@ -287,7 +287,7 @@ def add_review_board(
     state_formats: dict[str, Any] = {}
     ws.merge_range(
         2, 0, 2, min(8, last_column),
-        "SCHEDULE ABOVE ACTUAL  |  edit blue cells on ACTUAL rows only, save, then import",
+        "SCHEDULE ABOVE ACTUAL  |  correct the exact residual in Verint, export Activities, then refresh WFMHub",
         report.note,
     )
     legend_column = min(9, last_column + 1)
@@ -335,10 +335,6 @@ def add_review_board(
         review_gaps[(as_date(values[date_index]), str(values[agent_index]))].append((
             _as_datetime(raw_start), _as_datetime(raw_end),
         ))
-    editable = {
-        "Decision Category", "Decision Status", "Reviewed By", "Comment",
-        "Reviewed Date",
-    }
     gap_id_index = display_headers.index("Gap ID")
     schedule_body = report.workbook.add_format({
         "font_name": "Aptos", "font_size": 9, "font_color": COLORS["muted"],
@@ -400,10 +396,7 @@ def add_review_board(
                 ws.write(schedule_row, column, value, fmt)
         ws.write(schedule_row, band_column, "SCHEDULE", schedule_band)
         for column, value in enumerate(values):
-            header = display_headers[column]
-            if header in editable:
-                fmt = report.editable_date if header == "Reviewed Date" else report.editable
-            elif isinstance(value, datetime):
+            if isinstance(value, datetime):
                 fmt = report.datetime
             elif isinstance(value, date):
                 fmt = report.date
@@ -474,27 +467,7 @@ def add_review_board(
     if not decision_rows:
         ws.write(header_row + 1, 0, "No rows for this period.", report.subtitle)
     else:
-        category_col = display_headers.index("Decision Category")
-        status_col = display_headers.index("Decision Status")
-        date_col = display_headers.index("Reviewed Date")
         data_last_row = header_row + len(decision_rows) * 3 - 1
-        ws.data_validation(
-            header_row + 1, category_col, data_last_row, category_col,
-            {"validate": "list", "source": category_choices},
-        )
-        ws.data_validation(
-            header_row + 1, status_col, data_last_row, status_col,
-            {"validate": "list", "source": ["Open", "Approved", "Dismissed"]},
-        )
-        ws.data_validation(
-            header_row + 1, date_col, data_last_row, date_col,
-            {"validate": "date", "criteria": "between",
-             "minimum": date(2020, 1, 1), "maximum": date(2100, 12, 31)},
-        )
-        ws.conditional_format(
-            header_row + 1, status_col, data_last_row, status_col,
-            {"type": "text", "criteria": "containing", "value": "Open", "format": report.error},
-        )
         ws.autofilter(
             header_row, 0, data_last_row, last_column,
         )
@@ -503,9 +476,9 @@ def add_review_board(
         "Gap ID": 42, "Date": 12, "Agent ID": 13, "Agent": 22,
         "Team Leader": 20, "LOB": 16, "Detected Issue": 22,
         "Exact Start": 19, "Exact End": 19, "Minutes": 10,
-        "Suggested Activity": 21, "Decision Category": 21,
-        "Decision Status": 16, "Reviewed By": 18, "Comment": 30,
-        "Reviewed Date": 15,
+        "Suggested Verint Activity": 24, "Final Activity Found": 24,
+        "Final Overlap Minutes": 16, "Residual Status": 20,
+        "Confidence": 12, "Observed Source": 18,
     }
     for column, header in enumerate(display_headers):
         ws.set_column(column, column, widths.get(header, 16))

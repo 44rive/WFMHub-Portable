@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.31.0 - 2026-09-12
+
+- Replace Attendance Review write-back with an automatic residual correction
+  workflow: Schedule plus Agent Status/LILO detects exact gaps, mapped final
+  Verint Activities are subtracted, and only unresolved interval fragments are
+  shown. Corrected gaps disappear after the next Activities export and refresh.
+- Make Attendance Review and Final Absenteeism read-only evidence products;
+  remove attendance-decision import from the menu and CLI, while retaining
+  legacy database compatibility non-destructively.
+- Populate final-Verint completeness exceptions with deterministic unique keys,
+  preventing repeated issue rows from failing the SQLite refresh constraint.
+- Preserve enough historical attendance evidence to calculate the configured
+  rolling Schedule Integrity window even when the selected report period is
+  shorter.
+- Advance the Power BI project/feed contract to 5, add the premium Absence &
+  Shrinkage page, replace the unavailable schedule-placement visual with a
+  native chart, and add visible navigation fallback labels.
+- Conform Power BI filtering through Management LOB -> Employee/Queue and join
+  Service, Forecast and Queue Coverage with a composite Service Key so LOB,
+  Team Leader, Agent and queue filters do not cross-contaminate facts.
+- Treat the exact configured Available AUX classification as productive in the
+  Power BI realisation feed, while retaining raw status detail and auditability.
+- Advance the workbook report catalog to `2026.11.4` and update the operator,
+  architecture and design contracts for the new Verint-led workflow.
+
 ## 0.30.1 - 2026-09-12
 
 - Rebuild the source-controlled Power BI report as seven page-specific premium

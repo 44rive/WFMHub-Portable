@@ -1,76 +1,67 @@
-# Attendance decision ledger
+# Attendance residual reconciliation
 
-## The business flow
+The filename is retained for compatibility. Attendance Review is no longer a
+decision ledger or a write-back workbook.
+
+## Business flow
 
 WFMHub never edits an extract. Verint schedule boundaries say when an agent was
-expected. Agent Status is the primary proof of what happened inside that shift.
-LILO fills missing Status coverage and remains a control for first login, last
-logout, blank daily rows, and incomplete Status exports.
+expected. Agent Status is the primary proof of what happened inside that shift;
+LILO is fallback/control evidence when Status coverage is insufficient.
 
-The Hub detects continuous gaps at their exact timestamps. It does not round a
-gap to 15 minutes and does not bridge two gaps when an agent returns between
-them. Today is excluded from Attendance Review, so an unfinished shift cannot
-become an early leave.
+The Hub detects every continuous gap at its exact timestamps. It then compares
+the gap with final mapped Verint Activities for the same agent and day:
+
+```text
+Schedule + Agent Status/LILO -> exact raw gap
+exact raw gap - exact final Verint overlap -> residual correction interval
+```
+
+- A fully covered gap disappears from Attendance Review.
+- A partly covered gap is split and only the remaining fragment is shown.
+- A gap with no matching final activity remains in full.
+- Activities never prove attendance and never create a gap.
+- Today is excluded, so an unfinished shift cannot become Early Leave.
 
 ## How to operate it
 
-1. Refresh Attendance sources.
-2. Open **Operational > Attendance Review > Build or rebuild**.
-3. Open `Reports\Attendance Review.xlsx`.
-4. On `REVIEW BOARD`, edit only Decision Category, Decision Status, Reviewed By,
-   Comment, and Reviewed Date.
-5. Use `Approved` when the interval and category are correct.
-6. Use `Dismissed` when the detected interval must count as no loss.
-7. Leave it `Open` when it is not decided.
-8. Save and close Excel.
-9. Choose **Attendance Review > Import completed decisions**.
+1. Put the latest StartEndTimes, Agent Status and Verint Activities extracts in
+   their normal source folders without editing them.
+2. Run the Hub update for the required completed period.
+3. Build **Operational > Attendance Review**.
+4. Open `Reports\Attendance Review.xlsx`.
+5. Use `REVIEW BOARD` as the exact residual backlog. Read Exact Start, Exact End,
+   Issue, Suggested Verint Activity and Residual Status.
+6. Correct the remaining intervals in Verint.
+7. Export the updated Verint Activities file and refresh WFMHub again.
+8. Rebuild Attendance Review. Correctly covered intervals disappear.
 
-Each case uses two aligned rows followed by a short blank separator. `SCHEDULE`
-is directly above `ACTUAL` and shows scheduled work plus PTO/Away; `ACTUAL`
-shows Logged, Break, Lunch, gaps and unknown evidence. Edit blue decision cells
-only on the ACTUAL row. Dark red is
-the exact gap owned by that row, light red is another counted gap for the same
-agent-day, and grey is inside the configured tolerance. The cells are a
-15-minute reading aid; Exact Start and Exact End remain authoritative. Hidden
-`EVIDENCE` keeps every exact source segment, while hidden `DECISION LEDGER` is
-the read-only snapshot already persisted in WFM Hub. They are audit and
-troubleshooting sheets, not places to type decisions.
+The workbook is read-only evidence. Nothing is typed back into WFMHub and there
+is no import command.
 
-`Meal Aux` is explicit Agent Status presence and is displayed as Lunch. If a
-LILO logout timestamp falls inside that interval, Agent Status wins: the meal
-is not counted as a gap, and a genuine early-leave interval can begin only
-after the Meal Aux interval ends. Missing evidence is never invented as meal.
+## Visual evidence
+
+Each case uses a SCHEDULE band directly above an ACTUAL band, followed by a
+short separator. Scheduled work and PTO/Away are visible above Logged, Break,
+Lunch, residual Gap and Unknown evidence. Dark red is the exact residual owned
+by the case; lighter red is another residual for the same agent-day. The
+15-minute cells are a reading aid; Exact Start and Exact End are authoritative.
+Hidden `EVIDENCE` keeps the exact source segments for audit.
+
+Explicit `Meal Aux` is Lunch. If a LILO logout timestamp falls inside that
+interval, Agent Status wins: the meal is not a gap and an actual early-leave
+fragment can begin only after the meal ends.
 
 `BREAK & MEAL` is a separate completed-day control, not adherence. It totals
-Agent Status break and meal intervals inside each scheduled shift. The default
-allowances are 30 break minutes and 45 meal minutes and remain editable in
-`config\wfmhub.toml`. A result is judged only when status coverage reaches the
-configured minimum; otherwise it stays `INSUFFICIENT EVIDENCE`.
+Agent Status break and meal intervals inside each scheduled shift. Default
+allowances are configured in `config\wfmhub.toml`. A result is judged only when
+Status coverage reaches the configured minimum; otherwise it stays
+`INSUFFICIENT EVIDENCE`.
 
-The import is atomic: one invalid or stale row rejects the whole file. Gap ID
-retrieves the authoritative date, agent, start and end from SQLite. Changing a
-white evidence cell in Excel cannot alter the stored gap.
+## Audit and final absence
 
-## Calculation result
-
-- Approved decisions use the flags in `config\wfm_rules.toml`.
-- Dismissed gaps count as neither absence nor shrinkage.
-- Open gaps remain unverified and make the affected result incomplete.
-- Approved PTO and effective Away intervals come directly from the FTE workbook
-  registers. They do not create fake no-show gaps.
-- Overlapping intervals are unioned before totals; they are never added twice.
-- Absence and shrinkage are parallel measures and must not be added together.
-
-The observed-review outputs are `mart.absence_event` at exact interval grain
-and `mart.absence_agent_day` at agent/day grain. The separate
-`mart.verint_final_absence_*` tables use final mapped Verint Activities after
-the day. Attendance Review decisions diagnose and document operational gaps;
-they do not overwrite or masquerade as the final Verint coding.
-
-## Audit controls
-
-Every generated event records the rulebook version and SHA-256. Every decision
-records its Gap ID, reviewer fields, import filename, and update timestamp in
-`core.correction_action`. Rebuilding the model reattaches the stored decision
-when the exact Gap ID still exists. A changed physical gap produces a different
-ID rather than silently inheriting an old decision.
+Gap ID is derived from the source date, agent, issue and original exact
+boundaries. Residual segments retain that lineage plus final-activity overlap
+and reconciliation status. Final Absenteeism is separate: it uses mapped Verint
+Activities clipped to the planned shift and explicitly flags empty, partial,
+unmapped or missing-planned-time-off coding.

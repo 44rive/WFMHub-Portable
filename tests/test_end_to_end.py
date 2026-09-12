@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfoNotFoundError
 
 from openpyxl import Workbook, load_workbook
 
-from wfmhub.actions import import_attendance_decisions
 from wfmhub.config import ensure_user_config, load_config, write_source_root
 from wfmhub.database import write_session
 from wfmhub.ingestion import ingest_all
@@ -38,7 +37,6 @@ from wfmhub.shared_feeds import (
 from wfmhub.exports import export_dataset
 from wfmhub.report_packs import build_report_pack
 from wfmhub.reports import build_report
-from wfmhub.rules import load_rulebook
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -681,17 +679,17 @@ class EndToEndTests(unittest.TestCase):
                     460,
                 )
                 late = conn.execute("SELECT gap_start, gap_end, gap_minutes FROM mart.correction_candidate WHERE agent_id='100' AND detected_issue='Late'").fetchone()
-                self.assertEqual(str(late[0]), "2026-08-01 08:00:00")
+                self.assertEqual(str(late[0]), "2026-08-01 08:10:00")
                 self.assertEqual(str(late[1]), "2026-08-01 08:20:00")
-                self.assertEqual(late[2], 20)
+                self.assertEqual(late[2], 10)
                 self.assertEqual(
                     conn.execute("SELECT verint_reconciliation FROM mart.correction_candidate WHERE agent_id='100' AND detected_issue='Late'").fetchone()[0],
-                    "PENDING_REVIEW",
+                    "PARTIALLY_IN_VERINT",
                 )
                 status_gap = conn.execute(
                     "SELECT gap_minutes, observed_source, verint_reconciliation FROM mart.correction_candidate WHERE agent_id='100' AND detected_issue='Mid-shift logged off'"
                 ).fetchone()
-                self.assertEqual(status_gap, (60, "AGENT_STATUS", "PENDING_REVIEW"))
+                self.assertEqual(status_gap, (60, "AGENT_STATUS", "NOT_IN_VERINT"))
                 self.assertEqual(
                     conn.execute(
                         "SELECT uncoded_early_leave_minutes FROM mart.attendance_agent_day WHERE agent_day_key='20260801-100'"
@@ -773,13 +771,13 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     conn.execute("SELECT count(*) FROM mart.verint_final_exception").fetchone()[0],
-                    0,
+                    1,
                 )
                 self.assertEqual(
                     conn.execute(
                         "SELECT final_ledger_status FROM mart.verint_final_absence_agent_day WHERE agent_day_key='20260801-300'"
                     ).fetchone()[0],
-                    "ABSENCE_RECORDED",
+                    "VERINT_WITHOUT_OBSERVED_GAP",
                 )
                 service = conn.execute(
                     "SELECT sum(answered), sum(offered), sum(handled_seconds) FROM mart.service_interval"
@@ -892,90 +890,17 @@ class EndToEndTests(unittest.TestCase):
                     self.assertIn("Classification authority", audit_values)
                 finally:
                     empty_corrections_book.close()
-                decisions_book = load_workbook(corrections_report)
-                decisions = decisions_book["REVIEW BOARD"]
-                decision_headers = {
-                    cell.value: cell.column for cell in decisions[4]
-                }
-                approved_gap = None
-                dismissed_gap = None
-                for row_number in range(5, decisions.max_row + 1):
-                    if not decisions.cell(
-                        row_number, decision_headers["Gap ID"],
-                    ).value:
-                        continue
-                    agent_id = str(
-                        decisions.cell(row_number, decision_headers["Agent ID"]).value or ""
-                    )
-                    if agent_id == "200":
-                        approved_gap = decisions.cell(
-                            row_number, decision_headers["Gap ID"],
-                        ).value
-                        decisions.cell(
-                            row_number, decision_headers["Decision Category"],
-                            "Short sickness",
-                        )
-                        decisions.cell(
-                            row_number, decision_headers["Decision Status"],
-                            "Approved",
-                        )
-                        decisions.cell(
-                            row_number, decision_headers["Reviewed By"], "Reviewer",
-                        )
-                        decisions.cell(
-                            row_number, decision_headers["Reviewed Date"],
-                            date(2026, 8, 3),
-                        )
-                    elif agent_id == "100" and dismissed_gap is None:
-                        dismissed_gap = decisions.cell(
-                            row_number, decision_headers["Gap ID"],
-                        ).value
-                        decisions.cell(
-                            row_number, decision_headers["Decision Status"],
-                            "Dismissed",
-                        )
-                decisions_book.save(corrections_report)
-                decisions_book.close()
-                imported = import_attendance_decisions(
-                    conn, corrections_report,
-                    load_rulebook(home, config.business_rules),
-                )
-                self.assertGreater(imported.imported, 1)
-                self.assertIsNotNone(approved_gap)
-                self.assertIsNotNone(dismissed_gap)
-                refresh_models(
-                    conn, config, "reviewed-decisions",
-                    date(2026, 8, 1), date(2026, 8, 2),
-                    as_of=datetime(2026, 8, 3, 17, 0),
-                )
+                review_book = load_workbook(corrections_report)
+                review_sheet = review_book["REVIEW BOARD"]
+                review_headers = {cell.value for cell in review_sheet[4]}
+                self.assertIn("Residual Status", review_headers)
+                self.assertIn("Final Activity Found", review_headers)
+                self.assertNotIn("Decision Status", review_headers)
+                self.assertNotIn("Decision Category", review_headers)
+                self.assertEqual(review_sheet.data_validations.count, 0)
+                review_book.close()
                 self.assertEqual(
-                    conn.execute(
-                        "SELECT absence_minutes, shrinkage_minutes, unverified_minutes "
-                        "FROM mart.absence_agent_day WHERE agent_day_key='20260801-200'"
-                    ).fetchone(),
-                    (480, 480, 0),
-                )
-                self.assertEqual(
-                    conn.execute(
-                        "SELECT confirmed_activity, validation_status "
-                        "FROM core.correction_action WHERE correction_id=?",
-                        [approved_gap],
-                    ).fetchone(),
-                    ("Short sickness", "Approved"),
-                )
-                self.assertEqual(
-                    conn.execute(
-                        "SELECT confirmed_activity, validation_status "
-                        "FROM core.correction_action WHERE correction_id=?",
-                        [dismissed_gap],
-                    ).fetchone(),
-                    (None, "Dismissed"),
-                )
-                self.assertGreater(
-                    conn.execute(
-                        "SELECT corrected_minutes FROM mart.absence_agent_day "
-                        "WHERE agent_day_key='20260801-100'"
-                    ).fetchone()[0],
+                    conn.execute("SELECT count(*) FROM core.correction_action").fetchone()[0],
                     0,
                 )
                 pcs_report = build_report_pack("quality_pcs", conn, config, model.start, model.end)
@@ -1098,14 +1023,13 @@ class EndToEndTests(unittest.TestCase):
             try:
                 self.assertEqual(corrections_book.sheetnames, [
                     "CONTROL", "REVIEW BOARD", "BREAK & MEAL",
-                    "DECISION LEDGER", "EVIDENCE", "DEFINITIONS", "_LOOKUPS",
-                    "_AUDIT",
+                    "EVIDENCE", "DEFINITIONS", "_AUDIT",
                 ])
                 self.assertEqual(corrections_book["CONTROL"]["A2"].value, "PERIOD")
                 self.assertIn("01 Aug", corrections_book["CONTROL"]["C2"].value)
                 self.assertEqual(
                     [corrections_book["CONTROL"][cell].value for cell in ("A5", "H5", "O5", "V5")],
-                    ["REVIEW GAPS", "GAP HOURS", "OPEN DECISIONS", "MISSING EVIDENCE"],
+                    ["REVIEW GAPS", "GAP HOURS", "PARTLY CORRECTED", "MISSING EVIDENCE"],
                 )
                 self.assertIn(
                     "tblAttendanceReviewSummary",
@@ -1116,7 +1040,8 @@ class EndToEndTests(unittest.TestCase):
                 review_headers = [cell.value for cell in review[4]]
                 self.assertIn("Exact Start", review_headers)
                 self.assertIn("Exact End", review_headers)
-                self.assertIn("Decision Status", review_headers)
+                self.assertIn("Residual Status", review_headers)
+                self.assertNotIn("Decision Status", review_headers)
                 self.assertIn("Band", review_headers)
                 self.assertIn("08:00", review_headers)
                 start_column = review_headers.index("Exact Start")
@@ -1129,9 +1054,6 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn(
                     (datetime(2026, 8, 1, 12, 0), datetime(2026, 8, 1, 13, 0)),
                     exact_intervals,
-                )
-                self.assertEqual(
-                    corrections_book["DECISION LEDGER"].sheet_state, "hidden",
                 )
                 self.assertEqual(corrections_book["EVIDENCE"].sheet_state, "hidden")
                 self.assertEqual(corrections_book["BREAK & MEAL"].sheet_state, "visible")
@@ -1317,7 +1239,7 @@ class EndToEndTests(unittest.TestCase):
             try:
                 self.assertEqual(absence_book.sheetnames, [
                     "DASHBOARD", "TEAM_VIEW", "TEAM_SUMMARY", "AGENT_RESULTS",
-                    "ACTIONS", "ACTION_QUEUE", "ABSENCE_COMPONENTS",
+                    "ACTION_QUEUE", "ABSENCE_COMPONENTS",
                     "SHRINKAGE_COMPONENTS", "COMPONENT_VIEW", "ACTIVITY_DETAIL",
                     "ABSENCE_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT",
                 ])
@@ -1327,7 +1249,6 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertEqual(len(absence_book["DASHBOARD"]._charts), 2)
                 self.assertIn("tblAbsenceData", absence_book["ABSENCE_DATA"].tables)
-                self.assertIn("tblActions", absence_book["ACTIONS"].tables)
                 self.assertIn("tblActionQueue", absence_book["ACTION_QUEUE"].tables)
                 absence_team_formula = absence_book["TEAM_VIEW"]["A17"].value
                 self.assertIn("tblAbsenceData", getattr(absence_team_formula, "text", ""))

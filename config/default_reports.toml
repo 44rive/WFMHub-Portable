@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.11.3"
+version = "2026.11.4"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
@@ -49,16 +49,16 @@ sheets = ["DASHBOARD", "ACTIONS", "TREND", "DEFINITIONS", "_AUDIT"]
 [[packs]]
 key = "corrections"
 title = "ATTENDANCE REVIEW"
-purpose = "Completed-day exact gaps with schedule-over-actual decisions and break/meal overrun control."
+purpose = "Completed-day exact residual gaps after final Verint Activities reconciliation, with schedule-over-actual evidence and break/meal control."
 finding_domains = ["attendance", "data_quality"]
-sheets = ["CONTROL", "REVIEW BOARD", "BREAK & MEAL", "DECISION LEDGER", "EVIDENCE", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
+sheets = ["CONTROL", "REVIEW BOARD", "BREAK & MEAL", "EVIDENCE", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "absence"
 title = "ABSENCE & SHRINKAGE"
-purpose = "Reviewed attendance-decision absence and shrinkage ledger."
+purpose = "Final mapped Verint Activities absence and shrinkage ledger with explicit completeness states."
 finding_domains = ["absence", "data_quality"]
-sheets = ["DASHBOARD", "TEAM_VIEW", "TEAM_SUMMARY", "AGENT_RESULTS", "ACTIONS", "ACTION_QUEUE", "ABSENCE_COMPONENTS", "SHRINKAGE_COMPONENTS", "COMPONENT_VIEW", "ACTIVITY_DETAIL", "ABSENCE_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
+sheets = ["DASHBOARD", "TEAM_VIEW", "TEAM_SUMMARY", "AGENT_RESULTS", "ACTION_QUEUE", "ABSENCE_COMPONENTS", "SHRINKAGE_COMPONENTS", "COMPONENT_VIEW", "ACTIVITY_DETAIL", "ABSENCE_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]
 
 
 [[packs]]

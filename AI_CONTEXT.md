@@ -1,8 +1,8 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.7.0`
-Applies to: WFMHub `0.30.1` and later
-Last reviewed: `2026-09-11`
+Context version: `1.8.0`
+Applies to: WFMHub `0.31.0` and later
+Last reviewed: `2026-09-12`
 
 Read this file before proposing or changing WFMHub. When details are needed,
 follow the authoritative files listed below. Do not reconstruct decisions from
@@ -54,7 +54,7 @@ Operational:
 - **RTM Daily Control**: combined Service Flash, per-LOB attendance pulse and
   same-day call list.
 - **Attendance Review**: completed-day exact gaps, schedule-versus-observed
-  review, break/meal control, and human decisions.
+  review, automatic final-Verint reconciliation, and break/meal control.
 - **PCS Report & Coaching**: one permanent direct-CSV Power Query performance
   and coaching tracker.
 
@@ -152,9 +152,13 @@ RTM Daily Control is regenerated under one fixed name and archives the prior
 copy. It contains CONTROL plus the four LOB sheets; Service Flash and attendance
 callout are not separate workbooks.
 
-Attendance Review is regenerated for the selected completed period. REVIEW
-BOARD keeps its exact header on Excel row 4. Users edit five blue ACTUAL fields,
-save, then import the same workbook. Decisions persist by immutable Gap ID.
+Attendance Review is a regenerated, read-only correction backlog for the
+selected completed period. REVIEW BOARD keeps its exact header on Excel row 4.
+The Hub detects exact gaps from Schedule plus Agent Status/LILO, subtracts exact
+overlap already present in final Verint Activities, and publishes only the
+remaining interval fragments. Users correct those residuals in Verint, export
+Activities again, and refresh; fully covered gaps then disappear automatically.
+There is no workbook-to-Hub decision import or WFMHub write-back workflow.
 
 PCS has one permanent collaboration workbook and six fixed-name CSV feeds:
 filter lists, LOB cache, agent cache, daily cache, full filter-ready results,
@@ -190,16 +194,17 @@ Complete updates atomically publish the governed Power BI star feed under
 raw extracts and never recalculates source classification. It relates stable
 dimensions and derives ratios only from summed additive counters. The PBIX is a
 Power BI Desktop-owned artifact. The portable runtime ships a real,
-source-controlled `WFMHub BI.pbip` project with the seven approved 1680x945
+source-controlled `WFMHub BI.pbip` project with the eight approved 1680x945
 page-specific premium layouts, import partitions, explicit DAX measures and
 theme. `POWERBI.cmd` installs it
 under `Reports\Power BI`, sets only the `HubRoot` parameter, and opens it in
 Desktop. A PBIX remains a Desktop-saved publishable snapshot rather than a
 binary fabricated by Python.
 
-Power BI project contract 4 is WFM-only. Its pages are Daily WFM Command,
+Power BI project contract 5 is WFM-only. Its pages are Daily WFM Command,
 Service & SL Drivers, Staff Preparation, Workforce Realisation, Schedule
-Integrity & Patterns, Forecast Accuracy, and Data Readiness. PCS remains the
+Integrity & Patterns, Forecast Accuracy, Absence & Shrinkage, and Data
+Readiness. PCS remains the
 separate permanent collaborative Excel tracker. Actual service is exported at
 native 15-minute grain for analysis while the validated hourly Flash mart and
 workbooks remain unchanged. Schedule Integrity is not adherence: it compares
@@ -213,6 +218,11 @@ StartEndTimes is scheduled-capacity authority. The Power BI staffing feed keeps
 scheduled/observed headcount separate from interval capacity. Required FTE
 comes only from Verint `Full Time Equivalents (Absolute Req)`; if it is absent,
 Required FTE, Net Gap and Coverage remain blank rather than becoming zero.
+Management LOB filters Employee, Queue and all downstream facts through
+conformed relationships. Service, Forecast and Queue Coverage join Queue by the
+stable composite Service Key, not queue text alone; this prevents repeated
+display queues from cross-filtering the wrong LOB. Every page has a native page
+navigator plus visible static labels and normal Power BI page tabs as fallback.
 
 Every current report first screen uses the measured grid in
 `src/wfmhub/excel_layout.py`: 28 equal 52-pixel columns, four equal KPI cards,
@@ -249,7 +259,7 @@ Implementation:
 - `pcs_excel.py`: tracker inspection and Windows Excel install/refresh bridge
 - `decision_products.py`: Attendance Review and development products
 - `shared_feeds.py`: PCS/Absenteeism fixed feeds and Power Query definitions
-- `actions.py`: Attendance Review decision import
+- `actions.py`: legacy compatibility reader; not dispatched by the CLI or menu
 - `design.py`, `reports.py`, `template_reports.py`: visual contract
 - `bonus.py`: governed Bonus Matrix import/report
 
@@ -260,6 +270,7 @@ Documentation:
 - `docs/SERVICE_KPI_REFERENCE.md`
 - `docs/QUEUE_REFERENCE_CHANGE_2026-09-10.md`
 - `docs/REFERENCE_UPDATE_2026-09-11.md`
+- `docs/REFERENCE_UPDATE_2026-09-12.md`
 - `docs/PCS_LOGIC.md`
 - `docs/ATTENDANCE_DECISION_LEDGER.md`
 - `docs/REPORT_DESIGN_SYSTEM.md`
@@ -288,8 +299,10 @@ Documentation:
 
 - Never guess or broaden queue membership.
 - Never revive APBE, APFR or APDE.
-- Never treat Verint Activities as observed attendance; use them only for the
-  separately labelled final post-day absence/shrinkage ledger.
+- Never treat Verint Activities as observed attendance. Use them only for final
+  post-day absence/shrinkage and exact residual-gap reconciliation.
+- Never ask users to type attendance decisions into a generated workbook or
+  import them back into WFMHub. Attendance correction happens in Verint.
 - Never call missing evidence a No Show.
 - Never mark today’s unfinished shift as Early Leave.
 - Never average rates or invent a target.

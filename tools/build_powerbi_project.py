@@ -86,17 +86,21 @@ TABLES = (
     ),
     Table(
         "Queue", "DimQueue.csv", "Reviewed queue reference from the active service model.",
-        (c("Queue"), c("Source System"), c("Service Scope"), c("Comparison Scope"), c("Designation"), c("Mapping Status")),
         (
-            m("Queue Count", "DISTINCTCOUNT('Queue'[Queue])", "#,##0", "Distinct queues visible in the active governed model.", "Data quality"),
-            m("Mapped Queue Count", "CALCULATE(DISTINCTCOUNT('Queue'[Queue]), 'Queue'[Mapping Status] = \"MAPPED\")", "#,##0", "Distinct queues explicitly mapped to a governed scope.", "Data quality"),
+            c("Service Key", hidden=True), c("Queue"), c("Source System"),
+            c("Service Scope"), c("Management LOB", hidden=True),
+            c("Comparison Scope"), c("Designation"), c("Mapping Status"),
+        ),
+        (
+            m("Queue Count", "DISTINCTCOUNT('Queue'[Service Key])", "#,##0", "Distinct service-scope queue members visible in the active governed model.", "Data quality"),
+            m("Mapped Queue Count", "CALCULATE(DISTINCTCOUNT('Queue'[Service Key]), 'Queue'[Mapping Status] = \"MAPPED\")", "#,##0", "Distinct service-scope queue members explicitly mapped to a governed scope.", "Data quality"),
             m("Queue Mapping %", "DIVIDE([Mapped Queue Count], [Queue Count])", "0.0%", "Mapped queues divided by all queues in context.", "Data quality"),
         ),
     ),
     Table(
         "Queue Coverage", "FactQueueCoverage.csv", "Inbound queue entries with explicit reviewed mapping status.",
         (
-            c("Date", "date", True), c("Queue", hidden=True), c("Service Scope"),
+            c("Date", "date", True), c("Service Key", hidden=True), c("Queue", hidden=True), c("Service Scope"),
             c("Management LOB", hidden=True), c("Comparison Scope"), c("Mapping Status"),
             c("Inbound Entries", "int", True), c("Mapped Inbound Entries", "int", True),
         ),
@@ -118,7 +122,7 @@ TABLES = (
         "Service", "FactService15Min.csv", "Additive service counters at date, 15-minute interval and queue grain.",
         (
             c("Date", "date", True), c("Interval Start"), c("Interval End"),
-            c("Time Slot", "int", True), c("Service Scope"),
+            c("Time Slot", "int", True), c("Service Key", hidden=True), c("Service Scope"),
             c("Management LOB", hidden=True), c("Queue", hidden=True), c("Offered", "int", True),
             c("Answered", "int", True), c("Abandoned", "int", True),
             c("Short Abandoned", "int", True), c("Abandoned Within Target", "int", True),
@@ -199,7 +203,7 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
     Table(
         "Forecast", "FactForecastInterval.csv", "Verint forecast at its native 15-minute queue interval.",
         (
-            c("Date", "date", True), c("Time Slot", "int", True), c("Queue", hidden=True),
+            c("Date", "date", True), c("Time Slot", "int", True), c("Service Key", hidden=True), c("Queue", hidden=True),
             c("Volume Forecast", "decimal", True), c("FTE Required", "decimal", True),
             c("SL Forecast", "decimal", True), c("SL Required", "decimal", True),
             c("AHT Forecast Seconds", "decimal", True), c("Service Scope"),
@@ -291,7 +295,7 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
         (
             m("Elapsed Scheduled Minutes", "CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = \"COMPLETE\", 'Status'[Is Planned Time Off] = 0)", "#,##0", "Completed scheduled minutes excluding governed PTO/Away.", "Workforce realisation"),
             m("Observed Minutes", "CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = \"COMPLETE\", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Observed] = 1)", "#,##0", "Completed elapsed minutes with observed connected evidence.", "Workforce realisation"),
-            m("Productive Minutes", "CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = \"COMPLETE\", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Productive] = 1)", "#,##0", "Completed voice, BO and other governed productive minutes; Available remains separate.", "Workforce realisation"),
+            m("Productive Minutes", "CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = \"COMPLETE\", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Productive] = 1)", "#,##0", "Completed voice, available, BO and other governed productive minutes.", "Workforce realisation"),
             m("Unexplained Minutes", "CALCULATE(SUM('Status'[Minutes]), 'Status'[Shift State] = \"COMPLETE\", 'Status'[Is Planned Time Off] = 0, 'Status'[Is Unexplained] = 1)", "#,##0", "Completed scheduled minutes with logged-off, no-activity or missing-status evidence.", "Workforce realisation"),
             m("Elapsed Scheduled Hours", "DIVIDE([Elapsed Scheduled Minutes], 60)", "#,##0.0", "Completed elapsed scheduled hours excluding governed PTO/Away.", "Workforce realisation"),
             m("Observed Hours", "DIVIDE([Observed Minutes], 60)", "#,##0.0", "Observed connected hours in completed shifts.", "Workforce realisation"),
@@ -303,7 +307,7 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
             m("Status Hours", "DIVIDE(SUM('Status'[Minutes]), 60)", "#,##0.0", "Hours in the selected governed operational category.", "Workforce realisation"),
             m("Status Mapped %", "DIVIDE(CALCULATE(SUM('Status'[Minutes]), 'Status'[Observed Source] = \"AGENT_STATUS\", 'Status'[Is Status Mapped] = 1), CALCULATE(SUM('Status'[Minutes]), 'Status'[Observed Source] = \"AGENT_STATUS\"))", "0.0%", "Mapped Agent Status minutes divided by Agent Status minutes.", "Data quality"),
             m("Capacity Loss Hours", "MAX([Elapsed Scheduled Hours] - [Productive Hours], 0)", "#,##0.0", "Elapsed scheduled hours not delivered as governed productive hours.", "Driver signals"),
-            m("Capacity Bridge Hours", "SWITCH(SELECTEDVALUE('Capacity Stage'[Capacity Stage]), \"Elapsed scheduled\", [Elapsed Scheduled Hours], \"Absence / missing\", -MAX([Elapsed Scheduled Hours]-[Observed Hours],0), \"Observed\", [Observed Hours], \"AUX / available / breaks\", -MAX([Observed Hours]-[Productive Hours],0), \"Productive\", [Productive Hours])", "#,##0.0;[Red]-#,##0.0", "Auditable capacity bridge values by selected stage.", "Workforce realisation"),
+            m("Capacity Bridge Hours", "SWITCH(SELECTEDVALUE('Capacity Stage'[Capacity Stage]), \"Elapsed scheduled\", [Elapsed Scheduled Hours], \"Absence / missing\", -MAX([Elapsed Scheduled Hours]-[Observed Hours],0), \"Observed\", [Observed Hours], \"AUX / breaks\", -MAX([Observed Hours]-[Productive Hours],0), \"Productive\", [Productive Hours])", "#,##0.0;[Red]-#,##0.0", "Auditable capacity bridge values by selected stage.", "Workforce realisation"),
         ),
     ),
     Table(
@@ -423,7 +427,7 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
             m("Sources Ready %", "DIVIDE([Sources Ready], [Source Count])", "0.0%", "Ready source families divided by configured source families.", "Data quality"),
             m("Latest Data Date", "MAX('Source Health'[Newest Date])", "dd mmm yyyy", "Latest business date present across source families.", "Data quality"),
             m("Rows Accepted %", "DIVIDE(SUM('Source Health'[Rows]), SUM('Source Health'[Rows]) + SUM('Source Health'[Rejected]))", "0.0%", "Accepted source rows divided by accepted plus rejected rows.", "Data quality"),
-            m("Models Built", "22", "#,##0", "Imported semantic tables in Power BI project contract 4.", "Data quality"),
+            m("Models Built", "22", "#,##0", "Imported semantic tables in Power BI project contract 5.", "Data quality"),
             m("Manifest State", "IF([Critical Quality Issues] > 0, \"HOLD\", \"READY\")", "", "HOLD when blocking quality issues exist; READY otherwise.", "Data quality"),
         ),
     ),
@@ -443,35 +447,28 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
 
 
 RELATIONSHIPS = (
+    ("Employee", "Management LOB", "Management LOB", "Management LOB"),
+    ("Queue", "Management LOB", "Management LOB", "Management LOB"),
     ("Service", "Date", "Date", "Date"), ("Service", "Time Slot", "Time", "Quarter Hour Index"),
-    ("Service", "Management LOB", "Management LOB", "Management LOB"), ("Service", "Queue", "Queue", "Queue"),
+    ("Service", "Service Key", "Queue", "Service Key"),
     ("Queue Coverage", "Date", "Date", "Date"),
-    ("Queue Coverage", "Management LOB", "Management LOB", "Management LOB"),
-    ("Queue Coverage", "Queue", "Queue", "Queue"),
+    ("Queue Coverage", "Service Key", "Queue", "Service Key"),
     ("Forecast", "Date", "Date", "Date"), ("Forecast", "Time Slot", "Time", "Quarter Hour Index"),
-    ("Forecast", "Management LOB", "Management LOB", "Management LOB"), ("Forecast", "Queue", "Queue", "Queue"),
+    ("Forecast", "Service Key", "Queue", "Service Key"),
     ("Staffing", "Date", "Date", "Date"), ("Staffing", "Time Slot", "Time", "Quarter Hour Index"),
     ("Staffing", "Management LOB", "Management LOB", "Management LOB"),
     ("Attendance", "Date", "Date", "Date"), ("Attendance", "Agent ID", "Employee", "Agent ID"),
-    ("Attendance", "Management LOB", "Management LOB", "Management LOB"),
     ("Status", "Date", "Date", "Date"), ("Status", "Agent ID", "Employee", "Agent ID"),
     ("Status", "Time Slot", "Time", "Quarter Hour Index"),
-    ("Status", "Management LOB", "Management LOB", "Management LOB"),
     ("Schedule Integrity", "Date", "Date", "Date"),
     ("Schedule Integrity", "Agent ID", "Employee", "Agent ID"),
-    ("Schedule Integrity", "Management LOB", "Management LOB", "Management LOB"),
     ("Shift Placement", "Date", "Date", "Date"),
     ("Shift Placement", "Agent ID", "Employee", "Agent ID"),
-    ("Shift Placement", "Management LOB", "Management LOB", "Management LOB"),
     ("Attendance Gap", "Date", "Date", "Date"), ("Attendance Gap", "Agent ID", "Employee", "Agent ID"),
-    ("Attendance Gap", "Management LOB", "Management LOB", "Management LOB"),
     ("Time Off", "Date", "Date", "Date"), ("Time Off", "Agent ID", "Employee", "Agent ID"),
-    ("Time Off", "Management LOB", "Management LOB", "Management LOB"),
     ("Final Absence", "Date", "Date", "Date"), ("Final Absence", "Agent ID", "Employee", "Agent ID"),
-    ("Final Absence", "Management LOB", "Management LOB", "Management LOB"),
     ("Absence Component", "Date", "Date", "Date"), ("Absence Component", "Agent ID", "Employee", "Agent ID"),
-    ("Absence Component", "Management LOB", "Management LOB", "Management LOB"),
-    ("Finding", "Period End", "Date", "Date"), ("Finding", "Agent ID", "Employee", "Agent ID"),
+    ("Finding", "Period End", "Date", "Date"),
     ("Finding", "Management LOB", "Management LOB", "Management LOB"),
     ("Quality Issue", "Date", "Date", "Date"), ("Quality Issue", "Agent ID", "Employee", "Agent ID"),
 )
@@ -553,7 +550,7 @@ PAGES = (
             ("Schedule Integrity", "Early Leaves", "EARLY LEAVES", "#D99815", "Completed days only"),
         ),
         "charts": (
-            {"type": "stackedBarChart", "title": "PUBLISHED VS OBSERVED SHIFT PLACEMENT", "category": ("Shift Placement", "Placement Label"), "values": (("Shift Placement", "Start Hour Value"), ("Shift Placement", "Published Placement Hours"), ("Shift Placement", "Observed Placement Hours"))},
+            {"type": "clusteredBarChart", "title": "PUBLISHED VS OBSERVED SHIFT HOURS", "category": ("Shift Placement", "Placement Label"), "values": (("Shift Placement", "Published Placement Hours"), ("Shift Placement", "Observed Placement Hours"))},
             {"type": "matrix", "title": "SUPPORTED RECURRING PATTERNS", "rows": (("Schedule Integrity", "Pattern Family"),), "columns": (("Date", "Weekday"),), "values": (("Schedule Integrity", "Integrity Cases"),)},
         ),
         "tables": (("SCHEDULE INTEGRITY CASES", (("Schedule Integrity", "Agent"), ("Schedule Integrity", "Team Leader"), ("Schedule Integrity", "Date"), ("Schedule Integrity", "Scheduled Start"), ("Schedule Integrity", "Scheduled End"), ("Schedule Integrity", "Observed Start"), ("Schedule Integrity", "Observed End"), ("Schedule Integrity", "Classification"), ("Schedule Integrity", "Start Delta Minutes"), ("Schedule Integrity", "End Delta Minutes"), ("Schedule Integrity", "Recurrence Count"), ("Schedule Integrity", "Confidence")), "full"),),
@@ -573,6 +570,22 @@ PAGES = (
             {"type": "matrix", "title": "ACCURACY BY LOB & DAY OF WEEK", "rows": (("Management LOB", "Management LOB"),), "columns": (("Date", "Weekday"),), "values": (("Service", "Forecast Accuracy %"),)},
         ),
         "tables": (("RECURRING FORECAST MISSES", (("Date", "Weekday"), ("Management LOB", "Management LOB"), ("Time", "Hour Label"), ("Forecast", "Forecast Volume"), ("Service", "Offered Calls"), ("Service", "Forecast Bias %"), ("Service", "AHT Error Seconds"), ("Service", "Forecast Accuracy %")), "full"),),
+    },
+    {
+        "title": "Absence & Shrinkage", "nav": "Absence & Shrinkage", "status": "FINAL CHECK",
+        "subtitle": "Final Verint activity ledger, governed component logic and unresolved evidence",
+        "slicers": (("Date", "Date", "PERIOD", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Employee", "Team Leader", "TEAM LEADER", "Dropdown"), ("Final Absence", "Final Ledger Status", "LEDGER STATUS", "Dropdown")),
+        "cards": (
+            ("Final Absence", "Final Absence %", "FINAL ABSENCE", "#C91F2A", "Mapped absence / finalized planned time"),
+            ("Final Absence", "Final Shrinkage %", "FINAL SHRINKAGE", "#D99815", "Mapped shrinkage / finalized planned time"),
+            ("Final Absence", "Final PTO %", "FINAL PTO", "#244F78", "Mapped vacation / finalized planned time"),
+            ("Final Absence", "Absence Review HC", "REVIEW AGENT-DAYS", "#C91F2A", "Residual, empty or unmapped evidence"),
+        ),
+        "charts": (
+            {"type": "clusteredBarChart", "title": "FINAL RATES BY MANAGEMENT LOB", "category": ("Management LOB", "Management LOB"), "values": (("Final Absence", "Final Absence %"), ("Final Absence", "Final Shrinkage %"))},
+            {"type": "clusteredColumnChart", "title": "VERINT ACTIVITY COMPONENT MINUTES", "category": ("Absence Component", "Category"), "values": (("Absence Component", "Activity Minutes"),)},
+        ),
+        "tables": (("FINAL AGENT-DAY DETAIL", (("Final Absence", "Date"), ("Final Absence", "Agent"), ("Final Absence", "Team Leader"), ("Final Absence", "LOB"), ("Final Absence", "Scheduled Minutes"), ("Final Absence", "Absence Minutes"), ("Final Absence", "Vacation Minutes"), ("Final Absence", "Shrinkage Minutes"), ("Final Absence", "Unmapped Minutes"), ("Final Absence", "Final Ledger Status")), "full"),),
     },
     {
         "title": "Data Readiness", "nav": "Data Readiness", "status": "GOVERNED",
@@ -1012,11 +1025,11 @@ def _matrix(
 def _navigator(name: str) -> dict:
     return {
         "$schema": VISUAL_SCHEMA, "name": name,
-        "position": _position(18, 128, 140, 545, 20, 20),
+        "position": _position(18, 128, 140, len(PAGES) * 48, 20, 20),
         "visual": {
             "visualType": "pageNavigator",
             "objects": {
-                "layout": [{"properties": {"columnCount": _literal(1), "rowCount": _literal(7), "cellPadding": _literal(8)}}],
+                "layout": [{"properties": {"columnCount": _literal(1), "rowCount": _literal(len(PAGES)), "cellPadding": _literal(6)}}],
                 "pages": [{"properties": {"showHiddenPages": _literal(False), "showTooltipPages": _literal(False), "showByDefault": _literal(True)}}],
                 "shape": [{"properties": {"tileShape": _literal("rectangleRoundedByPixel"), "rectangleRoundedCurve": _literal(6)}}],
                 "text": [
@@ -1066,6 +1079,30 @@ def _write_report(root: Path) -> None:
         _write_visual(page_dir, title, "accent", _shape("", 178, 58, 1502, 4, "#00A3A8", 2))
         _write_visual(page_dir, title, "brand", _textbox("", "WFMHub", 20, 17, 140, 48, 22, "#FFFFFF", 10, True, "center"))
         _write_visual(page_dir, title, "nav label", _textbox("", "NAVIGATION", 26, 100, 124, 20, 9, "#7F9AB2", 10, True))
+        # Static labels guarantee a readable sidebar even on Desktop builds
+        # that fail to render pageNavigator text.  The native navigator stays
+        # above them as the interactive layer; Power BI's bottom page tabs are
+        # also retained as a second navigation route.
+        current_nav = next(
+            index for index, candidate in enumerate(PAGES)
+            if candidate["title"] == title
+        )
+        for index, candidate in enumerate(PAGES):
+            nav_y = 132 + index * 48
+            if index == current_nav:
+                _write_visual(
+                    page_dir, title, f"nav selected {index}",
+                    _shape("", 20, nav_y, 136, 38, "#007C83", 12, rounded=True),
+                )
+            _write_visual(
+                page_dir, title, f"nav text {index}",
+                _textbox(
+                    "", f"{index + 1:02d}  {candidate['nav']}",
+                    28, nav_y + 9, 124, 20, 9,
+                    "#FFFFFF" if index == current_nav else "#DCE9F2",
+                    14, index == current_nav,
+                ),
+            )
         _write_visual(page_dir, title, "nav", _navigator(""))
         _write_visual(page_dir, title, "owner", _textbox("", "Prepared by Anass ASSRI\nWorkforce Management", 18, 878, 140, 42, 9, "#9FB3C8", 10, False, "center"))
         _write_visual(page_dir, title, "page title", _textbox("", f"WFM HUB  |  {title.upper()}", 210, 10, 760, 32, 18, "#FFFFFF", 10, True))
@@ -1212,7 +1249,7 @@ def build() -> Path:
         PROJECT_ROOT / f"{PROJECT_NAME}.pbip",
         {"$schema": "https://developer.microsoft.com/json-schemas/fabric/pbip/pbipProperties/1.0.0/schema.json", "version": "1.0", "artifacts": [{"report": {"path": f"{PROJECT_NAME}.Report"}}], "settings": {"enableAutoRecovery": True}},
     )
-    (PROJECT_ROOT / "PROJECT_VERSION.txt").write_text("4\n", encoding="utf-8")
+    (PROJECT_ROOT / "PROJECT_VERSION.txt").write_text("5\n", encoding="utf-8")
     (PROJECT_ROOT / "README.txt").write_text(
         "WFMHUB BI\n=========\n\n"
         "Open WFMHub BI.pbip with Microsoft Power BI Desktop, then choose Home > Refresh.\n"

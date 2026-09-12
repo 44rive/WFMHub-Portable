@@ -5,7 +5,7 @@
     "x": 18,
     "y": 128,
     "z": 20,
-    "height": 545,
+    "height": 384,
     "width": 140,
     "tabOrder": 20
   },
@@ -25,14 +25,14 @@
             "rowCount": {
               "expr": {
                 "Literal": {
-                  "Value": "7L"
+                  "Value": "8L"
                 }
               }
             },
             "cellPadding": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "6L"
                 }
               }
             }

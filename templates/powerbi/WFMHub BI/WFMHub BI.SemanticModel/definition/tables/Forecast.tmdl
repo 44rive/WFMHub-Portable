@@ -50,6 +50,13 @@ table 'Forecast'
 		summarizeBy: none
 		sourceColumn: Time Slot
 
+	column 'Service Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Service Key
+
 	column 'Queue'
 		dataType: string
 		isHidden
@@ -120,9 +127,9 @@ table 'Forecast'
 			let
 			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactForecastInterval.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-			    Selected = Table.SelectColumns(Promoted, {"Date", "Time Slot", "Queue", "Volume Forecast", "FTE Required", "SL Forecast", "SL Required", "AHT Forecast Seconds", "Service Scope", "Management LOB", "Mapping Status", "Source File"}, MissingField.Error),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Time Slot", "Service Key", "Queue", "Volume Forecast", "FTE Required", "SL Forecast", "SL Required", "AHT Forecast Seconds", "Service Scope", "Management LOB", "Mapping Status", "Source File"}, MissingField.Error),
 			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Time Slot", "Volume Forecast", "FTE Required", "SL Forecast", "SL Required", "AHT Forecast Seconds"}),
-			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Time Slot", Int64.Type}, {"Queue", type text}, {"Volume Forecast", type number}, {"FTE Required", type number}, {"SL Forecast", type number}, {"SL Required", type number}, {"AHT Forecast Seconds", type number}, {"Service Scope", type text}, {"Management LOB", type text}, {"Mapping Status", type text}, {"Source File", type text}}, "en-US")
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Time Slot", Int64.Type}, {"Service Key", type text}, {"Queue", type text}, {"Volume Forecast", type number}, {"FTE Required", type number}, {"SL Forecast", type number}, {"SL Required", type number}, {"AHT Forecast Seconds", type number}, {"Service Scope", type text}, {"Management LOB", type text}, {"Mapping Status", type text}, {"Source File", type text}}, "en-US")
 			in
 			    Typed
 

@@ -3,8 +3,8 @@
 // Ratios always divide summed governed components; Power BI does not reclassify source data.
 
 // Queue
-Queue Count = DISTINCTCOUNT('Queue'[Queue])
-Mapped Queue Count = CALCULATE(DISTINCTCOUNT('Queue'[Queue]), 'Queue'[Mapping Status] = "MAPPED")
+Queue Count = DISTINCTCOUNT('Queue'[Service Key])
+Mapped Queue Count = CALCULATE(DISTINCTCOUNT('Queue'[Service Key]), 'Queue'[Mapping Status] = "MAPPED")
 Queue Mapping % = DIVIDE([Mapped Queue Count], [Queue Count])
 
 // Queue Coverage
@@ -122,7 +122,7 @@ Capacity Delivered % = DIVIDE([Productive Minutes], [Elapsed Scheduled Minutes])
 Status Hours = DIVIDE(SUM('Status'[Minutes]), 60)
 Status Mapped % = DIVIDE(CALCULATE(SUM('Status'[Minutes]), 'Status'[Observed Source] = "AGENT_STATUS", 'Status'[Is Status Mapped] = 1), CALCULATE(SUM('Status'[Minutes]), 'Status'[Observed Source] = "AGENT_STATUS"))
 Capacity Loss Hours = MAX([Elapsed Scheduled Hours] - [Productive Hours], 0)
-Capacity Bridge Hours = SWITCH(SELECTEDVALUE('Capacity Stage'[Capacity Stage]), "Elapsed scheduled", [Elapsed Scheduled Hours], "Absence / missing", -MAX([Elapsed Scheduled Hours]-[Observed Hours],0), "Observed", [Observed Hours], "AUX / available / breaks", -MAX([Observed Hours]-[Productive Hours],0), "Productive", [Productive Hours])
+Capacity Bridge Hours = SWITCH(SELECTEDVALUE('Capacity Stage'[Capacity Stage]), "Elapsed scheduled", [Elapsed Scheduled Hours], "Absence / missing", -MAX([Elapsed Scheduled Hours]-[Observed Hours],0), "Observed", [Observed Hours], "AUX / breaks", -MAX([Observed Hours]-[Productive Hours],0), "Productive", [Productive Hours])
 
 // Schedule Integrity
 Displaced Shifts = CALCULATE(COUNTROWS('Schedule Integrity'), 'Schedule Integrity'[Requires Review] = 1)

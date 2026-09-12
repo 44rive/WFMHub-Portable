@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `3.2.0` |
+| Version | `3.3.0` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
 | First compatible Hub version | `0.27.1` |
@@ -101,13 +101,13 @@ defines a target; WFMHub never invents the pictured PCS target.
 
 ### Attendance Review
 
-- `CONTROL`: review gaps, gap hours, open decisions, missing evidence; by-LOB
-  action summary and gap-hours chart.
+- `CONTROL`: residual gaps, gap hours, partly corrected cases, missing evidence;
+  by-LOB reconciliation summary and gap-hours chart.
 - `REVIEW BOARD`: SCHEDULE directly above ACTUAL, followed by a visual spacer.
-  Exact times and Gap ID remain authoritative; only five blue ACTUAL fields are
-  editable.
+  Exact residual start/end and Gap ID remain authoritative. The sheet is
+  read-only; final correction happens in Verint.
 - `BREAK & MEAL`: exact completed-shift control with evidence gating.
-- Decision ledger and evidence remain hidden audit support.
+- Exact source evidence remains hidden audit support.
 
 ### In-development workbooks
 
@@ -130,7 +130,7 @@ their calculations and decision workflows still require production review.
 
 ## Interaction and persistence
 
-- Generated RTM and Attendance workbooks are dated decision snapshots.
+- Generated RTM and Attendance workbooks are dated operational snapshots.
 - `PCS Live Tracker.xlsx` is permanent. Only a versioned, action-preserving
   migration may rebuild it; normal Hub updates never do.
 - Each PCS update atomically replaces six fixed governed CSV feeds.
