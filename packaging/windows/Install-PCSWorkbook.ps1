@@ -173,6 +173,83 @@ function Set-TableColumnFormat {
     finally { Release-ComObject $sheet }
 }
 
+function Set-SelectorNames {
+    $keys = "'_PCS_FILTERS'!`$A:`$A"
+    $values = "'_PCS_FILTERS'!`$C:`$C"
+    $teamGroup = '"TL|"&SUBSTITUTE(OVERVIEW!$H$3,"|","/")'
+    $agentGroup = '"AGENT|"&SUBSTITUTE(OVERVIEW!$H$3,"|","/")&"|"&SUBSTITUTE(OVERVIEW!$O$3,"|","/")'
+    $groups = [ordered]@{
+        "PCS_PERIOD_LIST" = '"PERIOD"'
+        "PCS_LOB_LIST" = '"LOB"'
+        "PCS_TL_ACTIVE" = $teamGroup
+        "PCS_AGENT_ACTIVE" = $agentGroup
+    }
+    foreach ($entry in $groups.GetEnumerator()) {
+        $group = [string]$entry.Value
+        $first = "MATCH($group,$keys,0)"
+        $formula = "=INDEX($values,$first):INDEX($values,$first+COUNTIF($keys,$group)-1)"
+        $existing = $null
+        try {
+            $existing = $script:Workbook.Names.Item([string]$entry.Key)
+            $existing.Delete()
+        }
+        catch {}
+        finally { Release-ComObject $existing }
+        $created = $script:Workbook.Names.Add([string]$entry.Key, $formula)
+        Release-ComObject $created
+    }
+}
+
+function Assert-SelectorIntegrity {
+    $overview = $script:Workbook.Worksheets.Item("OVERVIEW")
+    try {
+        $selectedLob = [string]$overview.Range("H3").Value2
+        $selectedTeam = [string]$overview.Range("O3").Value2
+    }
+    finally { Release-ComObject $overview }
+    $checks = @(
+        @("PCS_PERIOD_LIST", "PERIOD", "Current MTD"),
+        @("PCS_LOB_LIST", "LOB", "All"),
+        @("PCS_TL_ACTIVE", ("TL|" + $selectedLob.Replace("|", "/")), "All"),
+        @("PCS_AGENT_ACTIVE", ("AGENT|" + $selectedLob.Replace("|", "/") + "|" + $selectedTeam.Replace("|", "/")), "All")
+    )
+    $filterSheet = $script:Workbook.Worksheets.Item("_PCS_FILTERS")
+    try {
+        foreach ($check in $checks) {
+            $definedName = $null
+            $resolved = $null
+            try {
+                $definedName = $script:Workbook.Names.Item([string]$check[0])
+                $resolved = $definedName.RefersToRange
+                if ($null -eq $resolved -or $resolved.Rows.Count -lt 1) {
+                    throw "$($check[0]) does not resolve to a populated range"
+                }
+                $seenRequired = $false
+                foreach ($cell in $resolved.Cells) {
+                    try {
+                        $actualGroup = [string]$filterSheet.Cells.Item($cell.Row, 1).Value2
+                        if ($actualGroup -ne [string]$check[1]) {
+                            throw "$($check[0]) crossed into '$actualGroup' instead of '$($check[1])' at row $($cell.Row)"
+                        }
+                        if ([string]$cell.Value2 -eq [string]$check[2]) {
+                            $seenRequired = $true
+                        }
+                    }
+                    finally { Release-ComObject $cell }
+                }
+                if (-not $seenRequired) {
+                    throw "$($check[0]) is missing required value '$($check[2])'"
+                }
+            }
+            finally {
+                Release-ComObject $resolved
+                Release-ComObject $definedName
+            }
+        }
+    }
+    finally { Release-ComObject $filterSheet }
+}
+
 function Assert-PresentationIntegrity {
     $problems = @()
     foreach ($sheetName in @("OVERVIEW", "COACHING", "_PCS_CALC")) {
@@ -266,7 +343,9 @@ function Add-QueryTable {
         try {
             $queryTable.CommandType = 2
             $queryTable.CommandText = "SELECT * FROM [$QueryName]"
-            $queryTable.RefreshStyle = 1
+            # Overwrite the query destination in place. Insert/delete-cell
+            # refresh can shift workbook names by one row at group boundaries.
+            $queryTable.RefreshStyle = 0
             $queryTable.BackgroundQuery = $false
             $queryTable.AdjustColumnWidth = $false
             $queryTable.PreserveFormatting = $true
@@ -377,7 +456,9 @@ try {
     )) {
         Set-TableColumnFormat $format[0] $format[1] $format[2] $format[3]
     }
+    Set-SelectorNames
     $script:Excel.CalculateFullRebuild()
+    Assert-SelectorIntegrity
     Assert-PresentationIntegrity
     Set-SetupValue "Workbook Last Refreshed" ([DateTime]::Now.ToString("yyyy-MM-dd HH:mm:ss"))
     Set-SetupValue "Last Installer Result" "Refresh completed"

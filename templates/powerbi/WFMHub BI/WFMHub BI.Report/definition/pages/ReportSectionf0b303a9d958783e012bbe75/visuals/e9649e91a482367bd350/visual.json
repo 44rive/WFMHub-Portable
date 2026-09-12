@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "e9649e91a482367bd350",
   "position": {
-    "x": 18,
+    "x": 26,
     "y": 16,
     "z": 10,
-    "height": 62,
-    "width": 100,
+    "height": 64,
+    "width": 124,
     "tabOrder": 10
   },
   "visual": {
@@ -22,7 +22,7 @@
                     "value": "WFM\nHUB",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "21px",
+                      "fontSize": "23px",
                       "fontWeight": "bold",
                       "color": "#FFFFFF"
                     }

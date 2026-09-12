@@ -49,10 +49,18 @@ class PowerBIProjectTests(unittest.TestCase):
             page_root = pages_file.parent / page_id
             page = json.loads((page_root / "page.json").read_text(encoding="utf-8"))
             names.append(page["displayName"])
-            self.assertEqual((page["width"], page["height"]), (1280, 720))
+            self.assertEqual((page["width"], page["height"]), (1680, 945))
             visuals = list((page_root / "visuals").glob("*/visual.json"))
-            self.assertEqual(len(visuals), 20)
-            self.assertEqual(len({path.parent.name for path in visuals}), 20)
+            self.assertGreaterEqual(len(visuals), 35)
+            self.assertEqual(len({path.parent.name for path in visuals}), len(visuals))
+            visual_types = [
+                json.loads(path.read_text(encoding="utf-8"))["visual"]["visualType"]
+                for path in visuals
+            ]
+            self.assertEqual(visual_types.count("slicer"), 4)
+            self.assertEqual(visual_types.count("cardVisual"), 4)
+            self.assertIn("pageNavigator", visual_types)
+            self.assertGreaterEqual(visual_types.count("shape"), 12)
         self.assertEqual(
             names,
             [

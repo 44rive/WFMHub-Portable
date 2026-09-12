@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "8d9d64dfd45343e6524a",
   "position": {
-    "x": 158,
-    "y": 9,
+    "x": 210,
+    "y": 10,
     "z": 10,
-    "height": 30,
-    "width": 480,
+    "height": 32,
+    "width": 620,
     "tabOrder": 10
   },
   "visual": {
@@ -22,7 +22,7 @@
                     "value": "PCS PERFORMANCE & COACHING",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "18px",
+                      "fontSize": "19px",
                       "fontWeight": "bold",
                       "color": "#FFFFFF"
                     }

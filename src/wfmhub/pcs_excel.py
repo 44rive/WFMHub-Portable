@@ -22,10 +22,11 @@ from openpyxl import load_workbook
 from .config import Config
 
 
-PCS_TEMPLATE_VERSION = "2026.11.3"
+PCS_TEMPLATE_VERSION = "2026.11.4"
 PCS_PRESENTATION_SHEETS = ("OVERVIEW", "COACHING", "_PCS_CALC")
 PCS_PRESENTATION_NAMES = (
     "PCS_LOB_DATA", "PCS_AGENT_DATA", "PCS_DAILY_DATA", "PCS_COACH_DATA",
+    "PCS_PERIOD_LIST", "PCS_LOB_LIST", "PCS_TL_ACTIVE", "PCS_AGENT_ACTIVE",
 )
 
 
@@ -147,6 +148,9 @@ def _presentation_problem(workbook) -> str | None:
             problems.append(f"missing workbook name {name}")
         elif "#REF!" in reference:
             problems.append(f"workbook name {name} contains #REF!")
+        elif name.startswith("PCS_") and name.endswith(("_LIST", "_ACTIVE")) \
+                and "OFFSET(" in reference.upper():
+            problems.append(f"workbook name {name} still uses a drift-prone OFFSET range")
     return "; ".join(problems[:5]) or None
 
 
@@ -248,6 +252,13 @@ def run_pcs_excel_action(
         raise PCSExcelError("PCS connection mode must be LOCAL or SHAREPOINT")
     folder = config.feed / "PCS"
     suffix = normalized_mode
+    if normalized_action == "Install":
+        # Query definitions ship as generated contract assets. Recreate them
+        # here so Install/Repair also works immediately after a portable
+        # upgrade, even if the previous Feed folder did not contain them.
+        from .shared_feeds import publish_pcs_power_query_scripts
+
+        publish_pcs_power_query_scripts(folder)
     command = [
         _powershell(), "-NoLogo", "-NoProfile", "-NonInteractive",
         "-ExecutionPolicy", "Bypass", "-File", str(_helper_path(config)),

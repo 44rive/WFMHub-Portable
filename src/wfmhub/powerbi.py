@@ -13,7 +13,7 @@ from .service_profiles import load_service_profiles
 from .shared_feeds import SharedFeedResult, _atomic_csv, _manifest
 
 
-POWERBI_SCHEMA_VERSION = "2"
+POWERBI_SCHEMA_VERSION = "3"
 
 
 def _query(
@@ -245,7 +245,15 @@ def publish_powerbi_feeds(
             ("Queue", "Source System", "Service Scope", "Comparison Scope", "Designation", "Mapping Status"),
             """SELECT queue, min(source_system), min(service_scope),
                       min(comparison_scope), min(designation), min(mapping_status)
-               FROM mart.service_interval
+               FROM (
+                 SELECT queue, source_system, service_scope, comparison_scope,
+                        designation, mapping_status
+                 FROM mart.service_interval
+                 UNION ALL
+                 SELECT queue_name, 'VERINT_FORECAST', service_scope,
+                        comparison_scope, NULL, mapping_status
+                 FROM mart.forecast_interval
+               ) q
                WHERE trim(coalesce(queue,''))<>''
                GROUP BY queue ORDER BY min(service_scope), queue""",
         ),
@@ -313,6 +321,7 @@ def publish_powerbi_feeds(
             (
                 "Date", "Interval Start", "Interval End", "Time Slot", "LOB",
                 "Management LOB", "Language",
+                "Scheduled HC", "Observed HC", "Productive HC", "Auxiliary HC",
                 "Gross Scheduled FTE", "Planned Time Off FTE", "Scheduled FTE",
                 "Observed FTE", "Productive FTE", "Staffing Variance FTE",
                 "Staffing Gap FTE", "Staffing State", "Evidence Basis", "Evaluation As Of",
@@ -321,6 +330,8 @@ def publish_powerbi_feeds(
                       cast(strftime('%H',s.interval_start) AS INTEGER)*4
                         + cast(strftime('%M',s.interval_start) AS INTEGER)/15,
                       s.lob, coalesce(m.management_lob,s.lob), s.language,
+                      s.scheduled_agents, s.observed_agents,
+                      s.productive_agents, s.auxiliary_agents,
                       s.gross_scheduled_fte, s.planned_time_off_fte,
                       s.scheduled_fte, s.observed_fte, s.productive_fte,
                       s.staffing_variance_fte, s.staffing_gap_fte,

@@ -22,11 +22,32 @@ table 'Staffing'
 		formatString: #,##0.0
 		displayFolder: 'Capacity'
 
-	/// Required FTE less average scheduled FTE, floored at zero.
-	measure 'Capacity Gap FTE' = ```
-			MAX([Required FTE] - [Average Scheduled FTE], 0)
+	/// Average scheduled headcount across selected native intervals.
+	measure 'Average Scheduled HC' = ```
+			AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval HC", SUM('Staffing'[Scheduled HC])), [Interval HC])
 			```
 		formatString: #,##0.0
+		displayFolder: 'Capacity'
+
+	/// Average observed headcount across selected completed intervals.
+	measure 'Average Observed HC' = ```
+			AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval HC", SUM('Staffing'[Observed HC])), [Interval HC])
+			```
+		formatString: #,##0.0
+		displayFolder: 'Capacity'
+
+	/// Required FTE less average scheduled capacity, floored at zero; blank when Verint requirement is not supplied.
+	measure 'Capacity Gap FTE' = ```
+			IF(ISBLANK([Required FTE]), BLANK(), MAX([Required FTE] - [Average Scheduled FTE], 0))
+			```
+		formatString: #,##0.0
+		displayFolder: 'Capacity'
+
+	/// Average scheduled capacity less required FTE; blank when Verint requirement is not supplied.
+	measure 'Net Capacity Gap FTE' = ```
+			IF(ISBLANK([Required FTE]), BLANK(), [Average Scheduled FTE] - [Required FTE])
+			```
+		formatString: #,##0.0;[Red]-#,##0.0
 		displayFolder: 'Capacity'
 
 	/// Average scheduled FTE less average observed FTE, floored at zero.
@@ -36,9 +57,9 @@ table 'Staffing'
 		formatString: #,##0.0
 		displayFolder: 'Capacity'
 
-	/// Average scheduled FTE divided by required FTE.
+	/// Average scheduled capacity divided by explicit Verint required FTE; blank when requirement is unavailable.
 	measure 'Coverage %' = ```
-			DIVIDE([Average Scheduled FTE], [Required FTE])
+			IF(ISBLANK([Required FTE]), BLANK(), DIVIDE([Average Scheduled FTE], [Required FTE]))
 			```
 		formatString: 0.0%
 		displayFolder: 'Capacity'
@@ -73,6 +94,34 @@ table 'Staffing'
 		dataType: string
 		summarizeBy: none
 		sourceColumn: Language
+
+	column 'Scheduled HC'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Scheduled HC
+
+	column 'Observed HC'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Observed HC
+
+	column 'Productive HC'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Productive HC
+
+	column 'Auxiliary HC'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Auxiliary HC
 
 	column 'Gross Scheduled FTE'
 		dataType: decimal
@@ -139,9 +188,9 @@ table 'Staffing'
 			let
 			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactStaffing15Min.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-			    Selected = Table.SelectColumns(Promoted, {"Date", "Time Slot", "LOB", "Management LOB", "Language", "Gross Scheduled FTE", "Planned Time Off FTE", "Scheduled FTE", "Observed FTE", "Productive FTE", "Staffing Variance FTE", "Staffing Gap FTE", "Staffing State", "Evidence Basis"}, MissingField.Error),
-			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Time Slot", "Gross Scheduled FTE", "Planned Time Off FTE", "Scheduled FTE", "Observed FTE", "Productive FTE", "Staffing Variance FTE", "Staffing Gap FTE"}),
-			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Time Slot", Int64.Type}, {"LOB", type text}, {"Management LOB", type text}, {"Language", type text}, {"Gross Scheduled FTE", type number}, {"Planned Time Off FTE", type number}, {"Scheduled FTE", type number}, {"Observed FTE", type number}, {"Productive FTE", type number}, {"Staffing Variance FTE", type number}, {"Staffing Gap FTE", type number}, {"Staffing State", type text}, {"Evidence Basis", type text}}, "en-US")
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Time Slot", "LOB", "Management LOB", "Language", "Scheduled HC", "Observed HC", "Productive HC", "Auxiliary HC", "Gross Scheduled FTE", "Planned Time Off FTE", "Scheduled FTE", "Observed FTE", "Productive FTE", "Staffing Variance FTE", "Staffing Gap FTE", "Staffing State", "Evidence Basis"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Time Slot", "Scheduled HC", "Observed HC", "Productive HC", "Auxiliary HC", "Gross Scheduled FTE", "Planned Time Off FTE", "Scheduled FTE", "Observed FTE", "Productive FTE", "Staffing Variance FTE", "Staffing Gap FTE"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Time Slot", Int64.Type}, {"LOB", type text}, {"Management LOB", type text}, {"Language", type text}, {"Scheduled HC", Int64.Type}, {"Observed HC", Int64.Type}, {"Productive HC", Int64.Type}, {"Auxiliary HC", Int64.Type}, {"Gross Scheduled FTE", type number}, {"Planned Time Off FTE", type number}, {"Scheduled FTE", type number}, {"Observed FTE", type number}, {"Productive FTE", type number}, {"Staffing Variance FTE", type number}, {"Staffing Gap FTE", type number}, {"Staffing State", type text}, {"Evidence Basis", type text}}, "en-US")
 			in
 			    Typed
 

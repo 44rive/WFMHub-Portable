@@ -3,8 +3,8 @@
   "name": "ReportSectionf0b303a9d958783e012bbe75",
   "displayName": "Absence & Shrinkage",
   "displayOption": "FitToPage",
-  "height": 720,
-  "width": 1280,
+  "height": 945,
+  "width": 1680,
   "objects": {
     "background": [
       {
@@ -14,7 +14,7 @@
               "color": {
                 "expr": {
                   "Literal": {
-                    "Value": "'#F4F7F9'"
+                    "Value": "'#F3F6F8'"
                   }
                 }
               }

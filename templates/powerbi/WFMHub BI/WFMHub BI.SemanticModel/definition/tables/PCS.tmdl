@@ -43,6 +43,20 @@ table 'PCS'
 		formatString: 0.0%
 		displayFolder: 'PCS'
 
+	/// PCS average for the equivalent prior-month date context.
+	measure 'Prior Month PCS Average' = ```
+			CALCULATE([PCS Average], DATEADD('Date'[Date], -1, MONTH))
+			```
+		formatString: 0.00
+		displayFolder: 'PCS comparison'
+
+	/// Current PCS average less the equivalent prior-month result.
+	measure 'PCS Change' = ```
+			[PCS Average] - [Prior Month PCS Average]
+			```
+		formatString: 0.00;[Red]-0.00
+		displayFolder: 'PCS comparison'
+
 	column 'Date'
 		dataType: dateTime
 		isHidden

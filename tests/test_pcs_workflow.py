@@ -38,6 +38,7 @@ from wfmhub.shared_feeds import (
     PCS_RESULTS_HEADERS,
     pcs_dashboard_cache_rows,
     pcs_result_rows,
+    publish_pcs_power_query_scripts,
     _pcs_reporting_windows,
 )
 
@@ -96,6 +97,17 @@ def _rows() -> dict[str, list[tuple[object, ...]]]:
 
 
 class PCSWorkflowTests(unittest.TestCase):
+    def test_power_query_contract_can_be_recreated_without_business_refresh(self):
+        with tempfile.TemporaryDirectory() as folder:
+            paths = publish_pcs_power_query_scripts(Path(folder) / "Feed" / "PCS")
+            self.assertEqual(len(paths), 12)
+            for path in paths:
+                self.assertTrue(path.is_file())
+                self.assertIn("Excel.CurrentWorkbook", path.read_text(encoding="utf-8"))
+            self.assertTrue(
+                (Path(folder) / "Feed" / "PCS" / "POWER_QUERY_PCS_FILTERS_LOCAL.txt").is_file()
+            )
+
     def test_text_business_dates_are_parsed_for_sqlite_rows(self):
         self.assertEqual(_as_date("2026-09-08 17:00:00"), date(2026, 9, 8))
 
@@ -247,10 +259,18 @@ class PCSWorkflowTests(unittest.TestCase):
                 self.assertIn("PCS_COACH_DATA", workbook["COACHING"]["A5"].value)
                 for name in (
                     "PCS_LOB_DATA", "PCS_AGENT_DATA", "PCS_DAILY_DATA",
-                    "PCS_COACH_DATA",
+                    "PCS_COACH_DATA", "PCS_PERIOD_LIST", "PCS_LOB_LIST",
+                    "PCS_TL_ACTIVE", "PCS_AGENT_ACTIVE",
                 ):
                     self.assertIn(name, workbook.defined_names)
                     self.assertNotIn("#REF!", workbook.defined_names[name].attr_text)
+                for name in (
+                    "PCS_PERIOD_LIST", "PCS_LOB_LIST",
+                    "PCS_TL_ACTIVE", "PCS_AGENT_ACTIVE",
+                ):
+                    formula = workbook.defined_names[name].attr_text.upper()
+                    self.assertIn("INDEX(", formula)
+                    self.assertNotIn("OFFSET(", formula)
                 self.assertIn("tblPcsPerformance", workbook["PERFORMANCE"].tables)
                 self.assertIn("tblCoachingQueue", workbook["COACHING"].tables)
                 self.assertIn("tblCoachingActions", workbook["COACHING"].tables)

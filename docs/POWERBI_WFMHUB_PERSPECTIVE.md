@@ -63,7 +63,7 @@ conflicting results.
 - `FactPCSAgentDay`
 - `FactPCSCoaching`
 - `FactTimeOff`
-- `FactStaffing15Min`
+- `FactStaffing15Min` (scheduled/observed HC plus interval capacity)
 - `FactBonusMonth`
 
 WFMHub exports these as stable clean Power BI feeds. Power BI performs only
@@ -76,6 +76,12 @@ Absence % = SUM(Absence Hours) / SUM(Scheduled Hours)
 ```
 
 Percentages must be recalculated from summed components, never averaged.
+
+Forecast demand and required capacity may arrive in the same Verint export or
+in separate exports. WFMHub accepts either contract at native grain and keeps
+missing measures null. It never estimates required FTE from volume. The
+Staffing page therefore displays a blank requirement/gap/coverage until a real
+`Full Time Equivalents (Absolute Req)` field is available.
 
 ## Implemented output
 

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "b806776052b39ecdde18",
   "position": {
-    "x": 10,
-    "y": 654,
+    "x": 18,
+    "y": 878,
     "z": 10,
-    "height": 44,
-    "width": 116,
+    "height": 42,
+    "width": 140,
     "tabOrder": 10
   },
   "visual": {
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Prepared by\nAnass ASSRI | WFM",
+                    "value": "Prepared by Anass ASSRI\nWorkforce Management",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "9px",

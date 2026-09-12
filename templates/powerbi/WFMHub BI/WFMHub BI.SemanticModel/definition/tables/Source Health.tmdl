@@ -15,6 +15,13 @@ table 'Source Health'
 		formatString: #,##0
 		displayFolder: 'Data quality'
 
+	/// Ready source families divided by configured source families.
+	measure 'Sources Ready %' = ```
+			DIVIDE([Sources Ready], [Source Count])
+			```
+		formatString: 0.0%
+		displayFolder: 'Data quality'
+
 	/// Latest business date present across source families.
 	measure 'Latest Data Date' = ```
 			MAX('Source Health'[Newest Date])

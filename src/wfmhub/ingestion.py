@@ -1102,12 +1102,18 @@ def parse_forecast(path: Path, file_id: str) -> ParseResult:
     if header_index is None:
         raise SourceSchemaError("Forecast Queue Name / Date / Time header was not found")
     reader = csv.DictReader(lines[header_index:], delimiter="\t")
-    # Some reviewed Verint exports intentionally contain volume only. The
-    # remaining forecast measures are optional and stay NULL, never invented.
-    required = {"Queue Name", "Date", "Time", "Time Interval", FORECAST_NAMES["volume_forecast"]}
+    # Verint can export demand forecast and FTE requirement as either one file
+    # or separate files. Require the native interval identity plus at least one
+    # governed metric; absent measures stay NULL and are never invented.
+    required = {"Queue Name", "Date", "Time", "Time Interval"}
     missing = sorted(required - set(reader.fieldnames or []))
     if missing:
         raise SourceSchemaError(f"Forecast missing columns: {', '.join(missing)}")
+    supplied_metrics = set(FORECAST_NAMES.values()) & set(reader.fieldnames or [])
+    if not supplied_metrics:
+        raise SourceSchemaError(
+            "Forecast contains no supported demand or staffing measure"
+        )
     output: list[dict[str, Any]] = []
     rejected: list[str] = []
     for source_row, row in enumerate(reader, header_index + 2):

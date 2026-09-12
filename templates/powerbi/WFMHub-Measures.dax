@@ -2,6 +2,11 @@
 // The live measures are stored beside their owning facts in WFMHub BI.SemanticModel/definition/tables.
 // Ratios always divide summed governed components; Power BI does not reclassify source data.
 
+// Queue
+Queue Count = DISTINCTCOUNT('Queue'[Queue])
+Mapped Queue Count = CALCULATE(DISTINCTCOUNT('Queue'[Queue]), 'Queue'[Mapping Status] = "MAPPED")
+Queue Mapping % = DIVIDE([Mapped Queue Count], [Queue Count])
+
 // Service
 Offered Calls = SUM('Service'[Offered])
 Answered Calls = SUM('Service'[Answered])
@@ -14,18 +19,34 @@ Abandon Rate % = DIVIDE([Abandoned Calls], [Offered Calls])
 AHT Seconds = DIVIDE(SUM('Service'[Handled Seconds]), [Answered Calls])
 Volume Variance = [Offered Calls] - [Forecast Volume]
 Volume Variance % = DIVIDE([Volume Variance], [Forecast Volume])
+Forecast Accuracy % = VAR Grain =
+SUMMARIZECOLUMNS(
+    'Date'[Date],
+    'Time'[Hour],
+    'Management LOB'[Management LOB],
+    "Actual Volume", [Offered Calls],
+    "Forecast Volume At Grain", [Forecast Volume]
+)
+VAR Comparable = FILTER(Grain, NOT ISBLANK([Forecast Volume At Grain]))
+VAR ForecastTotal = SUMX(Comparable, [Forecast Volume At Grain])
+VAR AbsoluteError = SUMX(Comparable, ABS(COALESCE([Actual Volume], 0) - [Forecast Volume At Grain]))
+RETURN IF(ForecastTotal <= 0, BLANK(), MAX(0, 1 - DIVIDE(AbsoluteError, ForecastTotal)))
 
 // Forecast
 Forecast Volume = SUM('Forecast'[Volume Forecast])
 Required FTE = AVERAGEX(SUMMARIZE('Forecast', 'Forecast'[Date], 'Forecast'[Time Slot], "Interval FTE", SUM('Forecast'[FTE Required])), [Interval FTE])
+Requirement Intervals = COUNT('Forecast'[FTE Required])
 
 // Staffing
 Average Scheduled FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Scheduled FTE])), [Interval FTE])
 Average Observed FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Observed FTE])), [Interval FTE])
 Average Productive FTE = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval FTE", SUM('Staffing'[Productive FTE])), [Interval FTE])
-Capacity Gap FTE = MAX([Required FTE] - [Average Scheduled FTE], 0)
+Average Scheduled HC = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval HC", SUM('Staffing'[Scheduled HC])), [Interval HC])
+Average Observed HC = AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], "Interval HC", SUM('Staffing'[Observed HC])), [Interval HC])
+Capacity Gap FTE = IF(ISBLANK([Required FTE]), BLANK(), MAX([Required FTE] - [Average Scheduled FTE], 0))
+Net Capacity Gap FTE = IF(ISBLANK([Required FTE]), BLANK(), [Average Scheduled FTE] - [Required FTE])
 Observed Gap FTE = MAX([Average Scheduled FTE] - [Average Observed FTE], 0)
-Coverage % = DIVIDE([Average Scheduled FTE], [Required FTE])
+Coverage % = IF(ISBLANK([Required FTE]), BLANK(), DIVIDE([Average Scheduled FTE], [Required FTE]))
 
 // Attendance
 Due HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0)
@@ -35,7 +56,9 @@ Unknown / Possible No Show HC = MAX([Due HC] - [Present HC] - [No Show HC], 0)
 Callout HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Requires Call] = "1")
 Late HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Late Minutes] > 0)
 Early Leave HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Early Leave Minutes] > 0)
+On Time HC = MAX([Present HC] - [Late HC], 0)
 Attendance % = DIVIDE([Present HC], [Due HC])
+Status Evidence Coverage % = DIVIDE(SUM('Attendance'[Status Covered Minutes]), SUM('Attendance'[Planned Work Minutes]))
 
 // Attendance Gap
 Total Gap Minutes = SUM('Attendance Gap'[Gap Minutes])
@@ -47,6 +70,11 @@ Valid PCS Responses = SUM('PCS'[Valid PCS])
 Low Score Response Count = SUM('PCS'[Low Score Responses])
 Top Box Response Count = SUM('PCS'[Top Box Responses])
 PCS Index % = DIVIDE([PCS Average], 5)
+Prior Month PCS Average = CALCULATE([PCS Average], DATEADD('Date'[Date], -1, MONTH))
+PCS Change = [PCS Average] - [Prior Month PCS Average]
+
+// PCS Coaching
+Coaching Cases = COUNTROWS('PCS Coaching')
 
 // Time Off
 PTO / Away HC = DISTINCTCOUNT('Time Off'[Agent Day Key])
@@ -60,6 +88,7 @@ Final Absence % = DIVIDE([Final Absence Minutes], [Final Planned Minutes])
 Final Shrinkage % = DIVIDE([Final Shrinkage Minutes], [Final Planned Minutes])
 Final PTO % = DIVIDE([Final PTO Minutes], [Final Planned Minutes])
 Absence Review HC = CALCULATE(DISTINCTCOUNT('Final Absence'[Agent Day Key]), NOT('Final Absence'[Final Ledger Status] IN {"CLEAR", "ABSENCE_RECORDED"}))
+Prior Month Final Absence % = CALCULATE([Final Absence %], DATEADD('Date'[Date], -1, MONTH))
 
 // Absence Component
 Activity Minutes = SUM('Absence Component'[Minutes])
@@ -70,6 +99,7 @@ Finding Count = COUNTROWS('Finding')
 // Source Health
 Source Count = COUNTROWS('Source Health')
 Sources Ready = CALCULATE(COUNTROWS('Source Health'), 'Source Health'[Status] IN {"OK", "READY", "LOADED"})
+Sources Ready % = DIVIDE([Sources Ready], [Source Count])
 Latest Data Date = MAX('Source Health'[Newest Date])
 
 // Quality Issue

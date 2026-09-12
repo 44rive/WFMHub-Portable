@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "ef305098ccea1ec1f8b0",
   "position": {
-    "x": 150,
-    "y": 694,
+    "x": 196,
+    "y": 910,
     "z": 10,
     "height": 18,
-    "width": 1116,
+    "width": 1456,
     "tabOrder": 10
   },
   "visual": {
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "WFMHub governed feed • Refresh receipt: Feed\\PowerBI\\POWERBI_MANIFEST_CURRENT.csv",
+                    "value": "WFMHub governed feed  •  Feed\\PowerBI\\POWERBI_MANIFEST_CURRENT.csv",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "8px",

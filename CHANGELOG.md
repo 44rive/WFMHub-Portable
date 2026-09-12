@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.30.0 - 2026-09-12
+
+- Rebuild the source-controlled Power BI report as seven page-specific premium
+  1680x945 management views matching the approved WFMHub design: compact
+  selectors, aligned KPI cards, purposeful analytical panels and operational
+  action tables rather than a repeated generic page skeleton.
+- Add schedule-derived headcount alongside interval capacity, keep Verint
+  required FTE explicitly separate, and return blank gaps/coverage when an FTE
+  requirement was not supplied instead of displaying a misleading zero.
+- Accept separate Verint required-FTE extracts at native 15-minute grain and
+  include forecast-only queues in the Power BI queue dimension without
+  inventing missing forecast measures.
+- Fix PCS dropdown values crossing from Period into LOB after Power Query
+  refresh: query tables now overwrite in place, selector names use stable
+  whole-column INDEX ranges, and Excel validates every selector group before
+  saving.
+- Make PCS Install/Repair recreate all versioned Power Query definition files
+  automatically, so a portable upgrade cannot fail merely because an older
+  Feed folder is missing `POWER_QUERY_PCS_FILTERS_LOCAL.txt`.
+- Advance the PCS tracker contract to `2026.11.4`, the Power BI feed schema to
+  `3`, and the installed PBIP project contract to `3`.
+
 ## 0.29.2 - 2026-09-11
 
 - Fix Power BI semantic-model load failures caused by measure and source-column

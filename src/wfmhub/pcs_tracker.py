@@ -48,7 +48,7 @@ from .shared_feeds import (
 
 
 PCS_TRACKER_FILENAME = "PCS Live Tracker.xlsx"
-PCS_TRACKER_VERSION = "2026.11.3"
+PCS_TRACKER_VERSION = "2026.11.4"
 COACHING_ACTION_HEADERS = (
     "Coaching Key", "Call ID", "Coaching Status", "Coach",
     "Coaching Date", "Due Date", "Coaching Comment",
@@ -367,20 +367,31 @@ def _selected_key(*, sheet: str | None = None) -> str:
 
 
 def _add_filter_names(workbook) -> None:
-    keys = "'_PCS_FILTERS'!$A$5:$A$50000"
-    values = "'_PCS_FILTERS'!$C$5"
+    keys = "'_PCS_FILTERS'!$A:$A"
+    values = "'_PCS_FILTERS'!$C:$C"
+
+    def group_range(group: str) -> str:
+        first = f"MATCH({group},{keys},0)"
+        return (
+            f'=INDEX({values},{first}):'
+            f'INDEX({values},{first}+COUNTIF({keys},{group})-1)'
+        )
+
+    # Whole-column INDEX ranges do not drift when desktop Excel replaces the
+    # starter Power Query ListObject. The Windows installer recreates and
+    # validates these same four names after every live query refresh.
     workbook.define_name(
         "PCS_PERIOD_LIST",
-        f'=OFFSET({values},MATCH("PERIOD",{keys},0)-1,0,COUNTIF({keys},"PERIOD"),1)',
+        group_range('"PERIOD"'),
     )
     workbook.define_name(
         "PCS_LOB_LIST",
-        f'=OFFSET({values},MATCH("LOB",{keys},0)-1,0,COUNTIF({keys},"LOB"),1)',
+        group_range('"LOB"'),
     )
     team_group = '"TL|"&SUBSTITUTE(OVERVIEW!$H$3,"|","/")'
     workbook.define_name(
         "PCS_TL_ACTIVE",
-        f'=OFFSET({values},MATCH({team_group},{keys},0)-1,0,COUNTIF({keys},{team_group}),1)',
+        group_range(team_group),
     )
     agent_group = (
         '"AGENT|"&SUBSTITUTE(OVERVIEW!$H$3,"|","/")&"|"&'
@@ -388,7 +399,7 @@ def _add_filter_names(workbook) -> None:
     )
     workbook.define_name(
         "PCS_AGENT_ACTIVE",
-        f'=OFFSET({values},MATCH({agent_group},{keys},0)-1,0,COUNTIF({keys},{agent_group}),1)',
+        group_range(agent_group),
     )
     # Dynamic sheet-backed ranges deliberately do not reference ListObject
     # names. Power Query installation replaces the starter tables; these names

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "5f59f975261470e3b9e4",
   "position": {
-    "x": 660,
-    "y": 13,
+    "x": 820,
+    "y": 16,
     "z": 10,
-    "height": 25,
-    "width": 600,
+    "height": 24,
+    "width": 680,
     "tabOrder": 10
   },
   "visual": {
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Freshness, exceptions and evidence behind every management view",
+                    "value": "Freshness, mapping, evidence coverage and active blockers",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

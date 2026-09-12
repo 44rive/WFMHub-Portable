@@ -1,6 +1,27 @@
 /// Reviewed queue reference from the active service model.
 table 'Queue'
 
+	/// Distinct queues visible in the active governed model.
+	measure 'Queue Count' = ```
+			DISTINCTCOUNT('Queue'[Queue])
+			```
+		formatString: #,##0
+		displayFolder: 'Data quality'
+
+	/// Distinct queues explicitly mapped to a governed scope.
+	measure 'Mapped Queue Count' = ```
+			CALCULATE(DISTINCTCOUNT('Queue'[Queue]), 'Queue'[Mapping Status] = "MAPPED")
+			```
+		formatString: #,##0
+		displayFolder: 'Data quality'
+
+	/// Mapped queues divided by all queues in context.
+	measure 'Queue Mapping %' = ```
+			DIVIDE([Mapped Queue Count], [Queue Count])
+			```
+		formatString: 0.0%
+		displayFolder: 'Data quality'
+
 	column 'Queue'
 		dataType: string
 		summarizeBy: none

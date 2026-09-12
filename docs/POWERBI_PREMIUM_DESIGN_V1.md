@@ -2,10 +2,10 @@
 
 Status: **implemented as the source-controlled `WFMHub BI.pbip` project**
 
-The existing Excel reports remain part of WFMHub. Power BI is added as a
-separate analytical and management layer. Prototype values shown below are
-illustrative; the implemented project binds this design to governed
-`Feed\PowerBI` facts and explicit measures.
+The existing Excel reports remain part of WFMHub. Power BI is a separate
+analytical and management layer. Prototype values shown below are illustrative;
+project contract 3 implements the same 1680x945 page geometry and binds it to
+governed `Feed\PowerBI` facts and explicit measures.
 
 ## Shared experience
 
@@ -13,10 +13,11 @@ All seven pages use one persistent shell:
 
 - WFMHub navy navigation and header;
 - active page highlighted in teal;
-- four global, page-appropriate slicers;
+- one compact global selector strip with four page-appropriate slicers;
 - exactly four decision KPI cards;
 - at most two analytical visuals before the action area;
-- compact, filterable decision tables;
+- compact, filterable decision tables, including split agent/coaching and
+  issue/governance work areas where the approved prototype requires them;
 - green, amber, and red only for evidence-backed states;
 - footer ownership: `Prepared by Anass ASSRI | WFM`.
 
@@ -90,3 +91,8 @@ invent KPI targets, change current Hub calculations, retire Excel reports, or
 authorize publication. Power BI Desktop rendering remains the final visual
 acceptance boundary; the source PBIR passes Microsoft's report-authoring
 validator before release.
+
+Staffing has one additional truthfulness rule: **Scheduled FTE** is capacity
+derived from StartEndTimes and reduced by effective PTO/Away. **Required FTE**
+comes only from an explicit Verint requirement column. When that column is not
+supplied, Required FTE, Net Gap and Coverage remain blank.

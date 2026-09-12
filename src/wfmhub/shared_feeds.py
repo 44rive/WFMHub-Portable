@@ -842,7 +842,13 @@ def pcs_coaching_cache_rows(
     return output
 
 
-def _publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
+def publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
+    """Materialize the six local and six SharePoint PCS query definitions.
+
+    Query definitions are a versioned workbook contract, not business data.
+    Keeping this callable independently prevents an upgraded portable package
+    from depending on query text left behind by an older feed refresh.
+    """
     filter_types = (
         ("Group Key", "type text"), ("Sort Order", "Int64.Type"),
         ("Value", "type text"),
@@ -968,7 +974,7 @@ def publish_pcs_feeds(
     path = folder / "PCS_COACHING_OPPORTUNITY_CURRENT.csv"
     counts.append((path.name, _atomic_csv(path, PCS_COACHING_HEADERS, rows)))
     files.append(path)
-    files.extend(_publish_pcs_power_query_scripts(folder))
+    files.extend(publish_pcs_power_query_scripts(folder))
     files.append(_manifest(
         folder, "PCS", start, end, counts,
         schema_version=PCS_FEED_SCHEMA_VERSION,

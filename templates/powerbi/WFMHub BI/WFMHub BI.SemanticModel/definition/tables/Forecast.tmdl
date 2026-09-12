@@ -15,6 +15,13 @@ table 'Forecast'
 		formatString: #,##0.0
 		displayFolder: 'Forecast'
 
+	/// Native forecast intervals containing an explicit Verint required-FTE value.
+	measure 'Requirement Intervals' = ```
+			COUNT('Forecast'[FTE Required])
+			```
+		formatString: #,##0
+		displayFolder: 'Forecast'
+
 	column 'Date'
 		dataType: dateTime
 		isHidden

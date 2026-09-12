@@ -50,12 +50,26 @@ table 'Attendance'
 		formatString: #,##0
 		displayFolder: 'Attendance'
 
+	/// Present agent-days without governed late minutes.
+	measure 'On Time HC' = ```
+			MAX([Present HC] - [Late HC], 0)
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance'
+
 	/// Present agent-days divided by due agent-days.
 	measure 'Attendance %' = ```
 			DIVIDE([Present HC], [Due HC])
 			```
 		formatString: 0.0%
 		displayFolder: 'Attendance'
+
+	/// Agent Status-covered minutes divided by governed planned work minutes.
+	measure 'Status Evidence Coverage %' = ```
+			DIVIDE(SUM('Attendance'[Status Covered Minutes]), SUM('Attendance'[Planned Work Minutes]))
+			```
+		formatString: 0.0%
+		displayFolder: 'Data quality'
 
 	column 'Date'
 		dataType: dateTime

@@ -78,6 +78,24 @@ table 'Service'
 		formatString: 0.0%;[Red]-0.0%
 		displayFolder: 'Forecast comparison'
 
+	/// One minus WAPE across Date, Hour and Management LOB using only intervals with supplied forecast demand.
+	measure 'Forecast Accuracy %' = ```
+			VAR Grain =
+			SUMMARIZECOLUMNS(
+			    'Date'[Date],
+			    'Time'[Hour],
+			    'Management LOB'[Management LOB],
+			    "Actual Volume", [Offered Calls],
+			    "Forecast Volume At Grain", [Forecast Volume]
+			)
+			VAR Comparable = FILTER(Grain, NOT ISBLANK([Forecast Volume At Grain]))
+			VAR ForecastTotal = SUMX(Comparable, [Forecast Volume At Grain])
+			VAR AbsoluteError = SUMX(Comparable, ABS(COALESCE([Actual Volume], 0) - [Forecast Volume At Grain]))
+			RETURN IF(ForecastTotal <= 0, BLANK(), MAX(0, 1 - DIVIDE(AbsoluteError, ForecastTotal)))
+			```
+		formatString: 0.0%
+		displayFolder: 'Forecast comparison'
+
 	column 'Date'
 		dataType: dateTime
 		isHidden

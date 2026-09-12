@@ -57,6 +57,13 @@ table 'Final Absence'
 		formatString: #,##0
 		displayFolder: 'Final absence'
 
+	/// Final absence rate for the equivalent prior-month date context.
+	measure 'Prior Month Final Absence %' = ```
+			CALCULATE([Final Absence %], DATEADD('Date'[Date], -1, MONTH))
+			```
+		formatString: 0.0%
+		displayFolder: 'Final absence comparison'
+
 	column 'Date'
 		dataType: dateTime
 		isHidden

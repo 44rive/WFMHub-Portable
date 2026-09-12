@@ -2,18 +2,18 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "efc68b865cc08cb17d24",
   "position": {
-    "x": 722,
-    "y": 250,
-    "z": 300,
-    "height": 264,
-    "width": 544,
-    "tabOrder": 300
+    "x": 936,
+    "y": 322,
+    "z": 350,
+    "height": 292,
+    "width": 708,
+    "tabOrder": 350
   },
   "visual": {
-    "visualType": "clusteredColumnChart",
+    "visualType": "matrix",
     "query": {
       "queryState": {
-        "Category": {
+        "Rows": {
           "projections": [
             {
               "field": {
@@ -31,22 +31,26 @@
             }
           ]
         },
-        "Y": {
+        "Columns": {
           "projections": [
             {
               "field": {
-                "Measure": {
+                "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Forecast"
+                      "Entity": "Date"
                     }
                   },
-                  "Property": "Required FTE"
+                  "Property": "Weekday"
                 }
               },
-              "queryRef": "Forecast.Required FTE",
-              "nativeQueryRef": "Required FTE"
-            },
+              "queryRef": "Date.Weekday",
+              "nativeQueryRef": "Weekday"
+            }
+          ]
+        },
+        "Values": {
+          "projections": [
             {
               "field": {
                 "Measure": {
@@ -55,15 +59,90 @@
                       "Entity": "Staffing"
                     }
                   },
-                  "Property": "Average Scheduled FTE"
+                  "Property": "Coverage %"
                 }
               },
-              "queryRef": "Staffing.Average Scheduled FTE",
-              "nativeQueryRef": "Average Scheduled FTE"
+              "queryRef": "Staffing.Coverage %",
+              "nativeQueryRef": "Coverage %"
             }
           ]
         }
       }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#17324D'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "rowHeaders": [
+        {
+          "properties": {
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#263B50'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#263B50'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "visualContainerObjects": {
       "title": [
@@ -79,7 +158,65 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Capacity gap by LOB'"
+                  "Value": "'LOB / DAY COVERAGE'"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#17324D'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11L"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'left'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }
@@ -105,7 +242,7 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "12L"
                 }
               }
             },
@@ -119,14 +256,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "14L"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "14L"
                 }
               }
             }

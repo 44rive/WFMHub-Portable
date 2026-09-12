@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "300b0ed2b0936d871ba7",
   "position": {
-    "x": 990,
-    "y": 148,
+    "x": 1302,
+    "y": 170,
     "z": 200,
-    "height": 94,
-    "width": 260,
+    "height": 124,
+    "width": 338,
     "tabOrder": 200
   },
   "visual": {
@@ -50,13 +50,54 @@
           }
         }
       ],
+      "fillCustom": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
+          }
+        }
+      ],
       "value": [
         {
           "properties": {
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "24L"
+                  "Value": "28L"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#17324D'"
+                    }
+                  }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "horizontalAlignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'left'"
                 }
               }
             }
@@ -79,7 +120,25 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Coverage %'"
+                  "Value": "'COVERAGE'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10L"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#61758A'"
+                    }
+                  }
                 }
               }
             }
@@ -110,28 +169,28 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "18L"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "12L"
                 }
               }
             },
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "24L"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "14L"
                 }
               }
             }

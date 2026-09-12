@@ -1,7 +1,7 @@
 # WFMHub canonical context for AI and developers
 
-Context version: `1.6.0`
-Applies to: WFMHub `0.29.0` and later
+Context version: `1.7.0`
+Applies to: WFMHub `0.30.0` and later
 Last reviewed: `2026-09-11`
 
 Read this file before proposing or changing WFMHub. When details are needed,
@@ -179,17 +179,28 @@ Presentation formulas use the stable sheet-backed names `PCS_LOB_DATA`,
 `PCS_AGENT_DATA`, `PCS_DAILY_DATA`, and `PCS_COACH_DATA`. They must never
 directly reference a `tblPcs*` query destination because setup replaces those
 ListObjects and Excel rewrites direct references to `#REF!`.
+Selector list names use whole-column `INDEX:INDEX` ranges and are rebuilt and
+validated after every desktop query refresh. Query tables overwrite cells in
+place; insert/delete-cell refresh is forbidden because it shifts adjacent
+selector groups. Install/Repair recreates the versioned query-definition text
+files before launching Excel, so upgrades do not depend on stale Feed assets.
 
 Complete updates atomically publish the governed Power BI star feed under
 `Feed\PowerBI`; its manifest is written last. Power BI never reads SQLite or
 raw extracts and never recalculates source classification. It relates stable
 dimensions and derives ratios only from summed additive counters. The PBIX is a
 Power BI Desktop-owned artifact. The portable runtime ships a real,
-source-controlled `WFMHub BI.pbip` project with the seven approved pages,
-import partitions, explicit DAX measures and theme. `POWERBI.cmd` installs it
+source-controlled `WFMHub BI.pbip` project with the seven approved 1680x945
+page-specific premium layouts, import partitions, explicit DAX measures and
+theme. `POWERBI.cmd` installs it
 under `Reports\Power BI`, sets only the `HubRoot` parameter, and opens it in
 Desktop. A PBIX remains a Desktop-saved publishable snapshot rather than a
 binary fabricated by Python.
+
+StartEndTimes is scheduled-capacity authority. The Power BI staffing feed keeps
+scheduled/observed headcount separate from interval capacity. Required FTE
+comes only from Verint `Full Time Equivalents (Absolute Req)`; if it is absent,
+Required FTE, Net Gap and Coverage remain blank rather than becoming zero.
 
 Every current report first screen uses the measured grid in
 `src/wfmhub/excel_layout.py`: 28 equal 52-pixel columns, four equal KPI cards,

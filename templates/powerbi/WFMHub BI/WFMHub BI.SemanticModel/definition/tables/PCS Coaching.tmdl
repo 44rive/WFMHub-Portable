@@ -1,6 +1,13 @@
 /// Exact low-score call queue with Call ID for coaching follow-up.
 table 'PCS Coaching'
 
+	/// Low-score call-level cases available for coaching follow-up.
+	measure 'Coaching Cases' = ```
+			COUNTROWS('PCS Coaching')
+			```
+		formatString: #,##0
+		displayFolder: 'PCS coaching'
+
 	column 'Date'
 		dataType: dateTime
 		isHidden
