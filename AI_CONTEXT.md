@@ -1,8 +1,8 @@
 # WFMHub mandatory context router
 
-Context version: `2.1.0`
-Applies to: WFMHub `0.33.1` and later
-Last reviewed: `2026-09-13`
+Context version: `2.2.0`
+Applies to: WFMHub `0.34.0` and later
+Last reviewed: `2026-09-14`
 
 Before proposing or editing anything, read in this order:
 
@@ -29,8 +29,12 @@ Hard stops:
   published schedule assignment.
 - No adherence KPI, runtime AI, DuckDB, ODBC, hidden database server, or required
   Excel Data Model.
-- PCS is a permanent collaborative Excel tracker and is outside Power BI.
-- Power BI has exactly the five approved WFM-cycle pages in project contract 8.
+- PCS is a permanent collaborative Excel tracker and is outside the local console.
+- The default presentation is the localhost Operations Console. It reads
+  governed SQLite marts directly and binds only to `127.0.0.1`.
+- Power BI is retired historical source. Do not regenerate or package it unless
+  the user explicitly starts a future Power BI project; normal updates never
+  publish its duplicated CSV feed.
 - Missing evidence remains unknown; percentages are never averaged when their
   additive numerator and denominator exist.
 
@@ -42,9 +46,9 @@ Primary authorities:
 - capacity scope: `config/capacity_mapping.csv` or shipped default
 - KPI arithmetic: `config/metric_catalog.toml`
 - attendance/activity classification: `config/wfm_rules.toml`
-- Power BI feed: `src/wfmhub/powerbi.py`
-- Power BI model/layout: `tools/build_powerbi_project.py`
-- approved pixels: `docs/design-prototypes/powerbi-wfm-cycle-reset-v1/`
+- local console projections: `src/wfmhub/web_data.py`
+- local console server/security: `src/wfmhub/webapp.py`
+- local console pixels/interactions: `src/wfmhub/web/`
 - release behavior: tests plus `packaging/windows/build_portable.py`
 
 If documentation and active behavior differ, stop and reconcile the master,

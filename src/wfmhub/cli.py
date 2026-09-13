@@ -32,7 +32,6 @@ from .pcs_tracker import (
 )
 from .custom_jobs import list_jobs, run_python_job, run_sql_job
 from .progress import ProgressBar, ProgressCallback
-from .powerbi_project import open_powerbi_project
 from .report_packs import IMPLEMENTED_REPORT_PACK_KEYS, build_report_pack, report_current_path
 from .report_specs import load_report_catalog, validate_report_catalog
 from .rules import load_rulebook, validate_rulebook
@@ -41,6 +40,7 @@ from .sota_reports import build_kpi_catalog
 from .service_profiles import load_service_profiles, validate_service_profiles
 from .shared_feeds import publish_shared_feeds
 from .ui import clear_screen, render_dashboard
+from .webapp import run_console
 
 
 SOURCE_GROUPS = {
@@ -919,7 +919,7 @@ def menu(home: Path) -> int:
         print("\n  ANALYZE")
         print("    [5] Analyze a period")
         print("    [6] Export clean data")
-        print("    [7] Open Power BI dashboard")
+        print("    [7] Open local WFM operations console")
         print("\n  IN DEVELOPMENT")
         print("    [8] Staffing")
         print("    [9] Realisations")
@@ -950,10 +950,7 @@ def menu(home: Path) -> int:
                 file_format = input("Format CSV or XLSX [CSV]: ").strip().lower() or "csv"
                 export_clean(home, dataset, start, end, file_format, use_config_period=use_config)
             elif choice == "7":
-                result = open_powerbi_project(load_config(home))
-                print(f"Power BI     : {result.project}")
-                if result.archived:
-                    print(f"Prior project: {result.archived}")
+                run_console(home)
             elif choice == "8":
                 _build_menu_product(home, "staffing")
             elif choice == "9":
@@ -1045,8 +1042,9 @@ def parser() -> argparse.ArgumentParser:
     )
     rules_p.add_argument("metric", nargs="?", help="Metric id for the explain action")
     rules_p.add_argument("--against", type=Path, help="Earlier metric catalog for the diff action")
-    powerbi_p = commands.add_parser("powerbi", help="Install or open the governed Power BI project")
-    powerbi_p.add_argument("action", choices=("install", "open"), nargs="?", default="open")
+    web_p = commands.add_parser("web", help="Open the localhost WFM operations console")
+    web_p.add_argument("--port", type=int, default=8765)
+    web_p.add_argument("--no-browser", action="store_true")
     commands.add_parser("menu", help="Open the interactive menu")
     return root
 
@@ -1096,15 +1094,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if run_doctor(home) else 1
         if args.command == "rules":
             return rules_tool(home, args.action, args.metric, args.against)
-        if args.command == "powerbi":
-            config = load_config(home)
-            result = open_powerbi_project(config, launch=args.action == "open")
-            print(f"Power BI project: {result.project}")
-            if result.archived:
-                print(f"Previous project archived: {result.archived}")
-            if args.action == "install":
-                print("Open WFMHub BI.pbip in Power BI Desktop, then choose Refresh.")
-            return 0
+        if args.command == "web":
+            return run_console(home, args.port, launch=not args.no_browser)
         return menu(home)
     except (ConfigError, HubLockedError, FileNotFoundError, FileExistsError, ValueError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

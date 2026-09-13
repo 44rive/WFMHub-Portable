@@ -18,6 +18,13 @@ class LauncherTests(unittest.TestCase):
             self.assertIn("title wfmhub portable", text)
             self.assertIn("if not defined no_color color 0b", text)
 
+    def test_webapp_launcher_uses_only_the_embedded_runtime(self):
+        text = (REPO / "WEBAPP.cmd").read_text(encoding="utf-8").lower()
+        self.assertIn(r"_system\runtime\python.exe", text)
+        self.assertIn("-m wfmhub", text)
+        self.assertIn(" web", text)
+        self.assertNotIn("py -3", text)
+
     def test_pcs_packages_the_reviewed_power_query_installer(self):
         text = (
             REPO / "packaging" / "windows" / "build_portable.py"

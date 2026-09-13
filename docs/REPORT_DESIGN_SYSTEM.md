@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `3.4.0` |
+| Version | `4.0.0` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
 | First compatible Hub version | `0.27.1` |
@@ -65,6 +65,26 @@ A target line or pass/fail state is shown only when the effective metric catalog
 defines a target; WFMHub never invents the pictured PCS target.
 
 ## Report blueprints
+
+### Local Operations Console
+
+The checked-in pixel reference is
+[`WFMHub-Operations-Console.png`](WFMHub-Operations-Console.png). It contains
+synthetic demonstration rows only and is the visual acceptance reference for
+desktop density, navigation, selector geometry, cards, charts and action tables.
+Future changes must compare against it before altering the console CSS or page
+composition.
+
+- Five horizontal WFM-cycle views: Today, Staff Preparation, Intraday,
+  Attendance, and History.
+- One cascading period/Management LOB/Planning Group/Staff Type/Team
+  Leader/Agent selector strip. Service and capacity remain separate grains.
+- Four evidence cards, at most two decision charts, and one exact action table
+  in the first working surface. Attendance uses schedule above actual status.
+- Native local SVG only: no CDN, marketplace visual, Power BI, Excel engine,
+  Node.js, or internet dependency.
+- `127.0.0.1` only. Browser views are read-only; Update invokes the governed Hub
+  pipeline and visible-detail export creates a filtered CSV.
 
 ### PCS Report & Coaching
 
@@ -159,6 +179,9 @@ Every design change requires:
 7. a version bump when the report contract changes.
 
 ## Change log
+
+- `4.0.0`: makes the portable localhost Operations Console the default WFM
+  cycle surface and retires automatic Power BI feed publishing.
 
 - `3.4.0`: replaces the Power BI side rail with native horizontal navigation,
   synchronized conformed slicers, compact card geometry and a native

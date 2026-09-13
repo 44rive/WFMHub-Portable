@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.34.0 - 2026-09-14
+
+- Add a fully functional, offline localhost WFM Operations Console with five
+  compact WFM-cycle views, cascading organisational filters, native SVG charts,
+  exact evidence tables and filtered CSV export.
+- Read governed SQLite marts directly through short-lived read-only connections;
+  the browser never sees raw extracts, SQL or the database file.
+- Add `WEBAPP.cmd` plus the `wfmhub web` command. The console binds only to
+  `127.0.0.1`, uses strict browser security headers and requires no Power BI,
+  Node.js, ODBC, CDN or internet connection.
+- Add a visible Update workflow that runs the existing ingestion/model pipeline
+  and reports progress without opening Excel.
+- Retire Power BI from the normal menu and disable its duplicated full CSV feed
+  publishing. Historical source stays in Git only; SQLite history and existing
+  user files are untouched.
+
 ## 0.33.1 - 2026-09-13
 
 - Fix the Power BI Desktop project-load failure caused by two active filter paths

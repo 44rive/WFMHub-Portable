@@ -1086,12 +1086,7 @@ def publish_shared_feeds(
     """Refresh every stable collaboration feed after the Hub models finish."""
 
     # PCS publishes its six focused feeds inside its targeted report builder.
-    # Generic full refreshes publish Absenteeism and Power BI together.
-    # Local import avoids a module cycle: the Power BI publisher reuses the
-    # atomic CSV and manifest primitives defined above.
-    from .powerbi import publish_powerbi_feeds
-
-    return (
-        publish_absence_feeds(conn, config, start, end),
-        publish_powerbi_feeds(conn, config, start, end),
-    )
+    # The localhost operations console reads SQLite directly and needs no
+    # duplicated dashboard CSV layer. Only the stable Absenteeism handoff is
+    # part of the generic refresh contract.
+    return (publish_absence_feeds(conn, config, start, end),)

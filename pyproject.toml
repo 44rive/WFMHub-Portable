@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wfmhub-portable"
-version = "0.33.1"
-description = "Corporate-compatible portable SQLite WFM data hub and Excel report generator"
+version = "0.34.0"
+description = "Corporate-compatible portable SQLite WFM hub, local console, and Excel report generator"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 license = {text = "Proprietary"}
@@ -27,4 +27,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-wfmhub = ["py.typed"]
+wfmhub = ["py.typed", "web/*.html", "web/*.css", "web/*.js"]

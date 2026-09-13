@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WFMHub Operations Console</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#today" aria-label="WFMHub home">
+      <span class="brand-wfm">WFM</span><span class="brand-hub">HUB</span>
+      <span class="brand-sub">OPERATIONS CONSOLE</span>
+    </a>
+    <nav class="nav" aria-label="WFM cycle">
+      <button data-view="today" class="nav-item active"><span>01</span>Today</button>
+      <button data-view="staffing" class="nav-item"><span>02</span>Staff prep</button>
+      <button data-view="service" class="nav-item"><span>03</span>Intraday</button>
+      <button data-view="attendance" class="nav-item"><span>04</span>Attendance</button>
+      <button data-view="history" class="nav-item"><span>05</span>History</button>
+    </nav>
+    <div class="system-state">
+      <span class="state-dot" id="state-dot"></span>
+      <span><b id="data-through">—</b><small>DATA THROUGH</small></span>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-head">
+      <div>
+        <p class="eyebrow" id="page-kicker">LIVE CONTROL</p>
+        <h1 id="page-title">Today's Control</h1>
+        <p id="page-subtitle">What needs attention now, backed by governed evidence.</p>
+      </div>
+      <div class="head-actions">
+        <button class="btn ghost" id="export-btn">Export visible detail</button>
+        <button class="btn primary" id="update-btn"><span class="refresh-icon">↻</span> Update data</button>
+      </div>
+    </section>
+
+    <section class="filter-shell" aria-label="Dashboard filters">
+      <div class="filter-field compact">
+        <label for="period">PERIOD</label>
+        <select id="period">
+          <option value="latest">Latest day</option>
+          <option value="week">Current week</option>
+          <option value="month">Current month</option>
+          <option value="future">Next 28 days</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="filter-field date-field"><label for="start">FROM</label><input id="start" type="date"></div>
+      <div class="filter-field date-field"><label for="end">THROUGH</label><input id="end" type="date"></div>
+      <div class="filter-field"><label for="lob">MANAGEMENT LOB</label><select id="lob"></select></div>
+      <div class="filter-field"><label for="planning">PLANNING GROUP</label><select id="planning"></select></div>
+      <div class="filter-field"><label for="staff">STAFF TYPE</label><select id="staff"></select></div>
+      <div class="filter-field"><label for="leader">TEAM LEADER</label><select id="leader"></select></div>
+      <div class="filter-field"><label for="agent">AGENT</label><select id="agent"></select></div>
+      <button class="reset-btn" id="reset-btn" title="Reset filters" aria-label="Reset filters">×</button>
+    </section>
+
+    <section class="scope-strip">
+      <span id="scope-text">Loading governed scope…</span>
+      <span id="refresh-text">Database status: checking</span>
+    </section>
+
+    <section class="cards" id="cards" aria-label="Headline measures"></section>
+
+    <section id="workspace" aria-live="polite">
+      <div class="loading-card"><span class="spinner"></span><b>Reading governed marts</b><small>No raw extracts are opened by this screen.</small></div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <dialog id="update-dialog">
+    <div class="dialog-head"><div><p class="eyebrow">GOVERNED PIPELINE</p><h2>Updating WFMHub</h2></div><button id="dialog-close" aria-label="Close">×</button></div>
+    <div class="progress-track"><span id="progress-bar"></span></div>
+    <p id="update-status">Preparing update…</p>
+    <pre id="update-log"></pre>
+    <p class="dialog-note">You may keep this page open. Source extracts remain unchanged.</p>
+  </dialog>
+
+  <footer><span>Prepared by Anass ASSRI | WFM</span><span id="footer-version">WFMHub</span><span>LOCAL • READ-ONLY CONSOLE</span></footer>
+  <script src="app.js" defer></script>
+</body>
+</html>

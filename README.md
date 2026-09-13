@@ -1,8 +1,9 @@
 # WFMHub Portable
 
-WFMHub reads untouched WFM extracts, keeps a durable SQLite history, and
-produces focused Excel workbooks. It runs on a locked-down Windows work machine
-without admin rights, installed Python, ODBC, DuckDB, or Python in Excel.
+WFMHub reads untouched WFM extracts, keeps a durable SQLite history, opens a
+local WFM operations console, and produces focused Excel workbooks. It runs on a
+locked-down Windows work machine without admin rights, installed Python, ODBC,
+DuckDB, or Python in Excel.
 
 The operating rule is simple: **refresh the sources once, then build only the
 product you need**. Extract files are never moved or edited.
@@ -93,17 +94,16 @@ only the remaining read-only residuals are shown.
 3. Paste the folder containing `FTE`, `Storm`, and `Verint`.
 4. Double-click `WFMHub.cmd`.
 5. Choose **Refresh source data once**.
-6. Choose a reliable product under **Operational**, or an unfinished product
-   under **In Development**.
-7. Open it directly from `Reports`.
+6. Choose **Open local WFM operations console**, or double-click `WEBAPP.cmd`.
+7. Use Excel only when you need a detailed handoff or the collaborative PCS
+   tracker.
 
 See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
 [Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the one-time PCS Power
 Query installation and the optional shared-Absenteeism setup.
-The [Power BI WFM-cycle contract](docs/POWERBI_WFM_CYCLE.md) describes the
-governed `Feed\PowerBI` model and five implemented pages. Run a full update,
-then double-click `POWERBI.cmd`; the [beginner Power BI guide](docs/POWERBI_BEGINNER_GUIDE.md)
-explains the two-refresh routine.
+The [local console guide](docs/LOCAL_WEB_CONSOLE.md) explains the five WFM-cycle
+views, filters, Update action and visible-detail exports. It requires no Power
+BI, Excel refresh, browser extension or internet connection.
 
 The approved visual contract is in the
 [report design system](docs/REPORT_DESIGN_SYSTEM.md), with a data-free
@@ -252,8 +252,10 @@ its metric, comparison, and evidence filter.
 
 Attendance/absence refreshes update the fixed Absenteeism CSV feeds under
 `Feed`. PCS updates its own six governed fixed CSV feeds under `Feed\PCS`.
-Every complete update also replaces the fixed star-model feeds under
-`Feed\PowerBI`; Power BI only refreshes those governed outputs.
+The local console reads SQLite directly, so a complete update does not create a
+second dashboard-sized CSV copy. The old Power BI route is retired and not part
+of normal setup, update, packaging, or support.
+
 **Export clean data** produces any additional CSV or
 XLSX dataset you request for a selected period. Large call datasets should use
 CSV. The original extract is unchanged.
@@ -272,6 +274,7 @@ python3 -m wfmhub --home . refresh --start 2026-08-01 --end 2026-08-31 --no-repo
 python3 -m wfmhub --home . report --pack service --start 2026-08-31 --end 2026-08-31
 python3 -m wfmhub --home . report --pack pcs --start 2026-08-01 --end 2026-08-31
 python3 -m wfmhub --home . analyze pcs --start 2026-08-01 --end 2026-08-31 --comparison previous_month
+python3 -m wfmhub --home . web --no-browser
 python3 -m unittest discover -s tests -v
 ```
 

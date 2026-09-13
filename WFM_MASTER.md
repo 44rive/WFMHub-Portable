@@ -1,8 +1,8 @@
 # WFMHub master product and business contract
 
-Contract version: `2.1.0`
-Applies to: WFMHub `0.33.1` and later
-Last reviewed: `2026-09-13`
+Contract version: `2.2.0`
+Applies to: WFMHub `0.34.0` and later
+Last reviewed: `2026-09-14`
 
 This is the single starting point for humans and coding assistants. Read it,
 `AGENTS.md`, and the effective configuration before changing the Hub. Current
@@ -15,21 +15,23 @@ and unreachable builders are not current authority.
 WFMHub is a deterministic, portable WFM system for a restricted Windows work
 machine. It leaves source extracts untouched, scopes rows to the effective FTE
 roster, persists history in SQLite, calculates governed Python/SQL marts, and
-publishes focused Excel reports and a Power BI feed. There is no runtime AI,
-DuckDB, ODBC dependency, server database, Excel Data Model requirement, or
-adherence KPI. `prompts/COPILOT_WFM_ANALYST.md` is only an optional manual aid.
+serves a localhost operations console plus focused Excel reports. There is no
+runtime AI, DuckDB, ODBC dependency, server database, Excel Data Model
+requirement, or adherence KPI. `prompts/COPILOT_WFM_ANALYST.md` is only an
+optional manual aid.
 
 The normal pipeline is:
 
 ```text
 untouched extracts -> validated raw/core SQLite -> governed marts
-                   -> Excel decision products + fixed CSV feeds -> Power BI
+                   -> localhost operations console
+                   -> focused Excel decision products + fixed collaboration feeds
 ```
 
-`UPDATE.cmd` refreshes the durable database and publishes feeds. Report commands
-read the database; they do not parse raw files independently. Power BI reads
-only `Feed\PowerBI`, never SQLite or raw extracts. PCS remains its own permanent
-collaborative Excel tracker and is deliberately outside Power BI for now.
+The Update action refreshes the durable database and collaboration feeds. The
+local console and report commands read the database; they do not parse raw files
+independently. PCS remains its own permanent collaborative Excel tracker and is
+deliberately outside the single-user operations console.
 
 ## Source authority
 
@@ -159,16 +161,13 @@ The PTO/Away submission app is a separate future Microsoft Power Platform
 project. Its accepted contract is `docs/PTO_AWAY_APP_IMPLEMENTATION.md`; tenant
 construction/deployment still requires the user's Microsoft environment.
 
-## Power BI contract 8
+## Local operations-console contract 1
 
-The shipped source-controlled project is
-`templates/powerbi/WFMHub BI/WFMHub BI.pbip`. `POWERBI.cmd` installs or upgrades
-it under `Reports\Power BI`, changes only the local `HubRoot` parameter and opens
-it. A Hub update publishes the fixed schema-7 feed and manifest atomically;
-Power BI Desktop then performs its own Refresh. The feed and project can be
-upgraded without rebuilding the durable SQLite database.
-
-The report has exactly five 1680x945 pages following the approved screenshots:
+`WEBAPP.cmd` starts a standard-library Python HTTP server on `127.0.0.1` and
+opens the default browser. It is reachable only from the work machine, reads
+governed SQLite marts through read-only connections, serves no CDN assets and
+never exposes raw extracts. Its Update button launches the same governed Hub
+refresh used by the command-line menu. The console has five WFM-cycle views:
 
 1. Today's Control
 2. Staff Preparation
@@ -176,13 +175,10 @@ The report has exactly five 1680x945 pages following the approved screenshots:
 4. Attendance & Schedule Review
 5. Historical Review
 
-Every page uses a 64-pixel navy header, a native horizontal page navigator, one
-connected selector strip, four compact cards, two decision panels and one
-evidence/action table. Slicers from the same conformed dimension are assigned
-to the same Power BI sync group. The pixel reference is
-`docs/design-prototypes/powerbi-wfm-cycle-reset-v1/` and its five PNGs.
-Do not replace this with generic cards, invented KPIs, AI-style prose or extra
-pages. PCS is not imported.
+Every view uses a fixed 64-pixel navy WFM-cycle navigator, one cascading selector
+strip, four compact cards, two decision panels and one evidence/action table.
+All charts are locally rendered SVG. Do not replace this with generic cards,
+invented KPIs, AI-style prose or extra pages. PCS is not imported.
 
 Page grain rules:
 
@@ -191,7 +187,7 @@ Page grain rules:
   schedule; no call queues.
 - Intraday Service: combined Management LOB result with exact configured queue
   diagnosis; capacity Staff Types never appear on this page.
-- Attendance: a native stacked horizontal bar places published schedule above
+- Attendance: a horizontal timeline places published schedule above
   chronological Agent Status evidence and exact residual gaps; no marketplace
   visual is required.
 - Historical Review: forecast, actual, requirement, scheduled delivery, final
@@ -202,15 +198,16 @@ The matching Excel handoff is narrow: RTM Daily Control for today/service,
 Staffing Preparation for 15-minute capacity and its persistent action ledger,
 Attendance Review for exact residual evidence, Realisations for detailed cycle
 results, and Final Absenteeism & Shrinkage for final Verint components. PCS and
-Bonus retain their existing workflows outside this Power BI scope.
+Bonus retain their existing workflows outside this local-console scope.
 
 ## Repository map and change discipline
 
 - `src/wfmhub/ingestion.py`: untouched-source parsers and idempotent ingestion
 - `src/wfmhub/models.py`: attendance, staffing, service, PCS and final ledgers
 - `src/wfmhub/capacity_mapping.py`: capacity mapping validation and safe default merge
-- `src/wfmhub/powerbi.py`: fixed Power BI feed contract
-- `tools/build_powerbi_project.py`: semantic model and exact five-page PBIP
+- `src/wfmhub/web_data.py`: governed read-only console projections
+- `src/wfmhub/webapp.py`: localhost HTTP/API, refresh and export boundary
+- `src/wfmhub/web/`: offline HTML/CSS/JavaScript presentation
 - `src/wfmhub/report_packs.py`: current Excel product dispatch authority
 - `src/wfmhub/decision_products.py`: active report builders
 - `config/default_*`: shipped defaults; user files are durable runtime state
@@ -221,23 +218,25 @@ Never delete or overwrite user configuration, database, backups, extracts,
 reports, Feed, attachments or coaching history during an upgrade. Default-map
 changes merge missing identities into user copies and create a backup first.
 Database migrations are append-only and existing history survives a release.
-Generated PBIP source is built in a temporary sibling and replaces the checked-in
-project only after JSON, page and table validation succeeds.
+The retired PBIP implementation is historical source only. Do not regenerate,
+package, publish feeds for, or repair Power BI unless the user explicitly revives
+that route in a later project.
 
-Release gate: compile, regenerate PBIP, run the complete unit suite, build the
-portable package, smoke-test the staged package, inspect the diff, then commit,
-push `main`, tag the version and publish the GitHub release artifact.
+Release gate: compile Python and JavaScript, run the complete unit suite, validate
+all XLSX archives, exercise every console API/view, build the portable package,
+smoke-test the staged package, inspect the diff, then commit, push `main`, tag the
+version and publish the GitHub release artifact.
 
 ## Known boundaries
 
-- Power BI Desktop is the final renderer; repo validation can prove JSON/TMDL
-  structure and visual bindings but not substitute for one Desktop-open check.
+- The console is a single-user localhost application. Collaboration remains in
+  the governed Excel products; hosting for other users is deliberately absent.
 - Capacity-map `UNMAPPED_*` states require a reviewed config row; do not infer.
 - Schedule Integrity recurrence is supported evidence, not proof of intent.
 - Pressure signals are investigation leads, not mathematical SL causality.
 - PTO/Away Power Apps deployment and SharePoint permissions remain tenant work.
 
 Supporting operator documentation begins at `docs/BEGINNER_GUIDE.md` and
-`docs/POWERBI_BEGINNER_GUIDE.md`. Formula governance is documented in
+`docs/LOCAL_WEB_CONSOLE.md`. Formula governance is documented in
 `docs/METRIC_CATALOG_GUIDE.md`; exact service logic is in
 `docs/SERVICE_KPI_REFERENCE.md`.

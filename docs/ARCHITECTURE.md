@@ -7,7 +7,7 @@ Every feature follows the same layers:
 ```text
 untouched source -> parser/scope gate -> raw/core -> additive marts
                  -> effective metric catalog -> semantic values
-                 -> deterministic findings + report datasets -> Excel
+                 -> localhost console + deterministic findings + Excel handoffs
 ```
 
 A new forecast KPI, queue feed, or attendance rule adds an adapter, a numbered
@@ -19,6 +19,7 @@ files are never edited.
 ```text
 WFMHub/
 ├── WFMHub.cmd                  daily menu
+├── WEBAPP.cmd                  localhost WFM operations console
 ├── SETUP.cmd                   system check and first setup
 ├── UPGRADE.cmd                 adopt an older portable database into a new folder
 ├── Reports/                    fixed-name reports + dated archive
@@ -66,12 +67,12 @@ without overwriting a destination file, runs `quick_check`, and then applies
 only missing migrations. Historical extracts are not re-ingested merely because
 application code or a report template changed.
 
-The release ships a versioned PBIP source project under
-`_system/templates/powerbi/WFMHub BI`. `POWERBI.cmd` installs it under
-`Reports/Power BI`, rewrites only the `HubRoot` M parameter, and opens it in
-Power BI Desktop. A newer project contract archives the installed project
-before replacement. The PBIP model imports only `Feed/PowerBI`; it never opens
-SQLite or raw extracts.
+The only current dashboard surface is a standard-library HTTP server bound to
+`127.0.0.1`. `WEBAPP.cmd` starts it with the embedded runtime. API requests use
+short-lived read-only SQLite connections, static assets are packaged under
+`wfmhub/web`, and the browser receives only governed projections. No port is
+opened to the network. Legacy PBIP source is retained only as history; it is not
+regenerated, packaged, opened from the menu, or fed during a normal update.
 
 Logical names such as `raw.lilo` are translated by the database facade into
 SQLite tables such as `raw_lilo`. Business code stays readable and backend
@@ -188,13 +189,13 @@ Final Absenteeism uses the same collaboration boundary. Power Query may replace
 it must never load into permanent `tblActions`. `TEAM_VIEW` and
 `COMPONENT_VIEW` read the refreshed tables directly.
 
-Power BI receives fixed additive facts under `Feed\PowerBI`. Python/SQLite owns
-classification and counters; Power BI owns relationships, measures, slicers and
-visuals. `POWERBI_MANIFEST_CURRENT.csv` is written last as the refresh receipt.
-Service facts use exact reviewed call-queue allowlists. Forecast and staffing
-facts use a separate Staff Type -> Planning Group -> Management LOB bridge;
-Verint forecast `Queue Name` is a Staff Type and never joins the call-queue
-dimension. RSA BE SL is combined while RSA BE FR/VL remain separate in capacity.
+The local console reads governed marts directly and never produces a duplicated
+dashboard feed. Python/SQLite owns classification, counters, filters and final
+ratios; the browser owns presentation only. Service facts use exact reviewed
+call-queue allowlists. Forecast and staffing facts use a separate Staff Type ->
+Planning Group -> Management LOB bridge; Verint forecast `Queue Name` is a Staff
+Type and never joins the call-queue domain. RSA BE SL is combined while RSA BE
+FR/VL remain separate in capacity.
 
 ## Agent scope and identity
 
@@ -303,7 +304,7 @@ chosen finished workbook to an approved Copilot account. The runtime never
 connects Copilot to SQLite or raw extracts, and Copilot is never a calculation
 authority.
 
-## Terminal dashboard
+## Terminal status panel
 
 The daily menu reads a small read-only dashboard snapshot from existing marts.
 It never rebuilds a model merely to draw the screen. The fixed-width ASCII
@@ -312,7 +313,7 @@ source-health counts, quality counts, and the maximum loaded source business
 date with its family. Identifying the family prevents a future Forecast date
 from being presented as the freshness date for operational actuals.
 
-The dashboard is failure-tolerant: a missing, unconfigured, or incompatible
+The status panel is failure-tolerant: a missing, unconfigured, or incompatible
 database produces a setup/check state rather than crashing the menu renderer.
 The launcher uses native CMD title/color commands; the application itself adds
 no terminal package and redirected output is never cleared.
@@ -477,8 +478,8 @@ an empty roster cannot hide a shortage. `WEEKLY_PLAN` rolls additive FTE-hours
 up by ISO week, management LOB, roster LOB, and language.
 
 Realisations iterates every active service profile by default. Each profile
-uses its configured SLA method and target. The dashboard never blends different
-LOB service-level contracts into one synthetic overall SL.
+uses its configured SLA method and target. The reporting layer never blends
+different LOB service-level contracts into one synthetic overall SL.
 
 ## Upgrades
 
