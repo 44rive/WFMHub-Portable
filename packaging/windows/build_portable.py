@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.31.0"
+DEFAULT_VERSION = "0.32.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -100,6 +100,7 @@ def validate_stage(stage: Path, expected_native: dict[str, str]) -> None:
         stage / "config" / "analytics_rules.toml",
         stage / "config" / "report_catalog.toml",
         stage / "config" / "queue_mapping.csv",
+        stage / "config" / "capacity_mapping.csv",
         stage / "database" / "wfm.sqlite3",
         stage / "database" / "wfm.duckdb",
         stage / "_system" / "database" / "wfm.sqlite3",
@@ -122,7 +123,7 @@ def validate_stage(stage: Path, expected_native: dict[str, str]) -> None:
     if unexpected_custom:
         raise RuntimeError(f"Portable stage contains runnable/user custom jobs: {unexpected_custom}")
     allowed_root = {
-        "WFMHub.cmd", "SETUP.cmd", "UPGRADE.cmd", "POWERBI.cmd", "README.md", "VERSION.txt",
+        "WFMHub.cmd", "SETUP.cmd", "UPGRADE.cmd", "POWERBI.cmd", "README.md", "WFM_MASTER.md", "VERSION.txt",
         "Reports", "Feed", "config", "_system",
     }
     unexpected_root = sorted(path.name for path in stage.iterdir() if path.name not in allowed_root)
@@ -188,6 +189,7 @@ def build(args) -> Path:
     copy_tree(ROOT / "sql", stage / "_system" / "app" / "sql")
     copy_tree(ROOT / "docs", stage / "_system" / "docs")
     shutil.copy2(ROOT / "AI_CONTEXT.md", stage / "_system" / "docs" / "AI_CONTEXT.md")
+    shutil.copy2(ROOT / "WFM_MASTER.md", stage / "_system" / "docs" / "WFM_MASTER.md")
     copy_tree(ROOT / "prompts", stage / "_system" / "prompts")
     copy_tree(ROOT / "templates", stage / "_system" / "templates")
     # Excel-authored masters are local user assets and can contain refreshed
@@ -220,6 +222,7 @@ def build(args) -> Path:
     shutil.copy2(ROOT / "config" / "default_analytics.toml", stage / "config" / "default_analytics.toml")
     shutil.copy2(ROOT / "config" / "default_reports.toml", stage / "config" / "default_reports.toml")
     shutil.copy2(ROOT / "config" / "default_queue_mapping.csv", stage / "config" / "default_queue_mapping.csv")
+    shutil.copy2(ROOT / "config" / "default_capacity_mapping.csv", stage / "config" / "default_capacity_mapping.csv")
     shutil.copy2(ROOT / "config" / "default_service_profiles.toml", stage / "config" / "default_service_profiles.toml")
     shutil.copy2(ROOT / "WFMHub.cmd", stage / "WFMHub.cmd")
     shutil.copy2(ROOT / "SETUP.cmd", stage / "SETUP.cmd")
@@ -231,6 +234,7 @@ def build(args) -> Path:
         stage / "_system" / "scripts" / "Install-PCSWorkbook.ps1",
     )
     shutil.copy2(ROOT / "README.md", stage / "README.md")
+    shutil.copy2(ROOT / "WFM_MASTER.md", stage / "WFM_MASTER.md")
     packaged_readme = stage / "README.md"
     packaged_readme.write_text(
         packaged_readme.read_text(encoding="utf-8").replace(

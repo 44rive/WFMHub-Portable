@@ -66,6 +66,7 @@ class Config:
     report_catalog: Path
     queue_mapping: Path
     service_profiles: Path
+    capacity_mapping: Path
     sources: dict[str, str]
     period_start: date | None
     period_end: date | None
@@ -271,6 +272,7 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         report_catalog=_portable_path(home, str(paths.get("report_catalog", "config/report_catalog.toml"))),
         queue_mapping=_portable_path(home, str(paths.get("queue_mapping", "config/queue_mapping.csv"))),
         service_profiles=_portable_path(home, str(paths.get("service_profiles", "config/service_profiles.toml"))),
+        capacity_mapping=_portable_path(home, str(paths.get("capacity_mapping", "config/capacity_mapping.csv"))),
         sources={
             "call_folder": "Storm/Call by Call",
             **{str(k): str(v) for k, v in raw.get("sources", {}).items()},
@@ -357,6 +359,7 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         )
     from .analytics import ensure_analytics_rules, load_analytics_rules
     from .mapping import ensure_queue_mapping, load_queue_mapping
+    from .capacity_mapping import ensure_capacity_mapping, load_capacity_mapping
     from .metrics import ensure_metric_catalog, load_metric_catalog
     from .report_specs import ensure_report_catalog, load_report_catalog
     from .rules import ensure_rulebook, load_rulebook, validate_rulebook
@@ -368,7 +371,9 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
     ensure_report_catalog(home, cfg.report_catalog)
     ensure_queue_mapping(home, cfg.queue_mapping)
     ensure_service_profiles(home, cfg.service_profiles)
+    ensure_capacity_mapping(home, cfg.capacity_mapping)
     load_queue_mapping(cfg.queue_mapping)
+    load_capacity_mapping(cfg.capacity_mapping)
     metric_catalog = load_metric_catalog(home, cfg.metric_catalog)
     validate_service_profiles(load_service_profiles(home, cfg.service_profiles), metric_catalog)
     load_analytics_rules(home, cfg.analytics_rules)

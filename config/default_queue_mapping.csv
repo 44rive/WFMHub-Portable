@@ -1,6 +1,8 @@
 mapping_type,source_system,source_value,service_scope,designation
 forecast_file,VERINT_FORECAST,FORD_FR,Ford FR,Ford France
 forecast_file,VERINT_FORECAST,FORD_NL,Ford NL,Ford Netherlands
+forecast_file,VERINT_FORECAST,RSA_BE_FR,RSA BE FR,RSA Belgium FR planning
+forecast_file,VERINT_FORECAST,RSA_BE_VL,RSA BE VL,RSA Belgium VL planning
 forecast_file,VERINT_FORECAST,RSA_BE,RSA BE,RSA Belgium
 forecast_file,VERINT_FORECAST,RSA_NL,RSA NL,RSA Netherlands
 scope_rollup,CONFIG,RSA BE FR,RSA BE,RSA Belgium rollup

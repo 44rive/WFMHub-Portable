@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "6efda2a9182b50c1650b",
   "position": {
-    "x": 570,
-    "y": 154,
+    "x": 598,
+    "y": 155,
     "z": 200,
-    "height": 108,
-    "width": 338,
+    "height": 84,
+    "width": 337,
     "tabOrder": 200
   },
   "visual": {
@@ -23,11 +23,11 @@
                       "Entity": "Staffing"
                     }
                   },
-                  "Property": "Peak Net Scheduled FTE"
+                  "Property": "Peak Shortage FTE"
                 }
               },
-              "queryRef": "Staffing.Peak Net Scheduled FTE",
-              "nativeQueryRef": "Peak Net Scheduled FTE"
+              "queryRef": "Staffing.Peak Shortage FTE",
+              "nativeQueryRef": "Peak Shortage FTE"
             }
           ]
         }
@@ -81,7 +81,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#159957'"
+                      "Value": "'#BD2B32'"
                     }
                   }
                 }
@@ -120,7 +120,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'NET SCHEDULED FTE'"
+                  "Value": "'PEAK STAFFING GAP'"
                 }
               }
             },

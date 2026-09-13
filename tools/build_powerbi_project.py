@@ -11,6 +11,8 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -83,6 +85,17 @@ TABLES = (
     Table(
         "Management LOB", "DimManagementLOB.csv", "Explicit conformed management LOB used across operational domains.",
         (c("Management LOB"), c("Sort Order", "int", True)),
+    ),
+    Table(
+        "Planning Group", "DimPlanningGroup.csv", "Capacity-planning roll-up below Management LOB; RSA BE FR and VL remain separate here.",
+        (c("Planning Group"), c("Management LOB", hidden=True), c("Sort Order", "int", True)),
+    ),
+    Table(
+        "Staff Type", "DimStaffType.csv", "Governed Verint Staff Type and published-assignment bridge; never a call queue.",
+        (
+            c("Staff Type Key", hidden=True), c("Staff Type"), c("Planning Group", hidden=True),
+            c("Management LOB", hidden=True), c("Mapping Status"),
+        ),
     ),
     Table(
         "Queue", "DimQueue.csv", "Reviewed queue reference from the active service model.",
@@ -201,13 +214,17 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
         ),
     ),
     Table(
-        "Forecast", "FactForecastInterval.csv", "Verint forecast at its native 15-minute queue interval.",
+        "Forecast", "FactForecastInterval.csv", "Verint Volume and Absolute Required FTE at native 15-minute Staff Type grain.",
         (
-            c("Date", "date", True), c("Time Slot", "int", True), c("Service Key", hidden=True), c("Queue", hidden=True),
-            c("Volume Forecast", "decimal", True), c("FTE Required", "decimal", True),
+            c("Date", "date", True), c("Interval Start"), c("Interval End"),
+            c("Interval Minutes", "int", True), c("Time Slot", "int", True),
+            c("Staff Type Key", hidden=True), c("Source Staff Type"), c("Staff Type"),
+            c("Planning Group"), c("Management LOB", hidden=True), c("Capacity Mapping Status"),
+            c("Volume Forecast", "decimal", True), c("Abandons Forecast", "decimal", True),
+            c("FTE Forecast", "decimal", True), c("FTE Required", "decimal", True),
+            c("Headcount Forecast", "decimal", True), c("Net Staffing Forecast", "decimal", True),
             c("SL Forecast", "decimal", True), c("SL Required", "decimal", True),
-            c("AHT Forecast Seconds", "decimal", True), c("Service Scope"),
-            c("Management LOB", hidden=True), c("Mapping Status"), c("Source File"),
+            c("AHT Forecast Seconds", "decimal", True), c("Source File"),
         ),
         (
             m("Forecast Volume", "SUM('Forecast'[Volume Forecast])", "#,##0", "Summed Verint forecast demand at native interval grain.", "Forecast"),
@@ -218,20 +235,25 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
                 "#,##0.0", "Average summed required FTE across selected date/time intervals.", "Forecast",
             ),
             m("Requirement Intervals", "COUNT('Forecast'[FTE Required])", "#,##0", "Native forecast intervals containing an explicit Verint required-FTE value.", "Forecast"),
+            m("Expected Requirement Intervals", "COUNTROWS('Forecast')", "#,##0", "Native Staff Type intervals present in the selected forecast extract.", "Forecast"),
+            m("Requirement Coverage %", "DIVIDE([Requirement Intervals], [Expected Requirement Intervals])", "0.0%", "Intervals with explicit required FTE divided by supplied Staff Type intervals.", "Forecast"),
+            m("Required FTE Hours", "SUMX('Forecast', 'Forecast'[FTE Required] * DIVIDE('Forecast'[Interval Minutes], 60))", "#,##0.0", "Native-interval required FTE converted to additive FTE-hours.", "Forecast"),
             m("Peak Required FTE", "MAXX(SUMMARIZE('Forecast', 'Forecast'[Date], 'Forecast'[Time Slot], \"Interval FTE\", SUM('Forecast'[FTE Required])), [Interval FTE])", "#,##0.0", "Peak summed explicit required FTE in the selected horizon.", "Forecast"),
         ),
     ),
     Table(
-        "Staffing", "FactStaffing15Min.csv", "Scheduled and observed capacity at date, interval, roster LOB and language grain.",
+        "Staffing", "FactStaffing15Min.csv", "Scheduled and observed capacity at date, interval, Planning Group and Staff Type grain.",
         (
-            c("Date", "date", True), c("Time Slot", "int", True), c("LOB"), c("Management LOB", hidden=True),
+            c("Date", "date", True), c("Interval Start"), c("Interval End"), c("Time Slot", "int", True),
+            c("Staff Type Key", hidden=True), c("LOB"), c("Management LOB", hidden=True),
+            c("Planning Group"), c("Staff Type"), c("Capacity Mapping Status"),
             c("Language"), c("Scheduled HC", "int", True), c("Observed HC", "int", True),
             c("Productive HC", "int", True), c("Auxiliary HC", "int", True),
             c("Gross Scheduled FTE", "decimal", True), c("Planned Time Off FTE", "decimal", True),
             c("Scheduled FTE", "decimal", True), c("Elapsed Scheduled FTE", "decimal", True),
             c("Observed FTE", "decimal", True),
             c("Productive FTE", "decimal", True), c("Staffing Variance FTE", "decimal", True),
-            c("Staffing Gap FTE", "decimal", True), c("Staffing State"), c("Evidence Basis"),
+            c("Staffing Gap FTE", "decimal", True), c("Staffing State"), c("Evidence Basis"), c("Evaluation As Of"),
         ),
         (
             m("Average Scheduled FTE", "AVERAGEX(SUMMARIZE('Staffing', 'Staffing'[Date], 'Staffing'[Time Slot], \"Interval FTE\", SUM('Staffing'[Scheduled FTE])), [Interval FTE])", "#,##0.0", "Average net scheduled FTE across selected intervals after governed time off.", "Capacity"),
@@ -249,6 +271,14 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
             m("Peak Shortage FTE", "MINX(SUMMARIZECOLUMNS('Date'[Date], 'Time'[Quarter Hour Index], \"Gap\", IF(ISBLANK([Required FTE]), BLANK(), [Average Scheduled FTE] - [Required FTE])), [Gap])", "#,##0.0;[Red]-#,##0.0", "Most negative scheduled-minus-required FTE interval; blank requirements remain excluded.", "Capacity"),
             m("Critical Intervals", "COUNTROWS(FILTER(SUMMARIZECOLUMNS('Date'[Date], 'Time'[Quarter Hour Index], \"Gap\", IF(ISBLANK([Required FTE]), BLANK(), [Average Scheduled FTE] - [Required FTE])), NOT ISBLANK([Gap]) && [Gap] < -1))", "#,##0", "Selected intervals with more than one FTE scheduled shortage.", "Capacity"),
             m("Current Productive Gap FTE", "IF(ISBLANK([Required FTE]), BLANK(), [Average Productive FTE] - [Required FTE])", "#,##0.0;[Red]-#,##0.0", "Productive capacity less explicit requirement in the selected operational context.", "Capacity"),
+            m("Present FTE Gap", "IF(ISBLANK([Required FTE]), BLANK(), [Average Observed FTE] - [Required FTE])", "#,##0.0;[Red]-#,##0.0", "Agent Status-first observed FTE less explicit Staff Type requirement.", "Capacity"),
+            m("Gross Scheduled FTE Hours", "SUM('Staffing'[Gross Scheduled FTE]) * 0.25", "#,##0.0", "Gross published schedule capacity converted from 15-minute FTE to hours.", "Capacity"),
+            m("Net Scheduled FTE Hours", "SUM('Staffing'[Scheduled FTE]) * 0.25", "#,##0.0", "Published schedule capacity after PTO/Away converted to hours.", "Capacity"),
+            m("PTO / Away FTE Hours", "SUM('Staffing'[Planned Time Off FTE]) * 0.25", "#,##0.0", "Governed PTO/Away capacity removed from gross published schedules.", "Capacity"),
+            m("Observed FTE Hours", "SUM('Staffing'[Observed FTE]) * 0.25", "#,##0.0", "Agent Status-first observed capacity converted to hours.", "Capacity"),
+            m("Productive FTE Hours", "SUM('Staffing'[Productive FTE]) * 0.25", "#,##0.0", "Governed productive observed capacity converted to hours.", "Capacity"),
+            m("Scheduled Coverage %", "DIVIDE([Net Scheduled FTE Hours], [Required FTE Hours])", "0.0%", "Net published schedule FTE-hours divided by Verint required FTE-hours.", "Capacity"),
+            m("Uncovered FTE Hours", "MAX([Required FTE Hours] - [Net Scheduled FTE Hours], 0)", "#,##0.0", "Selected requirement FTE-hours not covered by net published schedule capacity.", "Capacity"),
         ),
     ),
     Table(
@@ -256,6 +286,7 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
         (
             c("Date", "date", True), c("Agent Day Key", hidden=True), c("Agent ID", hidden=True),
             c("Agent"), c("Team Leader"), c("Ops Manager"), c("LOB"), c("Management LOB", hidden=True),
+            c("Planning Group"), c("Staff Type"), c("Capacity Mapping Status"),
             c("Market"), c("Language"), c("Location"), c("Scheduled Start"), c("Scheduled End"),
             c("Scheduled Minutes", "int", True), c("Planned Work Minutes", "int", True),
             c("Planning Overlay"), c("First Login"), c("Last Logout"), c("Attendance Result"),
@@ -334,7 +365,7 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
         ),
     ),
     Table(
-        "Shift Placement", "FactShiftPlacement.csv", "Two-row published/observed placement bridge used by the native Gantt-style chart.",
+        "Shift Placement", "FactShiftPlacement.csv", "Published, observed and exact residual placement bands used by the schedule review timeline.",
         (
             c("Date", "date", True), c("Placement Key", hidden=True), c("Agent ID", hidden=True),
             c("Agent"), c("Team Leader"), c("Management LOB", hidden=True), c("Placement"),
@@ -346,6 +377,7 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
             m("Start Hour Value", "SUM('Shift Placement'[Start Hour])", "0.0", "Hours after midnight before the placement bar starts.", "Schedule integrity"),
             m("Published Placement Hours", "SUM('Shift Placement'[Published Hours])", "0.0", "Published shift duration for the placement chart.", "Schedule integrity"),
             m("Observed Placement Hours", "SUM('Shift Placement'[Observed Hours])", "0.0", "Observed presence span for the placement chart.", "Schedule integrity"),
+            m("Placement Duration Hours", "SUM('Shift Placement'[Duration Hours])", "0.0", "Duration of the selected published, observed or residual band.", "Schedule integrity"),
         ),
     ),
     Table(
@@ -355,9 +387,43 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
             c("Agent"), c("Team Leader"), c("Ops Manager"), c("LOB"), c("Management LOB", hidden=True),
             c("Scheduled Start"), c("Scheduled End"), c("Gap Start"), c("Gap End"),
             c("Gap Minutes", "int", True), c("Detected Issue"), c("Priority"), c("Confidence"),
-            c("Suggested Activity"), c("Observed Source"), c("Reconciliation"), c("Source File"),
+            c("Suggested Activity"), c("Observed Source"), c("Reconciliation"),
+            c("Verint Activity"), c("Verint Category"), c("Verint Overlap Minutes", "int", True),
+            c("Verint Source File"), c("Source File"),
         ),
-        (m("Total Gap Minutes", "SUM('Attendance Gap'[Gap Minutes])", "#,##0", "Summed exact review-gap minutes.", "Attendance review"),),
+        (
+            m("Total Gap Minutes", "SUM('Attendance Gap'[Gap Minutes])", "#,##0", "Summed exact residual review-gap minutes.", "Attendance review"),
+            m("Residual Gap Hours", "DIVIDE([Total Gap Minutes], 60)", "#,##0.0", "Exact residual gap hours still unsupported by final Verint Activities.", "Attendance review"),
+        ),
+    ),
+    Table(
+        "Break Meal", "FactBreakMealControl.csv", "Evidence-gated break and meal control using the same rules as Attendance Review.",
+        (
+            c("Date", "date", True), c("LOB"), c("Management LOB", hidden=True), c("Team Leader"),
+            c("Agent ID", hidden=True), c("Agent"), c("Scheduled Start"), c("Scheduled End"),
+            c("Status Coverage %", "decimal"), c("Break Minutes", "int", True),
+            c("Break Allowance Minutes", "int"), c("Break Overrun Minutes", "int", True),
+            c("Break Spells", "int"), c("Longest Break Minutes", "int"),
+            c("Meal Minutes", "int", True), c("Meal Allowance Minutes", "int"),
+            c("Meal Overrun Minutes", "int", True), c("Meal Spells", "int"),
+            c("Longest Meal Minutes", "int"), c("Alert"), c("Evidence"),
+        ),
+        (
+            m("Total Break Overrun Minutes", "SUM('Break Meal'[Break Overrun Minutes])", "#,##0", "Evidence-supported break minutes above the configured allowance.", "Attendance review"),
+            m("Total Meal Overrun Minutes", "SUM('Break Meal'[Meal Overrun Minutes])", "#,##0", "Evidence-supported meal minutes above the configured allowance.", "Attendance review"),
+            m("Break / Meal Alerts", "CALCULATE(COUNTROWS('Break Meal'), 'Break Meal'[Alert] IN {\"BREAK EXCEEDED\",\"MEAL EXCEEDED\",\"BREAK & MEAL EXCEEDED\"})", "#,##0", "Completed evidence-supported agent-days exceeding a configured allowance.", "Attendance review"),
+        ),
+    ),
+    Table(
+        "Operational Action", "FactOperationalAction.csv", "One compact intraday queue combining capacity gaps and attendance call/follow-up facts.",
+        (
+            c("Date", "date", True), c("Time Slot", "int", True), c("State"), c("Item"),
+            c("Agent ID", hidden=True), c("Agent"), c("Team Leader"), c("Management LOB", hidden=True),
+            c("Planning Group"), c("Staff Type"), c("Staff Type Key", hidden=True), c("Required FTE", "decimal"),
+            c("Resource FTE", "decimal"), c("Variance FTE", "decimal"), c("Detail"),
+            c("Evidence"), c("Priority Sort", "int", True),
+        ),
+        (m("Operational Actions", "COUNTROWS('Operational Action')", "#,##0", "Current capacity and attendance facts requiring operational attention.", "Intraday"),),
     ),
     Table(
         "Time Off", "FactTimeOff.csv", "Approved PTO and effective Away segments after roster validation.",
@@ -449,14 +515,16 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
 RELATIONSHIPS = (
     ("Employee", "Management LOB", "Management LOB", "Management LOB"),
     ("Queue", "Management LOB", "Management LOB", "Management LOB"),
+    ("Planning Group", "Management LOB", "Management LOB", "Management LOB"),
+    ("Staff Type", "Planning Group", "Planning Group", "Planning Group"),
     ("Service", "Date", "Date", "Date"), ("Service", "Time Slot", "Time", "Quarter Hour Index"),
     ("Service", "Service Key", "Queue", "Service Key"),
     ("Queue Coverage", "Date", "Date", "Date"),
     ("Queue Coverage", "Service Key", "Queue", "Service Key"),
     ("Forecast", "Date", "Date", "Date"), ("Forecast", "Time Slot", "Time", "Quarter Hour Index"),
-    ("Forecast", "Service Key", "Queue", "Service Key"),
+    ("Forecast", "Staff Type Key", "Staff Type", "Staff Type Key"),
     ("Staffing", "Date", "Date", "Date"), ("Staffing", "Time Slot", "Time", "Quarter Hour Index"),
-    ("Staffing", "Management LOB", "Management LOB", "Management LOB"),
+    ("Staffing", "Staff Type Key", "Staff Type", "Staff Type Key"),
     ("Attendance", "Date", "Date", "Date"), ("Attendance", "Agent ID", "Employee", "Agent ID"),
     ("Status", "Date", "Date", "Date"), ("Status", "Agent ID", "Employee", "Agent ID"),
     ("Status", "Time Slot", "Time", "Quarter Hour Index"),
@@ -465,6 +533,10 @@ RELATIONSHIPS = (
     ("Shift Placement", "Date", "Date", "Date"),
     ("Shift Placement", "Agent ID", "Employee", "Agent ID"),
     ("Attendance Gap", "Date", "Date", "Date"), ("Attendance Gap", "Agent ID", "Employee", "Agent ID"),
+    ("Break Meal", "Date", "Date", "Date"), ("Break Meal", "Agent ID", "Employee", "Agent ID"),
+    ("Operational Action", "Date", "Date", "Date"),
+    ("Operational Action", "Time Slot", "Time", "Quarter Hour Index"),
+    ("Operational Action", "Staff Type Key", "Staff Type", "Staff Type Key"),
     ("Time Off", "Date", "Date", "Date"), ("Time Off", "Agent ID", "Employee", "Agent ID"),
     ("Final Absence", "Date", "Date", "Date"), ("Final Absence", "Agent ID", "Employee", "Agent ID"),
     ("Absence Component", "Date", "Date", "Date"), ("Absence Component", "Agent ID", "Employee", "Agent ID"),
@@ -476,132 +548,96 @@ RELATIONSHIPS = (
 
 PAGES = (
     {
-        "title": "Daily WFM Command", "nav": "Daily Command", "status": "LIVE",
-        "subtitle": "Today’s service, attendance and capacity decisions in one operational view",
-        "slicers": (("Date", "Date", "DATE", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Employee", "Team Leader", "TEAM LEADER", "Dropdown"), ("Time", "Time Label", "CHECKPOINT", "Dropdown")),
+        "title": "Forecast & Requirement", "nav": "Forecast & Requirement", "status": "MONTH PLAN",
+        "subtitle": "Verint Staff Type demand and absolute required FTE",
+        "rule": "Forecast and requirement are the planning baseline. Call queues are not Staff Types.",
+        "scope": "Grain: 15-minute Staff Type\nSource: Verint Volume + Absolute Required FTE",
+        "slicers": (("Date", "Date", "FORECAST PERIOD", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Planning Group", "Planning Group", "PLANNING GROUP", "Dropdown"), ("Staff Type", "Staff Type", "STAFF TYPE", "Dropdown")),
         "cards": (
-            ("Service", "LOBs On Target Label", "LOBS ON TARGET", "#159957", "Profile-specific target"),
-            ("Service", "Volume Variance %", "DEMAND VS FORECAST", "#D99815", "Actual entered vs forecast"),
-            ("Attendance", "No Show HC", "CONFIRMED NO SHOW", "#C91F2A", "Evidence-backed completed cases"),
-            ("Staffing", "Current Productive Gap FTE", "CURRENT CAPACITY GAP", "#C91F2A", "Productive FTE vs required"),
+            ("Forecast", "Forecast Volume", "FORECAST VOLUME", "#315F85", "Sum of populated Staff Type volume"),
+            ("Forecast", "Required FTE Hours", "REQUIRED FTE-HOURS", "#008B95", "15-minute required FTE converted to hours"),
+            ("Forecast", "Peak Required FTE", "PEAK REQUIRED FTE", "#D18A13", "Peak at selected Staff Type grain"),
+            ("Forecast", "Requirement Coverage %", "REQUIREMENT COVERAGE", "#26805A", "Intervals with explicit absolute requirement"),
         ),
         "charts": (
-            {"type": "clusteredBarChart", "title": "SERVICE LEVEL BY MANAGEMENT LOB", "category": ("Management LOB", "Management LOB"), "values": (("Service", "Service Level %"), ("Service", "SL Target %"))},
-            {"type": "lineChart", "title": "TODAY'S CAPACITY PULSE", "category": ("Time", "Time Label"), "values": (("Forecast", "Required FTE"), ("Staffing", "Average Observed FTE"), ("Staffing", "Average Productive FTE"))},
+            {"type": "lineStackedColumnComboChart", "title": "VOLUME AND REQUIRED FTE PROFILE", "category": ("Time", "Time Label"), "values": (("Forecast", "Forecast Volume"),), "secondary": (("Forecast", "Required FTE"),)},
+            {"type": "table", "title": "REQUIREMENT BY STAFF TYPE", "fields": (("Staff Type", "Staff Type"), ("Forecast", "Forecast Volume"), ("Forecast", "Required FTE Hours"), ("Forecast", "Peak Required FTE"))},
         ),
-        "tables": (("WFM ACTION QUEUE", (("Finding", "Rank"), ("Finding", "Severity"), ("Finding", "Management LOB"), ("Finding", "Title"), ("Finding", "Summary"), ("Finding", "Evidence Dataset")), "full"),),
+        "tables": (("STAFF TYPE REQUIREMENT DETAIL", (("Date", "Date"), ("Time", "Time Label"), ("Management LOB", "Management LOB"), ("Planning Group", "Planning Group"), ("Staff Type", "Staff Type"), ("Forecast", "Forecast Volume"), ("Forecast", "Required FTE"), ("Forecast", "Capacity Mapping Status")), "full"),),
     },
     {
-        "title": "Service & SL Drivers", "nav": "SL Drivers", "status": "ANALYSIS",
-        "subtitle": "15-minute service pressure, review leads and exact queue evidence",
-        "slicers": (("Date", "Date", "DATE", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Queue", "Queue", "QUEUE", "Dropdown"), ("Time", "Time Label", "15-MIN INTERVAL", "Dropdown")),
+        "title": "Staff Preparation", "nav": "Staff Preparation", "status": "NEXT 14 DAYS",
+        "subtitle": "Required capacity versus published schedules — by planning group and Staff Type",
+        "rule": "Forecast and requirement follow Staff Type. Service level remains a separate LOB result.",
+        "scope": "Service: combined management LOB result\nStaffing: planning groups remain separate",
+        "slicers": (("Date", "Date", "PLANNING HORIZON", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Planning Group", "Planning Group", "PLANNING GROUP", "Dropdown"), ("Staff Type", "Staff Type", "STAFF TYPE", "Dropdown")),
         "cards": (
-            ("Service", "Service Level %", "SERVICE LEVEL", "#C91F2A", "Against configured target"),
-            ("Service", "Volume Variance %", "DEMAND VARIANCE", "#D99815", "Actual entered vs forecast"),
-            ("Status", "Capacity Loss Hours", "CAPACITY LOSS", "#C91F2A", "Elapsed schedule not productive"),
-            ("Service", "Primary Driver", "PRIMARY DRIVER", "#244F78", "Largest supported pressure signal"),
+            ("Forecast", "Peak Required FTE", "PEAK REQUIRED FTE", "#315F85", "Explicit Verint requirement"),
+            ("Staffing", "Peak Shortage FTE", "PEAK STAFFING GAP", "#BD2B32", "Worst net schedule position"),
+            ("Staffing", "Uncovered FTE Hours", "UNCOVERED FTE-HOURS", "#BD2B32", "Requirement not covered by net schedule"),
+            ("Staffing", "PTO / Away FTE Hours", "PTO / AWAY IMPACT", "#D18A13", "Removed from gross schedule capacity"),
         ),
         "charts": (
-            {"type": "lineStackedColumnComboChart", "title": "INTRADAY SL AND DEMAND PRESSURE", "category": ("Time", "Time Label"), "values": (("Service", "Offered Calls"), ("Forecast", "Forecast Volume")), "secondary": (("Service", "Service Level %"), ("Service", "SL Target %"))},
-            {"type": "clusteredColumnChart", "title": "SUPPORTED DRIVER PRESSURE SIGNALS", "category": ("Driver", "Driver"), "values": (("Service", "Driver Pressure %"),)},
+            {"type": "lineChart", "title": "REQUIRED FTE vs NET SCHEDULED FTE", "category": ("Time", "Time Label"), "values": (("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"))},
+            {"type": "table", "title": "CAPACITY BY PLANNING GROUP", "fields": (("Planning Group", "Planning Group"), ("Staff Type", "Staff Type"), ("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "Net Capacity Gap FTE"))},
         ),
-        "tables": (("INTERVAL & QUEUE DIAGNOSIS", (("Service", "Interval Start"), ("Queue", "Queue"), ("Queue", "Designation"), ("Service", "Offered Calls"), ("Forecast", "Forecast Volume"), ("Service", "Service Level %"), ("Service", "AHT Seconds"), ("Service", "AHT Error Seconds")), "full"),),
+        "tables": (("STAFFING GAPS TO TREAT", (("Date", "Date"), ("Time", "Time Label"), ("Management LOB", "Management LOB"), ("Planning Group", "Planning Group"), ("Staff Type", "Staff Type"), ("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "PTO / Away FTE"), ("Staffing", "Net Capacity Gap FTE")), "full"),),
     },
     {
-        "title": "Staff Preparation", "nav": "Staff Prep", "status": "PLANNING",
-        "subtitle": "Future requirement, net published capacity and PTO/Away impact at native grain",
-        "slicers": (("Date", "Date", "PLANNING HORIZON", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Date", "Weekday", "DAY OF WEEK", "Dropdown"), ("Time", "Time Label", "OPERATING WINDOW", "Dropdown")),
+        "title": "Intraday Control", "nav": "Intraday Control", "status": "LIVE",
+        "subtitle": "Live service outcome and current staffing position — kept at their correct grains",
+        "rule": "Operate service at LOB level and resources at Planning Group / Staff Type level.",
+        "scope": "Service: exact queues rolled to one LOB ratio\nResources: planning groups stay visible",
+        "equal_charts": True,
+        "slicers": (("Date", "Date", "BUSINESS DATE", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Planning Group", "Planning Group", "PLANNING GROUP", "Dropdown"), ("Time", "Time Label", "CHECKPOINT", "Dropdown")),
         "cards": (
-            ("Forecast", "Peak Required FTE", "PEAK REQUIRED FTE", "#244F78", "Explicit Verint requirement"),
-            ("Staffing", "Peak Net Scheduled FTE", "NET SCHEDULED FTE", "#159957", "After PTO and Away"),
-            ("Staffing", "Peak Shortage FTE", "PEAK SHORTAGE", "#C91F2A", "Worst supported interval"),
-            ("Staffing", "Critical Intervals", "CRITICAL INTERVALS", "#D99815", "Shortage greater than 1 FTE"),
+            ("Service", "Service Level %", "SERVICE LEVEL", "#D18A13", "Ratio of summed Storm components"),
+            ("Service", "Offered Calls", "OFFERED VOLUME", "#315F85", "Exact configured service queue scope"),
+            ("Staffing", "Present FTE Gap", "PRESENT FTE GAP", "#BD2B32", "Requirement less Agent Status presence"),
+            ("Attendance", "No Show HC", "CONFIRMED NO SHOW", "#BD2B32", "Unknown evidence remains separate"),
         ),
         "charts": (
-            {"type": "lineChart", "title": "REQUIRED VS NET SCHEDULED CAPACITY", "category": ("Time", "Time Label"), "values": (("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"))},
-            {"type": "matrix", "title": "COVERAGE RISK BY LOB & DAY", "rows": (("Management LOB", "Management LOB"),), "columns": (("Date", "Date"),), "values": (("Staffing", "Coverage %"),)},
+            {"type": "lineChart", "title": "COMBINED LOB SERVICE LEVEL", "category": ("Time", "Time Label"), "values": (("Service", "Service Level %"), ("Service", "SL Target %"))},
+            {"type": "table", "title": "RESOURCE POSITION BY PLANNING GROUP", "fields": (("Planning Group", "Planning Group"), ("Staff Type", "Staff Type"), ("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "Average Observed FTE"), ("Staffing", "Present FTE Gap"))},
         ),
-        "tables": (("STAFF PREPARATION ACTIONS", (("Date", "Date"), ("Time", "Time Label"), ("Management LOB", "Management LOB"), ("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "Net Capacity Gap FTE"), ("Staffing", "Coverage %"), ("Staffing", "PTO / Away FTE")), "full"),),
+        "tables": (("NEXT INTERVALS AND ATTENDANCE CONTROL", (("Operational Action", "State"), ("Operational Action", "Item"), ("Operational Action", "Planning Group"), ("Operational Action", "Staff Type"), ("Operational Action", "Required FTE"), ("Operational Action", "Resource FTE"), ("Operational Action", "Variance FTE"), ("Operational Action", "Detail"), ("Operational Action", "Evidence")), "full"),),
     },
     {
-        "title": "Workforce Realisation", "nav": "Realisation", "status": "CONTROL",
-        "subtitle": "Observed and productive delivery against completed elapsed schedule",
-        "slicers": (("Date", "Date", "PERIOD", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Employee", "Team Leader", "TEAM LEADER", "Dropdown"), ("Date", "Weekday", "DAY TYPE", "Dropdown")),
+        "title": "Attendance & Schedule Review", "nav": "Attendance & Schedule Review", "status": "CURRENT WEEK",
+        "subtitle": "Completed-shift evidence, exact residual corrections, breaks and meals",
+        "rule": "Agent Status owns observed attendance. Final Verint Activities close exact residual gaps.",
+        "scope": "Observed: Agent Status first, LILO fallback\nCorrection: Activities subtract exact overlap",
+        "slicers": (("Date", "Date", "COMPLETED PERIOD", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Employee", "Team Leader", "TEAM LEADER", "Dropdown"), ("Attendance Gap", "Detected Issue", "EXCEPTION", "Dropdown")),
         "cards": (
-            ("Status", "Presence Realisation %", "PRESENCE REALISATION", "#159957", "Observed / elapsed scheduled"),
-            ("Status", "Productive Realisation %", "PRODUCTIVE REALISATION", "#087E91", "Productive / observed"),
-            ("Status", "Capacity Delivered %", "CAPACITY DELIVERED", "#244F78", "Productive / elapsed scheduled"),
-            ("Status", "Unexplained Hours", "UNEXPLAINED TIME", "#C91F2A", "Requires evidence review"),
+            ("Attendance", "No Show HC", "CONFIRMED NO SHOW", "#BD2B32", "Completed supported cases"),
+            ("Attendance", "Late HC", "LATE ARRIVALS", "#D18A13", "Exact start variance above tolerance"),
+            ("Attendance", "Early Leave HC", "EARLY LEAVES", "#D18A13", "Completed shifts only"),
+            ("Attendance Gap", "Residual Gap Hours", "RESIDUAL GAP HOURS", "#BD2B32", "Still unsupported by final Activities"),
         ),
         "charts": (
-            {"type": "hundredPercentStackedBarChart", "title": "OBSERVED TIME COMPOSITION BY LOB", "category": ("Management LOB", "Management LOB"), "values": (("Status", "Status Hours"),), "series": ("Status", "Operational Category")},
-            {"type": "clusteredColumnChart", "title": "CAPACITY REALISATION BRIDGE", "category": ("Capacity Stage", "Capacity Stage"), "values": (("Status", "Capacity Bridge Hours"),)},
+            {"type": "stackedBarChart", "title": "PUBLISHED SCHEDULE vs OBSERVED PRESENCE", "category": ("Shift Placement", "Placement Label"), "values": (("Shift Placement", "Start Hour Value"), ("Shift Placement", "Placement Duration Hours"))},
+            {"type": "table", "title": "BREAK & MEAL CONTROL", "fields": (("Break Meal", "Agent"), ("Break Meal", "Break Minutes"), ("Break Meal", "Meal Minutes"), ("Break Meal", "Break Allowance Minutes"), ("Break Meal", "Meal Allowance Minutes"), ("Break Meal", "Alert"))},
         ),
-        "tables": (("LOB REALISATION DETAIL", (("Management LOB", "Management LOB"), ("Status", "Elapsed Scheduled Hours"), ("Status", "Observed Hours"), ("Status", "Productive Hours"), ("Status", "Presence Realisation %"), ("Status", "Productive Realisation %"), ("Status", "Capacity Delivered %"), ("Status", "Unexplained Hours")), "full"),),
+        "tables": (("RESIDUAL VERINT CORRECTION QUEUE", (("Attendance Gap", "Date"), ("Attendance Gap", "Agent"), ("Attendance Gap", "Team Leader"), ("Attendance Gap", "Detected Issue"), ("Attendance Gap", "Gap Start"), ("Attendance Gap", "Gap End"), ("Attendance Gap", "Gap Minutes"), ("Attendance Gap", "Verint Activity"), ("Attendance Gap", "Verint Overlap Minutes"), ("Attendance Gap", "Suggested Activity")), "full"),),
     },
     {
-        "title": "Schedule Integrity & Patterns", "nav": "Schedule Integrity", "status": "REVIEW",
-        "subtitle": "Published versus observed placement with evidence-backed recurrence only",
-        "slicers": (("Date", "Date", "PERIOD", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Employee", "Team Leader", "TEAM LEADER", "Dropdown"), ("Schedule Integrity", "Pattern Family", "PATTERN", "Dropdown")),
+        "title": "Performance Review", "nav": "Performance Review", "status": "PERIOD REVIEW",
+        "subtitle": "Close the WFM cycle with forecast, staffing, service, absence and shrinkage",
+        "rule": "Review source variances, then improve the next forecast and staff plan. No synthetic score.",
+        "scope": "Cycle: demand → requirement → schedule → delivery\nRates: recalculated from summed components",
+        "equal_charts": True,
+        "slicers": (("Date", "Date", "REVIEW PERIOD", "Between"), ("Date", "Year Month", "COMPARISON MONTH", "Dropdown"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Planning Group", "Planning Group", "PLANNING GROUP", "Dropdown")),
         "cards": (
-            ("Schedule Integrity", "Displaced Shifts", "DISPLACED SHIFTS", "#C91F2A", "Completed supported cases"),
-            ("Schedule Integrity", "Capacity Displaced Hours", "CAPACITY DISPLACED", "#D99815", "Hours moved or lost"),
-            ("Schedule Integrity", "Recurring Agents", "RECURRING AGENTS", "#C91F2A", "Configured recurrence threshold"),
-            ("Schedule Integrity", "Early Leaves", "EARLY LEAVES", "#D99815", "Completed days only"),
+            ("Service", "Service Level %", "SERVICE LEVEL", "#D18A13", "Against governed LOB target"),
+            ("Service", "Volume Variance %", "VOLUME vs FORECAST", "#315F85", "Actual offered versus compatible roll-up"),
+            ("Staffing", "Scheduled Coverage %", "SCHEDULED COVERAGE", "#26805A", "Net scheduled FTE-hours / required"),
+            ("Final Absence", "Final Absence %", "FINAL ABSENCE", "#BD2B32", "Final Verint Activities only"),
         ),
         "charts": (
-            {"type": "clusteredBarChart", "title": "PUBLISHED VS OBSERVED SHIFT HOURS", "category": ("Shift Placement", "Placement Label"), "values": (("Shift Placement", "Published Placement Hours"), ("Shift Placement", "Observed Placement Hours"))},
-            {"type": "matrix", "title": "SUPPORTED RECURRING PATTERNS", "rows": (("Schedule Integrity", "Pattern Family"),), "columns": (("Date", "Weekday"),), "values": (("Schedule Integrity", "Integrity Cases"),)},
+            {"type": "lineChart", "title": "WEEKLY FORECAST vs ACTUAL VOLUME", "category": ("Date", "ISO Week"), "values": (("Forecast", "Forecast Volume"), ("Service", "Offered Calls"))},
+            {"type": "clusteredColumnChart", "title": "REQUIREMENT TO DELIVERY — FTE-HOURS", "category": ("Capacity Stage", "Capacity Stage"), "values": (("Status", "Capacity Bridge Hours"),)},
         ),
-        "tables": (("SCHEDULE INTEGRITY CASES", (("Schedule Integrity", "Agent"), ("Schedule Integrity", "Team Leader"), ("Schedule Integrity", "Date"), ("Schedule Integrity", "Scheduled Start"), ("Schedule Integrity", "Scheduled End"), ("Schedule Integrity", "Observed Start"), ("Schedule Integrity", "Observed End"), ("Schedule Integrity", "Classification"), ("Schedule Integrity", "Start Delta Minutes"), ("Schedule Integrity", "End Delta Minutes"), ("Schedule Integrity", "Recurrence Count"), ("Schedule Integrity", "Confidence")), "full"),),
-    },
-    {
-        "title": "Forecast Accuracy", "nav": "Forecast Accuracy", "status": "PLANNING",
-        "subtitle": "Comparable 15-minute demand and AHT forecast quality, separate from execution",
-        "slicers": (("Date", "Date", "PERIOD", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Queue", "Queue", "QUEUE", "Dropdown"), ("Date", "Weekday", "DAY OF WEEK", "Dropdown")),
-        "cards": (
-            ("Service", "Forecast Accuracy %", "VOLUME ACCURACY", "#159957", "One minus weighted absolute error"),
-            ("Service", "Forecast Bias %", "FORECAST BIAS", "#D99815", "Signed actual vs forecast"),
-            ("Service", "AHT Error Seconds", "AHT ERROR", "#D99815", "Actual vs weighted forecast"),
-            ("Service", "Peak Accuracy %", "PEAK ACCURACY", "#C91F2A", "Top forecast-demand decile"),
-        ),
-        "charts": (
-            {"type": "lineChart", "title": "ACTUAL VS FORECAST DEMAND", "category": ("Time", "Time Label"), "values": (("Service", "Offered Calls"), ("Forecast", "Forecast Volume"))},
-            {"type": "matrix", "title": "ACCURACY BY LOB & DAY OF WEEK", "rows": (("Management LOB", "Management LOB"),), "columns": (("Date", "Weekday"),), "values": (("Service", "Forecast Accuracy %"),)},
-        ),
-        "tables": (("RECURRING FORECAST MISSES", (("Date", "Weekday"), ("Management LOB", "Management LOB"), ("Time", "Hour Label"), ("Forecast", "Forecast Volume"), ("Service", "Offered Calls"), ("Service", "Forecast Bias %"), ("Service", "AHT Error Seconds"), ("Service", "Forecast Accuracy %")), "full"),),
-    },
-    {
-        "title": "Absence & Shrinkage", "nav": "Absence & Shrinkage", "status": "FINAL CHECK",
-        "subtitle": "Final Verint activity ledger, governed component logic and unresolved evidence",
-        "slicers": (("Date", "Date", "PERIOD", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Employee", "Team Leader", "TEAM LEADER", "Dropdown"), ("Final Absence", "Final Ledger Status", "LEDGER STATUS", "Dropdown")),
-        "cards": (
-            ("Final Absence", "Final Absence %", "FINAL ABSENCE", "#C91F2A", "Mapped absence / finalized planned time"),
-            ("Final Absence", "Final Shrinkage %", "FINAL SHRINKAGE", "#D99815", "Mapped shrinkage / finalized planned time"),
-            ("Final Absence", "Final PTO %", "FINAL PTO", "#244F78", "Mapped vacation / finalized planned time"),
-            ("Final Absence", "Absence Review HC", "REVIEW AGENT-DAYS", "#C91F2A", "Residual, empty or unmapped evidence"),
-        ),
-        "charts": (
-            {"type": "clusteredBarChart", "title": "FINAL RATES BY MANAGEMENT LOB", "category": ("Management LOB", "Management LOB"), "values": (("Final Absence", "Final Absence %"), ("Final Absence", "Final Shrinkage %"))},
-            {"type": "clusteredColumnChart", "title": "VERINT ACTIVITY COMPONENT MINUTES", "category": ("Absence Component", "Category"), "values": (("Absence Component", "Activity Minutes"),)},
-        ),
-        "tables": (("FINAL AGENT-DAY DETAIL", (("Final Absence", "Date"), ("Final Absence", "Agent"), ("Final Absence", "Team Leader"), ("Final Absence", "LOB"), ("Final Absence", "Scheduled Minutes"), ("Final Absence", "Absence Minutes"), ("Final Absence", "Vacation Minutes"), ("Final Absence", "Shrinkage Minutes"), ("Final Absence", "Unmapped Minutes"), ("Final Absence", "Final Ledger Status")), "full"),),
-    },
-    {
-        "title": "Data Readiness", "nav": "Data Readiness", "status": "GOVERNED",
-        "subtitle": "Freshness, mappings, accepted evidence and active operational blockers",
-        "slicers": (("Date", "Date", "PERIOD", "Between"), ("Quality Issue", "Source Family", "SOURCE FAMILY", "Dropdown"), ("Quality Issue", "Severity", "SEVERITY", "Dropdown"), ("Finding", "Domain", "DOMAIN", "Dropdown")),
-        "cards": (
-            ("Source Health", "Sources Ready %", "SOURCES FRESH", "#D99815", "Latest complete Hub update"),
-            ("Queue Coverage", "Queue Mapped %", "QUEUE MAPPED", "#159957", "By inbound queue entries"),
-            ("Status", "Status Mapped %", "STATUS MAPPED", "#D99815", "By observed Agent Status minutes"),
-            ("Quality Issue", "Critical Quality Issues", "BLOCKING ISSUES", "#C91F2A", "Never converted to zero"),
-        ),
-        "charts": (
-            {"type": "table", "title": "SOURCE FRESHNESS", "fields": (("Source Health", "Source Family"), ("Source Health", "Newest Date"), ("Source Health", "Rows"), ("Source Health", "Rejected"), ("Source Health", "Status"))},
-            {"type": "pipeline", "title": "GOVERNED UPDATE PIPELINE", "stages": (("Source Health", "Source Count", "Source contracts", "#087E91"), ("Source Health", "Rows Accepted %", "Rows accepted", "#087E91"), ("Source Health", "Models Built", "Models built", "#087E91"), ("Quality Issue", "Critical Quality Issues", "Blocking checks", "#C91F2A"), ("Source Health", "Manifest State", "Manifest state", "#244F78"))},
-        ),
-        "tables": (("ACTIVE DATA ISSUES", (("Quality Issue", "Severity"), ("Quality Issue", "Source Family"), ("Quality Issue", "Issue Type"), ("Quality Issue", "Date"), ("Quality Issue", "Agent ID"), ("Quality Issue", "Details")), "full"),),
+        "tables": (("MONTHLY WFM SCORECARD", (("Management LOB", "Management LOB"), ("Service", "Service Level %"), ("Service", "Offered Calls"), ("Forecast", "Forecast Volume"), ("Service", "Volume Variance %"), ("Forecast", "Required FTE Hours"), ("Staffing", "Net Scheduled FTE Hours"), ("Staffing", "Observed FTE Hours"), ("Final Absence", "Final Absence %"), ("Final Absence", "Final Shrinkage %")), "full"),),
     },
 )
 
@@ -1025,20 +1061,20 @@ def _matrix(
 def _navigator(name: str) -> dict:
     return {
         "$schema": VISUAL_SCHEMA, "name": name,
-        "position": _position(18, 128, 140, len(PAGES) * 48, 20, 20),
+        "position": _position(12, 105, 186, len(PAGES) * 68, 20, 20),
         "visual": {
             "visualType": "pageNavigator",
             "objects": {
-                "layout": [{"properties": {"columnCount": _literal(1), "rowCount": _literal(len(PAGES)), "cellPadding": _literal(6)}}],
+                "layout": [{"properties": {"columnCount": _literal(1), "rowCount": _literal(len(PAGES)), "cellPadding": _literal(5)}}],
                 "pages": [{"properties": {"showHiddenPages": _literal(False), "showTooltipPages": _literal(False), "showByDefault": _literal(True)}}],
                 "shape": [{"properties": {"tileShape": _literal("rectangleRoundedByPixel"), "rectangleRoundedCurve": _literal(6)}}],
                 "text": [
-                    {"properties": {"show": _literal(True), "fontSize": _literal(10), "fontColor": _color("#DCE9F2"), "leftMargin": _literal(10)}, "selector": {"id": "default"}},
-                    {"properties": {"show": _literal(True), "fontSize": _literal(10), "bold": _literal(True), "fontColor": _color("#FFFFFF"), "leftMargin": _literal(10)}, "selector": {"id": "selected"}},
+                    {"properties": {"show": _literal(False)}, "selector": {"id": "default"}},
+                    {"properties": {"show": _literal(False)}, "selector": {"id": "selected"}},
                 ],
                 "fill": [
                     {"properties": {"show": _literal(True), "fillColor": _color("#0B1F33"), "transparency": _literal(100)}, "selector": {"id": "default"}},
-                    {"properties": {"show": _literal(True), "fillColor": _color("#007C83"), "transparency": _literal(0)}, "selector": {"id": "selected"}},
+                    {"properties": {"show": _literal(True), "fillColor": _color("#007C83"), "transparency": _literal(100)}, "selector": {"id": "selected"}},
                 ],
                 "outline": [{"properties": {"show": _literal(False)}, "selector": {"id": "default"}}],
             },
@@ -1074,11 +1110,11 @@ def _write_report(root: Path) -> None:
                 },
             },
         )
-        _write_visual(page_dir, title, "sidebar", _shape("", 0, 0, 178, 945, "#0B1F33", 0))
-        _write_visual(page_dir, title, "header", _shape("", 178, 0, 1502, 58, "#0B1F33", 1))
-        _write_visual(page_dir, title, "accent", _shape("", 178, 58, 1502, 4, "#00A3A8", 2))
-        _write_visual(page_dir, title, "brand", _textbox("", "WFMHub", 20, 17, 140, 48, 22, "#FFFFFF", 10, True, "center"))
-        _write_visual(page_dir, title, "nav label", _textbox("", "NAVIGATION", 26, 100, 124, 20, 9, "#7F9AB2", 10, True))
+        _write_visual(page_dir, title, "sidebar", _shape("", 0, 0, 210, 945, "#0B2239", 0))
+        _write_visual(page_dir, title, "header", _shape("", 210, 0, 1470, 72, "#FFFFFF", 1))
+        _write_visual(page_dir, title, "header line", _shape("", 210, 71, 1470, 1, "#D6E0E6", 2))
+        _write_visual(page_dir, title, "brand", _textbox("", "WFMHub", 20, 16, 170, 45, 27, "#FFFFFF", 10, True, "left"))
+        _write_visual(page_dir, title, "nav label", _textbox("", "WFM CYCLE", 24, 88, 160, 20, 10, "#A9BFCE", 10, True))
         # Static labels guarantee a readable sidebar even on Desktop builds
         # that fail to render pageNavigator text.  The native navigator stays
         # above them as the interactive layer; Power BI's bottom page tabs are
@@ -1088,44 +1124,52 @@ def _write_report(root: Path) -> None:
             if candidate["title"] == title
         )
         for index, candidate in enumerate(PAGES):
-            nav_y = 132 + index * 48
+            nav_y = 112 + index * 68
             if index == current_nav:
                 _write_visual(
                     page_dir, title, f"nav selected {index}",
-                    _shape("", 20, nav_y, 136, 38, "#007C83", 12, rounded=True),
+                    _shape("", 12, nav_y, 186, 63, "#008B95", 12, rounded=True),
                 )
             _write_visual(
                 page_dir, title, f"nav text {index}",
                 _textbox(
-                    "", f"{index + 1:02d}  {candidate['nav']}",
-                    28, nav_y + 9, 124, 20, 9,
+                    "", f"{index + 1}   {candidate['nav']}",
+                    26, nav_y + 20, 158, 28, 11,
                     "#FFFFFF" if index == current_nav else "#DCE9F2",
                     14, index == current_nav,
                 ),
             )
         _write_visual(page_dir, title, "nav", _navigator(""))
-        _write_visual(page_dir, title, "owner", _textbox("", "Prepared by Anass ASSRI\nWorkforce Management", 18, 878, 140, 42, 9, "#9FB3C8", 10, False, "center"))
-        _write_visual(page_dir, title, "page title", _textbox("", f"WFM HUB  |  {title.upper()}", 210, 10, 760, 32, 18, "#FFFFFF", 10, True))
-        _write_visual(page_dir, title, "subtitle", _textbox("", page["subtitle"], 820, 16, 680, 24, 10, "#C9D7E3", 10, False, "right"))
-        _write_visual(page_dir, title, "status panel", _shape("", 1520, 13, 128, 32, "#007C83", 8, rounded=True))
-        _write_visual(page_dir, title, "status", _textbox("", page["status"], 1525, 20, 118, 18, 9, "#FFFFFF", 10, True, "center"))
+        _write_visual(page_dir, title, "business rule", _textbox("", "BUSINESS RULE\n" + page["rule"], 24, 792, 162, 104, 10, "#AFC2CF", 10, False, "left"))
+        _write_visual(page_dir, title, "page title", _textbox("", title.upper(), 235, 11, 720, 30, 25, "#17324D", 10, True))
+        _write_visual(page_dir, title, "subtitle", _textbox("", page["subtitle"], 235, 43, 850, 20, 11, "#607587", 10, False))
+        _write_visual(page_dir, title, "update", _textbox("", "Last Hub update · refresh the governed feed", 1150, 24, 330, 20, 10, "#607587", 10, False, "right"))
+        _write_visual(page_dir, title, "status panel", _shape("", 1494, 19, 156, 34, "#E4F4F4", 8, rounded=True))
+        _write_visual(page_dir, title, "status", _textbox("", page["status"], 1500, 27, 144, 18, 9, "#08757D", 10, True, "center"))
 
         # One compact selector strip shared by every page.
-        _write_visual(page_dir, title, "selector panel", _shape("", 196, 70, 1456, 70, "#FFFFFF", 3, rounded=True))
-        slicer_x = (212, 570, 928, 1286)
-        for index, ((table, field, label, mode), x) in enumerate(zip(page["slicers"], slicer_x), 1):
-            _write_visual(page_dir, title, f"slicer {index}", _slicer("", table, field, label, mode, x, 72, 340, 66))
+        _write_visual(page_dir, title, "selector panel", _shape("", 228, 85, 1434, 58, "#FFFFFF", 3, rounded=True))
+        slicer_layout = ((240, 270), (522, 235), (769, 235), (1016, 270))
+        for index, ((table, field, label, mode), (x, width)) in enumerate(zip(page["slicers"], slicer_layout), 1):
+            _write_visual(page_dir, title, f"slicer {index}", _slicer("", table, field, label, mode, x, 88, width, 52))
+        _write_visual(page_dir, title, "scope panel", _shape("", 1298, 94, 352, 40, "#E9F5F5", 4, rounded=True))
+        _write_visual(page_dir, title, "scope accent", _shape("", 1298, 94, 4, 40, "#008B95", 5))
+        _write_visual(page_dir, title, "scope", _textbox("", page["scope"], 1310, 98, 328, 32, 9, "#315169", 10, False))
 
         # Four aligned KPI cards with a restrained semantic accent.
-        card_x = (196, 562, 928, 1294)
+        card_x = (228, 590, 951, 1313)
         for index, ((table, measure, label, accent, subtext), x) in enumerate(zip(page["cards"], card_x), 1):
-            _write_visual(page_dir, title, f"card panel {index}", _shape("", x, 152, 350, 147, "#FFFFFF", 3, rounded=True))
-            _write_visual(page_dir, title, f"card accent {index}", _shape("", x, 152, 8, 147, accent, 4, rounded=True))
-            _write_visual(page_dir, title, f"card {index}", _card("", table, measure, label, accent, x + 8, 154, 338, 108))
-            _write_visual(page_dir, title, f"card note {index}", _textbox("", subtext, x + 28, 268, 300, 20, 9, "#61758A", 10, False))
+            _write_visual(page_dir, title, f"card panel {index}", _shape("", x, 153, 349, 119, "#FFFFFF", 3, rounded=True))
+            _write_visual(page_dir, title, f"card accent {index}", _shape("", x, 153, 6, 119, accent, 4, rounded=True))
+            _write_visual(page_dir, title, f"card {index}", _card("", table, measure, label, accent, x + 8, 155, 337, 84))
+            _write_visual(page_dir, title, f"card note {index}", _textbox("", subtext, x + 24, 244, 305, 20, 9, "#607587", 10, False))
 
         # The two analytical panels occupy the same visual rhythm on all pages.
-        chart_positions = ((196, 311, 716, 311), (928, 311, 724, 311))
+        chart_positions = (
+            ((228, 282, 711, 330), (951, 282, 711, 330))
+            if page.get("equal_charts") else
+            ((228, 282, 872, 330), (1112, 282, 550, 330))
+        )
         for index, (chart, position) in enumerate(zip(page["charts"], chart_positions), 1):
             x, y, width, height = position
             _write_visual(page_dir, title, f"chart panel {index}", _shape("", x, y, width, height, "#FFFFFF", 3, rounded=True))
@@ -1178,16 +1222,16 @@ def _write_report(root: Path) -> None:
             _write_visual(page_dir, title, f"chart {index}", visual)
 
         table_layouts = {
-            "full": (196, 634, 1456, 250),
-            "left": (196, 634, 716, 250),
-            "right": (928, 634, 724, 250),
+            "full": (228, 622, 1434, 248),
+            "left": (228, 622, 711, 248),
+            "right": (951, 622, 711, 248),
         }
         for index, (table_title, table_fields, layout) in enumerate(page["tables"], 1):
             x, y, width, height = table_layouts[layout]
             _write_visual(page_dir, title, f"table panel {index}", _shape("", x, y, width, height, "#FFFFFF", 3, rounded=True))
             _write_visual(page_dir, title, f"table {index}", _table("", table_title, table_fields, x + 8, y + 6, width - 16, height - 12))
 
-        _write_visual(page_dir, title, "footer", _textbox("", "Prepared by Anass ASSRI | WFM   •   Internal operational use   •   Governed feed: POWERBI_MANIFEST_CURRENT.csv", 196, 902, 1456, 20, 8, "#64748B", 10, False, "right"))
+        _write_visual(page_dir, title, "footer", _textbox("", "Prepared by Anass ASSRI | WFM   •   Governed feed: POWERBI_MANIFEST_CURRENT.csv", 228, 910, 1434, 18, 8, "#687E8E", 10, False, "right"))
 
     _write_json(
         definition / "pages" / "pages.json",
@@ -1231,33 +1275,72 @@ def _write_report(root: Path) -> None:
     )
 
 
+def _validate_project(root: Path) -> None:
+    """Fail before publication when the generated PBIP is incomplete."""
+    for path in root.rglob("*.json"):
+        json.loads(path.read_text(encoding="utf-8"))
+    page_files = list((
+        root / f"{PROJECT_NAME}.Report" / "definition" / "pages"
+    ).glob("ReportSection*/page.json"))
+    if len(page_files) != len(PAGES):
+        raise ValueError(f"Generated {len(page_files)} report pages; expected {len(PAGES)}")
+    actual = {
+        json.loads(path.read_text(encoding="utf-8"))["displayName"]
+        for path in page_files
+    }
+    expected = {page["nav"] for page in PAGES}
+    if actual != expected:
+        raise ValueError(f"Generated page contract differs: {actual ^ expected}")
+    tables = root / f"{PROJECT_NAME}.SemanticModel" / "definition" / "tables"
+    missing = [spec.name for spec in TABLES if not (tables / f"{spec.name}.tmdl").exists()]
+    if missing:
+        raise ValueError(f"Generated semantic tables missing: {', '.join(missing)}")
+
+
 def build() -> Path:
-    if PROJECT_ROOT.exists():
-        shutil.rmtree(PROJECT_ROOT)
-    PROJECT_ROOT.mkdir(parents=True)
-    _write_model(PROJECT_ROOT)
-    _write_report(PROJECT_ROOT)
-    _write_json(
-        PROJECT_ROOT / f"{PROJECT_NAME}.SemanticModel" / ".platform",
-        {
-            "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
-            "metadata": {"type": "SemanticModel", "displayName": PROJECT_NAME},
-            "config": {"version": "2.0", "logicalId": _stable_guid("WFMHub BI Semantic Model")},
-        },
-    )
-    _write_json(
-        PROJECT_ROOT / f"{PROJECT_NAME}.pbip",
-        {"$schema": "https://developer.microsoft.com/json-schemas/fabric/pbip/pbipProperties/1.0.0/schema.json", "version": "1.0", "artifacts": [{"report": {"path": f"{PROJECT_NAME}.Report"}}], "settings": {"enableAutoRecovery": True}},
-    )
-    (PROJECT_ROOT / "PROJECT_VERSION.txt").write_text("5\n", encoding="utf-8")
-    (PROJECT_ROOT / "README.txt").write_text(
-        "WFMHUB BI\n=========\n\n"
-        "Open WFMHub BI.pbip with Microsoft Power BI Desktop, then choose Home > Refresh.\n"
-        "The HubRoot parameter is set automatically when this project is opened through POWERBI.cmd.\n"
-        "The model reads only Feed\\PowerBI CSVs and never reads SQLite or raw extracts.\n"
-        "PCS remains a separate collaborative Excel product and is not imported into this WFM-only model.\n",
-        encoding="utf-8",
-    )
+    PROJECT_ROOT.parent.mkdir(parents=True, exist_ok=True)
+    staged = Path(tempfile.mkdtemp(prefix=".WFMHubBI-build-", dir=PROJECT_ROOT.parent))
+    backup = PROJECT_ROOT.parent / f".WFMHubBI-backup-{uuid.uuid4().hex}"
+    try:
+        _write_model(staged)
+        _write_report(staged)
+        _write_json(
+            staged / f"{PROJECT_NAME}.SemanticModel" / ".platform",
+            {
+                "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+                "metadata": {"type": "SemanticModel", "displayName": PROJECT_NAME},
+                "config": {"version": "2.0", "logicalId": _stable_guid("WFMHub BI Semantic Model")},
+            },
+        )
+        _write_json(
+            staged / f"{PROJECT_NAME}.pbip",
+            {"$schema": "https://developer.microsoft.com/json-schemas/fabric/pbip/pbipProperties/1.0.0/schema.json", "version": "1.0", "artifacts": [{"report": {"path": f"{PROJECT_NAME}.Report"}}], "settings": {"enableAutoRecovery": True}},
+        )
+        (staged / "PROJECT_VERSION.txt").write_text("6\n", encoding="utf-8")
+        (staged / "README.txt").write_text(
+            "WFMHUB BI\n=========\n\n"
+            "Open WFMHub BI.pbip with Microsoft Power BI Desktop, then choose Home > Refresh.\n"
+            "The HubRoot parameter is set automatically when this project is opened through POWERBI.cmd.\n"
+            "The model reads only Feed\\PowerBI CSVs and never reads SQLite or raw extracts.\n"
+            "The five pages follow the WFM cycle: forecast, staff preparation, intraday, attendance review and performance review.\n"
+            "PCS remains a separate collaborative Excel product and is not imported into this WFM-only model.\n",
+            encoding="utf-8",
+        )
+        _validate_project(staged)
+        if PROJECT_ROOT.exists():
+            PROJECT_ROOT.replace(backup)
+        try:
+            staged.replace(PROJECT_ROOT)
+        except Exception:
+            if backup.exists() and not PROJECT_ROOT.exists():
+                backup.replace(PROJECT_ROOT)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup)
+    except Exception:
+        if staged.exists():
+            shutil.rmtree(staged)
+        raise
     reference = [
         "// AUDIT REFERENCE — generated by tools/build_powerbi_project.py",
         "// The live measures are stored beside their owning facts in WFMHub BI.SemanticModel/definition/tables.",

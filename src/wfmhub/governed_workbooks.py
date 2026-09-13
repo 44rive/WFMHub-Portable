@@ -210,7 +210,7 @@ def _schedule_variant_sheet(report: ExcelReport, conn: DatabaseConnection) -> No
     )
     ws = report.add_table_sheet(
         "SCHEDULE_SOURCES", "Verint schedule source roles",
-        "START_END drives shifts. ACTIVITIES may supply a Shift Assignment boundary fallback only; it is not observed attendance or a final ledger.",
+        "START_END alone drives shifts. ACTIVITIES is final absence/shrinkage and correction-overlap evidence; it never supplies schedule or observed attendance.",
         headers, rows,
     )
     _color_statuses(report, ws, headers, rows, "status", {"SUCCESS": "good", "ERROR": "bad"})

@@ -1,7 +1,8 @@
 # WFMHub Power BI — premium design proposal V1
 
-Status: **superseded by `POWERBI_WFM_CONTROL_TOWER_V2.md` and retained as a
-historical design reference**
+Status: **archived; superseded by `POWERBI_WFM_CYCLE.md` and project contract 6**
+
+Do not implement this file. It is retained only as design history.
 
 The existing Excel reports remain part of WFMHub. Power BI is a separate
 analytical and management layer. Prototype values shown below are illustrative;

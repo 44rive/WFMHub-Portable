@@ -75,6 +75,9 @@ Forecast Volume = SUM('Forecast'[Volume Forecast])
 Forecast AHT Seconds = DIVIDE(SUMX('Forecast', 'Forecast'[Volume Forecast] * 'Forecast'[AHT Forecast Seconds]), [Forecast Volume])
 Required FTE = AVERAGEX(SUMMARIZE('Forecast', 'Forecast'[Date], 'Forecast'[Time Slot], "Interval FTE", SUM('Forecast'[FTE Required])), [Interval FTE])
 Requirement Intervals = COUNT('Forecast'[FTE Required])
+Expected Requirement Intervals = COUNTROWS('Forecast')
+Requirement Coverage % = DIVIDE([Requirement Intervals], [Expected Requirement Intervals])
+Required FTE Hours = SUMX('Forecast', 'Forecast'[FTE Required] * DIVIDE('Forecast'[Interval Minutes], 60))
 Peak Required FTE = MAXX(SUMMARIZE('Forecast', 'Forecast'[Date], 'Forecast'[Time Slot], "Interval FTE", SUM('Forecast'[FTE Required])), [Interval FTE])
 
 // Staffing
@@ -93,6 +96,14 @@ Coverage % = IF(ISBLANK([Required FTE]), BLANK(), DIVIDE([Average Scheduled FTE]
 Peak Shortage FTE = MINX(SUMMARIZECOLUMNS('Date'[Date], 'Time'[Quarter Hour Index], "Gap", IF(ISBLANK([Required FTE]), BLANK(), [Average Scheduled FTE] - [Required FTE])), [Gap])
 Critical Intervals = COUNTROWS(FILTER(SUMMARIZECOLUMNS('Date'[Date], 'Time'[Quarter Hour Index], "Gap", IF(ISBLANK([Required FTE]), BLANK(), [Average Scheduled FTE] - [Required FTE])), NOT ISBLANK([Gap]) && [Gap] < -1))
 Current Productive Gap FTE = IF(ISBLANK([Required FTE]), BLANK(), [Average Productive FTE] - [Required FTE])
+Present FTE Gap = IF(ISBLANK([Required FTE]), BLANK(), [Average Observed FTE] - [Required FTE])
+Gross Scheduled FTE Hours = SUM('Staffing'[Gross Scheduled FTE]) * 0.25
+Net Scheduled FTE Hours = SUM('Staffing'[Scheduled FTE]) * 0.25
+PTO / Away FTE Hours = SUM('Staffing'[Planned Time Off FTE]) * 0.25
+Observed FTE Hours = SUM('Staffing'[Observed FTE]) * 0.25
+Productive FTE Hours = SUM('Staffing'[Productive FTE]) * 0.25
+Scheduled Coverage % = DIVIDE([Net Scheduled FTE Hours], [Required FTE Hours])
+Uncovered FTE Hours = MAX([Required FTE Hours] - [Net Scheduled FTE Hours], 0)
 
 // Attendance
 Due HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0)
@@ -135,9 +146,19 @@ Integrity Cases = CALCULATE(COUNTROWS('Schedule Integrity'), 'Schedule Integrity
 Start Hour Value = SUM('Shift Placement'[Start Hour])
 Published Placement Hours = SUM('Shift Placement'[Published Hours])
 Observed Placement Hours = SUM('Shift Placement'[Observed Hours])
+Placement Duration Hours = SUM('Shift Placement'[Duration Hours])
 
 // Attendance Gap
 Total Gap Minutes = SUM('Attendance Gap'[Gap Minutes])
+Residual Gap Hours = DIVIDE([Total Gap Minutes], 60)
+
+// Break Meal
+Total Break Overrun Minutes = SUM('Break Meal'[Break Overrun Minutes])
+Total Meal Overrun Minutes = SUM('Break Meal'[Meal Overrun Minutes])
+Break / Meal Alerts = CALCULATE(COUNTROWS('Break Meal'), 'Break Meal'[Alert] IN {"BREAK EXCEEDED","MEAL EXCEEDED","BREAK & MEAL EXCEEDED"})
+
+// Operational Action
+Operational Actions = COUNTROWS('Operational Action')
 
 // Time Off
 PTO / Away HC = DISTINCTCOUNT('Time Off'[Agent Day Key])

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "187f83411812d975842b",
   "position": {
-    "x": 204,
-    "y": 640,
+    "x": 236,
+    "y": 628,
     "z": 400,
-    "height": 238,
-    "width": 1440,
+    "height": 236,
+    "width": 1418,
     "tabOrder": 400
   },
   "visual": {
@@ -59,6 +59,34 @@
             },
             {
               "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Planning Group"
+                    }
+                  },
+                  "Property": "Planning Group"
+                }
+              },
+              "queryRef": "Planning Group.Planning Group",
+              "nativeQueryRef": "Planning Group"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staff Type"
+                    }
+                  },
+                  "Property": "Staff Type"
+                }
+              },
+              "queryRef": "Staff Type.Staff Type",
+              "nativeQueryRef": "Staff Type"
+            },
+            {
+              "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
@@ -93,39 +121,25 @@
                       "Entity": "Staffing"
                     }
                   },
-                  "Property": "Net Capacity Gap FTE"
-                }
-              },
-              "queryRef": "Staffing.Net Capacity Gap FTE",
-              "nativeQueryRef": "Net Capacity Gap FTE"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Staffing"
-                    }
-                  },
-                  "Property": "Coverage %"
-                }
-              },
-              "queryRef": "Staffing.Coverage %",
-              "nativeQueryRef": "Coverage %"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Staffing"
-                    }
-                  },
                   "Property": "PTO / Away FTE"
                 }
               },
               "queryRef": "Staffing.PTO / Away FTE",
               "nativeQueryRef": "PTO / Away FTE"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staffing"
+                    }
+                  },
+                  "Property": "Net Capacity Gap FTE"
+                }
+              },
+              "queryRef": "Staffing.Net Capacity Gap FTE",
+              "nativeQueryRef": "Net Capacity Gap FTE"
             }
           ]
         }
@@ -291,7 +305,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'STAFF PREPARATION ACTIONS'"
+                  "Value": "'STAFFING GAPS TO TREAT'"
                 }
               }
             },

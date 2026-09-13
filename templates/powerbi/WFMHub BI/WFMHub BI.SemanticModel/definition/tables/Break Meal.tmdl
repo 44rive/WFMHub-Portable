@@ -1,0 +1,149 @@
+/// Evidence-gated break and meal control using the same rules as Attendance Review.
+table 'Break Meal'
+
+	/// Evidence-supported break minutes above the configured allowance.
+	measure 'Total Break Overrun Minutes' = ```
+			SUM('Break Meal'[Break Overrun Minutes])
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance review'
+
+	/// Evidence-supported meal minutes above the configured allowance.
+	measure 'Total Meal Overrun Minutes' = ```
+			SUM('Break Meal'[Meal Overrun Minutes])
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance review'
+
+	/// Completed evidence-supported agent-days exceeding a configured allowance.
+	measure 'Break / Meal Alerts' = ```
+			CALCULATE(COUNTROWS('Break Meal'), 'Break Meal'[Alert] IN {"BREAK EXCEEDED","MEAL EXCEEDED","BREAK & MEAL EXCEEDED"})
+			```
+		formatString: #,##0
+		displayFolder: 'Attendance review'
+
+	column 'Date'
+		dataType: dateTime
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'LOB'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: LOB
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Team Leader'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Team Leader
+
+	column 'Agent ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent ID
+
+	column 'Agent'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Agent
+
+	column 'Scheduled Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Scheduled Start
+
+	column 'Scheduled End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Scheduled End
+
+	column 'Status Coverage %'
+		dataType: decimal
+		sourceColumn: Status Coverage %
+
+	column 'Break Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Break Minutes
+
+	column 'Break Allowance Minutes'
+		dataType: int64
+		sourceColumn: Break Allowance Minutes
+
+	column 'Break Overrun Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Break Overrun Minutes
+
+	column 'Break Spells'
+		dataType: int64
+		sourceColumn: Break Spells
+
+	column 'Longest Break Minutes'
+		dataType: int64
+		sourceColumn: Longest Break Minutes
+
+	column 'Meal Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Meal Minutes
+
+	column 'Meal Allowance Minutes'
+		dataType: int64
+		sourceColumn: Meal Allowance Minutes
+
+	column 'Meal Overrun Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Meal Overrun Minutes
+
+	column 'Meal Spells'
+		dataType: int64
+		sourceColumn: Meal Spells
+
+	column 'Longest Meal Minutes'
+		dataType: int64
+		sourceColumn: Longest Meal Minutes
+
+	column 'Alert'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Alert
+
+	column 'Evidence'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Evidence
+
+	partition 'Break Meal' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactBreakMealControl.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "LOB", "Management LOB", "Team Leader", "Agent ID", "Agent", "Scheduled Start", "Scheduled End", "Status Coverage %", "Break Minutes", "Break Allowance Minutes", "Break Overrun Minutes", "Break Spells", "Longest Break Minutes", "Meal Minutes", "Meal Allowance Minutes", "Meal Overrun Minutes", "Meal Spells", "Longest Meal Minutes", "Alert", "Evidence"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Status Coverage %", "Break Minutes", "Break Allowance Minutes", "Break Overrun Minutes", "Break Spells", "Longest Break Minutes", "Meal Minutes", "Meal Allowance Minutes", "Meal Overrun Minutes", "Meal Spells", "Longest Meal Minutes"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"LOB", type text}, {"Management LOB", type text}, {"Team Leader", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Scheduled Start", type text}, {"Scheduled End", type text}, {"Status Coverage %", type number}, {"Break Minutes", Int64.Type}, {"Break Allowance Minutes", Int64.Type}, {"Break Overrun Minutes", Int64.Type}, {"Break Spells", Int64.Type}, {"Longest Break Minutes", Int64.Type}, {"Meal Minutes", Int64.Type}, {"Meal Allowance Minutes", Int64.Type}, {"Meal Overrun Minutes", Int64.Type}, {"Meal Spells", Int64.Type}, {"Longest Meal Minutes", Int64.Type}, {"Alert", type text}, {"Evidence", type text}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

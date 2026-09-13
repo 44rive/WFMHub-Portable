@@ -1,4 +1,4 @@
-/// Two-row published/observed placement bridge used by the native Gantt-style chart.
+/// Published, observed and exact residual placement bands used by the schedule review timeline.
 table 'Shift Placement'
 
 	/// Hours after midnight before the placement bar starts.
@@ -18,6 +18,13 @@ table 'Shift Placement'
 	/// Observed presence span for the placement chart.
 	measure 'Observed Placement Hours' = ```
 			SUM('Shift Placement'[Observed Hours])
+			```
+		formatString: 0.0
+		displayFolder: 'Schedule integrity'
+
+	/// Duration of the selected published, observed or residual band.
+	measure 'Placement Duration Hours' = ```
+			SUM('Shift Placement'[Duration Hours])
 			```
 		formatString: 0.0
 		displayFolder: 'Schedule integrity'

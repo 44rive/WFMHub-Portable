@@ -1,5 +1,8 @@
 # WFMHub Power BI — WFM Control Tower V2
 
+> Archived. Superseded by `POWERBI_WFM_CYCLE.md` and project contract 6. The
+> seven/eight-page navigation below is not current product authority.
+
 | Field | Value |
 |---|---|
 | Report contract | `WFMHUB-PBI-5` |

@@ -21,6 +21,7 @@ analytics_rules = "config/analytics_rules.toml"
 report_catalog = "config/report_catalog.toml"
 queue_mapping = "config/queue_mapping.csv"
 service_profiles = "config/service_profiles.toml"
+capacity_mapping = "config/capacity_mapping.csv"
 
 [sources]
 # FTE Agent is the authoritative "our agents" roster. Schedule, LILO, and

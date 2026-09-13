@@ -2,55 +2,61 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "e81a34d57673d8077ea2",
   "position": {
-    "x": 936,
-    "y": 317,
-    "z": 350,
-    "height": 299,
-    "width": 708,
-    "tabOrder": 350
+    "x": 1120,
+    "y": 288,
+    "z": 400,
+    "height": 318,
+    "width": 534,
+    "tabOrder": 400
   },
   "visual": {
-    "visualType": "matrix",
+    "visualType": "tableEx",
     "query": {
       "queryState": {
-        "Rows": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Management LOB"
-                    }
-                  },
-                  "Property": "Management LOB"
-                }
-              },
-              "queryRef": "Management LOB.Management LOB",
-              "nativeQueryRef": "Management LOB"
-            }
-          ]
-        },
-        "Columns": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Date"
-                    }
-                  },
-                  "Property": "Date"
-                }
-              },
-              "queryRef": "Date.Date",
-              "nativeQueryRef": "Date"
-            }
-          ]
-        },
         "Values": {
           "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Planning Group"
+                    }
+                  },
+                  "Property": "Planning Group"
+                }
+              },
+              "queryRef": "Planning Group.Planning Group",
+              "nativeQueryRef": "Planning Group"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staff Type"
+                    }
+                  },
+                  "Property": "Staff Type"
+                }
+              },
+              "queryRef": "Staff Type.Staff Type",
+              "nativeQueryRef": "Staff Type"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Forecast"
+                    }
+                  },
+                  "Property": "Required FTE"
+                }
+              },
+              "queryRef": "Forecast.Required FTE",
+              "nativeQueryRef": "Required FTE"
+            },
             {
               "field": {
                 "Measure": {
@@ -59,11 +65,25 @@
                       "Entity": "Staffing"
                     }
                   },
-                  "Property": "Coverage %"
+                  "Property": "Average Scheduled FTE"
                 }
               },
-              "queryRef": "Staffing.Coverage %",
-              "nativeQueryRef": "Coverage %"
+              "queryRef": "Staffing.Average Scheduled FTE",
+              "nativeQueryRef": "Average Scheduled FTE"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staffing"
+                    }
+                  },
+                  "Property": "Net Capacity Gap FTE"
+                }
+              },
+              "queryRef": "Staffing.Net Capacity Gap FTE",
+              "nativeQueryRef": "Net Capacity Gap FTE"
             }
           ]
         }
@@ -73,6 +93,20 @@
       "columnHeaders": [
         {
           "properties": {
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "fontColor": {
               "solid": {
                 "color": {
@@ -90,23 +124,6 @@
                   "expr": {
                     "Literal": {
                       "Value": "'#17324D'"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      ],
-      "rowHeaders": [
-        {
-          "properties": {
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#263B50'"
                     }
                   }
                 }
@@ -139,6 +156,80 @@
                   }
                 }
               }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#263B50'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F5F8FA'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "9L"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "gridVertical": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "gridHorizontal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4L"
+                }
+              }
+            },
+            "outlineColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#E5EBF0'"
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -158,7 +249,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'COVERAGE RISK BY LOB & DAY'"
+                  "Value": "'CAPACITY BY PLANNING GROUP'"
                 }
               }
             },

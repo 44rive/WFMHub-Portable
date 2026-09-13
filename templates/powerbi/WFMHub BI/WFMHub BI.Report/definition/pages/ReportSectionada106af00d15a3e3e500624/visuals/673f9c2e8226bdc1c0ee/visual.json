@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "673f9c2e8226bdc1c0ee",
   "position": {
-    "x": 956,
-    "y": 268,
+    "x": 975,
+    "y": 244,
     "z": 10,
     "height": 20,
-    "width": 300,
+    "width": 305,
     "tabOrder": 10
   },
   "visual": {
@@ -19,12 +19,12 @@
               {
                 "textRuns": [
                   {
-                    "value": "Worst supported interval",
+                    "value": "Requirement not covered by net schedule",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "9px",
                       "fontWeight": "normal",
-                      "color": "#61758A"
+                      "color": "#607587"
                     }
                   }
                 ],

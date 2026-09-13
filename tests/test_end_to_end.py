@@ -288,7 +288,7 @@ class EndToEndTests(unittest.TestCase):
                     "2026-08-01 13:00:00",
                 )
 
-    def test_activities_shift_assignment_is_safe_schedule_fallback(self):
+    def test_activities_never_replace_a_missing_start_end_schedule(self):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "hub"
             source = Path(folder) / "source"
@@ -313,7 +313,7 @@ class EndToEndTests(unittest.TestCase):
             with write_session(config) as conn:
                 self.assertEqual(ingest_all(conn, config).failed, 0)
                 refresh_models(
-                    conn, config, "activities-fallback",
+                    conn, config, "activities-not-schedule",
                     date(2026, 8, 1), date(2026, 8, 1),
                     as_of=datetime(2026, 8, 1, 17, 0),
                 )
@@ -326,22 +326,16 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     conn.execute("SELECT count(*) FROM mart.attendance_agent_day").fetchone()[0],
-                    3,
-                )
-                self.assertEqual(
-                    conn.execute(
-                        "SELECT attendance_result FROM mart.attendance_agent_day WHERE agent_id='100'"
-                    ).fetchone()[0],
-                    "Present",
+                    0,
                 )
                 fallback_issue = conn.execute(
                     "SELECT severity, details FROM meta.quality_issue "
                     "WHERE issue_type='Dedicated StartEndTimes schedule not loaded'"
                 ).fetchone()
-                self.assertEqual(fallback_issue[0], "REVIEW")
-                self.assertIn("Activities Shift Assignment", fallback_issue[1])
+                self.assertEqual(fallback_issue[0], "ERROR")
+                self.assertIn("reserved for final absence/shrinkage", fallback_issue[1])
 
-    def test_activities_fills_start_end_coverage_per_agent_day(self):
+    def test_activities_do_not_fill_partial_start_end_coverage(self):
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "hub"
             source = Path(folder) / "source"
@@ -374,12 +368,12 @@ class EndToEndTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     conn.execute("SELECT count(*) FROM mart.attendance_agent_day").fetchone()[0],
-                    3,
+                    1,
                 )
                 self.assertEqual(
                     conn.execute(
                         "SELECT count(*) FROM meta.quality_issue "
-                        "WHERE issue_type='StartEndTimes coverage incomplete' AND severity='REVIEW'"
+                        "WHERE issue_type='StartEndTimes coverage incomplete' AND severity='ERROR'"
                     ).fetchone()[0],
                     1,
                 )

@@ -154,11 +154,14 @@ Every design change requires:
    parts, Data Model, macros or external links and reopens without repair;
 5. verification of all six fixed CSV schemas, Power Query destination tables,
    same-version tracker byte preservation, and migration action preservation;
-6. verification that attendance decisions still import from Excel row 4;
+6. verification that Attendance Review remains read-only and corrected gaps
+   disappear only through refreshed final Verint Activities evidence;
 7. a version bump when the report contract changes.
 
 ## Change log
 
+- `3.3.0`: standardizes the exact five-page Power BI WFM-cycle layout and its
+  separate service-queue versus Staff Type/Planning Group semantic grains.
 - `3.2.0`: adds cascading Overview selectors and a filtered Coaching view using
   precomputed caches and classic exact lookups.
 - `3.1.0`: replaces manual paste and the raw `DATA` sheet with five lightweight

@@ -1,0 +1,233 @@
+# WFMHub master product and business contract
+
+Contract version: `2.0.0`
+Applies to: WFMHub `0.32.0` and later
+Last reviewed: `2026-09-13`
+
+This is the single starting point for humans and coding assistants. Read it,
+`AGENTS.md`, and the effective configuration before changing the Hub. Current
+user instructions and dispatched code with passing tests override prose. Old
+conversation summaries, archived reports, TOLEARN examples, prototype folders,
+and unreachable builders are not current authority.
+
+## Mission and operating model
+
+WFMHub is a deterministic, portable WFM system for a restricted Windows work
+machine. It leaves source extracts untouched, scopes rows to the effective FTE
+roster, persists history in SQLite, calculates governed Python/SQL marts, and
+publishes focused Excel reports and a Power BI feed. There is no runtime AI,
+DuckDB, ODBC dependency, server database, Excel Data Model requirement, or
+adherence KPI. `prompts/COPILOT_WFM_ANALYST.md` is only an optional manual aid.
+
+The normal pipeline is:
+
+```text
+untouched extracts -> validated raw/core SQLite -> governed marts
+                   -> Excel decision products + fixed CSV feeds -> Power BI
+```
+
+`UPDATE.cmd` refreshes the durable database and publishes feeds. Report commands
+read the database; they do not parse raw files independently. Power BI reads
+only `Feed\PowerBI`, never SQLite or raw extracts. PCS remains its own permanent
+collaborative Excel tracker and is deliberately outside Power BI for now.
+
+## Source authority
+
+| Source | Governed purpose | Explicit exclusion |
+|---|---|---|
+| FTE Count `Agent` | Client ID, organisation, FTE, Active/Leaver scope | not attendance evidence |
+| FTE Count `PTO` / `Away` | expected-work overlay and future net capacity | does not change published assignment grain |
+| Verint StartEndTimes | published shift start/end and assignment | not observed presence |
+| Storm Agent Status | primary observed attendance, interval staffing, AUX, break and meal evidence | not final payroll absence coding |
+| Storm LILO | fallback/control when Agent Status evidence is insufficient | never overrides explicit Agent Status states |
+| Verint Activities | final post-day absence/shrinkage ledger and exact correction overlap | never creates observed attendance |
+| Verint Forecast / FTE Requirement | 15-minute Staff Type Volume and Full Time Equivalents Absolute Req | `Queue Name` is not a call queue |
+| Storm Call by Call | service counters, Flash, call workload and PCS call legs | not workforce requirement |
+| Bonus Matrix v1.2 | exact management bonus source/calculation contract | not a WFM attendance source |
+
+Row dates are authoritative. Filename dates are fallback hints only, so all
+source families support multi-day files. Client ID / Agent ID is text and is the
+primary identity. Ambiguous IDs are rejected; a unique normalized-name match may
+enrich organisation fields but must never silently pick one duplicate.
+
+FTE eligibility is date-aware: `Active` is included; `Leaver` is included only
+through a populated leave date; other statuses and undated leavers are excluded.
+The rule applies to schedules, status, LILO and agent-scoped Call-by-Call/PCS
+facts. Queue-scoped service demand retains every contact entering an exact
+configured queue, including abandons and transfers handled outside the roster.
+
+## Two grains that must never be mixed
+
+Service and capacity have separate governed maps.
+
+- Service grain: exact Call-by-Call queue allowlists from
+  `config/service_profiles.toml`. Counters roll to Management LOB. RSA BE service
+  level is one combined result across its exact FR and VL queues. A queue may
+  intentionally belong to more than one management view when the reviewed
+  service profile says so.
+- Capacity grain: forecast filename + Verint Staff Type and roster LOB +
+  published schedule assignment from `config/capacity_mapping.csv`. Capacity
+  rolls through Staff Type -> Planning Group -> Management LOB.
+
+Current planning roll-ups:
+
+| Management LOB | Planning group / workforce identity | Examples of Staff Type |
+|---|---|---|
+| RSA NL | RSA NL / `RSA NL` | NL RSA FO, NL RSA BO Dispatch |
+| RSA BE | RSA BE FR / `RSA FR` | BE RSA FO FR, BE RSA Dispatch FR |
+| RSA BE | RSA BE VL / `RSA VL` | BE RSA FO VL, BE RSA Dispatch VL |
+| FORD NL | FORD NL / `Ford Dutch` | NL RSA Ford Level 1/2 |
+| OEM | Ford FR / `OEM FR` | FR RSA Ford Level 1/2, FR RSA ACM |
+
+PTO/Away reduces gross published capacity to net published capacity while the
+underlying published assignment remains the Staff Type key. Unknown Staff Types
+or assignments remain visible with an `UNMAPPED_*` state; they are never guessed.
+
+## Core calculations
+
+Service Flash follows the supplied Storm business reference. Components are
+summed first and ratios are calculated afterward:
+
+```text
+Service Level = answered within target
+                / (offered - abandoned within target)
+
+Routed Rate = total routed / total entered
+
+AHT = summed handled seconds / answered calls
+```
+
+The exact service thresholds, targets, sources and queue allowlists are in
+`config/metric_catalog.toml`, `config/wfm_rules.toml`, and
+`config/service_profiles.toml`. Never average row-level SL or AHT percentages.
+
+Attendance is Agent Status first with LILO fallback. Missing source evidence is
+`Unknown`, not zero and not No Show. A confirmed No Show needs a completed shift
+and positive disconnection evidence. Late is an exact missing boundary after
+scheduled start; early leave is evaluated only after shift completion; a later
+return turns the middle period into an internal gap. Meal-classified AUX is
+shown as meal and does not become a correction gap. PTO/Away changes expected
+work before attendance classification.
+
+Attendance Review is read-only. Schedule plus Agent Status/LILO detects exact
+gap fragments. Final Verint Activities subtract exact temporal overlap. Fully
+covered fragments disappear on refresh; partial overlap leaves only the exact
+residual. No decision-import or manual state is required in the Hub.
+
+Final absence and shrinkage use Verint Activities only. Unsupported, empty-shift
+or unmapped evidence is a review state, never a zero. Absence and shrinkage are
+parallel rates against finalized planned net minutes and are not added together.
+
+Capacity arithmetic:
+
+```text
+net scheduled FTE = gross published FTE - approved PTO/effective Away FTE
+scheduled coverage = net scheduled FTE-hours / required FTE-hours
+future gap = net scheduled FTE - required FTE
+intraday present gap = Agent Status-first observed FTE - required FTE
+required FTE-hours = sum(required FTE * source interval minutes / 60)
+```
+
+Forecast Volume and Absolute Required FTE are independent measures. A blank
+Volume is not converted into zero requirement and a supplied requirement remains
+valid even when Volume is blank.
+
+PCS is ratio-of-sums: valid inbound Q1 score sum / valid inbound Q1 response
+count. Participation is nonblank inbound Q1 responses / inbound PCSStatus=1.
+Call legs are source routing records, not necessarily unique customer contacts.
+The permanent tracker is refreshed from fixed CSVs; users maintain coaching in
+the same shared workbook using the stable Coaching Key and Call ID.
+
+## Product contracts
+
+Operational Excel products:
+
+- RTM Daily Control: validated Service Flash plus per-LOB attendance pulse and
+  call/follow-up lists. Present includes late; confirmed No Show and Unknown are
+  distinct.
+- Attendance Review: completed schedule/observed timeline, exact residual
+  correction intervals, and evidence-gated break/meal control.
+- PCS Operational Tracker: permanent collaborative Power Query workbook. Do not
+  regenerate it merely to update data; refresh its fixed feed and preserve keyed
+  coaching actions.
+
+In development: Staffing & Capacity Plan, Realisations, Final Absenteeism,
+Bonus Management. They may be used for validation but do not get silently
+promoted to operational status.
+
+The PTO/Away submission app is a separate future Microsoft Power Platform
+project. Its accepted contract is `docs/PTO_AWAY_APP_IMPLEMENTATION.md`; tenant
+construction/deployment still requires the user's Microsoft environment.
+
+## Power BI contract 6
+
+The shipped source-controlled project is
+`templates/powerbi/WFMHub BI/WFMHub BI.pbip`. `POWERBI.cmd` installs or upgrades
+it under `Reports\Power BI`, changes only the local `HubRoot` parameter and opens
+it. A Hub update publishes the fixed schema-6 feed and manifest atomically;
+Power BI Desktop then performs its own Refresh.
+
+The report has exactly five 1680x945 pages following the approved screenshots:
+
+1. Forecast & Requirement
+2. Staff Preparation
+3. Intraday Control
+4. Attendance & Schedule Review
+5. Performance Review
+
+Every page uses the same 210-pixel navy rail, 72-pixel white header, 58-pixel
+filter/scope strip, four compact 119-pixel cards, two 330-pixel analysis panels,
+and one 248-pixel action/detail table. The pixel reference is
+`docs/design-prototypes/wfm-manager-cycle-v1/cycle-pages.html` and its five PNGs.
+Do not replace this with generic cards, invented KPIs, AI-style prose or extra
+pages. PCS is not imported.
+
+Page grain rules:
+
+- Forecast: Staff Type at native 15 minutes; no service-level calculation.
+- Staff Preparation: Planning Group/Staff Type requirement versus published net
+  schedule; no call queues.
+- Intraday: service stays combined at Management LOB while resource rows remain
+  split by Planning Group/Staff Type.
+- Attendance: Agent Status-first published/observed/residual bands, exact
+  Activities overlap, break and meal evidence.
+- Performance: standard WFM cycle measures only; no synthetic score or claimed
+  causal attribution.
+
+## Repository map and change discipline
+
+- `src/wfmhub/ingestion.py`: untouched-source parsers and idempotent ingestion
+- `src/wfmhub/models.py`: attendance, staffing, service, PCS and final ledgers
+- `src/wfmhub/capacity_mapping.py`: capacity mapping validation and safe default merge
+- `src/wfmhub/powerbi.py`: fixed Power BI feed contract
+- `tools/build_powerbi_project.py`: semantic model and exact five-page PBIP
+- `src/wfmhub/report_packs.py`: current Excel product dispatch authority
+- `src/wfmhub/decision_products.py`: active report builders
+- `config/default_*`: shipped defaults; user files are durable runtime state
+- `sql/migrations`: append-only SQLite schema upgrades
+- `tests`: release gate
+
+Never delete or overwrite user configuration, database, backups, extracts,
+reports, Feed, attachments or coaching history during an upgrade. Default-map
+changes merge missing identities into user copies and create a backup first.
+Database migrations are append-only and existing history survives a release.
+Generated PBIP source is built in a temporary sibling and replaces the checked-in
+project only after JSON, page and table validation succeeds.
+
+Release gate: compile, regenerate PBIP, run the complete unit suite, build the
+portable package, smoke-test the staged package, inspect the diff, then commit,
+push `main`, tag the version and publish the GitHub release artifact.
+
+## Known boundaries
+
+- Power BI Desktop is the final renderer; repo validation can prove JSON/TMDL
+  structure and visual bindings but not substitute for one Desktop-open check.
+- Capacity-map `UNMAPPED_*` states require a reviewed config row; do not infer.
+- Schedule Integrity recurrence is supported evidence, not proof of intent.
+- Pressure signals are investigation leads, not mathematical SL causality.
+- PTO/Away Power Apps deployment and SharePoint permissions remain tenant work.
+
+Supporting operator documentation begins at `docs/BEGINNER_GUIDE.md` and
+`docs/POWERBI_BEGINNER_GUIDE.md`. Formula governance is documented in
+`docs/METRIC_CATALOG_GUIDE.md`; exact service logic is in
+`docs/SERVICE_KPI_REFERENCE.md`.

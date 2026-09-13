@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "91368b65d82aab8f6fc3",
   "position": {
-    "x": 28,
-    "y": 285,
+    "x": 26,
+    "y": 336,
     "z": 14,
-    "height": 20,
-    "width": 124,
+    "height": 28,
+    "width": 158,
     "tabOrder": 14
   },
   "visual": {
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "04  Realisation",
+                    "value": "4   Attendance & Schedule Review",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "9px",
+                      "fontSize": "11px",
                       "fontWeight": "normal",
                       "color": "#DCE9F2"
                     }

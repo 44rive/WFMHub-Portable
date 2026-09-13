@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "19c81872cf3ea7ce5794",
   "position": {
-    "x": 204,
-    "y": 317,
+    "x": 236,
+    "y": 288,
     "z": 300,
-    "height": 299,
-    "width": 700,
+    "height": 318,
+    "width": 856,
     "tabOrder": 300
   },
   "visual": {
@@ -244,7 +244,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'REQUIRED VS NET SCHEDULED CAPACITY'"
+                  "Value": "'REQUIRED FTE vs NET SCHEDULED FTE'"
                 }
               }
             },

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "d531bbdbf22d0dad5ab8",
   "position": {
-    "x": 928,
-    "y": 72,
+    "x": 769,
+    "y": 88,
     "z": 100,
-    "height": 66,
-    "width": 340,
+    "height": 52,
+    "width": 235,
     "tabOrder": 100
   },
   "visual": {
@@ -20,14 +20,14 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Date"
+                      "Entity": "Planning Group"
                     }
                   },
-                  "Property": "Weekday"
+                  "Property": "Planning Group"
                 }
               },
-              "queryRef": "Date.Weekday",
-              "nativeQueryRef": "Weekday"
+              "queryRef": "Planning Group.Planning Group",
+              "nativeQueryRef": "Planning Group"
             }
           ]
         }
@@ -60,7 +60,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'DAY OF WEEK'"
+                  "Value": "'PLANNING GROUP'"
                 }
               }
             },

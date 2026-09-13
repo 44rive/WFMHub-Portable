@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .analytics import build_findings, load_analytics_rules, validate_analytics_rules
 from .config import Config
+from .capacity_mapping import load_capacity_mapping
 from .database import DatabaseConnection, DatabaseCursor
 from .mapping import QueueMapping, load_queue_mapping
 from .metrics import MetricCatalog, MetricEvaluation, evaluate_metric, load_metric_catalog, validate_metric_catalog
@@ -162,15 +163,13 @@ def _load_schedules(conn: DatabaseConnection, start: date, end: date) -> list[di
                        ORDER BY CASE
                                   WHEN f.source_variant='START_END' AND r.parse_ok=true
                                        AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL THEN 0
-                                  WHEN f.source_variant='ACTIVITIES' AND r.parse_ok=true
-                                       AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL THEN 1
-                                  WHEN f.source_variant='START_END' THEN 2 ELSE 3
+                                  ELSE 1
                                 END,
                                 f.modified_at DESC NULLS LAST, f.file_name DESC
                    ) AS source_rank
             FROM raw.schedule_shift r
             JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
-            WHERE f.source_variant IN ('START_END','ACTIVITIES')
+            WHERE f.source_variant='START_END'
               AND r.schedule_date BETWEEN ? AND ?
         ), dedup AS (
             SELECT *, row_number() OVER (
@@ -877,6 +876,9 @@ def _build_attendance(
             "lob": agent.get("lob"), "market": agent.get("market"), "language": agent.get("language"), "location": agent.get("location"),
             "scheduled_start": start, "scheduled_end": end, "scheduled_minutes": scheduled_minutes,
             "assignment": effective_assignment, "assignment_type": effective_assignment_type,
+            # Capacity follows the published Verint assignment even when PTO or
+            # Away changes the effective attendance label for the day.
+            "_published_assignment": shift["assignment"],
             "planned_absence_minutes": planned_absence,
             "first_login": first, "last_logout": last, "source_loaded": source_loaded or status_source_loaded, "lilo_row_present": row_present,
             "seen_in_lilo": agent_id in seen_ids, "raw_late_minutes": raw_late, "raw_early_leave_minutes": raw_early,
@@ -1324,6 +1326,7 @@ def _build_corrections(
 
 STAFFING_COLUMNS = [
     "business_date", "interval_start", "interval_end", "lob", "language",
+    "planning_group", "staff_type", "capacity_mapping_status",
     "scheduled_agents", "observed_agents", "productive_agents", "auxiliary_agents",
     "scheduled_fte", "elapsed_scheduled_fte", "observed_fte", "productive_fte",
     "staffing_variance_fte", "staffing_gap_fte", "staffing_state",
@@ -1354,18 +1357,29 @@ def _overlap_seconds(left: datetime, right: datetime, start: datetime, end: date
 
 def _build_staffing(
     conn: DatabaseConnection,
+    config: Config,
     attendance: list[dict[str, Any]],
     as_of: datetime,
 ) -> int:
-    buckets: dict[tuple[date, datetime, str, str], dict[str, Any]] = {}
+    capacity_mapping = load_capacity_mapping(config.capacity_mapping)
+    buckets: dict[tuple[date, datetime, str, str, str, str], dict[str, Any]] = {}
 
     def bucket_for(row: dict[str, Any], left: datetime, right: datetime) -> dict[str, Any]:
         lob = str(row.get("lob") or "(blank)")
         language = str(row.get("language") or "(blank)")
-        key = (row["business_date"], left, lob, language)
+        capacity = capacity_mapping.map_schedule(
+            lob, row.get("_published_assignment") or row.get("assignment"),
+        )
+        key = (
+            row["business_date"], left, lob, language,
+            capacity.planning_group, capacity.staff_type,
+        )
         return buckets.setdefault(key, {
             "business_date": row["business_date"], "interval_start": left,
             "interval_end": right, "lob": lob, "language": language,
+            "planning_group": capacity.planning_group,
+            "staff_type": capacity.staff_type,
+            "capacity_mapping_status": capacity.status,
             "scheduled_ids": set(), "observed_ids": set(), "productive_ids": set(),
             "auxiliary_ids": set(), "scheduled_seconds": 0.0,
             "gross_scheduled_seconds": 0.0, "time_off_seconds": 0.0,
@@ -1478,6 +1492,7 @@ def _build_staffing(
         output.append({
             **{key: item[key] for key in (
                 "business_date", "interval_start", "interval_end", "lob", "language",
+                "planning_group", "staff_type", "capacity_mapping_status",
             )},
             "scheduled_agents": len(item["scheduled_ids"]),
             "observed_agents": len(item["observed_ids"]),
@@ -1495,7 +1510,10 @@ def _build_staffing(
             "gross_scheduled_fte": gross_scheduled_fte,
             "planned_time_off_fte": planned_time_off_fte,
         })
-    output.sort(key=lambda row: (row["business_date"], row["interval_start"], row["lob"], row["language"]))
+    output.sort(key=lambda row: (
+        row["business_date"], row["interval_start"], row["planning_group"],
+        row["staff_type"], row["lob"], row["language"],
+    ))
     conn.execute("DELETE FROM mart.staffing_interval")
     _insert_dicts(conn, "mart.staffing_interval", STAFFING_COLUMNS, output)
     return len(output)
@@ -1846,9 +1864,8 @@ def _build_verint_final_absence(
     end: date,
     as_of: datetime,
 ) -> tuple[int, int]:
-    # Prefer StartEndTimes as the expected agent-day roster. If it is absent,
-    # use only the Shift Assignment boundary parsed from Activities. Activity
-    # events remain post-day final evidence and never become observed presence.
+    # StartEndTimes alone defines the expected agent-day boundary. Activities
+    # remains post-day final evidence and never becomes schedule or presence.
     shifts = _dicts(conn.execute(
         """
         WITH ranked AS (
@@ -1860,9 +1877,7 @@ def _build_verint_final_absence(
                        ORDER BY CASE
                                   WHEN f.source_variant='START_END' AND r.parse_ok=true
                                        AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL THEN 0
-                                  WHEN f.source_variant='ACTIVITIES' AND r.parse_ok=true
-                                       AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL THEN 1
-                                  WHEN f.source_variant='START_END' THEN 2 ELSE 3
+                                  ELSE 1
                                 END,
                                 f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
                    ) AS row_rank
@@ -1870,7 +1885,7 @@ def _build_verint_final_absence(
             JOIN meta.source_file f ON f.file_id=r.source_file_id
             LEFT JOIN core.dim_agent d ON d.agent_id=r.agent_id
             WHERE f.active=true AND f.status='SUCCESS'
-              AND f.source_variant IN ('START_END','ACTIVITIES')
+              AND f.source_variant='START_END'
               AND r.schedule_date BETWEEN ? AND ? AND r.agent_id IS NOT NULL
         )
         SELECT * FROM ranked WHERE row_rank=1
@@ -3267,26 +3282,14 @@ def _build_quality(
         ).fetchall() if row[0]
     }
     if "START_END" not in schedule_variants:
-        activity_assignments = conn.execute(
-            """SELECT count(*) FROM raw.schedule_shift r
-               JOIN meta.source_file f ON f.file_id=r.source_file_id
-               WHERE f.active=true AND f.status='SUCCESS'
-                 AND f.source_variant='ACTIVITIES' AND r.parse_ok=true
-                 AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL"""
-        ).fetchone()[0]
         add(
             "schedule", str(config.source_path("schedule_folder")), None, None,
-            "Dedicated StartEndTimes schedule not loaded",
-            "REVIEW" if activity_assignments else "ERROR",
-            (
-                f"Using {activity_assignments:,} parsed Activities Shift Assignment boundaries; "
-                "load StartEndTimes when available for an independent schedule source."
-                if activity_assignments else
-                "No usable schedule boundary exists. Load StartEndTimes or an Activities export with Shift Assignment."
-            ),
+            "Dedicated StartEndTimes schedule not loaded", "ERROR",
+            "No governed schedule boundary exists. Load a StartEndTimes export; "
+            "Activities is reserved for final absence/shrinkage evidence.",
         )
     else:
-        fallback_assignments = conn.execute(
+        uncovered_activity_days = conn.execute(
             """SELECT count(*) FROM (
                    SELECT DISTINCT r.schedule_date, r.agent_id
                    FROM raw.schedule_shift r
@@ -3310,11 +3313,12 @@ def _build_quality(
                      )
                )"""
         ).fetchone()[0]
-        if fallback_assignments:
+        if uncovered_activity_days:
             add(
                 "schedule", str(config.source_path("schedule_folder")), None, None,
-                "StartEndTimes coverage incomplete", "REVIEW",
-                f"Using Activities Shift Assignment boundaries for {fallback_assignments:,} agent-day row(s) not covered by a valid StartEndTimes row.",
+                "StartEndTimes coverage incomplete", "ERROR",
+                f"{uncovered_activity_days:,} Activities agent-day row(s) have no "
+                "valid StartEndTimes boundary. They are not used as schedule fallback.",
             )
     rulebook = load_rulebook(config.home, config.business_rules)
     for row in _dicts(conn.execute(
@@ -3549,7 +3553,7 @@ def _schedule_integrity_history_start(
                FROM raw.schedule_shift r
                JOIN meta.source_file f ON f.file_id=r.source_file_id
                WHERE f.active=true AND f.status='SUCCESS'
-                 AND f.source_variant IN ('START_END','ACTIVITIES')
+                 AND f.source_variant='START_END'
                  AND r.agent_id IS NOT NULL AND r.parse_ok=true
                  AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL
                  AND r.scheduled_end>r.scheduled_start
@@ -3636,7 +3640,7 @@ def refresh_models(
         stage(9, "Reconciling observed gaps against final Verint Activities")
         corrections = _build_corrections(conn, rulebook, selected_attendance)
         stage(10, "Building LOB and language staffing intervals")
-        staffing = _build_staffing(conn, selected_attendance, evaluation_as_of)
+        staffing = _build_staffing(conn, config, selected_attendance, evaluation_as_of)
         stage(11, "Building shift evidence timelines")
         timeline = _build_shift_timeline(conn, selected_attendance, evaluation_as_of)
         schedule_integrity = _build_schedule_integrity(

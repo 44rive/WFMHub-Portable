@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "c822f3e8b8165a5fb49b",
   "position": {
-    "x": 196,
-    "y": 902,
+    "x": 228,
+    "y": 910,
     "z": 10,
-    "height": 20,
-    "width": 1456,
+    "height": 18,
+    "width": 1434,
     "tabOrder": 10
   },
   "visual": {
@@ -19,12 +19,12 @@
               {
                 "textRuns": [
                   {
-                    "value": "Prepared by Anass ASSRI | WFM   •   Internal operational use   •   Governed feed: POWERBI_MANIFEST_CURRENT.csv",
+                    "value": "Prepared by Anass ASSRI | WFM   •   Governed feed: POWERBI_MANIFEST_CURRENT.csv",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "8px",
                       "fontWeight": "normal",
-                      "color": "#64748B"
+                      "color": "#687E8E"
                     }
                   }
                 ],

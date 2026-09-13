@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "839e86e87166d574f285",
   "position": {
-    "x": 1525,
-    "y": 20,
+    "x": 1500,
+    "y": 27,
     "z": 10,
     "height": 18,
-    "width": 118,
+    "width": 144,
     "tabOrder": 10
   },
   "visual": {
@@ -19,12 +19,12 @@
               {
                 "textRuns": [
                   {
-                    "value": "PLANNING",
+                    "value": "NEXT 14 DAYS",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "9px",
                       "fontWeight": "bold",
-                      "color": "#FFFFFF"
+                      "color": "#08757D"
                     }
                   }
                 ],

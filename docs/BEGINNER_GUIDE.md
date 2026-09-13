@@ -17,7 +17,7 @@ portable Hub.
 - `SETUP.cmd`: use it once after extracting WFMHub.
 - `UPGRADE.cmd`: use it only when a new release was extracted into a different folder.
 - `WFMHub.cmd`: use it for normal work.
-- `POWERBI.cmd`: open the already-built eight-page Power BI project after a
+- `POWERBI.cmd`: open the already-built five-page Power BI project after a
   full Hub update.
 
 Never move only the `.cmd` file. Keep the full WFMHub folder together.

@@ -1,11 +1,18 @@
 /// Exact start/end attendance gaps prepared for human review.
 table 'Attendance Gap'
 
-	/// Summed exact review-gap minutes.
+	/// Summed exact residual review-gap minutes.
 	measure 'Total Gap Minutes' = ```
 			SUM('Attendance Gap'[Gap Minutes])
 			```
 		formatString: #,##0
+		displayFolder: 'Attendance review'
+
+	/// Exact residual gap hours still unsupported by final Verint Activities.
+	measure 'Residual Gap Hours' = ```
+			DIVIDE([Total Gap Minutes], 60)
+			```
+		formatString: #,##0.0
 		displayFolder: 'Attendance review'
 
 	column 'Date'
@@ -113,6 +120,28 @@ table 'Attendance Gap'
 		summarizeBy: none
 		sourceColumn: Reconciliation
 
+	column 'Verint Activity'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Verint Activity
+
+	column 'Verint Category'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Verint Category
+
+	column 'Verint Overlap Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Verint Overlap Minutes
+
+	column 'Verint Source File'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Verint Source File
+
 	column 'Source File'
 		dataType: string
 		summarizeBy: none
@@ -124,9 +153,9 @@ table 'Attendance Gap'
 			let
 			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactAttendanceGap.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-			    Selected = Table.SelectColumns(Promoted, {"Date", "Correction ID", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Scheduled Start", "Scheduled End", "Gap Start", "Gap End", "Gap Minutes", "Detected Issue", "Priority", "Confidence", "Suggested Activity", "Observed Source", "Reconciliation", "Source File"}, MissingField.Error),
-			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Gap Minutes"}),
-			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Correction ID", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Scheduled Start", type text}, {"Scheduled End", type text}, {"Gap Start", type text}, {"Gap End", type text}, {"Gap Minutes", Int64.Type}, {"Detected Issue", type text}, {"Priority", type text}, {"Confidence", type text}, {"Suggested Activity", type text}, {"Observed Source", type text}, {"Reconciliation", type text}, {"Source File", type text}}, "en-US")
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Correction ID", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Scheduled Start", "Scheduled End", "Gap Start", "Gap End", "Gap Minutes", "Detected Issue", "Priority", "Confidence", "Suggested Activity", "Observed Source", "Reconciliation", "Verint Activity", "Verint Category", "Verint Overlap Minutes", "Verint Source File", "Source File"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Gap Minutes", "Verint Overlap Minutes"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Correction ID", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Scheduled Start", type text}, {"Scheduled End", type text}, {"Gap Start", type text}, {"Gap End", type text}, {"Gap Minutes", Int64.Type}, {"Detected Issue", type text}, {"Priority", type text}, {"Confidence", type text}, {"Suggested Activity", type text}, {"Observed Source", type text}, {"Reconciliation", type text}, {"Verint Activity", type text}, {"Verint Category", type text}, {"Verint Overlap Minutes", Int64.Type}, {"Verint Source File", type text}, {"Source File", type text}}, "en-US")
 			in
 			    Typed
 

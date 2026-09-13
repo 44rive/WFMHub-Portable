@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "9f588da7ceaa9ced0c0c",
   "position": {
-    "x": 28,
-    "y": 141,
+    "x": 26,
+    "y": 132,
     "z": 14,
-    "height": 20,
-    "width": 124,
+    "height": 28,
+    "width": 158,
     "tabOrder": 14
   },
   "visual": {
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "01  Daily Command",
+                    "value": "1   Forecast & Requirement",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "9px",
+                      "fontSize": "11px",
                       "fontWeight": "normal",
                       "color": "#DCE9F2"
                     }

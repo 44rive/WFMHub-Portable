@@ -1,0 +1,35 @@
+/// Capacity-planning roll-up below Management LOB; RSA BE FR and VL remain separate here.
+table 'Planning Group'
+
+	column 'Planning Group'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Planning Group
+
+	column 'Management LOB'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Management LOB
+
+	column 'Sort Order'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Sort Order
+
+	partition 'Planning Group' = m
+		mode: import
+		source =
+			let
+			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\DimPlanningGroup.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+			    Selected = Table.SelectColumns(Promoted, {"Planning Group", "Management LOB", "Sort Order"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Sort Order"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Planning Group", type text}, {"Management LOB", type text}, {"Sort Order", Int64.Type}}, "en-US")
+			in
+			    Typed
+
+	annotation PBI_ResultType = Table

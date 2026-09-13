@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.32.0 - 2026-09-13
+
+- Rebuild the source-controlled Power BI project around the approved five-page
+  WFM cycle: Forecast & Requirement, Staff Preparation, Intraday Control,
+  Attendance & Schedule Review and Performance Review, using the exact compact
+  1680x945 design geometry.
+- Separate Storm service queue scope from Verint capacity scope. Service uses
+  exact profile allowlists and RSA BE remains one combined SL result; forecast,
+  requirement and schedules use Staff Type -> Planning Group -> Management LOB,
+  with RSA BE FR and VL preserved separately for capacity.
+- Add a governed capacity mapping, mapping-state visibility, additive required
+  and scheduled FTE-hours, scheduled coverage, uncovered capacity, present gap,
+  a compact operational action feed and evidence-gated break/meal feed.
+- Keep PTO/Away on expected-work and net-capacity logic without replacing the
+  underlying published assignment used for Staff Type capacity.
+- Extend the Power BI attendance timeline with published, observed and exact
+  residual bands and include final Verint activity/overlap evidence in the
+  residual correction detail.
+- Build PBIP source into a validated temporary directory before atomic
+  replacement, preventing a failed generator from deleting the last good
+  project; advance the Power BI feed and project contracts to `6`.
+- Add `WFM_MASTER.md` as the canonical product/business reference, convert
+  `AI_CONTEXT.md` into its mandatory router, reconcile active operator docs and
+  archive the superseded Power BI concepts.
+- Advance the shared visual contract to `3.3.0`.
+
 ## 0.31.0 - 2026-09-12
 
 - Replace Attendance Review write-back with an automatic residual correction

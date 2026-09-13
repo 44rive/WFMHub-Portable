@@ -3,10 +3,10 @@
   "name": "96b8ed1b35346ee7f5a3",
   "position": {
     "x": 20,
-    "y": 17,
+    "y": 16,
     "z": 10,
-    "height": 48,
-    "width": 140,
+    "height": 45,
+    "width": 170,
     "tabOrder": 10
   },
   "visual": {
@@ -22,13 +22,13 @@
                     "value": "WFMHub",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "22px",
+                      "fontSize": "27px",
                       "fontWeight": "bold",
                       "color": "#FFFFFF"
                     }
                   }
                 ],
-                "horizontalTextAlignment": "center"
+                "horizontalTextAlignment": "left"
               }
             ]
           }

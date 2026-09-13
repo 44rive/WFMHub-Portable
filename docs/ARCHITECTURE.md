@@ -93,7 +93,7 @@ details remain in one module.
 | `raw.schedule_event` | One parsed event interval belonging to an admitted shift |
 | `raw.lilo` | One admitted Storm LILO row |
 | `raw.agent_status` | One admitted status interval |
-| `raw.forecast_interval` | One queue/forecast interval; not agent-scoped |
+| `raw.forecast_interval` | One Verint Staff Type/forecast interval; not agent-scoped |
 | `raw.queue_actual` | Retired AP compatibility storage; never discovered or refreshed |
 | `raw.call_leg` | One admitted, typed Call-by-Call source leg |
 | `raw.bonus_import` | One immutable Bonus Matrix content hash/version |
@@ -114,7 +114,7 @@ details remain in one module.
 | `mart.planned_time_off_segment` | One schedule-clipped, non-overlapping PTO/Away interval |
 | `mart.rta_snapshot` | Legacy compatibility table; empty in v0.5 |
 | `mart.verint_final_exception` | One deterministic final-Verint completeness exception |
-| `mart.forecast_hour` | One raw forecast queue/hour plus mapped scopes |
+| `mart.forecast_hour` | Legacy hourly forecast roll-up retained for compatible Excel comparisons |
 | `mart.intraday_queue_interval` | Retired AP compatibility table; cleared during refresh |
 | `mart.agent_pcs_day` | One admitted Agent ID/day with call and PCS measures |
 | `mart.verint_final_absence_event` | One mapped Verint Activities final component interval |
@@ -191,6 +191,10 @@ it must never load into permanent `tblActions`. `TEAM_VIEW` and
 Power BI receives fixed additive facts under `Feed\PowerBI`. Python/SQLite owns
 classification and counters; Power BI owns relationships, measures, slicers and
 visuals. `POWERBI_MANIFEST_CURRENT.csv` is written last as the refresh receipt.
+Service facts use exact reviewed call-queue allowlists. Forecast and staffing
+facts use a separate Staff Type -> Planning Group -> Management LOB bridge;
+Verint forecast `Queue Name` is a Staff Type and never joins the call-queue
+dimension. RSA BE SL is combined while RSA BE FR/VL remain separate in capacity.
 
 ## Agent scope and identity
 

@@ -33,7 +33,7 @@ class PowerBIProjectTests(unittest.TestCase):
                 expressions.read_text(encoding="utf-8"),
             )
 
-    def test_shipped_pbip_has_eight_valid_pages_and_governed_sources(self):
+    def test_shipped_pbip_has_five_valid_wfm_cycle_pages_and_governed_sources(self):
         project = TEMPLATE / f"{PROJECT_NAME}.pbip"
         self.assertTrue(project.is_file())
         for path in TEMPLATE.rglob("*.json"):
@@ -43,7 +43,7 @@ class PowerBIProjectTests(unittest.TestCase):
             TEMPLATE / f"{PROJECT_NAME}.Report" / "definition" / "pages" / "pages.json"
         )
         pages = json.loads(pages_file.read_text(encoding="utf-8"))
-        self.assertEqual(len(pages["pageOrder"]), 8)
+        self.assertEqual(len(pages["pageOrder"]), 5)
         names = []
         for page_id in pages["pageOrder"]:
             page_root = pages_file.parent / page_id
@@ -58,16 +58,14 @@ class PowerBIProjectTests(unittest.TestCase):
                 for path in visuals
             ]
             self.assertEqual(visual_types.count("slicer"), 4)
-            expected_cards = 9 if page["displayName"] == "Data Readiness" else 4
-            self.assertEqual(visual_types.count("cardVisual"), expected_cards)
+            self.assertEqual(visual_types.count("cardVisual"), 4)
             self.assertIn("pageNavigator", visual_types)
             self.assertGreaterEqual(visual_types.count("shape"), 12)
         self.assertEqual(
             names,
             [
-                "Daily Command", "SL Drivers", "Staff Prep", "Realisation",
-                "Schedule Integrity", "Forecast Accuracy", "Absence & Shrinkage",
-                "Data Readiness",
+                "Forecast & Requirement", "Staff Preparation", "Intraday Control",
+                "Attendance & Schedule Review", "Performance Review",
             ],
         )
         expressions = TEMPLATE / f"{PROJECT_NAME}.SemanticModel" / "definition"
@@ -80,6 +78,9 @@ class PowerBIProjectTests(unittest.TestCase):
         self.assertNotIn("table 'PCS'", tmdl)
         self.assertIn("FactService15Min.csv", tmdl)
         self.assertIn("FactScheduleIntegrity.csv", tmdl)
+        self.assertIn("FactForecastInterval.csv", tmdl)
+        self.assertIn("FactOperationalAction.csv", tmdl)
+        self.assertIn("FactBreakMealControl.csv", tmdl)
 
     def test_every_visual_binding_exists_in_the_semantic_model(self):
         model_root = TEMPLATE / f"{PROJECT_NAME}.SemanticModel" / "definition" / "tables"
@@ -114,6 +115,46 @@ class PowerBIProjectTests(unittest.TestCase):
             }
             with self.subTest(table=path.stem):
                 self.assertFalse(measures & columns)
+
+    def test_every_page_keeps_the_approved_cycle_geometry(self):
+        pages_root = TEMPLATE / f"{PROJECT_NAME}.Report" / "definition" / "pages"
+        required_shapes = {
+            (0, 0, 210, 945),
+            (210, 0, 1470, 72),
+            (228, 85, 1434, 58),
+            (228, 153, 349, 119),
+            (590, 153, 349, 119),
+            (951, 153, 349, 119),
+            (1313, 153, 349, 119),
+            (228, 622, 1434, 248),
+        }
+        required_slicers = {
+            (240, 88, 270, 52),
+            (522, 88, 235, 52),
+            (769, 88, 235, 52),
+            (1016, 88, 270, 52),
+        }
+        required_cards = {
+            (236, 155, 337, 84),
+            (598, 155, 337, 84),
+            (959, 155, 337, 84),
+            (1321, 155, 337, 84),
+        }
+        for page_dir in pages_root.glob("ReportSection*"):
+            by_type: dict[str, set[tuple[int, int, int, int]]] = {}
+            for path in page_dir.glob("visuals/*/visual.json"):
+                value = json.loads(path.read_text(encoding="utf-8"))
+                position = value["position"]
+                geometry = tuple(
+                    int(position[key]) for key in ("x", "y", "width", "height")
+                )
+                by_type.setdefault(value["visual"]["visualType"], set()).add(geometry)
+            with self.subTest(page=page_dir.name):
+                self.assertTrue(required_shapes <= by_type["shape"])
+                self.assertEqual(required_slicers, by_type["slicer"])
+                self.assertEqual(required_cards, by_type["cardVisual"])
+                self.assertIn((12, 105, 186, 340), by_type["pageNavigator"])
+                self.assertIn((228, 910, 1434, 18), by_type["textbox"])
 
     @staticmethod
     def _bindings(value, binding_type: str):

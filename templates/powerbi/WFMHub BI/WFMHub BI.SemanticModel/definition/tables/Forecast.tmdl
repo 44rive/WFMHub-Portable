@@ -1,4 +1,4 @@
-/// Verint forecast at its native 15-minute queue interval.
+/// Verint Volume and Absolute Required FTE at native 15-minute Staff Type grain.
 table 'Forecast'
 
 	/// Summed Verint forecast demand at native interval grain.
@@ -29,6 +29,27 @@ table 'Forecast'
 		formatString: #,##0
 		displayFolder: 'Forecast'
 
+	/// Native Staff Type intervals present in the selected forecast extract.
+	measure 'Expected Requirement Intervals' = ```
+			COUNTROWS('Forecast')
+			```
+		formatString: #,##0
+		displayFolder: 'Forecast'
+
+	/// Intervals with explicit required FTE divided by supplied Staff Type intervals.
+	measure 'Requirement Coverage %' = ```
+			DIVIDE([Requirement Intervals], [Expected Requirement Intervals])
+			```
+		formatString: 0.0%
+		displayFolder: 'Forecast'
+
+	/// Native-interval required FTE converted to additive FTE-hours.
+	measure 'Required FTE Hours' = ```
+			SUMX('Forecast', 'Forecast'[FTE Required] * DIVIDE('Forecast'[Interval Minutes], 60))
+			```
+		formatString: #,##0.0
+		displayFolder: 'Forecast'
+
 	/// Peak summed explicit required FTE in the selected horizon.
 	measure 'Peak Required FTE' = ```
 			MAXX(SUMMARIZE('Forecast', 'Forecast'[Date], 'Forecast'[Time Slot], "Interval FTE", SUM('Forecast'[FTE Required])), [Interval FTE])
@@ -43,6 +64,23 @@ table 'Forecast'
 		summarizeBy: none
 		sourceColumn: Date
 
+	column 'Interval Start'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Interval Start
+
+	column 'Interval End'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Interval End
+
+	column 'Interval Minutes'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Interval Minutes
+
 	column 'Time Slot'
 		dataType: int64
 		isHidden
@@ -50,19 +88,39 @@ table 'Forecast'
 		summarizeBy: none
 		sourceColumn: Time Slot
 
-	column 'Service Key'
+	column 'Staff Type Key'
 		dataType: string
 		isHidden
 		isAvailableInMdx: false
 		summarizeBy: none
-		sourceColumn: Service Key
+		sourceColumn: Staff Type Key
 
-	column 'Queue'
+	column 'Source Staff Type'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Source Staff Type
+
+	column 'Staff Type'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Staff Type
+
+	column 'Planning Group'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Planning Group
+
+	column 'Management LOB'
 		dataType: string
 		isHidden
 		isAvailableInMdx: false
 		summarizeBy: none
-		sourceColumn: Queue
+		sourceColumn: Management LOB
+
+	column 'Capacity Mapping Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Capacity Mapping Status
 
 	column 'Volume Forecast'
 		dataType: decimal
@@ -71,12 +129,40 @@ table 'Forecast'
 		summarizeBy: none
 		sourceColumn: Volume Forecast
 
+	column 'Abandons Forecast'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Abandons Forecast
+
+	column 'FTE Forecast'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: FTE Forecast
+
 	column 'FTE Required'
 		dataType: decimal
 		isHidden
 		isAvailableInMdx: false
 		summarizeBy: none
 		sourceColumn: FTE Required
+
+	column 'Headcount Forecast'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Headcount Forecast
+
+	column 'Net Staffing Forecast'
+		dataType: decimal
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Net Staffing Forecast
 
 	column 'SL Forecast'
 		dataType: decimal
@@ -99,23 +185,6 @@ table 'Forecast'
 		summarizeBy: none
 		sourceColumn: AHT Forecast Seconds
 
-	column 'Service Scope'
-		dataType: string
-		summarizeBy: none
-		sourceColumn: Service Scope
-
-	column 'Management LOB'
-		dataType: string
-		isHidden
-		isAvailableInMdx: false
-		summarizeBy: none
-		sourceColumn: Management LOB
-
-	column 'Mapping Status'
-		dataType: string
-		summarizeBy: none
-		sourceColumn: Mapping Status
-
 	column 'Source File'
 		dataType: string
 		summarizeBy: none
@@ -127,9 +196,9 @@ table 'Forecast'
 			let
 			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactForecastInterval.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-			    Selected = Table.SelectColumns(Promoted, {"Date", "Time Slot", "Service Key", "Queue", "Volume Forecast", "FTE Required", "SL Forecast", "SL Required", "AHT Forecast Seconds", "Service Scope", "Management LOB", "Mapping Status", "Source File"}, MissingField.Error),
-			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Time Slot", "Volume Forecast", "FTE Required", "SL Forecast", "SL Required", "AHT Forecast Seconds"}),
-			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Time Slot", Int64.Type}, {"Service Key", type text}, {"Queue", type text}, {"Volume Forecast", type number}, {"FTE Required", type number}, {"SL Forecast", type number}, {"SL Required", type number}, {"AHT Forecast Seconds", type number}, {"Service Scope", type text}, {"Management LOB", type text}, {"Mapping Status", type text}, {"Source File", type text}}, "en-US")
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Interval Start", "Interval End", "Interval Minutes", "Time Slot", "Staff Type Key", "Source Staff Type", "Staff Type", "Planning Group", "Management LOB", "Capacity Mapping Status", "Volume Forecast", "Abandons Forecast", "FTE Forecast", "FTE Required", "Headcount Forecast", "Net Staffing Forecast", "SL Forecast", "SL Required", "AHT Forecast Seconds", "Source File"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Interval Minutes", "Time Slot", "Volume Forecast", "Abandons Forecast", "FTE Forecast", "FTE Required", "Headcount Forecast", "Net Staffing Forecast", "SL Forecast", "SL Required", "AHT Forecast Seconds"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Interval Start", type text}, {"Interval End", type text}, {"Interval Minutes", Int64.Type}, {"Time Slot", Int64.Type}, {"Staff Type Key", type text}, {"Source Staff Type", type text}, {"Staff Type", type text}, {"Planning Group", type text}, {"Management LOB", type text}, {"Capacity Mapping Status", type text}, {"Volume Forecast", type number}, {"Abandons Forecast", type number}, {"FTE Forecast", type number}, {"FTE Required", type number}, {"Headcount Forecast", type number}, {"Net Staffing Forecast", type number}, {"SL Forecast", type number}, {"SL Required", type number}, {"AHT Forecast Seconds", type number}, {"Source File", type text}}, "en-US")
 			in
 			    Typed
 

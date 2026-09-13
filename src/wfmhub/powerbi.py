@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .config import Config
+from .capacity_mapping import load_capacity_mapping
 from .database import DatabaseConnection
 from .mapping import load_queue_mapping
 from .rules import load_rulebook
@@ -15,7 +16,7 @@ from .service_profiles import load_service_profiles
 from .shared_feeds import SharedFeedResult, _atomic_csv, _manifest
 
 
-POWERBI_SCHEMA_VERSION = "5"
+POWERBI_SCHEMA_VERSION = "6"
 
 
 def _query(
@@ -130,12 +131,100 @@ def _prepare_management_lob_maps(
         "CREATE INDEX pbi_management_lob_lookup "
         "ON pbi_management_lob_map(source_kind, source_value, effective_from, effective_to)"
     )
+    conn.execute("DROP TABLE IF EXISTS pbi_service_queue_map")
+    conn.execute(
+        """CREATE TEMP TABLE pbi_service_queue_map (
+               queue TEXT NOT NULL,
+               service_scope TEXT NOT NULL,
+               management_lob TEXT NOT NULL,
+               designation TEXT,
+               effective_from DATE NOT NULL,
+               effective_to DATE,
+               display_order INTEGER NOT NULL,
+               PRIMARY KEY (queue, management_lob, effective_from)
+           )"""
+    )
+    service_rows: list[tuple[Any, ...]] = []
+    for profile in catalog.profiles:
+        for queue in profile.flash_queues:
+            service_rows.append((
+                queue, profile.management_lob, profile.management_lob,
+                profile.group_for(queue), profile.effective_from,
+                profile.effective_to, profile.display_order,
+            ))
+    conn.executemany(
+        "INSERT INTO pbi_service_queue_map VALUES (?, ?, ?, ?, ?, ?, ?)",
+        service_rows,
+    )
+    conn.execute(
+        "CREATE INDEX pbi_service_queue_lookup "
+        "ON pbi_service_queue_map(queue, effective_from, effective_to)"
+    )
     conn.execute("DROP TABLE IF EXISTS pbi_feed_context")
     conn.execute(
         "CREATE TEMP TABLE pbi_feed_context (feed_start DATE, feed_end DATE)"
     )
     conn.execute(
         "INSERT INTO pbi_feed_context VALUES (?, ?)", [feed_start, feed_end],
+    )
+    capacity_mapping = load_capacity_mapping(config.capacity_mapping)
+    conn.execute("DROP TABLE IF EXISTS pbi_forecast_capacity_map")
+    conn.execute(
+        """CREATE TEMP TABLE pbi_forecast_capacity_map (
+               source_file TEXT NOT NULL,
+               source_staff_type TEXT NOT NULL,
+               management_lob TEXT NOT NULL,
+               planning_group TEXT NOT NULL,
+               staff_type TEXT NOT NULL,
+               workforce_lob TEXT NOT NULL,
+               mapping_status TEXT NOT NULL,
+               PRIMARY KEY (source_file, source_staff_type)
+           )"""
+    )
+    forecast_identities = conn.execute(
+        """SELECT DISTINCT source_file, queue_name
+           FROM mart.forecast_interval
+           WHERE business_date BETWEEN ? AND ?""",
+        [feed_start, feed_end],
+    ).fetchall()
+    conn.executemany(
+        "INSERT INTO pbi_forecast_capacity_map VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                source_file, source_staff_type, mapped.management_lob,
+                mapped.planning_group, mapped.staff_type, mapped.workforce_lob,
+                mapped.status,
+            )
+            for source_file, source_staff_type in forecast_identities
+            for mapped in [capacity_mapping.map_forecast(source_file, source_staff_type)]
+        ],
+    )
+    conn.execute("DROP TABLE IF EXISTS pbi_attendance_capacity_map")
+    conn.execute(
+        """CREATE TEMP TABLE pbi_attendance_capacity_map (
+               agent_day_key TEXT PRIMARY KEY,
+               management_lob TEXT NOT NULL,
+               planning_group TEXT NOT NULL,
+               staff_type TEXT NOT NULL,
+               mapping_status TEXT NOT NULL
+           )"""
+    )
+    attendance_identities = conn.execute(
+        """SELECT agent_day_key, lob, assignment
+           FROM mart.attendance_agent_day
+           WHERE business_date BETWEEN ? AND ?""",
+        [feed_start, feed_end],
+    ).fetchall()
+    conn.executemany(
+        "INSERT INTO pbi_attendance_capacity_map VALUES (?, ?, ?, ?, ?)",
+        [
+            (
+                agent_day_key, mapped.management_lob, mapped.planning_group,
+                mapped.staff_type, mapped.status,
+            )
+            for agent_day_key, lob, assignment in attendance_identities
+            for mapped in [capacity_mapping.map_schedule(lob, assignment)]
+        ],
     )
     rulebook = load_rulebook(config.home, config.business_rules)
     conn.execute("DROP TABLE IF EXISTS pbi_status_reference")
@@ -324,46 +413,59 @@ def publish_powerbi_feeds(
                GROUP BY management_lob ORDER BY min(sort_order), management_lob""",
         ),
         (
-            "DimQueue.csv",
-            ("Service Key", "Queue", "Source System", "Service Scope", "Management LOB", "Comparison Scope", "Designation", "Mapping Status"),
-            """SELECT management_lob || '|' || coalesce(service_scope,'') || '|' || queue,
-                      queue, min(source_system), service_scope, management_lob,
-                      min(comparison_scope), min(designation), min(mapping_status)
+            "DimPlanningGroup.csv",
+            ("Planning Group", "Management LOB", "Sort Order"),
+            """SELECT planning_group, management_lob, min(sort_order)
                FROM (
-                 SELECT s.queue, s.source_system, s.service_scope,
-                        coalesce(m.management_lob,s.service_scope) AS management_lob,
-                        s.comparison_scope, s.designation, s.mapping_status
-                 FROM mart.service_interval s
+                 SELECT f.planning_group, f.management_lob, 10 AS sort_order
+                 FROM pbi_forecast_capacity_map f
+                 UNION ALL
+                 SELECT s.planning_group, coalesce(m.management_lob,s.lob), 20
+                 FROM mart.staffing_interval s
                  LEFT JOIN pbi_management_lob_map m
-                   ON m.source_kind='SERVICE'
-                  AND lower(trim(m.source_value))=lower(trim(s.service_scope))
+                   ON m.source_kind='WORKFORCE'
+                  AND lower(trim(m.source_value))=lower(trim(s.lob))
                   AND s.business_date>=m.effective_from
                   AND (m.effective_to IS NULL OR s.business_date<=m.effective_to)
-                 UNION ALL
-                 SELECT q.queue, 'CALL_BY_CALL', q.service_scope,
-                        coalesce(m.management_lob,q.service_scope),
-                        q.comparison_scope, NULL, q.mapping_status
-                 FROM pbi_queue_coverage q
-                 LEFT JOIN pbi_management_lob_map m
-                   ON m.source_kind='SERVICE'
-                  AND lower(trim(m.source_value))=lower(trim(q.service_scope))
-                  AND q.business_date>=m.effective_from
-                  AND (m.effective_to IS NULL OR q.business_date<=m.effective_to)
-                 UNION ALL
-                 SELECT f.queue_name, 'VERINT_FORECAST', f.service_scope,
-                        coalesce(m.management_lob,f.service_scope),
-                        f.comparison_scope, NULL, f.mapping_status
-                 FROM mart.forecast_interval f
-                 LEFT JOIN pbi_management_lob_map m
-                   ON m.source_kind='SERVICE'
-                  AND lower(trim(m.source_value))=lower(trim(f.service_scope))
-                  AND f.business_date>=m.effective_from
-                  AND (m.effective_to IS NULL OR f.business_date<=m.effective_to)
-               ) q
-               WHERE trim(coalesce(queue,''))<>''
+               ) x
+               WHERE trim(coalesce(planning_group,''))<>''
                  AND trim(coalesce(management_lob,''))<>''
-               GROUP BY management_lob, service_scope, queue
-               ORDER BY management_lob, service_scope, queue""",
+               GROUP BY planning_group, management_lob
+               ORDER BY min(sort_order), management_lob, planning_group""",
+        ),
+        (
+            "DimStaffType.csv",
+            ("Staff Type Key", "Staff Type", "Planning Group", "Management LOB", "Mapping Status"),
+            """SELECT management_lob || '|' || planning_group || '|' || staff_type,
+                      staff_type, planning_group, management_lob,
+                      min(mapping_status)
+               FROM (
+                 SELECT management_lob, planning_group, staff_type, mapping_status
+                 FROM pbi_forecast_capacity_map
+                 UNION ALL
+                 SELECT coalesce(m.management_lob,s.lob), s.planning_group,
+                        s.staff_type, s.capacity_mapping_status
+                 FROM mart.staffing_interval s
+                 LEFT JOIN pbi_management_lob_map m
+                   ON m.source_kind='WORKFORCE'
+                  AND lower(trim(m.source_value))=lower(trim(s.lob))
+                  AND s.business_date>=m.effective_from
+                  AND (m.effective_to IS NULL OR s.business_date<=m.effective_to)
+               ) x
+               WHERE trim(coalesce(staff_type,''))<>''
+               GROUP BY management_lob, planning_group, staff_type
+               ORDER BY management_lob, planning_group, staff_type""",
+        ),
+        (
+            "DimQueue.csv",
+            ("Service Key", "Queue", "Source System", "Service Scope", "Management LOB", "Comparison Scope", "Designation", "Mapping Status"),
+            """SELECT management_lob || '|' || management_lob || '|' || queue,
+                      queue, 'CALL_BY_CALL', management_lob, management_lob,
+                      management_lob, designation, 'MAPPED'
+               FROM pbi_service_queue_map
+               WHERE effective_from<=(SELECT feed_end FROM pbi_feed_context)
+                 AND (effective_to IS NULL OR effective_to>=(SELECT feed_start FROM pbi_feed_context))
+               ORDER BY display_order, designation, queue""",
         ),
         (
             "FactQueueCoverage.csv",
@@ -397,10 +499,10 @@ def publish_powerbi_feeds(
             """SELECT s.business_date, s.interval_start, s.interval_end,
                       cast(strftime('%H',s.interval_start) AS INTEGER)*4
                         + cast(strftime('%M',s.interval_start) AS INTEGER)/15,
-                      coalesce(m.management_lob,s.service_scope) || '|' || coalesce(s.service_scope,'') || '|' || s.queue,
-                      s.source_system, s.service_scope,
-                      coalesce(m.management_lob,s.service_scope),
-                      s.comparison_scope, s.queue, s.designation,
+                      sm.management_lob || '|' || sm.management_lob || '|' || s.queue,
+                      s.source_system, sm.management_lob,
+                      sm.management_lob,
+                      sm.management_lob, s.queue, sm.designation,
                       sum(coalesce(s.offered,0)), sum(coalesce(s.answered,0)),
                       sum(coalesce(s.abandoned,0)), sum(coalesce(s.short_abandoned,0)),
                       sum(coalesce(s.abandoned_within_target,0)),
@@ -410,11 +512,10 @@ def publish_powerbi_feeds(
                       max(h.sl_target),
                       group_concat(DISTINCT s.source_files)
                FROM mart.call_service_15min s
-               LEFT JOIN pbi_management_lob_map m
-                 ON m.source_kind='SERVICE'
-                AND lower(trim(m.source_value))=lower(trim(s.service_scope))
-                AND s.business_date>=m.effective_from
-                AND (m.effective_to IS NULL OR s.business_date<=m.effective_to)
+               JOIN pbi_service_queue_map sm
+                 ON lower(trim(sm.queue))=lower(trim(s.queue))
+                AND s.business_date>=sm.effective_from
+                AND (sm.effective_to IS NULL OR s.business_date<=sm.effective_to)
                LEFT JOIN (
                  SELECT business_date, hour_start, queue, max(sl_target) AS sl_target
                  FROM mart.service_interval
@@ -425,43 +526,44 @@ def publish_powerbi_feeds(
                     =strftime('%Y-%m-%d %H:00:00',s.interval_start)
                 AND lower(trim(h.queue))=lower(trim(s.queue))
                GROUP BY s.business_date, s.interval_start, s.interval_end, s.source_system,
-                        s.service_scope, coalesce(m.management_lob,s.service_scope),
-                        s.comparison_scope, s.queue, s.designation
-               ORDER BY s.business_date, s.interval_start, s.service_scope, s.queue""",
+                        sm.management_lob, s.queue, sm.designation
+               ORDER BY s.business_date, s.interval_start, sm.display_order, s.queue""",
         ),
         (
             "FactForecastInterval.csv",
             (
                 "Date", "Interval Start", "Interval End", "Interval Minutes",
-                "Time Slot", "Service Key", "Queue", "Volume Forecast", "Abandons Forecast", "FTE Forecast",
+                "Time Slot", "Staff Type Key", "Source Staff Type", "Staff Type",
+                "Planning Group", "Management LOB", "Capacity Mapping Status",
+                "Volume Forecast", "Abandons Forecast", "FTE Forecast",
                 "FTE Required", "Headcount Forecast", "Net Staffing Forecast",
                 "SL Forecast", "SL Required", "AHT Forecast Seconds",
-                "Service Scope", "Management LOB", "Comparison Scope", "Mapping Status", "Source File",
+                "Source File",
             ),
             """SELECT f.business_date, f.interval_start, f.interval_end,
                       f.interval_minutes,
                       cast(strftime('%H',f.interval_start) AS INTEGER)*4
                         + cast(strftime('%M',f.interval_start) AS INTEGER)/15,
-                      coalesce(m.management_lob,f.service_scope) || '|' || coalesce(f.service_scope,'') || '|' || f.queue_name,
-                      f.queue_name, f.volume_forecast, f.abandons_forecast,
+                      cm.management_lob || '|' || cm.planning_group || '|' || cm.staff_type,
+                      f.queue_name, cm.staff_type, cm.planning_group,
+                      cm.management_lob, cm.mapping_status,
+                      f.volume_forecast, f.abandons_forecast,
                       f.fte_forecast, f.fte_required, f.headcount_forecast,
                       f.net_staffing_forecast, f.sl_forecast, f.sl_required,
-                      f.aht_forecast_seconds, f.service_scope,
-                      coalesce(m.management_lob,f.service_scope),
-                      f.comparison_scope, f.mapping_status, f.source_file
+                      f.aht_forecast_seconds, f.source_file
                FROM mart.forecast_interval f
-               LEFT JOIN pbi_management_lob_map m
-                 ON m.source_kind='SERVICE'
-                AND lower(trim(m.source_value))=lower(trim(f.service_scope))
-                AND f.business_date>=m.effective_from
-                AND (m.effective_to IS NULL OR f.business_date<=m.effective_to)
-               ORDER BY f.business_date, f.interval_start, f.service_scope, f.queue_name""",
+               JOIN pbi_forecast_capacity_map cm
+                 ON cm.source_file=f.source_file
+                AND lower(trim(cm.source_staff_type))=lower(trim(f.queue_name))
+               ORDER BY f.business_date, f.interval_start,
+                        cm.management_lob, cm.planning_group, cm.staff_type""",
         ),
         (
             "FactStaffing15Min.csv",
             (
-                "Date", "Interval Start", "Interval End", "Time Slot", "LOB",
-                "Management LOB", "Language",
+                "Date", "Interval Start", "Interval End", "Time Slot",
+                "Staff Type Key", "LOB", "Management LOB", "Planning Group",
+                "Staff Type", "Capacity Mapping Status", "Language",
                 "Scheduled HC", "Observed HC", "Productive HC", "Auxiliary HC",
                 "Gross Scheduled FTE", "Planned Time Off FTE", "Scheduled FTE",
                 "Elapsed Scheduled FTE", "Observed FTE", "Productive FTE", "Staffing Variance FTE",
@@ -470,7 +572,9 @@ def publish_powerbi_feeds(
             """SELECT s.business_date, s.interval_start, s.interval_end,
                       cast(strftime('%H',s.interval_start) AS INTEGER)*4
                         + cast(strftime('%M',s.interval_start) AS INTEGER)/15,
-                      s.lob, coalesce(m.management_lob,s.lob), s.language,
+                      coalesce(m.management_lob,s.lob) || '|' || s.planning_group || '|' || s.staff_type,
+                      s.lob, coalesce(m.management_lob,s.lob), s.planning_group,
+                      s.staff_type, s.capacity_mapping_status, s.language,
                       s.scheduled_agents, s.observed_agents,
                       s.productive_agents, s.auxiliary_agents,
                       s.gross_scheduled_fte, s.planned_time_off_fte,
@@ -484,13 +588,15 @@ def publish_powerbi_feeds(
                 AND lower(trim(m.source_value))=lower(trim(s.lob))
                 AND s.business_date>=m.effective_from
                 AND (m.effective_to IS NULL OR s.business_date<=m.effective_to)
-               ORDER BY s.business_date, s.interval_start, s.lob, s.language""",
+               ORDER BY s.business_date, s.interval_start, s.planning_group,
+                        s.staff_type, s.lob, s.language""",
         ),
         (
             "FactAttendanceDay.csv",
             (
                 "Date", "Agent Day Key", "Agent ID", "Agent", "Team Leader",
-                "Ops Manager", "LOB", "Management LOB", "Market", "Language", "Location",
+                "Ops Manager", "LOB", "Management LOB", "Planning Group",
+                "Staff Type", "Capacity Mapping Status", "Market", "Language", "Location",
                 "Scheduled Start", "Scheduled End", "Scheduled Minutes",
                 "Planned Work Minutes", "Planning Overlay", "Planning Overlay Minutes",
                 "First Login", "Last Logout", "Attendance Result", "Call Action",
@@ -500,7 +606,8 @@ def publish_powerbi_feeds(
             ),
             """SELECT a.business_date, a.agent_day_key, a.agent_id, a.agent_name,
                       a.team_leader, a.ops_manager, a.lob,
-                      coalesce(m.management_lob,a.lob), a.market, a.language,
+                      cm.management_lob, cm.planning_group, cm.staff_type,
+                      cm.mapping_status, a.market, a.language,
                       a.location, a.scheduled_start, a.scheduled_end,
                       a.scheduled_minutes, a.planned_work_minutes,
                       a.planning_overlay, a.planning_overlay_minutes,
@@ -510,11 +617,8 @@ def publish_powerbi_feeds(
                       a.uncoded_early_leave_minutes, a.no_show_minutes,
                       a.status_covered_minutes, a.evaluation_as_of
                FROM mart.attendance_agent_day a
-               LEFT JOIN pbi_management_lob_map m
-                 ON m.source_kind='WORKFORCE'
-                AND lower(trim(m.source_value))=lower(trim(a.lob))
-                AND a.business_date>=m.effective_from
-                AND (m.effective_to IS NULL OR a.business_date<=m.effective_to)
+               JOIN pbi_attendance_capacity_map cm
+                 ON cm.agent_day_key=a.agent_day_key
                ORDER BY a.business_date, a.lob, a.team_leader, a.agent_name, a.agent_id""",
         ),
         (
@@ -662,7 +766,7 @@ def publish_powerbi_feeds(
                 AND lower(trim(m.source_value))=lower(trim(i.lob))
                 AND i.business_date>=m.effective_from
                 AND (m.effective_to IS NULL OR i.business_date<=m.effective_to)
-               WHERE i.observed_start IS NOT NULL AND i.observed_end IS NOT NULL
+               WHERE i.requires_review=1
                UNION ALL
                SELECT i.business_date, i.integrity_key || '-O', i.agent_id,
                       i.agent_name, i.team_leader, coalesce(m.management_lob,i.lob),
@@ -678,6 +782,22 @@ def publish_powerbi_feeds(
                 AND i.business_date>=m.effective_from
                 AND (m.effective_to IS NULL OR i.business_date<=m.effective_to)
                WHERE i.observed_start IS NOT NULL AND i.observed_end IS NOT NULL
+                 AND i.requires_review=1
+               UNION ALL
+               SELECT c.business_date, c.correction_id || '-R', c.agent_id,
+                      c.agent_name, c.team_leader, coalesce(m.management_lob,c.lob),
+                      'Residual', c.agent_name || '  |  Residual',
+                      cast(strftime('%H',c.gap_start) AS REAL)
+                        + cast(strftime('%M',c.gap_start) AS REAL)/60.0,
+                      c.gap_minutes/60.0, 0, 0,
+                      c.detected_issue, 1
+               FROM mart.correction_candidate c
+               LEFT JOIN pbi_management_lob_map m
+                 ON m.source_kind='WORKFORCE'
+                AND lower(trim(m.source_value))=lower(trim(c.lob))
+                AND c.business_date>=m.effective_from
+                AND (m.effective_to IS NULL OR c.business_date<=m.effective_to)
+               WHERE c.gap_start IS NOT NULL AND c.gap_end IS NOT NULL
                ORDER BY 1 DESC, 4, 7 DESC""",
         ),
         (
@@ -687,7 +807,8 @@ def publish_powerbi_feeds(
                 "Ops Manager", "LOB", "Management LOB", "Scheduled Start", "Scheduled End",
                 "Gap Start", "Gap End", "Gap Minutes", "Detected Issue",
                 "Priority", "Confidence", "Suggested Activity", "Observed Source",
-                "Reconciliation", "Source File",
+                "Reconciliation", "Verint Activity", "Verint Category",
+                "Verint Overlap Minutes", "Verint Source File", "Source File",
             ),
             """SELECT c.business_date, c.correction_id, c.agent_id, c.agent_name,
                       c.team_leader, c.ops_manager, c.lob,
@@ -695,7 +816,9 @@ def publish_powerbi_feeds(
                       c.scheduled_end, c.gap_start, c.gap_end, c.gap_minutes,
                       c.detected_issue, c.priority, c.confidence,
                       c.suggested_activity, c.observed_source,
-                      c.verint_reconciliation, c.source_file
+                      c.verint_reconciliation, c.verint_activity,
+                      c.verint_category, c.verint_overlap_minutes,
+                      c.verint_source_file, c.source_file
                FROM mart.correction_candidate c
                LEFT JOIN pbi_management_lob_map m
                  ON m.source_kind='WORKFORCE'
@@ -725,6 +848,103 @@ def publish_powerbi_feeds(
                 AND p.business_date>=m.effective_from
                 AND (m.effective_to IS NULL OR p.business_date<=m.effective_to)
                ORDER BY p.business_date, p.lob, p.team_leader, p.agent_name, p.segment_start""",
+        ),
+        (
+            "FactOperationalAction.csv",
+            (
+                "Date", "Time Slot", "State", "Item", "Agent ID", "Agent",
+                "Team Leader", "Management LOB", "Planning Group", "Staff Type",
+                "Staff Type Key",
+                "Required FTE", "Resource FTE", "Variance FTE", "Detail",
+                "Evidence", "Priority Sort",
+            ),
+            """WITH forecast AS (
+                 SELECT f.business_date, f.interval_start,
+                        cast(strftime('%H',f.interval_start) AS INTEGER)*4
+                          + cast(strftime('%M',f.interval_start) AS INTEGER)/15 AS time_slot,
+                        cm.management_lob, cm.planning_group, cm.staff_type,
+                        sum(f.fte_required) AS required_fte
+                 FROM mart.forecast_interval f
+                 JOIN pbi_forecast_capacity_map cm
+                   ON cm.source_file=f.source_file
+                  AND lower(trim(cm.source_staff_type))=lower(trim(f.queue_name))
+                 GROUP BY f.business_date, f.interval_start, cm.management_lob,
+                          cm.planning_group, cm.staff_type
+               ), staffing AS (
+                 SELECT s.business_date, s.interval_start,
+                        cast(strftime('%H',s.interval_start) AS INTEGER)*4
+                          + cast(strftime('%M',s.interval_start) AS INTEGER)/15 AS time_slot,
+                        coalesce(m.management_lob,s.lob) AS management_lob,
+                        s.planning_group, s.staff_type,
+                        sum(s.scheduled_fte) AS scheduled_fte,
+                        sum(s.observed_fte) AS observed_fte,
+                        max(s.staffing_state) AS staffing_state,
+                        group_concat(DISTINCT s.evidence_basis) AS evidence,
+                        max(s.evaluation_as_of) AS evaluation_as_of
+                 FROM mart.staffing_interval s
+                 LEFT JOIN pbi_management_lob_map m
+                   ON m.source_kind='WORKFORCE'
+                  AND lower(trim(m.source_value))=lower(trim(s.lob))
+                  AND s.business_date>=m.effective_from
+                  AND (m.effective_to IS NULL OR s.business_date<=m.effective_to)
+                 GROUP BY s.business_date, s.interval_start,
+                          coalesce(m.management_lob,s.lob), s.planning_group, s.staff_type
+               ), capacity AS (
+                 SELECT f.business_date, f.time_slot, f.interval_start,
+                        f.management_lob, f.planning_group, f.staff_type,
+                        f.required_fte,
+                        CASE WHEN f.interval_start<coalesce(s.evaluation_as_of,f.interval_start)
+                             THEN s.observed_fte ELSE s.scheduled_fte END AS resource_fte,
+                        s.staffing_state, s.evidence
+                 FROM forecast f
+                 LEFT JOIN staffing s
+                   ON s.business_date=f.business_date
+                  AND s.interval_start=f.interval_start
+                  AND s.management_lob=f.management_lob
+                  AND s.planning_group=f.planning_group
+                  AND s.staff_type=f.staff_type
+               )
+               SELECT business_date, time_slot, 'CAPACITY GAP',
+                      strftime('%H:%M',interval_start), NULL, NULL, NULL,
+                      management_lob, planning_group, staff_type,
+                      management_lob || '|' || planning_group || '|' || staff_type,
+                      required_fte, coalesce(resource_fte,0),
+                      coalesce(resource_fte,0)-required_fte,
+                      CASE WHEN resource_fte IS NULL THEN 'No matching published schedule'
+                           WHEN staffing_state='FUTURE' THEN 'Net scheduled versus requirement'
+                           ELSE 'Agent Status presence versus requirement' END,
+                      coalesce(evidence,'NO_SCHEDULE'), 1
+               FROM capacity
+               WHERE required_fte IS NOT NULL
+                 AND coalesce(resource_fte,0)+0.001<required_fte
+               UNION ALL
+               SELECT a.business_date,
+                      CASE WHEN a.scheduled_start IS NULL THEN NULL ELSE
+                        cast(strftime('%H',a.scheduled_start) AS INTEGER)*4
+                        + cast(strftime('%M',a.scheduled_start) AS INTEGER)/15 END,
+                      CASE
+                        WHEN a.attendance_result IN ('No show','No show - partial time off') THEN 'NO SHOW'
+                        WHEN a.uncoded_late_minutes>0 THEN 'LATE'
+                        WHEN a.uncoded_early_leave_minutes>0 THEN 'EARLY LEAVE'
+                        ELSE 'UNKNOWN' END,
+                      coalesce(a.agent_name,'Agent') || ' [' || a.agent_id || ']',
+                      a.agent_id, a.agent_name, a.team_leader,
+                      cm.management_lob, cm.planning_group, cm.staff_type,
+                      cm.management_lob || '|' || cm.planning_group || '|' || cm.staff_type,
+                      NULL, NULL, NULL,
+                      CASE
+                        WHEN a.attendance_result IN ('No show','No show - partial time off') THEN 'Confirmed completed no show'
+                        WHEN a.uncoded_late_minutes>0 THEN cast(a.uncoded_late_minutes AS TEXT) || ' late minutes'
+                        WHEN a.uncoded_early_leave_minutes>0 THEN cast(a.uncoded_early_leave_minutes AS TEXT) || ' early-leave minutes'
+                        ELSE 'Possible no show / insufficient evidence' END,
+                      a.actual_evidence,
+                      CASE WHEN a.attendance_result IN ('No show','No show - partial time off') THEN 1 ELSE 2 END
+               FROM mart.attendance_agent_day a
+               JOIN pbi_attendance_capacity_map cm ON cm.agent_day_key=a.agent_day_key
+               WHERE a.requires_call=1
+                  OR a.uncoded_late_minutes>0
+                  OR a.uncoded_early_leave_minutes>0
+               ORDER BY 1 DESC, 17, 2, 8, 4""",
         ),
         (
             "FactFinalAbsenceDay.csv",
@@ -834,6 +1054,43 @@ def publish_powerbi_feeds(
         path, count = _query(conn, folder, filename, headers, sql)
         files.append(path)
         counts.append((path.name, count))
+
+    # Break and meal controls reuse the exact evidence-gated operational logic
+    # used by Attendance Review.  Keeping one implementation prevents Excel and
+    # Power BI from disagreeing about allowances or Agent Status coverage.
+    from .decision_products import _break_meal_control_rows
+
+    completed_value = conn.execute(
+        "SELECT max(business_date) FROM mart.attendance_agent_day WHERE shift_state='COMPLETE'"
+    ).fetchone()[0]
+    completed_through = (
+        date.fromisoformat(str(completed_value)[:10]) if completed_value else feed_start - timedelta(days=1)
+    )
+    _break_headers, break_rows = _break_meal_control_rows(
+        conn, config, feed_start, min(feed_end, completed_through),
+    )
+    capacity_mapping = load_capacity_mapping(config.capacity_mapping)
+    break_path = folder / "FactBreakMealControl.csv"
+    count = _atomic_csv(
+        break_path,
+        (
+            "Date", "LOB", "Management LOB", "Team Leader", "Agent ID", "Agent",
+            "Scheduled Start", "Scheduled End", "Status Coverage %",
+            "Break Minutes", "Break Allowance Minutes", "Break Overrun Minutes",
+            "Break Spells", "Longest Break Minutes", "Meal Minutes",
+            "Meal Allowance Minutes", "Meal Overrun Minutes", "Meal Spells",
+            "Longest Meal Minutes", "Alert", "Evidence",
+        ),
+        (
+            (
+                row[0], row[1], capacity_mapping.map_schedule(row[1], None).management_lob,
+                row[2], *row[3:]
+            )
+            for row in break_rows
+        ),
+    )
+    files.append(break_path)
+    counts.append((break_path.name, count))
 
     setup_files = _copy_setup_assets(config, folder)
     files.extend(setup_files)

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "a57898341fe043dc88b6",
   "position": {
-    "x": 1302,
-    "y": 154,
+    "x": 1321,
+    "y": 155,
     "z": 200,
-    "height": 108,
-    "width": 338,
+    "height": 84,
+    "width": 337,
     "tabOrder": 200
   },
   "visual": {
@@ -23,11 +23,11 @@
                       "Entity": "Staffing"
                     }
                   },
-                  "Property": "Critical Intervals"
+                  "Property": "PTO / Away FTE Hours"
                 }
               },
-              "queryRef": "Staffing.Critical Intervals",
-              "nativeQueryRef": "Critical Intervals"
+              "queryRef": "Staffing.PTO / Away FTE Hours",
+              "nativeQueryRef": "PTO / Away FTE Hours"
             }
           ]
         }
@@ -81,7 +81,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#D99815'"
+                      "Value": "'#D18A13'"
                     }
                   }
                 }
@@ -120,7 +120,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'CRITICAL INTERVALS'"
+                  "Value": "'PTO / AWAY IMPACT'"
                 }
               }
             },

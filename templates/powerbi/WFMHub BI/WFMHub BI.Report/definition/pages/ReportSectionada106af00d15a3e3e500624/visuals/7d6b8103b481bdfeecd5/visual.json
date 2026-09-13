@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "7d6b8103b481bdfeecd5",
   "position": {
-    "x": 28,
-    "y": 333,
+    "x": 26,
+    "y": 404,
     "z": 14,
-    "height": 20,
-    "width": 124,
+    "height": 28,
+    "width": 158,
     "tabOrder": 14
   },
   "visual": {
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "05  Schedule Integrity",
+                    "value": "5   Performance Review",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "9px",
+                      "fontSize": "11px",
                       "fontWeight": "normal",
                       "color": "#DCE9F2"
                     }

@@ -1,6 +1,8 @@
-# WFMHub Power BI — WFM Control Tower V2 design review
+# Archived WFMHub Power BI — WFM Control Tower V2 design review
 
-Status: **proposal awaiting business validation**
+Status: **superseded by `../wfm-manager-cycle-v1/` and project contract 6**
+
+Retained only as design history; do not implement these pages.
 
 These are deterministic 1680 × 945 visual prototypes with illustrative data.
 They define the proposed Power BI page geometry, navigation, density and

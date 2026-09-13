@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "d7944fd005f5843a62f2",
   "position": {
-    "x": 820,
-    "y": 16,
+    "x": 235,
+    "y": 43,
     "z": 10,
-    "height": 24,
-    "width": 680,
+    "height": 20,
+    "width": 850,
     "tabOrder": 10
   },
   "visual": {
@@ -19,16 +19,16 @@
               {
                 "textRuns": [
                   {
-                    "value": "Future requirement, net published capacity and PTO/Away impact at native grain",
+                    "value": "Required capacity versus published schedules — by planning group and Staff Type",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "10px",
+                      "fontSize": "11px",
                       "fontWeight": "normal",
-                      "color": "#C9D7E3"
+                      "color": "#607587"
                     }
                   }
                 ],
-                "horizontalTextAlignment": "right"
+                "horizontalTextAlignment": "left"
               }
             ]
           }

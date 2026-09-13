@@ -20,9 +20,9 @@ eligible through their populated leave date.
 APBE, APFR and APDE are retired: no directory is discovered, required, loaded or
 calculated. Historical raw tables remain physically readable so upgrading is
 non-destructive. Activities event intervals are excluded from Attendance/RTM
-and are used only by the separate final post-day absence ledger. A parsed
-Activities Shift Assignment may also be used as a visibly flagged emergency
-schedule boundary when StartEndTimes is missing.
+and are used only by the separate final post-day absence ledger and exact
+residual overlap. Activities never replaces missing StartEndTimes schedule
+coverage.
 
 ## Key datasets
 

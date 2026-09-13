@@ -6,6 +6,14 @@ relationship b95b708b-8236-54a5-4eeb-d1d5604956ee
 	fromColumn: 'Queue'.'Management LOB'
 	toColumn: 'Management LOB'.'Management LOB'
 
+relationship d0bf9673-096c-080e-87f0-519025216767
+	fromColumn: 'Planning Group'.'Management LOB'
+	toColumn: 'Management LOB'.'Management LOB'
+
+relationship 27fb1a27-d456-6e2e-31e8-d578442ad102
+	fromColumn: 'Staff Type'.'Planning Group'
+	toColumn: 'Planning Group'.'Planning Group'
+
 relationship e33279f5-243e-b7ae-1623-a4ef3853e424
 	fromColumn: 'Service'.'Date'
 	toColumn: 'Date'.'Date'
@@ -34,9 +42,9 @@ relationship dce1ded1-0edc-8d2a-fbf1-3ed4db8f7bb8
 	fromColumn: 'Forecast'.'Time Slot'
 	toColumn: 'Time'.'Quarter Hour Index'
 
-relationship bbbaaec2-8860-aead-3876-625929197774
-	fromColumn: 'Forecast'.'Service Key'
-	toColumn: 'Queue'.'Service Key'
+relationship 5a852834-17af-c0a3-69ea-553355b23746
+	fromColumn: 'Forecast'.'Staff Type Key'
+	toColumn: 'Staff Type'.'Staff Type Key'
 
 relationship 4aff964c-3d67-3785-53cd-af0ba588ef0d
 	fromColumn: 'Staffing'.'Date'
@@ -46,9 +54,9 @@ relationship 062fb4c6-511f-fbcf-3f9e-d145dfc9c3f8
 	fromColumn: 'Staffing'.'Time Slot'
 	toColumn: 'Time'.'Quarter Hour Index'
 
-relationship 82bbe65e-9014-3262-4407-61a724f8c9a6
-	fromColumn: 'Staffing'.'Management LOB'
-	toColumn: 'Management LOB'.'Management LOB'
+relationship 37085aaf-c7e5-0fc2-ed85-1ea1118e9cde
+	fromColumn: 'Staffing'.'Staff Type Key'
+	toColumn: 'Staff Type'.'Staff Type Key'
 
 relationship f51bb41f-de9e-1e71-8ae7-365c5257ab21
 	fromColumn: 'Attendance'.'Date'
@@ -93,6 +101,26 @@ relationship a03b850c-ae44-d1aa-6b63-ccc5f8c1ad62
 relationship 529bd439-64a3-6706-f016-a0c7c398c6d1
 	fromColumn: 'Attendance Gap'.'Agent ID'
 	toColumn: 'Employee'.'Agent ID'
+
+relationship e34bf8a6-9245-2fca-507a-b76a9146a775
+	fromColumn: 'Break Meal'.'Date'
+	toColumn: 'Date'.'Date'
+
+relationship 501ae760-c73f-8be0-43fb-992040a4421b
+	fromColumn: 'Break Meal'.'Agent ID'
+	toColumn: 'Employee'.'Agent ID'
+
+relationship 8be07909-35fd-c100-9fd6-f8167f180afc
+	fromColumn: 'Operational Action'.'Date'
+	toColumn: 'Date'.'Date'
+
+relationship 9c8f1e65-5017-2d15-7d4c-989531fdcb79
+	fromColumn: 'Operational Action'.'Time Slot'
+	toColumn: 'Time'.'Quarter Hour Index'
+
+relationship 60e4162a-8f01-ac87-3913-ff28324077a2
+	fromColumn: 'Operational Action'.'Staff Type Key'
+	toColumn: 'Staff Type'.'Staff Type Key'
 
 relationship a703d78f-145c-4d68-536f-a3239320ef4a
 	fromColumn: 'Time Off'.'Date'

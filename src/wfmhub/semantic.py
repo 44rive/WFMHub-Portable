@@ -226,16 +226,17 @@ def _records(conn: DatabaseConnection, source_model: str, start: date, end: date
 
     if source_model == "staffing_interval":
         cursor = conn.execute(
-            """SELECT business_date, interval_start, lob, language, staffing_gap_fte,
+            """SELECT business_date, interval_start, lob, language,
+                      planning_group, staff_type, staffing_gap_fte,
                       staffing_variance_fte, scheduled_fte, observed_fte, productive_fte
                FROM mart.staffing_interval WHERE business_date BETWEEN ? AND ?
-               ORDER BY business_date, interval_start, lob, language""",
+               ORDER BY business_date, interval_start, planning_group, staff_type, lob, language""",
             [start, end],
         )
-        for day, interval, lob, language, gap, variance, scheduled, observed, productive in cursor:
+        for day, interval, lob, language, planning_group, staff_type, gap, variance, scheduled, observed, productive in cursor:
             yield ComponentRecord(
-                source_model, "LOB/language/15 minutes",
-                f"{day}|{interval}|{lob or ''}|{language or ''}", _as_date(day), _as_datetime(interval),
+                source_model, "LOB/planning group/Staff Type/language/15 minutes",
+                f"{day}|{interval}|{lob or ''}|{planning_group or ''}|{staff_type or ''}|{language or ''}", _as_date(day), _as_datetime(interval),
                 {"lob": lob, "language": language},
                 {"staffing_gap_fte": gap, "staffing_variance_fte": variance,
                  "scheduled_fte": scheduled, "observed_fte": observed,

@@ -18,15 +18,15 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class ParserTests(unittest.TestCase):
-    def test_supplied_september_forecast_keeps_native_15_minute_volume_only(self):
+    def test_supplied_september_forecast_keeps_native_15_minute_volume_and_requirement(self):
         result = parse_forecast(
-            REPO / "attachments" / "RSA_NL_09-2026.txt", "reference",
+            REPO / "attachments" / "RSA_NL_VOL&FTE_09-2026.txt", "reference",
         )
         rows = result.tables["raw.forecast_interval"]
         self.assertEqual(len(rows), 2880)
         self.assertEqual({row["interval_minutes"] for row in rows}, {15})
         self.assertTrue(all(row["volume_forecast"] is not None for row in rows))
-        self.assertTrue(all(row["fte_required"] is None for row in rows))
+        self.assertTrue(all(row["fte_required"] is not None for row in rows))
 
     def test_calls_keep_mapped_service_demand_outside_agent_roster(self):
         scope = AgentScope(

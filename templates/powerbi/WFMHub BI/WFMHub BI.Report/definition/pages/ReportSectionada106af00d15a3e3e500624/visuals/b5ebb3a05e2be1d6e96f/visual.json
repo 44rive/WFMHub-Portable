@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "b5ebb3a05e2be1d6e96f",
   "position": {
-    "x": 210,
-    "y": 10,
+    "x": 235,
+    "y": 11,
     "z": 10,
-    "height": 32,
-    "width": 760,
+    "height": 30,
+    "width": 720,
     "tabOrder": 10
   },
   "visual": {
@@ -19,12 +19,12 @@
               {
                 "textRuns": [
                   {
-                    "value": "WFM HUB  |  STAFF PREPARATION",
+                    "value": "STAFF PREPARATION",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "18px",
+                      "fontSize": "25px",
                       "fontWeight": "bold",
-                      "color": "#FFFFFF"
+                      "color": "#17324D"
                     }
                   }
                 ],

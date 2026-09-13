@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "4ae27e09f38626c335ed",
   "position": {
-    "x": 18,
-    "y": 128,
+    "x": 12,
+    "y": 105,
     "z": 20,
-    "height": 384,
-    "width": 140,
+    "height": 340,
+    "width": 186,
     "tabOrder": 20
   },
   "visual": {
@@ -25,14 +25,14 @@
             "rowCount": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "5L"
                 }
               }
             },
             "cellPadding": {
               "expr": {
                 "Literal": {
-                  "Value": "6L"
+                  "Value": "5L"
                 }
               }
             }
@@ -92,32 +92,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10L"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#DCE9F2'"
-                    }
-                  }
-                }
-              }
-            },
-            "leftMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "10L"
+                  "Value": "false"
                 }
               }
             }
@@ -131,39 +106,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10L"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "leftMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "10L"
+                  "Value": "false"
                 }
               }
             }
@@ -229,7 +172,7 @@
             "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "100L"
                 }
               }
             }

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "4f4242ae42cfdf68da09",
   "position": {
-    "x": 1286,
-    "y": 72,
+    "x": 1016,
+    "y": 88,
     "z": 100,
-    "height": 66,
-    "width": 340,
+    "height": 52,
+    "width": 270,
     "tabOrder": 100
   },
   "visual": {
@@ -20,14 +20,14 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Time"
+                      "Entity": "Staff Type"
                     }
                   },
-                  "Property": "Time Label"
+                  "Property": "Staff Type"
                 }
               },
-              "queryRef": "Time.Time Label",
-              "nativeQueryRef": "Time Label"
+              "queryRef": "Staff Type.Staff Type",
+              "nativeQueryRef": "Staff Type"
             }
           ]
         }
@@ -60,7 +60,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'OPERATING WINDOW'"
+                  "Value": "'STAFF TYPE'"
                 }
               }
             },

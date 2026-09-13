@@ -62,15 +62,16 @@ Multi-day files are supported. Row dates are authoritative; filename dates are
 only fallback hints. Missing evidence remains missing and is never converted to
 a false no-show or zero.
 
-If a dedicated StartEndTimes file is unavailable, WFMHub can use a successfully
-parsed Shift Assignment boundary from an Activities export and raises a visible
-review finding. Activity intervals are never used as attendance or presence;
-they feed only the separate final post-day absence/shrinkage ledger.
+StartEndTimes is mandatory for schedule boundaries. An Activities export never
+replaces a missing or incomplete schedule. Activity intervals feed only the
+separate final post-day absence/shrinkage ledger and exact residual-gap overlap;
+missing StartEndTimes coverage remains a visible data error.
 
 FTE scope is effective-dated: `Active` rows are admitted; `Leaver` rows are
 admitted only through `End date if leaver`; other statuses and undated leavers
 are excluded. The same rule is applied to schedules, LILO, Agent Status, and
-Call by Call for each row's business date.
+agent-scoped Call-by-Call/PCS facts for each row's business date. Queue-scoped
+service demand retains every contact entering an exact configured queue.
 
 RTM workforce ownership follows the roster labels exactly: OEM uses `OEM FR`,
 RSA Belgium combines `RSA FR` and `RSA VL`, Ford Netherlands uses `Ford Dutch`,
@@ -81,7 +82,8 @@ effective Away intervals change expected work and net staffing without editing
 any extract. Pending/Cancelled entries do not change the calculations. Active
 and Closed Away apply inside their effective dates; Planned Away affects future
 capacity only and never erases past or current attendance evidence. Exact
-attendance gaps are classified through the imported Attendance Review ledger.
+attendance gaps are reduced automatically by final Verint Activities overlap;
+only the remaining read-only residuals are shown.
 
 ## Windows quick start
 
@@ -98,16 +100,16 @@ attendance gaps are classified through the imported Attendance Review ledger.
 See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
 [Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the one-time PCS Power
 Query installation and the optional shared-Absenteeism setup.
-The [Power BI direction](docs/POWERBI_WFMHUB_PERSPECTIVE.md) and
-[implemented control-tower specification](docs/POWERBI_WFM_CONTROL_TOWER_V2.md) describe the
-governed `Feed\PowerBI` model and seven implemented pages. Run a full update,
+The [Power BI WFM-cycle contract](docs/POWERBI_WFM_CYCLE.md) describes the
+governed `Feed\PowerBI` model and five implemented pages. Run a full update,
 then double-click `POWERBI.cmd`; the [beginner Power BI guide](docs/POWERBI_BEGINNER_GUIDE.md)
 explains the two-refresh routine.
 
 The approved visual contract is in the
 [report design system](docs/REPORT_DESIGN_SYSTEM.md), with a data-free
 [Excel design reference](<docs/WFMHub Report Design Reference.xlsx>). Future
-developers and assistants must start with [AI_CONTEXT.md](AI_CONTEXT.md).
+developers and assistants must start with [WFM_MASTER.md](WFM_MASTER.md) and
+[AI_CONTEXT.md](AI_CONTEXT.md).
 
 ## RTM Daily Control
 
@@ -119,10 +121,11 @@ reconciling attendance/call list. `ISSUES & DRIVERS` contains only actionable
 source issues and below-target queues with real demand. Definitions and audit
 evidence remain in hidden support sheets.
 
-Actual demand comes from exact queues in `queue_mapping.csv`. WFMHub counts each
-mapped inbound queue entry, matching Storm `Total Entered`; outbound companion
-legs are ignored. A transfer entering another displayed queue is therefore a
-new queue entry. Each Flash uses an exact reviewed queue allowlist: RSA NL has
+Call-by-Call rows are normalized through `queue_mapping.csv`, while actual Flash
+demand is restricted by the exact queue allowlists in `service_profiles.toml`.
+WFMHub counts each included inbound queue entry, matching Storm `Total Entered`;
+outbound companion legs are ignored. A transfer entering another displayed
+queue is therefore a new queue entry. RSA NL has
 the 23 queues marked `SL Related = Y` in the supplied reference, RSA BE has 43
 queues, Ford NL has six queues, and Ford FR/OEM has the exact Ford Assistance,
 Toyota/Lexus and Chery Assistance queues. PCS stays limited to the effective-
@@ -236,6 +239,7 @@ configuration, so service and staffing are never joined by a guessed name.
 | `config\analytics_rules.toml` | Period-analysis thresholds |
 | `config\queue_mapping.csv` | Queue-to-LOB and forecast comparison mapping |
 | `config\service_profiles.toml` | Flash/service scope, roster-LOB links, and queue groups |
+| `config\capacity_mapping.csv` | Forecast Staff Type and published assignment to Planning Group/Management LOB |
 
 Percentages are stored as decimals: `0.80` means 80%. Aggregated percentages
 use ratios of summed components; WFMHub never averages agent percentages.
