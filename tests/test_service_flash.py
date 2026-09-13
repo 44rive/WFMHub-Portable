@@ -487,9 +487,7 @@ class CallServiceModelTests(unittest.TestCase):
                    language VARCHAR, lob VARCHAR, source_file VARCHAR
                )"""
         )
-        for migration_name in (
-            "013_call_service_flash.sql", "016_powerbi_wfm_control_tower.sql",
-        ):
+        for migration_name in ("013_call_service_flash.sql",):
             migration = (REPO / "sql" / "migrations" / migration_name).read_text(
                 encoding="utf-8",
             )
@@ -501,6 +499,15 @@ class CallServiceModelTests(unittest.TestCase):
         )
         for statement in _migration_statements(migration):
             conn.execute(statement)
+        for migration_name in (
+            "016_powerbi_wfm_control_tower.sql",
+            "018_call_service_language_grain.sql",
+        ):
+            migration = (REPO / "sql" / "migrations" / migration_name).read_text(
+                encoding="utf-8",
+            )
+            for statement in _migration_statements(migration):
+                conn.execute(statement)
 
         rows = [
             # Two inbound entries in one interaction. Storm counts both queue entries.
@@ -568,6 +575,81 @@ class CallServiceModelTests(unittest.TestCase):
         )
         self.assertEqual(len(selected), 1)
         self.assertEqual(selected[0]["queue"], "MAPPED_QUEUE")
+        conn.close()
+
+    def test_call_service_preserves_mixed_language_queue_buckets(self):
+        raw = sqlite3.connect(
+            ":memory:",
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+        )
+        conn = DatabaseConnection(raw)
+        conn.execute(
+            """CREATE TABLE core.clean_call_leg (
+                   business_date DATE, interaction_key VARCHAR, call_key VARCHAR,
+                   call_start TIMESTAMP, call_direction VARCHAR, queue VARCHAR,
+                   queue_wait_seconds DOUBLE, ringing_seconds DOUBLE,
+                   agent_id VARCHAR, talk_seconds DOUBLE,
+                   hold_seconds DOUBLE, wrap_seconds DOUBLE, transferred BOOLEAN,
+                   language VARCHAR, lob VARCHAR, source_file VARCHAR
+               )"""
+        )
+        migration = (REPO / "sql" / "migrations" / "013_call_service_flash.sql").read_text(
+            encoding="utf-8",
+        )
+        for statement in _migration_statements(migration):
+            conn.execute(statement)
+        conn.execute("CREATE TABLE mart.service_interval (placeholder INTEGER)")
+        for migration_name in (
+            "015_storm_service_reference.sql",
+            "016_powerbi_wfm_control_tower.sql",
+            "018_call_service_language_grain.sql",
+        ):
+            migration = (REPO / "sql" / "migrations" / migration_name).read_text(
+                encoding="utf-8",
+            )
+            for statement in _migration_statements(migration):
+                conn.execute(statement)
+
+        report_day = date(2026, 9, 13)
+        conn.executemany(
+            "INSERT INTO core.clean_call_leg VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (report_day, "fr-1", "leg-fr-1", datetime(2026, 9, 13, 10, 1), "I", "BE_QUEUE", 5, 0, "1", 30, 0, 0, False, "fr", None, "calls.csv"),
+                (report_day, "fr-2", "leg-fr-2", datetime(2026, 9, 13, 10, 2), "I", "BE_QUEUE", 5, 0, "2", 30, 0, 0, False, "FR", None, "calls.csv"),
+                (report_day, "vl-1", "leg-vl-1", datetime(2026, 9, 13, 10, 3), "I", "BE_QUEUE", 5, 0, "3", 30, 0, 0, False, "VL", None, "calls.csv"),
+            ],
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            mapping_file = Path(folder) / "queue_mapping.csv"
+            mapping_file.write_text(
+                "mapping_type,source_system,source_value,service_scope,designation\n"
+                "queue,STORM,BE_QUEUE,RSA BE,RSA BE\n",
+                encoding="utf-8",
+            )
+            count = _build_call_service(
+                conn,
+                load_rulebook(REPO, REPO / "config" / "default_rules.toml"),
+                load_metric_catalog(REPO, REPO / "config" / "default_metrics.toml"),
+                load_queue_mapping(mapping_file),
+                report_day,
+                report_day,
+            )
+
+        self.assertEqual(count, 2)
+        self.assertEqual(
+            conn.execute(
+                """SELECT language, offered
+                   FROM mart.call_service_hour ORDER BY language"""
+            ).fetchall(),
+            [("FR", 2), ("VL", 1)],
+        )
+        self.assertEqual(
+            conn.execute(
+                """SELECT language, offered
+                   FROM mart.call_service_15min ORDER BY language"""
+            ).fetchall(),
+            [("FR", 2), ("VL", 1)],
+        )
         conn.close()
 
 

@@ -3037,7 +3037,7 @@ def _build_call_service(
         language = (
             suffix
             if suffix in {"FR", "VL", "NL", "DE", "EN"}
-            else selected.get("language")
+            else str(selected.get("language") or "").strip().upper() or "(blank)"
         )
         key = (
             business_date, hour_start, mapped.service_scope,

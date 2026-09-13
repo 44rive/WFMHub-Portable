@@ -121,8 +121,8 @@ details remain in one module.
 | `mart.verint_final_absence_agent_day` | One Activities-final absence/shrinkage result per Agent ID/day |
 | `mart.absence_event` | One reviewed gap or PTO/Away exact component interval |
 | `mart.absence_agent_day` | One reviewed absence/vacation/shrinkage result per Agent ID/day |
-| `mart.service_interval` | Stable semantic projection of Call-by-Call queue/hour counters |
-| `mart.call_service_hour` | One mapped Call-by-Call queue/hour with interaction-deduplicated service counters |
+| `mart.service_interval` | Stable semantic projection of Call-by-Call queue/hour/language counters |
+| `mart.call_service_hour` | One mapped Call-by-Call queue/hour/language with queue-entry service counters |
 | `mart.metric_value` | One configured KPI observation per source entity/method |
 | `mart.analysis_finding` | One ranked deterministic finding with evidence filter |
 | `mart.bonus_agent_month` | One governed monthly bonus result per agent |

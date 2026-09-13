@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.32.1 - 2026-09-13
+
+- Fix refresh failures when one mapped Call-by-Call queue/hour contains more
+  than one language by aligning both service mart keys with their real
+  queue/time/language grain.
+- Normalize service language values before aggregation and add regression
+  coverage for mixed-case FR/VL rows in one RSA BE queue/hour.
+- Add an automatic, backed-up SQLite migration; existing databases and source
+  extracts do not need to be deleted or rebuilt.
+
 ## 0.32.0 - 2026-09-13
 
 - Rebuild the source-controlled Power BI project around the approved five-page

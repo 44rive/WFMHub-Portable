@@ -1,7 +1,7 @@
 # WFMHub mandatory context router
 
 Context version: `2.0.0`
-Applies to: WFMHub `0.32.0` and later
+Applies to: WFMHub `0.32.1` and later
 Last reviewed: `2026-09-13`
 
 Before proposing or editing anything, read in this order:

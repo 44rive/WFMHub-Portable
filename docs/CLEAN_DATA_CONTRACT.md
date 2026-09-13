@@ -34,8 +34,8 @@ coverage.
 | `mart.planned_time_off_segment` | Schedule-clipped interval | PTO/Away planning overlay |
 | `mart.absence_event` | Reviewed or planned exact interval | Absence/shrinkage component audit |
 | `mart.absence_agent_day` | Agent/day | Reviewed absence and shrinkage result |
-| `mart.call_service_hour` | Date/hour/mapped queue | Interaction-deduplicated service actual |
-| `mart.service_interval` | Date/hour/mapped queue | Stable semantic projection of Call-by-Call |
+| `mart.call_service_hour` | Date/hour/mapped queue/language | Queue-entry service actual |
+| `mart.service_interval` | Date/hour/mapped queue/language | Stable semantic projection of Call-by-Call |
 | `mart.forecast_interval` | Native Verint interval | Staffing and clean sharing |
 | `mart.forecast_hour` | Date/hour/mapped scope | Flash and Realisations comparison |
 | `mart.agent_pcs_day` | Agent/day | PCS result and participation |
