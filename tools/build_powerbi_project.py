@@ -71,6 +71,10 @@ TABLES = (
         ),
     ),
     Table(
+        "Comparison Period", "DimComparisonPeriod.csv", "Disconnected month selector for explicit historical comparisons without intersecting the active Date filter.",
+        (c("Comparison Period"), c("Month Start", "date", True), c("Sort Order", "int", True)),
+    ),
+    Table(
         "Time", "DimTime.csv", "Reusable 15-minute time-of-day dimension.",
         (c("Time"), c("Quarter Hour Index", "int", True), c("Hour", "int"), c("Hour Label"), c("Time Label")),
     ),
@@ -157,8 +161,9 @@ TABLES = (
             m("Routing Availability %", "DIVIDE([Answered Calls], [Offered Calls])", "0.0%", "Answered divided by offered; this is service routing availability, not agent availability.", "Service"),
             m("Abandon Rate %", "DIVIDE([Abandoned Calls], [Offered Calls])", "0.0%", "Abandoned divided by offered.", "Service"),
             m("AHT Seconds", "DIVIDE(SUM('Service'[Handled Seconds]), [Answered Calls])", "#,##0", "Weighted average handle time from additive handled seconds and answered calls.", "Service"),
-            m("Volume Variance", "[Offered Calls] - [Forecast Volume]", "#,##0;[Red]-#,##0", "Actual offered demand minus the governed forecast volume.", "Forecast comparison"),
-            m("Volume Variance %", "DIVIDE([Volume Variance], [Forecast Volume])", "0.0%;[Red]-0.0%", "Volume variance divided by forecast volume.", "Forecast comparison"),
+            m("Comparable Forecast Volume", "IF(ISFILTERED('Queue'[Queue]), BLANK(), [Forecast Volume])", "#,##0", "Governed Staff Type forecast volume; blank in a single-queue context where no defensible queue forecast allocation exists.", "Forecast comparison"),
+            m("Volume Variance", "IF(ISBLANK([Comparable Forecast Volume]), BLANK(), [Offered Calls] - [Comparable Forecast Volume])", "#,##0;[Red]-#,##0", "Actual offered demand minus compatible governed forecast volume; blank at queue grain.", "Forecast comparison"),
+            m("Volume Variance %", "DIVIDE([Volume Variance], [Comparable Forecast Volume])", "0.0%;[Red]-0.0%", "Volume variance divided by compatible forecast volume.", "Forecast comparison"),
             m(
                 "Forecast Accuracy %",
                 """VAR Grain =
@@ -176,6 +181,10 @@ RETURN IF(ForecastTotal <= 0, BLANK(), MAX(0, 1 - DIVIDE(AbsoluteError, Forecast
                 "0.0%", "One minus WAPE across Date, native 15-minute slot and Management LOB using only intervals with supplied forecast demand.", "Forecast comparison",
             ),
             m("Forecast Bias %", "DIVIDE([Offered Calls] - [Forecast Volume], [Forecast Volume])", "0.0%;[Red]-0.0%", "Signed actual-minus-forecast demand divided by forecast demand.", "Forecast comparison"),
+            m("Comparison Service Level %", "VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Service Level %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))", "0.0%", "Service level for the explicitly selected disconnected comparison month.", "Historical comparison"),
+            m("Service Level Delta vs Comparison pp", "([Service Level %] - [Comparison Service Level %]) * 100", "0.0;[Red]-0.0", "Current service level less the selected comparison month in percentage points.", "Historical comparison"),
+            m("Comparison Volume Variance %", "VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Volume Variance %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))", "0.0%", "Volume variance for the explicitly selected comparison month.", "Historical comparison"),
+            m("Volume Variance Delta vs Comparison pp", "([Volume Variance %] - [Comparison Volume Variance %]) * 100", "0.0;[Red]-0.0", "Current volume variance less the selected comparison month in percentage points.", "Historical comparison"),
             m("AHT Error Seconds", "[AHT Seconds] - [Forecast AHT Seconds]", "#,##0;[Red]-#,##0", "Actual weighted AHT less forecast weighted AHT.", "Forecast comparison"),
             m(
                 "Peak Accuracy %",
@@ -279,6 +288,8 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
             m("Productive FTE Hours", "SUM('Staffing'[Productive FTE]) * 0.25", "#,##0.0", "Governed productive observed capacity converted to hours.", "Capacity"),
             m("Scheduled Coverage %", "DIVIDE([Net Scheduled FTE Hours], [Required FTE Hours])", "0.0%", "Net published schedule FTE-hours divided by Verint required FTE-hours.", "Capacity"),
             m("Uncovered FTE Hours", "MAX([Required FTE Hours] - [Net Scheduled FTE Hours], 0)", "#,##0.0", "Selected requirement FTE-hours not covered by net published schedule capacity.", "Capacity"),
+            m("Comparison Scheduled Coverage %", "VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Scheduled Coverage %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))", "0.0%", "Scheduled coverage for the explicitly selected comparison month.", "Historical comparison"),
+            m("Scheduled Coverage Delta vs Comparison pp", "([Scheduled Coverage %] - [Comparison Scheduled Coverage %]) * 100", "0.0;[Red]-0.0", "Current scheduled coverage less the selected comparison month in percentage points.", "Historical comparison"),
         ),
     ),
     Table(
@@ -286,7 +297,7 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
         (
             c("Date", "date", True), c("Agent Day Key", hidden=True), c("Agent ID", hidden=True),
             c("Agent"), c("Team Leader"), c("Ops Manager"), c("LOB"), c("Management LOB", hidden=True),
-            c("Planning Group"), c("Staff Type"), c("Capacity Mapping Status"),
+            c("Planning Group"), c("Staff Type"), c("Staff Type Key", hidden=True), c("Capacity Mapping Status"),
             c("Market"), c("Language"), c("Location"), c("Scheduled Start"), c("Scheduled End"),
             c("Scheduled Minutes", "int", True), c("Planned Work Minutes", "int", True),
             c("Planning Overlay"), c("First Login"), c("Last Logout"), c("Attendance Result"),
@@ -365,19 +376,18 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
         ),
     ),
     Table(
-        "Shift Placement", "FactShiftPlacement.csv", "Published, observed and exact residual placement bands used by the schedule review timeline.",
+        "Shift Placement", "FactShiftPlacement.csv", "Ordered native stacked-bar segments for published schedule and Agent Status actual bands.",
         (
-            c("Date", "date", True), c("Placement Key", hidden=True), c("Agent ID", hidden=True),
-            c("Agent"), c("Team Leader"), c("Management LOB", hidden=True), c("Placement"),
-            c("Placement Label"), c("Start Hour", "decimal", True), c("Duration Hours", "decimal", True),
-            c("Published Hours", "decimal", True), c("Observed Hours", "decimal", True),
+            c("Date", "date", True), c("Placement Key", hidden=True), c("Agent Day Key", hidden=True),
+            c("Agent ID", hidden=True), c("Agent"), c("Team Leader"),
+            c("Management LOB", hidden=True), c("Row Label"), c("Row Sort", hidden=True),
+            c("Band"), c("Band Sort", "int", True), c("Segment Order", "int", True),
+            c("Segment Type"), c("Segment Series", hidden=True),
+            c("Duration Hours", "decimal", True), c("Segment Color", hidden=True),
             c("Classification"), c("Requires Review", "int"),
         ),
         (
-            m("Start Hour Value", "SUM('Shift Placement'[Start Hour])", "0.0", "Hours after midnight before the placement bar starts.", "Schedule integrity"),
-            m("Published Placement Hours", "SUM('Shift Placement'[Published Hours])", "0.0", "Published shift duration for the placement chart.", "Schedule integrity"),
-            m("Observed Placement Hours", "SUM('Shift Placement'[Observed Hours])", "0.0", "Observed presence span for the placement chart.", "Schedule integrity"),
-            m("Placement Duration Hours", "SUM('Shift Placement'[Duration Hours])", "0.0", "Duration of the selected published, observed or residual band.", "Schedule integrity"),
+            m("Timeline Duration Hours", "SUM('Shift Placement'[Duration Hours])", "0.0", "Ordered segment duration used by the native schedule review timeline.", "Schedule integrity"),
         ),
     ),
     Table(
@@ -456,6 +466,8 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
             m("Final PTO %", "DIVIDE([Final PTO Minutes], [Final Planned Minutes])", "0.0%", "Final vacation minutes divided by finalized planned net minutes.", "Final absence"),
             m("Absence Review HC", "CALCULATE(DISTINCTCOUNT('Final Absence'[Agent Day Key]), NOT('Final Absence'[Final Ledger Status] IN {\"CLEAR\", \"ABSENCE_RECORDED\"}))", "#,##0", "Agent-days not yet in a finalized ledger state.", "Final absence"),
             m("Prior Month Final Absence %", "CALCULATE([Final Absence %], DATEADD('Date'[Date], -1, MONTH))", "0.0%", "Final absence rate for the equivalent prior-month date context.", "Final absence comparison"),
+            m("Comparison Final Absence %", "VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Final Absence %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))", "0.0%", "Final absence rate for the explicitly selected comparison month.", "Final absence comparison"),
+            m("Final Absence Delta vs Comparison pp", "([Final Absence %] - [Comparison Final Absence %]) * 100", "0.0;[Red]-0.0", "Current final absence less the selected comparison month in percentage points.", "Final absence comparison"),
         ),
     ),
     Table(
@@ -526,6 +538,7 @@ RELATIONSHIPS = (
     ("Staffing", "Date", "Date", "Date"), ("Staffing", "Time Slot", "Time", "Quarter Hour Index"),
     ("Staffing", "Staff Type Key", "Staff Type", "Staff Type Key"),
     ("Attendance", "Date", "Date", "Date"), ("Attendance", "Agent ID", "Employee", "Agent ID"),
+    ("Attendance", "Staff Type Key", "Staff Type", "Staff Type Key"),
     ("Status", "Date", "Date", "Date"), ("Status", "Agent ID", "Employee", "Agent ID"),
     ("Status", "Time Slot", "Time", "Quarter Hour Index"),
     ("Schedule Integrity", "Date", "Date", "Date"),
@@ -548,96 +561,97 @@ RELATIONSHIPS = (
 
 PAGES = (
     {
-        "title": "Forecast & Requirement", "nav": "Forecast & Requirement", "status": "MONTH PLAN",
-        "subtitle": "Verint Staff Type demand and absolute required FTE",
-        "rule": "Forecast and requirement are the planning baseline. Call queues are not Staff Types.",
-        "scope": "Grain: 15-minute Staff Type\nSource: Verint Volume + Absolute Required FTE",
-        "slicers": (("Date", "Date", "FORECAST PERIOD", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Planning Group", "Planning Group", "PLANNING GROUP", "Dropdown"), ("Staff Type", "Staff Type", "STAFF TYPE", "Dropdown")),
+        "title": "Today's Control", "nav": "Today's Control", "status": "LIVE CONTROL",
+        "subtitle": "Real-time workforce visibility. Take action. Keep service on track.",
+        "slicers": (("Date", "Date", "BUSINESS DATE", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Planning Group", "Planning Group", "PLANNING GROUP", "Dropdown"), ("Staff Type", "Staff Type", "STAFF TYPE", "Dropdown"), ("Time", "Time Label", "CHECKPOINT", "Dropdown")),
         "cards": (
-            ("Forecast", "Forecast Volume", "FORECAST VOLUME", "#315F85", "Sum of populated Staff Type volume"),
-            ("Forecast", "Required FTE Hours", "REQUIRED FTE-HOURS", "#008B95", "15-minute required FTE converted to hours"),
-            ("Forecast", "Peak Required FTE", "PEAK REQUIRED FTE", "#D18A13", "Peak at selected Staff Type grain"),
-            ("Forecast", "Requirement Coverage %", "REQUIREMENT COVERAGE", "#26805A", "Intervals with explicit absolute requirement"),
+            ("Service", "Service Level %", "SERVICE LEVEL", "#008B95", "Against the governed LOB target"),
+            ("Service", "Volume Variance %", "VOLUME vs FORECAST", "#D18A13", "Actual offered versus Staff Type forecast"),
+            ("Staffing", "Present FTE Gap", "PRESENT FTE GAP", "#BD2B32", "Observed capacity less required FTE"),
+            ("Attendance", "Callout HC", "ATTENDANCE CALLS", "#26805A", "No show, possible no show and late follow-up"),
         ),
+        "chart_layout": "wide_left",
         "charts": (
-            {"type": "lineStackedColumnComboChart", "title": "VOLUME AND REQUIRED FTE PROFILE", "category": ("Time", "Time Label"), "values": (("Forecast", "Forecast Volume"),), "secondary": (("Forecast", "Required FTE"),)},
-            {"type": "table", "title": "REQUIREMENT BY STAFF TYPE", "fields": (("Staff Type", "Staff Type"), ("Forecast", "Forecast Volume"), ("Forecast", "Required FTE Hours"), ("Forecast", "Peak Required FTE"))},
+            {"type": "lineChart", "title": "ACTUAL SERVICE LEVEL vs TARGET", "category": ("Time", "Time Label"), "values": (("Service", "Service Level %"), ("Service", "SL Target %"))},
+            {"type": "table", "title": "CURRENT RESOURCE POSITION", "fields": (("Planning Group", "Planning Group"), ("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "Average Observed FTE"), ("Staffing", "Present FTE Gap"))},
         ),
-        "tables": (("STAFF TYPE REQUIREMENT DETAIL", (("Date", "Date"), ("Time", "Time Label"), ("Management LOB", "Management LOB"), ("Planning Group", "Planning Group"), ("Staff Type", "Staff Type"), ("Forecast", "Forecast Volume"), ("Forecast", "Required FTE"), ("Forecast", "Capacity Mapping Status")), "full"),),
+        "tables": (("ACTIONS NOW", (("Operational Action", "State"), ("Operational Action", "Item"), ("Operational Action", "Management LOB"), ("Operational Action", "Planning Group"), ("Operational Action", "Detail"), ("Operational Action", "Evidence")), "full"),),
     },
     {
-        "title": "Staff Preparation", "nav": "Staff Preparation", "status": "NEXT 14 DAYS",
-        "subtitle": "Required capacity versus published schedules — by planning group and Staff Type",
-        "rule": "Forecast and requirement follow Staff Type. Service level remains a separate LOB result.",
-        "scope": "Service: combined management LOB result\nStaffing: planning groups remain separate",
+        "title": "Staff Preparation", "nav": "Staff Preparation", "status": "PLAN & PREPARE",
+        "subtitle": "Right people. Right time. A better day of service.",
         "slicers": (("Date", "Date", "PLANNING HORIZON", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Planning Group", "Planning Group", "PLANNING GROUP", "Dropdown"), ("Staff Type", "Staff Type", "STAFF TYPE", "Dropdown")),
         "cards": (
-            ("Forecast", "Peak Required FTE", "PEAK REQUIRED FTE", "#315F85", "Explicit Verint requirement"),
-            ("Staffing", "Peak Shortage FTE", "PEAK STAFFING GAP", "#BD2B32", "Worst net schedule position"),
-            ("Staffing", "Uncovered FTE Hours", "UNCOVERED FTE-HOURS", "#BD2B32", "Requirement not covered by net schedule"),
-            ("Staffing", "PTO / Away FTE Hours", "PTO / AWAY IMPACT", "#D18A13", "Removed from gross schedule capacity"),
+            ("Forecast", "Peak Required FTE", "PEAK REQUIRED FTE", "#008B95", "Maximum explicit Verint requirement"),
+            ("Staffing", "Peak Shortage FTE", "PEAK STAFFING GAP", "#BD2B32", "Worst net-schedule interval"),
+            ("Staffing", "Uncovered FTE Hours", "UNCOVERED FTE-HOURS", "#BD2B32", "Total uncovered requirement"),
+            ("Staffing", "PTO / Away FTE Hours", "PTO / AWAY IMPACT", "#D18A13", "Capacity removed from gross schedules"),
         ),
+        "chart_layout": "equal",
         "charts": (
-            {"type": "lineChart", "title": "REQUIRED FTE vs NET SCHEDULED FTE", "category": ("Time", "Time Label"), "values": (("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"))},
-            {"type": "table", "title": "CAPACITY BY PLANNING GROUP", "fields": (("Planning Group", "Planning Group"), ("Staff Type", "Staff Type"), ("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "Net Capacity Gap FTE"))},
+            {"type": "lineChart", "title": "REQUIRED vs NET SCHEDULED FTE — 15 MINUTES", "category": ("Time", "Time Label"), "values": (("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"))},
+            {"type": "table", "title": "CAPACITY BY PLANNING GROUP AND STAFF TYPE", "fields": (("Planning Group", "Planning Group"), ("Staff Type", "Staff Type"), ("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "PTO / Away FTE"), ("Staffing", "Net Capacity Gap FTE"))},
         ),
-        "tables": (("STAFFING GAPS TO TREAT", (("Date", "Date"), ("Time", "Time Label"), ("Management LOB", "Management LOB"), ("Planning Group", "Planning Group"), ("Staff Type", "Staff Type"), ("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "PTO / Away FTE"), ("Staffing", "Net Capacity Gap FTE")), "full"),),
+        "tables": (("STAFFING GAPS TO TREAT", (("Date", "Date"), ("Time", "Time Label"), ("Planning Group", "Planning Group"), ("Staff Type", "Staff Type"), ("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "Net Capacity Gap FTE"), ("Staffing", "Staffing State"), ("Staffing", "Evidence Basis")), "full"),),
     },
     {
-        "title": "Intraday Control", "nav": "Intraday Control", "status": "LIVE",
-        "subtitle": "Live service outcome and current staffing position — kept at their correct grains",
-        "rule": "Operate service at LOB level and resources at Planning Group / Staff Type level.",
-        "scope": "Service: exact queues rolled to one LOB ratio\nResources: planning groups stay visible",
-        "equal_charts": True,
-        "slicers": (("Date", "Date", "BUSINESS DATE", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Planning Group", "Planning Group", "PLANNING GROUP", "Dropdown"), ("Time", "Time Label", "CHECKPOINT", "Dropdown")),
+        "title": "Intraday Service", "nav": "Intraday Service", "status": "INTRADAY",
+        "subtitle": "Combined LOB service result with queue-level evidence.",
+        "slicers": (("Date", "Date", "BUSINESS DATE", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Queue", "Queue", "QUEUE", "Dropdown"), ("Time", "Time Label", "CHECKPOINT", "Dropdown")),
         "cards": (
-            ("Service", "Service Level %", "SERVICE LEVEL", "#D18A13", "Ratio of summed Storm components"),
-            ("Service", "Offered Calls", "OFFERED VOLUME", "#315F85", "Exact configured service queue scope"),
-            ("Staffing", "Present FTE Gap", "PRESENT FTE GAP", "#BD2B32", "Requirement less Agent Status presence"),
-            ("Attendance", "No Show HC", "CONFIRMED NO SHOW", "#BD2B32", "Unknown evidence remains separate"),
+            ("Service", "Service Level %", "SERVICE LEVEL", "#008B95", "Ratio of summed Storm components"),
+            ("Service", "Offered Calls", "OFFERED", "#315F85", "Exact configured service scope"),
+            ("Service", "Answered Calls", "HANDLED", "#315F85", "Answered call legs"),
+            ("Service", "Volume Variance %", "VOLUME vs FORECAST", "#D18A13", "Blank when one queue is selected"),
         ),
+        "chart_layout": "wide_left",
         "charts": (
-            {"type": "lineChart", "title": "COMBINED LOB SERVICE LEVEL", "category": ("Time", "Time Label"), "values": (("Service", "Service Level %"), ("Service", "SL Target %"))},
-            {"type": "table", "title": "RESOURCE POSITION BY PLANNING GROUP", "fields": (("Planning Group", "Planning Group"), ("Staff Type", "Staff Type"), ("Forecast", "Required FTE"), ("Staffing", "Average Scheduled FTE"), ("Staffing", "Average Observed FTE"), ("Staffing", "Present FTE Gap"))},
+            {"type": "lineStackedColumnComboChart", "title": "SERVICE LEVEL vs TARGET — 15 MINUTES", "category": ("Time", "Time Label"), "values": (("Service", "Offered Calls"),), "secondary": (("Service", "Service Level %"), ("Service", "SL Target %"))},
+            {"type": "table", "title": "LOB SERVICE RESULTS — COMBINED", "fields": (("Management LOB", "Management LOB"), ("Service", "Service Level %"), ("Service", "SL Target %"), ("Service", "Offered Calls"), ("Service", "Answered Calls"), ("Service", "Handled in SL"), ("Service", "Abandoned Calls"))},
         ),
-        "tables": (("NEXT INTERVALS AND ATTENDANCE CONTROL", (("Operational Action", "State"), ("Operational Action", "Item"), ("Operational Action", "Planning Group"), ("Operational Action", "Staff Type"), ("Operational Action", "Required FTE"), ("Operational Action", "Resource FTE"), ("Operational Action", "Variance FTE"), ("Operational Action", "Detail"), ("Operational Action", "Evidence")), "full"),),
+        "tables": (
+            ("VOLUME ACTUAL vs FORECAST", (("Time", "Time Label"), ("Service", "Offered Calls"), ("Service", "Comparable Forecast Volume"), ("Service", "Volume Variance"), ("Service", "Volume Variance %")), "left"),
+            ("QUEUE DIAGNOSIS", (("Queue", "Queue"), ("Service", "Offered Calls"), ("Service", "Service Level %"), ("Service", "Abandoned Calls"), ("Service", "AHT Seconds")), "right"),
+        ),
     },
     {
-        "title": "Attendance & Schedule Review", "nav": "Attendance & Schedule Review", "status": "CURRENT WEEK",
-        "subtitle": "Completed-shift evidence, exact residual corrections, breaks and meals",
-        "rule": "Agent Status owns observed attendance. Final Verint Activities close exact residual gaps.",
-        "scope": "Observed: Agent Status first, LILO fallback\nCorrection: Activities subtract exact overlap",
-        "slicers": (("Date", "Date", "COMPLETED PERIOD", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Employee", "Team Leader", "TEAM LEADER", "Dropdown"), ("Attendance Gap", "Detected Issue", "EXCEPTION", "Dropdown")),
+        "title": "Attendance & Schedule Review", "nav": "Schedule Review", "status": "EVIDENCE REVIEW",
+        "subtitle": "Published schedule, Agent Status evidence and exact residual gaps.",
+        "slicers": (("Date", "Date", "REVIEW PERIOD", "Between"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Employee", "Team Leader", "TEAM LEADER", "Dropdown"), ("Employee", "Agent", "AGENT", "Dropdown"), ("Attendance Gap", "Detected Issue", "EXCEPTION", "Dropdown")),
         "cards": (
-            ("Attendance", "No Show HC", "CONFIRMED NO SHOW", "#BD2B32", "Completed supported cases"),
-            ("Attendance", "Late HC", "LATE ARRIVALS", "#D18A13", "Exact start variance above tolerance"),
-            ("Attendance", "Early Leave HC", "EARLY LEAVES", "#D18A13", "Completed shifts only"),
-            ("Attendance Gap", "Residual Gap Hours", "RESIDUAL GAP HOURS", "#BD2B32", "Still unsupported by final Activities"),
+            ("Attendance", "No Show HC", "CONFIRMED NO SHOW", "#BD2B32", "Evidence-backed completed no shows"),
+            ("Attendance", "Unknown / Possible No Show HC", "UNKNOWN POSSIBLE NO SHOW", "#D18A13", "Insufficient current evidence"),
+            ("Attendance", "Late HC", "LATE ARRIVALS", "#26805A", "Exact late minutes above tolerance"),
+            ("Attendance Gap", "Residual Gap Hours", "RESIDUAL GAP HOURS", "#49A9EA", "Unsupported by final Verint Activities"),
         ),
+        "chart_layout": "full",
         "charts": (
-            {"type": "stackedBarChart", "title": "PUBLISHED SCHEDULE vs OBSERVED PRESENCE", "category": ("Shift Placement", "Placement Label"), "values": (("Shift Placement", "Start Hour Value"), ("Shift Placement", "Placement Duration Hours"))},
-            {"type": "table", "title": "BREAK & MEAL CONTROL", "fields": (("Break Meal", "Agent"), ("Break Meal", "Break Minutes"), ("Break Meal", "Meal Minutes"), ("Break Meal", "Break Allowance Minutes"), ("Break Meal", "Meal Allowance Minutes"), ("Break Meal", "Alert"))},
+            {"type": "barChart", "title": "PUBLISHED SCHEDULE vs AGENT STATUS", "category": ("Shift Placement", "Row Label"), "values": (("Shift Placement", "Timeline Duration Hours"),), "series": ("Shift Placement", "Segment Series"), "field_color": ("Shift Placement", "Segment Color"), "legend": False, "timeline": True},
         ),
-        "tables": (("RESIDUAL VERINT CORRECTION QUEUE", (("Attendance Gap", "Date"), ("Attendance Gap", "Agent"), ("Attendance Gap", "Team Leader"), ("Attendance Gap", "Detected Issue"), ("Attendance Gap", "Gap Start"), ("Attendance Gap", "Gap End"), ("Attendance Gap", "Gap Minutes"), ("Attendance Gap", "Verint Activity"), ("Attendance Gap", "Verint Overlap Minutes"), ("Attendance Gap", "Suggested Activity")), "full"),),
+        "tables": (("RESIDUAL CORRECTION DETAIL — READ ONLY", (("Attendance Gap", "Correction ID"), ("Attendance Gap", "Date"), ("Attendance Gap", "Agent"), ("Attendance Gap", "Team Leader"), ("Attendance Gap", "Detected Issue"), ("Attendance Gap", "Gap Start"), ("Attendance Gap", "Gap End"), ("Attendance Gap", "Gap Minutes"), ("Attendance Gap", "Verint Activity"), ("Attendance Gap", "Verint Overlap Minutes"), ("Attendance Gap", "Observed Source")), "full"),),
     },
     {
-        "title": "Performance Review", "nav": "Performance Review", "status": "PERIOD REVIEW",
-        "subtitle": "Close the WFM cycle with forecast, staffing, service, absence and shrinkage",
-        "rule": "Review source variances, then improve the next forecast and staff plan. No synthetic score.",
-        "scope": "Cycle: demand → requirement → schedule → delivery\nRates: recalculated from summed components",
-        "equal_charts": True,
-        "slicers": (("Date", "Date", "REVIEW PERIOD", "Between"), ("Date", "Year Month", "COMPARISON MONTH", "Dropdown"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Planning Group", "Planning Group", "PLANNING GROUP", "Dropdown")),
+        "title": "Historical Review", "nav": "Historical Review", "status": "REVIEW & IMPROVE",
+        "subtitle": "Close the WFM cycle: forecast, schedule, delivery, service and final absence.",
+        "slicers": (("Date", "Date", "REVIEW PERIOD", "Between"), ("Comparison Period", "Comparison Period", "COMPARISON PERIOD", "Dropdown"), ("Management LOB", "Management LOB", "MANAGEMENT LOB", "Dropdown"), ("Planning Group", "Planning Group", "PLANNING GROUP", "Dropdown")),
         "cards": (
-            ("Service", "Service Level %", "SERVICE LEVEL", "#D18A13", "Against governed LOB target"),
-            ("Service", "Volume Variance %", "VOLUME vs FORECAST", "#315F85", "Actual offered versus compatible roll-up"),
-            ("Staffing", "Scheduled Coverage %", "SCHEDULED COVERAGE", "#26805A", "Net scheduled FTE-hours / required"),
+            ("Service", "Service Level %", "SERVICE LEVEL", "#008B95", "Combined service outcome"),
+            ("Service", "Volume Variance %", "VOLUME vs FORECAST", "#D18A13", "Actual versus compatible forecast"),
+            ("Staffing", "Scheduled Coverage %", "SCHEDULED COVERAGE", "#26805A", "Net schedule FTE-hours / required"),
             ("Final Absence", "Final Absence %", "FINAL ABSENCE", "#BD2B32", "Final Verint Activities only"),
         ),
-        "charts": (
-            {"type": "lineChart", "title": "WEEKLY FORECAST vs ACTUAL VOLUME", "category": ("Date", "ISO Week"), "values": (("Forecast", "Forecast Volume"), ("Service", "Offered Calls"))},
-            {"type": "clusteredColumnChart", "title": "REQUIREMENT TO DELIVERY — FTE-HOURS", "category": ("Capacity Stage", "Capacity Stage"), "values": (("Status", "Capacity Bridge Hours"),)},
+        "comparison_cards": (
+            ("Service", "Service Level Delta vs Comparison pp", "#008B95"),
+            ("Service", "Volume Variance Delta vs Comparison pp", "#D18A13"),
+            ("Staffing", "Scheduled Coverage Delta vs Comparison pp", "#26805A"),
+            ("Final Absence", "Final Absence Delta vs Comparison pp", "#BD2B32"),
         ),
-        "tables": (("MONTHLY WFM SCORECARD", (("Management LOB", "Management LOB"), ("Service", "Service Level %"), ("Service", "Offered Calls"), ("Forecast", "Forecast Volume"), ("Service", "Volume Variance %"), ("Forecast", "Required FTE Hours"), ("Staffing", "Net Scheduled FTE Hours"), ("Staffing", "Observed FTE Hours"), ("Final Absence", "Final Absence %"), ("Final Absence", "Final Shrinkage %")), "full"),),
+        "chart_layout": "equal",
+        "charts": (
+            {"type": "lineChart", "title": "FORECAST VOLUME vs ACTUAL VOLUME", "category": ("Date", "ISO Week"), "values": (("Service", "Offered Calls"), ("Forecast", "Forecast Volume"))},
+            {"type": "clusteredColumnChart", "title": "REQUIREMENT TO DELIVERY — FTE-HOURS", "category": ("Management LOB", "Management LOB"), "values": (("Forecast", "Required FTE Hours"), ("Staffing", "Net Scheduled FTE Hours"), ("Staffing", "Observed FTE Hours"), ("Staffing", "Productive FTE Hours"))},
+        ),
+        "tables": (("MONTHLY WFM SCORECARD", (("Management LOB", "Management LOB"), ("Service", "Service Level %"), ("Service", "Offered Calls"), ("Forecast", "Forecast Volume"), ("Service", "Volume Variance %"), ("Forecast", "Required FTE Hours"), ("Staffing", "Net Scheduled FTE Hours"), ("Staffing", "Observed FTE Hours"), ("Staffing", "Productive FTE Hours"), ("Final Absence", "Final Absence %"), ("Final Absence", "Final Shrinkage %")), "full"),),
     },
 )
 
@@ -879,13 +893,18 @@ def _title_vco(title: str) -> dict:
 
 def _slicer(
     name: str, table: str, column: str, label: str, mode: str,
-    x: int, y: int, width: int, height: int,
+    x: int, y: int, width: int, height: int, sync_group: str,
 ) -> dict:
     return {
         "$schema": VISUAL_SCHEMA, "name": name,
         "position": _position(x, y, width, height, 100, 100),
         "visual": {
             "visualType": "slicer",
+            "syncGroup": {
+                "groupName": sync_group,
+                "fieldChanges": True,
+                "filterChanges": True,
+            },
             "query": {"queryState": {"Values": {"projections": [_projection(table, column)]}}},
             "objects": {
                 "data": [{"properties": {"mode": _literal(mode)}}],
@@ -901,6 +920,7 @@ def _slicer(
             },
             "visualContainerObjects": {
                 "visualHeader": [{"properties": {"show": _literal(False)}}],
+                "title": [{"properties": {"show": _literal(False)}}],
                 "padding": [{"properties": {key: _literal(0) for key in ("top", "bottom", "left", "right")}}],
             },
         },
@@ -909,7 +929,7 @@ def _slicer(
 
 def _card(
     name: str, table: str, measure: str, label: str, accent: str,
-    x: int, y: int, width: int, height: int,
+    x: int, y: int, width: int, height: int, value_size: int = 32,
 ) -> dict:
     return {
         "$schema": VISUAL_SCHEMA, "name": name,
@@ -921,19 +941,20 @@ def _card(
                 "outline": [{"properties": {"show": _literal(False)}, "selector": {"id": "default"}}],
                 "fillCustom": [{"properties": {"show": _literal(False)}, "selector": {"id": "default"}}],
                 "value": [{"properties": {
-                    "fontSize": _literal(30), "fontColor": _color(accent),
+                    "fontSize": _literal(value_size), "fontColor": _color(accent),
                     "bold": _literal(True), "horizontalAlignment": _literal("left"),
                 }, "selector": {"id": "default"}}],
                 "label": [{"properties": {
-                    "show": _literal(True), "text": _literal(label),
+                    "show": _literal(False), "text": _literal(label),
                     "fontSize": _literal(10), "fontColor": _color("#61758A"),
                 }, "selector": {"id": "default"}}],
             },
             "visualContainerObjects": {
                 "visualHeader": [{"properties": {"show": _literal(False)}}],
+                "title": [{"properties": {"show": _literal(False)}}],
                 "padding": [{"properties": {
-                    "top": _literal(18), "bottom": _literal(12),
-                    "left": _literal(24), "right": _literal(14),
+                    "top": _literal(0), "bottom": _literal(0),
+                    "left": _literal(0), "right": _literal(0),
                 }}],
             },
         },
@@ -946,6 +967,10 @@ def _chart(
     *, secondary: Iterable[tuple[str, str]] = (),
     series: tuple[str, str] | None = None,
     aggregation: bool = False,
+    legend: bool = True,
+    field_color: tuple[str, str] | None = None,
+    timeline: bool = False,
+    show_title: bool = True,
 ) -> dict:
     projections = [
         _aggregation_projection(table, field) if aggregation else _projection(table, field, True)
@@ -961,32 +986,44 @@ def _chart(
         }
     if series:
         query_state["Series"] = {"projections": [_projection(*series)]}
+    objects: dict[str, list[dict]] = {
+        "legend": [{"properties": {
+            "show": _literal(legend), "position": _literal("Top"),
+            "labelColor": _color("#61758A"), "fontSize": _literal(9),
+        }}],
+        "labels": [{"properties": {
+            "show": _literal(False), "fontSize": _literal(9),
+            "color": _color("#52667A"),
+        }}],
+        "categoryAxis": [{"properties": {
+            "show": _literal(True), "labelColor": _color("#17324D"),
+            "fontSize": _literal(9), "showAxisTitle": _literal(False),
+        }}],
+        "valueAxis": [{"properties": {
+            "show": _literal(True), "labelColor": _color("#61758A"),
+            "fontSize": _literal(9), "showAxisTitle": _literal(False),
+            "gridlineShow": _literal(True), "gridlineColor": _color("#E7EDF2"),
+            **({"start": _literal(0), "end": _literal(24)} if timeline else {}),
+        }}],
+    }
+    if field_color:
+        table, field = field_color
+        objects["dataPoint"] = [{"properties": {
+            "fill": {"solid": {"color": {"expr": {
+                "Aggregation": {
+                    "Expression": _column_field(table, field),
+                    "Function": 3,
+                }
+            }}}}
+        }}]
     return {
         "$schema": VISUAL_SCHEMA, "name": name,
         "position": _position(x, y, width, height, 300, 300),
         "visual": {
             "visualType": chart_type,
             "query": {"queryState": query_state},
-            "objects": {
-                "legend": [{"properties": {
-                    "show": _literal(True), "position": _literal("Top"),
-                    "labelColor": _color("#61758A"), "fontSize": _literal(9),
-                }}],
-                "labels": [{"properties": {
-                    "show": _literal(False), "fontSize": _literal(9),
-                    "color": _color("#52667A"),
-                }}],
-                "categoryAxis": [{"properties": {
-                    "show": _literal(True), "labelColor": _color("#61758A"),
-                    "fontSize": _literal(9), "showAxisTitle": _literal(False),
-                }}],
-                "valueAxis": [{"properties": {
-                    "show": _literal(True), "labelColor": _color("#61758A"),
-                    "fontSize": _literal(9), "showAxisTitle": _literal(False),
-                    "gridlineShow": _literal(True), "gridlineColor": _color("#E7EDF2"),
-                }}],
-            },
-            "visualContainerObjects": _title_vco(title),
+            "objects": objects,
+            "visualContainerObjects": _title_vco(title) if show_title else _no_chrome(),
         },
     }
 
@@ -1061,20 +1098,20 @@ def _matrix(
 def _navigator(name: str) -> dict:
     return {
         "$schema": VISUAL_SCHEMA, "name": name,
-        "position": _position(12, 105, 186, len(PAGES) * 68, 20, 20),
+        "position": _position(22, 68, 1636, 48, 20, 20),
         "visual": {
             "visualType": "pageNavigator",
             "objects": {
-                "layout": [{"properties": {"columnCount": _literal(1), "rowCount": _literal(len(PAGES)), "cellPadding": _literal(5)}}],
+                "layout": [{"properties": {"columnCount": _literal(len(PAGES)), "rowCount": _literal(1), "cellPadding": _literal(2)}}],
                 "pages": [{"properties": {"showHiddenPages": _literal(False), "showTooltipPages": _literal(False), "showByDefault": _literal(True)}}],
                 "shape": [{"properties": {"tileShape": _literal("rectangleRoundedByPixel"), "rectangleRoundedCurve": _literal(6)}}],
                 "text": [
-                    {"properties": {"show": _literal(False)}, "selector": {"id": "default"}},
-                    {"properties": {"show": _literal(False)}, "selector": {"id": "selected"}},
+                    {"properties": {"show": _literal(True), "fontColor": _color("#DCE9F2"), "fontSize": _literal(10), "bold": _literal(True)}, "selector": {"id": "default"}},
+                    {"properties": {"show": _literal(True), "fontColor": _color("#FFFFFF"), "fontSize": _literal(10), "bold": _literal(True)}, "selector": {"id": "selected"}},
                 ],
                 "fill": [
-                    {"properties": {"show": _literal(True), "fillColor": _color("#0B1F33"), "transparency": _literal(100)}, "selector": {"id": "default"}},
-                    {"properties": {"show": _literal(True), "fillColor": _color("#007C83"), "transparency": _literal(100)}, "selector": {"id": "selected"}},
+                    {"properties": {"show": _literal(True), "fillColor": _color("#123B5D"), "transparency": _literal(0)}, "selector": {"id": "default"}},
+                    {"properties": {"show": _literal(True), "fillColor": _color("#008B95"), "transparency": _literal(0)}, "selector": {"id": "selected"}},
                 ],
                 "outline": [{"properties": {"show": _literal(False)}, "selector": {"id": "default"}}],
             },
@@ -1110,66 +1147,64 @@ def _write_report(root: Path) -> None:
                 },
             },
         )
-        _write_visual(page_dir, title, "sidebar", _shape("", 0, 0, 210, 945, "#0B2239", 0))
-        _write_visual(page_dir, title, "header", _shape("", 210, 0, 1470, 72, "#FFFFFF", 1))
-        _write_visual(page_dir, title, "header line", _shape("", 210, 71, 1470, 1, "#D6E0E6", 2))
-        _write_visual(page_dir, title, "brand", _textbox("", "WFMHub", 20, 16, 170, 45, 27, "#FFFFFF", 10, True, "left"))
-        _write_visual(page_dir, title, "nav label", _textbox("", "WFM CYCLE", 24, 88, 160, 20, 10, "#A9BFCE", 10, True))
-        # Static labels guarantee a readable sidebar even on Desktop builds
-        # that fail to render pageNavigator text.  The native navigator stays
-        # above them as the interactive layer; Power BI's bottom page tabs are
-        # also retained as a second navigation route.
-        current_nav = next(
-            index for index, candidate in enumerate(PAGES)
-            if candidate["title"] == title
-        )
-        for index, candidate in enumerate(PAGES):
-            nav_y = 112 + index * 68
-            if index == current_nav:
-                _write_visual(
-                    page_dir, title, f"nav selected {index}",
-                    _shape("", 12, nav_y, 186, 63, "#008B95", 12, rounded=True),
-                )
-            _write_visual(
-                page_dir, title, f"nav text {index}",
-                _textbox(
-                    "", f"{index + 1}   {candidate['nav']}",
-                    26, nav_y + 20, 158, 28, 11,
-                    "#FFFFFF" if index == current_nav else "#DCE9F2",
-                    14, index == current_nav,
-                ),
-            )
+        _write_visual(page_dir, title, "header", _shape("", 0, 0, 1680, 64, "#082D4A", 1))
+        _write_visual(page_dir, title, "brand", _textbox("", "WFMHub", 24, 10, 180, 44, 27, "#FFFFFF", 10, True))
+        _write_visual(page_dir, title, "brand accent", _shape("", 197, 12, 3, 40, "#00A3AD", 12))
+        _write_visual(page_dir, title, "page title", _textbox("", title.upper(), 224, 3, 760, 38, 24, "#FFFFFF", 10, True))
+        _write_visual(page_dir, title, "subtitle", _textbox("", page["subtitle"], 224, 39, 940, 19, 10, "#DCE9F2", 10))
+        _write_visual(page_dir, title, "status", _textbox("", page["status"], 1390, 12, 258, 20, 10, "#74D6DA", 10, True, "right"))
+        _write_visual(page_dir, title, "update", _textbox("", "REFRESHED FROM GOVERNED WFMHUB FEED", 1260, 35, 388, 18, 8, "#DCE9F2", 10, False, "right"))
         _write_visual(page_dir, title, "nav", _navigator(""))
-        _write_visual(page_dir, title, "business rule", _textbox("", "BUSINESS RULE\n" + page["rule"], 24, 792, 162, 104, 10, "#AFC2CF", 10, False, "left"))
-        _write_visual(page_dir, title, "page title", _textbox("", title.upper(), 235, 11, 720, 30, 25, "#17324D", 10, True))
-        _write_visual(page_dir, title, "subtitle", _textbox("", page["subtitle"], 235, 43, 850, 20, 11, "#607587", 10, False))
-        _write_visual(page_dir, title, "update", _textbox("", "Last Hub update · refresh the governed feed", 1150, 24, 330, 20, 10, "#607587", 10, False, "right"))
-        _write_visual(page_dir, title, "status panel", _shape("", 1494, 19, 156, 34, "#E4F4F4", 8, rounded=True))
-        _write_visual(page_dir, title, "status", _textbox("", page["status"], 1500, 27, 144, 18, 9, "#08757D", 10, True, "center"))
 
-        # One compact selector strip shared by every page.
-        _write_visual(page_dir, title, "selector panel", _shape("", 228, 85, 1434, 58, "#FFFFFF", 3, rounded=True))
-        slicer_layout = ((240, 270), (522, 235), (769, 235), (1016, 270))
-        for index, ((table, field, label, mode), (x, width)) in enumerate(zip(page["slicers"], slicer_layout), 1):
-            _write_visual(page_dir, title, f"slicer {index}", _slicer("", table, field, label, mode, x, 88, width, 52))
-        _write_visual(page_dir, title, "scope panel", _shape("", 1298, 94, 352, 40, "#E9F5F5", 4, rounded=True))
-        _write_visual(page_dir, title, "scope accent", _shape("", 1298, 94, 4, 40, "#008B95", 5))
-        _write_visual(page_dir, title, "scope", _textbox("", page["scope"], 1310, 98, 328, 32, 9, "#315169", 10, False))
+        _write_visual(page_dir, title, "selector panel", _shape("", 22, 124, 1636, 77, "#FFFFFF", 3, rounded=True))
+        slicers = page["slicers"]
+        gap = 12
+        slicer_width = (1636 - gap * (len(slicers) - 1)) // len(slicers)
+        sync_names = {
+            ("Date", "Date"): "BusinessDateSync",
+            ("Comparison Period", "Comparison Period"): "ComparisonPeriodSync",
+            ("Management LOB", "Management LOB"): "ManagementLOBSync",
+            ("Planning Group", "Planning Group"): "PlanningGroupSync",
+            ("Staff Type", "Staff Type"): "StaffTypeSync",
+            ("Time", "Time Label"): "CheckpointSync",
+            ("Queue", "Queue"): "QueueSync",
+            ("Employee", "Team Leader"): "TeamLeaderSync",
+            ("Employee", "Agent"): "AgentSync",
+            ("Attendance Gap", "Detected Issue"): "ExceptionSync",
+        }
+        for index, (table, field, label, mode) in enumerate(slicers, 1):
+            x = 22 + (index - 1) * (slicer_width + gap)
+            width = slicer_width if index < len(slicers) else 1658 - x
+            _write_visual(
+                page_dir, title, f"slicer {index}",
+                _slicer("", table, field, label, mode, x + 8, 125, width - 16, 76, sync_names[(table, field)]),
+            )
 
-        # Four aligned KPI cards with a restrained semantic accent.
-        card_x = (228, 590, 951, 1313)
-        for index, ((table, measure, label, accent, subtext), x) in enumerate(zip(page["cards"], card_x), 1):
-            _write_visual(page_dir, title, f"card panel {index}", _shape("", x, 153, 349, 119, "#FFFFFF", 3, rounded=True))
-            _write_visual(page_dir, title, f"card accent {index}", _shape("", x, 153, 6, 119, accent, 4, rounded=True))
-            _write_visual(page_dir, title, f"card {index}", _card("", table, measure, label, accent, x + 8, 155, 337, 84))
-            _write_visual(page_dir, title, f"card note {index}", _textbox("", subtext, x + 24, 244, 305, 20, 9, "#607587", 10, False))
+        card_gap = 12
+        card_width = (1636 - card_gap * 3) // 4
+        for index, (table, measure, label, accent, subtext) in enumerate(page["cards"], 1):
+            x = 22 + (index - 1) * (card_width + card_gap)
+            width = card_width if index < 4 else 1658 - x
+            _write_visual(page_dir, title, f"card panel {index}", _shape("", x, 211, width, 132, "#FFFFFF", 3, rounded=True))
+            _write_visual(page_dir, title, f"card accent {index}", _shape("", x, 211, 6, 132, accent, 4, rounded=True))
+            _write_visual(page_dir, title, f"card label {index}", _textbox("", label, x + 24, 222, width - 40, 22, 11, "#17324D", 10, True))
+            comparison = page.get("comparison_cards", ())
+            main_width = width - 174 if comparison else width - 44
+            _write_visual(page_dir, title, f"card {index}", _card("", table, measure, label, accent, x + 24, 246, main_width, 58))
+            if comparison:
+                compare_table, compare_measure, compare_accent = comparison[index - 1]
+                _write_visual(page_dir, title, f"card divider {index}", _shape("", x + width - 145, 225, 1, 72, "#D6E0E6", 8))
+                _write_visual(page_dir, title, f"card compare label {index}", _textbox("", "vs comparison", x + width - 132, 230, 112, 18, 8, "#607587", 10))
+                _write_visual(page_dir, title, f"card compare {index}", _card("", compare_table, compare_measure, "", compare_accent, x + width - 132, 252, 112, 36, 18))
+            _write_visual(page_dir, title, f"card note {index}", _textbox("", subtext, x + 24, 311, width - 40, 19, 8, "#607587", 10))
 
-        # The two analytical panels occupy the same visual rhythm on all pages.
-        chart_positions = (
-            ((228, 282, 711, 330), (951, 282, 711, 330))
-            if page.get("equal_charts") else
-            ((228, 282, 872, 330), (1112, 282, 550, 330))
-        )
+        chart_layout = page.get("chart_layout", "equal")
+        if chart_layout == "full":
+            chart_positions = ((22, 355, 1636, 350),)
+        elif chart_layout == "wide_left":
+            chart_positions = ((22, 355, 906, 316), (940, 355, 718, 316))
+        else:
+            chart_positions = ((22, 355, 806, 316), (840, 355, 818, 316))
         for index, (chart, position) in enumerate(zip(page["charts"], chart_positions), 1):
             x, y, width, height = position
             _write_visual(page_dir, title, f"chart panel {index}", _shape("", x, y, width, height, "#FFFFFF", 3, rounded=True))
@@ -1218,20 +1253,37 @@ def _write_report(root: Path) -> None:
                     secondary=chart.get("secondary", ()),
                     series=chart.get("series"),
                     aggregation=chart.get("aggregation", False),
+                    legend=chart.get("legend", True),
+                    field_color=chart.get("field_color"),
+                    timeline=chart.get("timeline", False),
+                    show_title=not chart.get("timeline", False),
                 )
+            if chart.get("timeline"):
+                _write_visual(page_dir, title, "timeline title", _textbox("", chart["title"], x + 18, y + 10, 480, 22, 12, "#17324D", 12, True))
+                legend_items = (
+                    ("SCHEDULE", "#0B4A75"), ("LOGGED", "#14946F"),
+                    ("MEAL", "#DDAA38"), ("BREAK", "#49A9EA"),
+                    ("GAP", "#D91F26"), ("PTO / AWAY", "#8B75B8"),
+                )
+                legend_x = x + 545
+                for legend_index, (legend_label, legend_color) in enumerate(legend_items, 1):
+                    item_x = legend_x + (legend_index - 1) * 150
+                    _write_visual(page_dir, title, f"timeline legend color {legend_index}", _shape("", item_x, y + 15, 12, 12, legend_color, 14, rounded=True))
+                    _write_visual(page_dir, title, f"timeline legend text {legend_index}", _textbox("", legend_label, item_x + 18, y + 10, 126, 22, 8, "#315169", 14, True))
+                visual["position"] = _position(x + 8, y + 38, width - 16, height - 44, 300, 300)
             _write_visual(page_dir, title, f"chart {index}", visual)
 
         table_layouts = {
-            "full": (228, 622, 1434, 248),
-            "left": (228, 622, 711, 248),
-            "right": (951, 622, 711, 248),
+            "full": (22, 718 if chart_layout == "full" else 684, 1636, 188 if chart_layout == "full" else 222),
+            "left": (22, 684, 806, 222),
+            "right": (840, 684, 818, 222),
         }
         for index, (table_title, table_fields, layout) in enumerate(page["tables"], 1):
             x, y, width, height = table_layouts[layout]
             _write_visual(page_dir, title, f"table panel {index}", _shape("", x, y, width, height, "#FFFFFF", 3, rounded=True))
             _write_visual(page_dir, title, f"table {index}", _table("", table_title, table_fields, x + 8, y + 6, width - 16, height - 12))
 
-        _write_visual(page_dir, title, "footer", _textbox("", "Prepared by Anass ASSRI | WFM   •   Governed feed: POWERBI_MANIFEST_CURRENT.csv", 228, 910, 1434, 18, 8, "#687E8E", 10, False, "right"))
+        _write_visual(page_dir, title, "footer", _textbox("", "Prepared by Anass ASSRI | WFM   •   Governed feed: POWERBI_MANIFEST_CURRENT.csv", 22, 917, 1636, 18, 8, "#687E8E", 10, False, "right"))
 
     _write_json(
         definition / "pages" / "pages.json",
@@ -1246,6 +1298,7 @@ def _write_report(root: Path) -> None:
     theme["name"] = THEME_FILE
     theme["$schema"] = "https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/Report%20Theme%20JSON%20Schema/reportThemeSchema-2.157.json"
     theme.setdefault("visualStyles", {}).setdefault("tableEx", {}).setdefault("*", {})["columnHeaders"] = [{"autoSizeColumnWidth": True, "columnAdjustment": "growToFit"}]
+    theme.setdefault("visualStyles", {}).setdefault("*", {}).setdefault("*", {})["title"] = [{"show": False}]
     theme_path = report_root / "StaticResources" / "RegisteredResources" / THEME_FILE
     _write_json(theme_path, theme)
     _write_json(
@@ -1316,13 +1369,14 @@ def build() -> Path:
             staged / f"{PROJECT_NAME}.pbip",
             {"$schema": "https://developer.microsoft.com/json-schemas/fabric/pbip/pbipProperties/1.0.0/schema.json", "version": "1.0", "artifacts": [{"report": {"path": f"{PROJECT_NAME}.Report"}}], "settings": {"enableAutoRecovery": True}},
         )
-        (staged / "PROJECT_VERSION.txt").write_text("6\n", encoding="utf-8")
+        (staged / "PROJECT_VERSION.txt").write_text("7\n", encoding="utf-8")
         (staged / "README.txt").write_text(
             "WFMHUB BI\n=========\n\n"
             "Open WFMHub BI.pbip with Microsoft Power BI Desktop, then choose Home > Refresh.\n"
             "The HubRoot parameter is set automatically when this project is opened through POWERBI.cmd.\n"
             "The model reads only Feed\\PowerBI CSVs and never reads SQLite or raw extracts.\n"
-            "The five pages follow the WFM cycle: forecast, staff preparation, intraday, attendance review and performance review.\n"
+            "The five pages follow the WFM cycle: today's control, staff preparation, intraday service, schedule review and historical review.\n"
+            "All visuals are native Power BI visuals; no marketplace visual is required.\n"
             "PCS remains a separate collaborative Excel product and is not imported into this WFM-only model.\n",
             encoding="utf-8",
         )

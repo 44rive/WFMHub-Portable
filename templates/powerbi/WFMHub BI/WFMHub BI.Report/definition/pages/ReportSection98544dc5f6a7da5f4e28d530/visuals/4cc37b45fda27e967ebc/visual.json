@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "4cc37b45fda27e967ebc",
   "position": {
-    "x": 236,
-    "y": 628,
+    "x": 30,
+    "y": 724,
     "z": 400,
-    "height": 236,
-    "width": 1418,
+    "height": 176,
+    "width": 1620,
     "tabOrder": 400
   },
   "visual": {
@@ -15,6 +15,20 @@
       "queryState": {
         "Values": {
           "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Attendance Gap"
+                    }
+                  },
+                  "Property": "Correction ID"
+                }
+              },
+              "queryRef": "Attendance Gap.Correction ID",
+              "nativeQueryRef": "Correction ID"
+            },
             {
               "field": {
                 "Column": {
@@ -149,11 +163,11 @@
                       "Entity": "Attendance Gap"
                     }
                   },
-                  "Property": "Suggested Activity"
+                  "Property": "Observed Source"
                 }
               },
-              "queryRef": "Attendance Gap.Suggested Activity",
-              "nativeQueryRef": "Suggested Activity"
+              "queryRef": "Attendance Gap.Observed Source",
+              "nativeQueryRef": "Observed Source"
             }
           ]
         }
@@ -319,7 +333,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'RESIDUAL VERINT CORRECTION QUEUE'"
+                  "Value": "'RESIDUAL CORRECTION DETAIL — READ ONLY'"
                 }
               }
             },

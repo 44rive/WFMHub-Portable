@@ -98,16 +98,23 @@ table 'Service'
 		formatString: #,##0
 		displayFolder: 'Service'
 
-	/// Actual offered demand minus the governed forecast volume.
+	/// Governed Staff Type forecast volume; blank in a single-queue context where no defensible queue forecast allocation exists.
+	measure 'Comparable Forecast Volume' = ```
+			IF(ISFILTERED('Queue'[Queue]), BLANK(), [Forecast Volume])
+			```
+		formatString: #,##0
+		displayFolder: 'Forecast comparison'
+
+	/// Actual offered demand minus compatible governed forecast volume; blank at queue grain.
 	measure 'Volume Variance' = ```
-			[Offered Calls] - [Forecast Volume]
+			IF(ISBLANK([Comparable Forecast Volume]), BLANK(), [Offered Calls] - [Comparable Forecast Volume])
 			```
 		formatString: #,##0;[Red]-#,##0
 		displayFolder: 'Forecast comparison'
 
-	/// Volume variance divided by forecast volume.
+	/// Volume variance divided by compatible forecast volume.
 	measure 'Volume Variance %' = ```
-			DIVIDE([Volume Variance], [Forecast Volume])
+			DIVIDE([Volume Variance], [Comparable Forecast Volume])
 			```
 		formatString: 0.0%;[Red]-0.0%
 		displayFolder: 'Forecast comparison'
@@ -136,6 +143,34 @@ table 'Service'
 			```
 		formatString: 0.0%;[Red]-0.0%
 		displayFolder: 'Forecast comparison'
+
+	/// Service level for the explicitly selected disconnected comparison month.
+	measure 'Comparison Service Level %' = ```
+			VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Service Level %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))
+			```
+		formatString: 0.0%
+		displayFolder: 'Historical comparison'
+
+	/// Current service level less the selected comparison month in percentage points.
+	measure 'Service Level Delta vs Comparison pp' = ```
+			([Service Level %] - [Comparison Service Level %]) * 100
+			```
+		formatString: 0.0;[Red]-0.0
+		displayFolder: 'Historical comparison'
+
+	/// Volume variance for the explicitly selected comparison month.
+	measure 'Comparison Volume Variance %' = ```
+			VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Volume Variance %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))
+			```
+		formatString: 0.0%
+		displayFolder: 'Historical comparison'
+
+	/// Current volume variance less the selected comparison month in percentage points.
+	measure 'Volume Variance Delta vs Comparison pp' = ```
+			([Volume Variance %] - [Comparison Volume Variance %]) * 100
+			```
+		formatString: 0.0;[Red]-0.0
+		displayFolder: 'Historical comparison'
 
 	/// Actual weighted AHT less forecast weighted AHT.
 	measure 'AHT Error Seconds' = ```

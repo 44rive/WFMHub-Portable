@@ -1,71 +1,85 @@
 # WFMHub Power BI — WFM cycle contract
 
-Status: implemented source project, Desktop render acceptance required
-Project contract: `6`
-Feed schema: `6`
-Design reference: `design-prototypes/wfm-manager-cycle-v1/`
+Status: implemented source project; Power BI Desktop render acceptance required
+
+Project contract: `7`
+
+Feed schema: `7`
+Design reference: `design-prototypes/powerbi-wfm-cycle-reset-v1/`
 
 ## Purpose
 
-This is a personal WFM management cockpit, not a second report factory and not
-an invented KPI scorecard. It follows the WFM cycle from planning through
-delivery and review. Excel remains available when exact operational rows must be
-shared; PCS keeps its permanent collaborative workbook.
+Power BI is the personal WFM control and prioritization layer. It follows the
+normal WFM cycle; it is not a second source engine, an AI scorecard or a place
+to enter corrections. WFMHub owns extraction, classification and additive
+counters. Excel retains exact rows and the few durable human-action workflows.
 
-## Pages and bindings
+## Five pages
 
-| Page | Cards | Analysis panels | Bottom evidence |
-|---|---|---|---|
-| Forecast & Requirement | Forecast Volume, Required FTE-hours, Peak Required FTE, Requirement Coverage | native interval Volume + requirement; Staff Type requirement summary | source Staff Type rows |
-| Staff Preparation | Peak Required, Peak Gap, Uncovered FTE-hours, PTO/Away impact | required vs net scheduled; Planning Group/Staff Type position | staffing gaps to treat |
-| Intraday Control | SL, Offered, Present FTE Gap, confirmed No Show | combined LOB SL; split resource position | capacity and attendance actions |
-| Attendance & Schedule Review | No Show, Late, Early Leave, residual hours | published/observed/residual placement; break/meal evidence | exact residual correction queue |
-| Performance Review | SL, Volume variance, scheduled coverage, final absence | weekly forecast vs actual; requirement-to-delivery bridge | monthly WFM scorecard |
+| Page | Primary decision | Evidence |
+|---|---|---|
+| Today's Control | What needs attention now? | current service, forecast variance, observed capacity and attendance/capacity action rows |
+| Staff Preparation | Where is published capacity below requirement? | 15-minute required, gross schedule, PTO/Away, net schedule and gap by Planning Group and Staff Type |
+| Intraday Service | Which configured service or queue is moving the result? | combined Management LOB SL and exact selected-LOB queue components |
+| Attendance & Schedule Review | Which published shift fragments remain unexplained? | native schedule-over-actual timeline, exact residual Gap ID/start/end and break/meal evidence |
+| Historical Review | How did forecast, capacity and delivery close? | separate demand, SL, requirement, scheduled coverage, final absence and final shrinkage measures with comparison period |
 
-## Semantic grain
+Only native Power BI visuals are allowed. The attendance timeline is a native
+stacked horizontal `barChart`; an invisible clock-offset series positions each
+schedule or actual segment. No marketplace visual is required.
 
-Service relationships are Date -> Time -> exact Service Key -> Management LOB.
-They come only from reviewed service-profile queue allowlists.
+## Filter model
 
-Capacity relationships are Date -> Time -> Staff Type -> Planning Group ->
-Management LOB. Forecast identity is filename plus source Staff Type. Scheduled
-identity is workforce LOB plus published assignment. The domains never join on
-similar-looking text.
+The navigation is a native horizontal page navigator. Date, Management LOB,
+Planning Group, Staff Type, Team Leader, Agent and Queue come from conformed
+dimensions. The same dimension uses the same slicer synchronization group on
+every applicable page.
 
-Employee facts use Agent ID -> Employee -> Management LOB. Attendance detail may
-show Planning Group/Staff Type resolved at build time without creating ambiguous
-relationship paths.
+Service and capacity remain separate:
+
+- service: exact queue -> combined Management LOB;
+- capacity: Verint Staff Type -> Planning Group -> Management LOB;
+- RSA BE service is combined, while RSA BE FR and RSA BE VL capacity remains
+  separate;
+- a forecast field labelled `Queue Name` is a Staff Type identity, not a Storm
+  routing queue;
+- only `MAPPED` capacity identities enter Staff Type/Planning Group visuals.
+
+The Historical Review comparison period is intentionally disconnected. Its DAX
+applies the selected comparison month to the same conformed measures without
+polluting organisational relationships.
 
 ## Data ownership
 
-WFMHub Python/SQLite owns parsing, identity, date scope, source classification,
-exact SL components, attendance, PTO/Away overlays, final-Activities overlap and
-published CSV rows. Power BI owns relationships, explicit ratio-of-sums DAX,
+WFMHub Python/SQLite owns parsing, date scope, identity, exact service
+components, PTO/Away overlays, attendance, final-Activities overlap and CSV
+publication. Power BI owns relationships, explicit ratio-of-sums measures,
 filter context and presentation.
 
-The feed is published under `Feed\PowerBI` and the manifest is written last.
-The PBIP imports the CSVs through the single `HubRoot` parameter. It contains no
-SQLite, DuckDB, ODBC or raw-source connection.
+The feed is published atomically under `Feed\PowerBI`; the manifest is written
+last. The PBIP imports those fixed CSVs through one `HubRoot` parameter. It has
+no SQLite, DuckDB, ODBC, raw-extract or PCS connection.
 
-## Layout contract
+## Excel handoff
 
-Canvas: 1680x945. Rail: x0–210. Header: x210–1680, height 72. Content starts at
-x228. Filter strip y85/h58. KPI cards y153/h119. Analysis y282/h330. Detail
-y622/h248. Footer y910. Colors, spacing, page copy and panel proportions follow
-the five approved PNGs and `cycle-pages.html`.
+| Workbook | Power BI handoff | Editable content |
+|---|---|---|
+| `RTM Daily Control.xlsx` | Today's Control and Intraday Service exact Flash/callout rows | none |
+| `Staffing Preparation.xlsx` | Staff Preparation 15-minute capacity detail | persistent `ACTIONS` ledger keyed by Capacity Key |
+| `Attendance Review.xlsx` | exact schedule, Agent Status and residual gap evidence | none; correct in Verint and refresh |
+| `Realisations.xlsx` | detailed historical service/capacity results | none |
+| `Final Absenteeism & Shrinkage.xlsx` | final Verint components and exceptions | none |
 
-`tools/build_powerbi_project.py` builds to a temporary sibling directory,
-validates every JSON file, the five-page set and all semantic tables, and only
-then replaces the checked-in PBIP. This prevents a failed generation from
-deleting the last valid project.
+PCS and Bonus remain outside this Power BI model.
 
-## Validation gate
+## Layout and validation
 
-- generated page count and exact names;
-- JSON parse of every artifact;
-- every visual binding exists in the semantic model;
-- no measure/column name collision;
-- every referenced feed CSV exists and headers match;
-- no forbidden raw/SQLite/PCS data source in TMDL;
-- complete automated suite and portable smoke test;
-- one manual Power BI Desktop open/refresh/render check before operational use.
+Canvas: 1680x945. Header: y0/h64. Native horizontal navigation: y68/h48.
+Selector strip: y124/h77. Four compact cards start at y211. Analysis begins at
+y355; evidence/action tables start at y684 or y718. Geometry, copy and colors
+follow the five approved PNGs.
+
+Automated validation proves page names, JSON/TMDL structure, native visual
+types, slicer groups, field bindings, feed headers and measure/column names.
+Power BI Desktop remains the final renderer, so every new release needs one
+Windows open, Refresh and visual inspection before operational use.

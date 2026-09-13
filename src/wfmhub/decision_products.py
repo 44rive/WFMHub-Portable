@@ -10,6 +10,7 @@ from typing import Any, Iterable, Sequence
 
 from openpyxl import load_workbook
 
+from .capacity_mapping import load_capacity_mapping
 from .config import Config
 from .database import DatabaseConnection
 from .excel_layout import (
@@ -159,8 +160,14 @@ def _audit_rows(
     rows: list[Sequence[Any]] = [
         ("Report", report_key, "WFM report product"),
         ("Selected period", f"{start} to {end}", "Dates included"),
-        ("Last refreshed", datetime.now(), "Local work-machine time"),
-        ("Refresh run", latest[0] if latest else None, latest[2] if latest else "No successful refresh metadata"),
+        ("Report generated at", datetime.now(), "Local work-machine time"),
+        (
+            "Last successful Hub refresh",
+            latest[1] if latest else None,
+            latest[2] if latest else "No successful refresh metadata",
+        ),
+        ("Data through", end, "Latest selected business date"),
+        ("Refresh run ID", latest[0] if latest else None, "Database lineage"),
         ("Prepared by", "Anass ASSRI", "WFM"),
     ]
     rows.extend(extra)
@@ -1982,6 +1989,39 @@ def build_pcs_performance_workbook(
     return result
 
 
+def _load_persistent_rows(
+    path: Path,
+    sheet_name: str,
+    key_header: str,
+) -> dict[str, dict[str, Any]]:
+    """Read a prior editable ledger without making report generation depend on it."""
+
+    if not path.is_file():
+        return {}
+    try:
+        workbook = load_workbook(path, read_only=True, data_only=False)
+        if sheet_name not in workbook.sheetnames:
+            workbook.close()
+            return {}
+        sheet = workbook[sheet_name]
+        headers = [str(cell.value or "") for cell in sheet[4]]
+        key_index = headers.index(key_header)
+        rows: dict[str, dict[str, Any]] = {}
+        for values in sheet.iter_rows(min_row=5, values_only=True):
+            if not any(value is not None and str(value).strip() for value in values):
+                continue
+            key = str(values[key_index] or "").strip()
+            if key:
+                rows[key] = {
+                    header: values[index] if index < len(values) else None
+                    for index, header in enumerate(headers)
+                }
+        workbook.close()
+        return rows
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
 def _service_rows(
     conn: DatabaseConnection,
     profile: ServiceProfile,
@@ -2583,84 +2623,81 @@ def build_staffing_coverage_workbook(
     book, partial, target = _atomic_book(
         config, "staffing", "STAFFING & CAPACITY PLAN", start, end, output,
     )
-    profiles = load_service_profiles(config.home, config.service_profiles)
-    active_profiles = tuple(profile for profile in profiles.profiles if profile.active_on(end))
-    staffing_profile: dict[str, ServiceProfile] = {}
-    for profile in active_profiles:
-        for lob in profile.staffing_lobs:
-            staffing_profile.setdefault(lob.casefold(), profile)
-
-    forecast_by_lob_interval: dict[tuple[str, str, datetime], tuple[Any, ...]] = {}
-    for profile in active_profiles:
-        for service_scope, staffing_lob in profile.staffing_pairs():
-            forecast_rows = conn.execute(
-                """SELECT business_date, interval_start, max(interval_minutes),
-                          sum(volume_forecast), sum(fte_forecast),
-                          sum(fte_required), avg(sl_required)
-                   FROM mart.forecast_interval
-                   WHERE business_date BETWEEN ? AND ? AND service_scope=?
-                   GROUP BY business_date, interval_start""",
-                [start, end, service_scope],
-            ).fetchall()
-            for (
-                business_date, interval_start, interval_minutes, volume,
-                fte_forecast, fte_required, sl_required,
-            ) in forecast_rows:
-                stamp = interval_start
-                if isinstance(stamp, str):
-                    stamp = datetime.fromisoformat(stamp)
-                source_minutes = max(15, int(interval_minutes or 60))
-                slots = max(1, (source_minutes + 14) // 15)
-                volume_per_slot = (
-                    float(volume) / slots if volume is not None else None
-                )
-                for offset in range(slots):
-                    key = (
-                        staffing_lob.casefold(), str(business_date)[:10],
-                        stamp + timedelta(minutes=15 * offset),
-                    )
-                    previous = forecast_by_lob_interval.get(key)
-                    slot_volume = volume_per_slot
-                    slot_fte_forecast = fte_forecast
-                    slot_fte_required = fte_required
-                    if previous:
-                        slot_volume = (
-                            float(previous[1] or 0)
-                            + float(volume_per_slot or 0)
-                        )
-                        slot_fte_forecast = (
-                            float(previous[2] or 0)
-                            + float(fte_forecast or 0)
-                        )
-                        slot_fte_required = (
-                            float(previous[3] or 0)
-                            + float(fte_required or 0)
-                        )
-                    forecast_by_lob_interval[key] = (
-                        profile, slot_volume, slot_fte_forecast,
-                        slot_fte_required, sl_required,
-                    )
+    capacity_mapping = load_capacity_mapping(config.capacity_mapping)
+    # Verint forecast ``Queue Name`` is a Staff Type identity. It must be
+    # governed by capacity_mapping.csv and must never be joined to Storm queue
+    # names or service-profile LOBs.
+    forecast_by_capacity_interval: dict[
+        tuple[str, str, str, str, datetime], list[float | None]
+    ] = {}
+    forecast_rows = conn.execute(
+        """SELECT business_date, interval_start, interval_minutes, queue_name,
+                  volume_forecast, fte_forecast, fte_required, source_file
+           FROM mart.forecast_interval
+           WHERE business_date BETWEEN ? AND ?
+           ORDER BY business_date, interval_start, source_file, queue_name""",
+        [start, end],
+    ).fetchall()
+    for (
+        business_date, interval_start, interval_minutes, source_staff_type,
+        volume, fte_forecast, fte_required, source_file,
+    ) in forecast_rows:
+        mapped = capacity_mapping.map_forecast(
+            str(source_file or ""), str(source_staff_type or ""),
+        )
+        if mapped.status != "MAPPED":
+            continue
+        stamp = interval_start
+        if isinstance(stamp, str):
+            stamp = datetime.fromisoformat(stamp)
+        source_minutes = max(15, int(interval_minutes or 60))
+        slots = max(1, (source_minutes + 14) // 15)
+        volume_per_slot = float(volume) / slots if volume is not None else None
+        for offset in range(slots):
+            key = (
+                mapped.management_lob.casefold(), mapped.planning_group.casefold(),
+                mapped.staff_type.casefold(), str(business_date)[:10],
+                stamp + timedelta(minutes=15 * offset),
+            )
+            bucket = forecast_by_capacity_interval.setdefault(
+                key, [None, None, None],
+            )
+            for index, value in enumerate(
+                (volume_per_slot, fte_forecast, fte_required),
+            ):
+                if value is not None:
+                    bucket[index] = float(bucket[index] or 0) + float(value)
 
     raw_headers, raw_rows = _query(
         conn,
-        """SELECT business_date, interval_start, interval_end, lob, language,
-                  scheduled_agents, observed_agents, productive_agents,
-                  gross_scheduled_fte, planned_time_off_fte, scheduled_fte,
-                  elapsed_scheduled_fte, observed_fte, productive_fte,
-                  staffing_variance_fte, staffing_gap_fte, staffing_state,
-                  evidence_basis, evaluation_as_of
+        """SELECT business_date, interval_start, max(interval_end) AS interval_end,
+                  lob, group_concat(DISTINCT language) AS language,
+                  planning_group, staff_type, capacity_mapping_status,
+                  sum(scheduled_agents) AS scheduled_agents,
+                  sum(observed_agents) AS observed_agents,
+                  sum(productive_agents) AS productive_agents,
+                  sum(gross_scheduled_fte) AS gross_scheduled_fte,
+                  sum(planned_time_off_fte) AS planned_time_off_fte,
+                  sum(scheduled_fte) AS scheduled_fte,
+                  sum(elapsed_scheduled_fte) AS elapsed_scheduled_fte,
+                  sum(observed_fte) AS observed_fte,
+                  sum(productive_fte) AS productive_fte,
+                  sum(staffing_variance_fte) AS staffing_variance_fte,
+                  sum(staffing_gap_fte) AS staffing_gap_fte,
+                  max(staffing_state) AS staffing_state,
+                  group_concat(DISTINCT evidence_basis) AS evidence_basis,
+                  max(evaluation_as_of) AS evaluation_as_of
            FROM mart.staffing_interval
            WHERE business_date BETWEEN ? AND ?
-           ORDER BY business_date, interval_start, lob, language""",
+           GROUP BY business_date, interval_start, lob, planning_group,
+                    staff_type, capacity_mapping_status
+           ORDER BY business_date, interval_start, planning_group, staff_type,
+                    lob, language""",
         [start, end],
     )
     source_indexes = {header: index for index, header in enumerate(raw_headers)}
-    known_languages: dict[str, set[str]] = defaultdict(set)
     evaluation_values: list[datetime] = []
     for raw in raw_rows:
-        lob = str(raw[source_indexes["lob"]] or "")
-        language = str(raw[source_indexes["language"]] or "Unspecified")
-        known_languages[lob.casefold()].add(language)
         evaluation = raw[source_indexes["evaluation_as_of"]]
         if isinstance(evaluation, str):
             evaluation = datetime.fromisoformat(evaluation)
@@ -2669,15 +2706,16 @@ def build_staffing_coverage_workbook(
     evaluation_default = max(evaluation_values, default=datetime.now())
     plan_headers = [
         "business_date", "iso_week", "interval_start", "interval_end",
-        "reporting_lob", "roster_lob", "language", "mode",
+        "management_lob", "planning_group", "staff_type", "mode",
         "forecast_volume_interval", "fte_forecast", "fte_required",
         "gross_scheduled_fte", "planned_time_off_fte", "net_scheduled_fte",
         "capacity_variance_fte", "capacity_gap_fte", "observed_fte",
         "productive_fte", "actual_gap_fte", "decision_state",
-        "evidence_basis", "evaluation_as_of",
+        "evidence_basis", "evaluation_as_of", "capacity_key", "source_lob",
+        "language",
     ]
     plan_rows: list[tuple[Any, ...]] = []
-    covered_intervals: set[tuple[str, str, datetime]] = set()
+    covered_intervals: set[tuple[str, str, str, str, datetime]] = set()
     for raw in raw_rows:
         values = {header: raw[index] for header, index in source_indexes.items()}
         business_date = values["business_date"]
@@ -2692,23 +2730,34 @@ def build_staffing_coverage_workbook(
         evaluation_as_of = values["evaluation_as_of"]
         if isinstance(evaluation_as_of, str):
             evaluation_as_of = datetime.fromisoformat(evaluation_as_of)
-        roster_lob = str(values["lob"] or "")
-        profile = staffing_profile.get(roster_lob.casefold())
-        forecast = forecast_by_lob_interval.get((
-            roster_lob.casefold(), business_date.isoformat(),
-            interval_start,
+        source_lob = str(values["lob"] or "")
+        workforce = capacity_mapping.map_schedule(source_lob, None)
+        management_lob = workforce.management_lob
+        planning_group = str(values["planning_group"] or "")
+        staff_type = str(values["staff_type"] or "")
+        capacity_key = f"{management_lob}|{planning_group}|{staff_type}|{business_date}|{interval_start:%H:%M}"
+        forecast = forecast_by_capacity_interval.get((
+            management_lob.casefold(), planning_group.casefold(),
+            staff_type.casefold(), business_date.isoformat(), interval_start,
         ))
-        if forecast:
-            profile = forecast[0]
-        _forecast_profile, volume, fte_forecast, fte_required, _sl_required = forecast or (None, None, None, None, None)
+        volume, fte_forecast, fte_required = forecast or (None, None, None)
         net_scheduled = float(values["scheduled_fte"] or 0)
         capacity_variance = net_scheduled - float(fte_required) if fte_required is not None else None
         capacity_gap = max(0.0, -capacity_variance) if capacity_variance is not None else None
         future = interval_start > evaluation_as_of
         mode = "FUTURE PLAN" if future else "ACTUAL CONTROL"
-        actual_gap = values["staffing_gap_fte"]
-        if profile is None:
-            state = "UNMAPPED LOB"
+        actual_gap = (
+            max(
+                0.0,
+                float(values["elapsed_scheduled_fte"] or 0)
+                - float(values["observed_fte"] or 0),
+            )
+            if str(values["staffing_state"] or "").upper()
+            not in {"FUTURE", "DATA_MISSING", "DATA_PARTIAL"}
+            else None
+        )
+        if str(values["capacity_mapping_status"] or "").upper() != "MAPPED":
+            state = "UNMAPPED CAPACITY"
         elif fte_required is None:
             state = "NO FORECAST"
         elif future:
@@ -2717,27 +2766,37 @@ def build_staffing_coverage_workbook(
             state = str(values["staffing_state"] or "DATA MISSING").replace("_", " ")
         plan_rows.append((
             business_date, f"{business_date.isocalendar().year}-W{business_date.isocalendar().week:02d}",
-            interval_start, interval_end, profile.label if profile else "Unmapped",
-            roster_lob, values["language"], mode, volume, fte_forecast,
+            interval_start, interval_end, management_lob, planning_group,
+            staff_type, mode, volume, fte_forecast,
             fte_required, values["gross_scheduled_fte"],
             values["planned_time_off_fte"], net_scheduled, capacity_variance,
             capacity_gap, values["observed_fte"], values["productive_fte"],
             actual_gap, state, values["evidence_basis"], evaluation_as_of,
+            capacity_key, source_lob, values["language"],
         ))
-        covered_intervals.add((roster_lob.casefold(), business_date.isoformat(), interval_start))
+        covered_intervals.add((
+            management_lob.casefold(), planning_group.casefold(),
+            staff_type.casefold(), business_date.isoformat(), interval_start,
+        ))
 
     # A demand interval with zero scheduled agents does not exist in the
     # staffing mart. Add it here so an empty roster can never hide a shortage.
     for (
-        lob_key, business_date_text, interval_start,
-    ), forecast in forecast_by_lob_interval.items():
-        profile, volume, fte_forecast, fte_required, _sl_required = forecast
-        roster_lob = next(
-            (lob for lob in profile.staffing_lobs if lob.casefold() == lob_key), lob_key,
+        management_lob_key, planning_group_key, staff_type_key,
+        business_date_text, interval_start,
+    ), forecast in forecast_by_capacity_interval.items():
+        volume, fte_forecast, fte_required = forecast
+        mapped = next(
+            result for _prefix, _staff, result in capacity_mapping.forecast_rows
+            if result.management_lob.casefold() == management_lob_key
+            and result.planning_group.casefold() == planning_group_key
+            and result.staff_type.casefold() == staff_type_key
         )
         business_date = date.fromisoformat(business_date_text)
-        language = " / ".join(sorted(known_languages.get(lob_key, {"Unspecified"})))
-        key = (lob_key, business_date_text, interval_start)
+        key = (
+            management_lob_key, planning_group_key, staff_type_key,
+            business_date_text, interval_start,
+        )
         if key in covered_intervals:
             continue
         interval_end = interval_start + timedelta(minutes=15)
@@ -2748,19 +2807,22 @@ def build_staffing_coverage_workbook(
         plan_rows.append((
             business_date,
             f"{business_date.isocalendar().year}-W{business_date.isocalendar().week:02d}",
-            interval_start, interval_end, profile.label, roster_lob, language,
+            interval_start, interval_end, mapped.management_lob,
+            mapped.planning_group, mapped.staff_type,
             mode, volume, fte_forecast, fte_required, 0.0, 0.0, 0.0,
             -required, required, None, None, required if not future else None,
             state, "Forecast demand with no scheduled roster interval",
             evaluation_default,
+            f"{mapped.management_lob}|{mapped.planning_group}|{mapped.staff_type}|{business_date}|{interval_start:%H:%M}",
+            mapped.workforce_lob, "Unspecified",
         ))
 
-    plan_rows.sort(key=lambda row: (row[0], row[2], str(row[5]), str(row[6])))
+    plan_rows.sort(key=lambda row: (row[0], row[2], str(row[4]), str(row[5]), str(row[6])))
 
     decision_state = plan_headers.index("decision_state")
     capacity_gap_column = plan_headers.index("capacity_gap_fte")
     actual_gap_column = plan_headers.index("actual_gap_fte")
-    action_states = {"FUTURE GAP", "NO FORECAST", "UNMAPPED LOB", "NO SCHEDULE", "GAP", "PARTIAL GAP", "DATA MISSING"}
+    action_states = {"FUTURE GAP", "NO FORECAST", "NO SCHEDULE", "UNMAPPED CAPACITY", "GAP", "PARTIAL GAP", "DATA MISSING"}
     actions = [row for row in plan_rows if str(row[decision_state]).upper() in action_states]
     future_rows = [row for row in plan_rows if row[plan_headers.index("mode")] == "FUTURE PLAN"]
     required_hours = sum(float(row[plan_headers.index("fte_required")] or 0) * 0.25 for row in future_rows)
@@ -2805,7 +2867,7 @@ def build_staffing_coverage_workbook(
             ("Period", f"{start:%d %b} – {end:%d %b %Y}"),
             ("Mode", "Future plan" if future_rows else "Actual control"),
             ("LOB", "All"),
-            ("Language", "All"),
+            ("Staff Type", "All"),
         ),
         kpis=(
             ("Peak gap FTE", peak_gap, "decimal"),
@@ -2825,7 +2887,7 @@ def build_staffing_coverage_workbook(
             (("Gap FTE", tuple(by_day.values()), COLORS["red"]),),
         ),
         action_title="Prioritized capacity actions",
-        action_headers=("INTERVAL", "LOB / LANGUAGE", "MODE", "REQUIRED FTE", "NET / OBSERVED", "GAP FTE", "STATE"),
+        action_headers=("INTERVAL", "PLANNING GROUP / STAFF TYPE", "MODE", "REQUIRED FTE", "NET / OBSERVED", "GAP FTE", "STATE"),
         action_rows=tuple((
             row[2].strftime("%d %b %H:%M") if isinstance(row[2], datetime) else str(row[2]),
             f"{row[4]} / {row[6]}",
@@ -2843,7 +2905,7 @@ def build_staffing_coverage_workbook(
     for row in plan_rows:
         weekly[(str(row[1]), str(row[4]), str(row[5]), str(row[6]))].append(row)
     weekly_rows = []
-    for (iso_week, reporting_lob, roster_lob, language), rows in sorted(weekly.items()):
+    for (iso_week, management_lob, planning_group, staff_type), rows in sorted(weekly.items()):
         required = sum(float(row[10] or 0) * 0.25 for row in rows)
         gross = sum(float(row[11] or 0) * 0.25 for row in rows)
         time_off = sum(float(row[12] or 0) * 0.25 for row in rows)
@@ -2851,7 +2913,7 @@ def build_staffing_coverage_workbook(
         gap = sum(float(row[15] or 0) * 0.25 for row in rows)
         weekly_rows.append((
             iso_week, min(row[0] for row in rows), max(row[0] for row in rows),
-            reporting_lob, roster_lob, language, required, gross, time_off, net,
+            management_lob, planning_group, staff_type, required, gross, time_off, net,
             net - required if required else None, gap,
             _ratio(net, required),
             sum(1 for row in rows if row[19] == "FUTURE GAP"),
@@ -2861,8 +2923,8 @@ def build_staffing_coverage_workbook(
         "WEEKLY_PLAN", "Weekly capacity plan",
         "Required, gross scheduled, PTO/Away and net scheduled FTE-hours by ISO week, LOB and language.",
         [
-            "iso_week", "start_date", "end_date", "reporting_lob", "roster_lob",
-            "language", "required_fte_hours", "gross_scheduled_fte_hours",
+            "iso_week", "start_date", "end_date", "management_lob", "planning_group",
+            "staff_type", "required_fte_hours", "gross_scheduled_fte_hours",
             "planned_time_off_fte_hours", "net_scheduled_fte_hours",
             "capacity_variance_fte_hours", "capacity_gap_fte_hours",
             "forecast_coverage", "gap_intervals", "no_forecast_intervals",
@@ -2871,7 +2933,7 @@ def build_staffing_coverage_workbook(
     )
     intraday = book.table(
         "INTRADAY", "15-minute staffing control and plan",
-        "All selected dates. FUTURE PLAN uses forecast demand; ACTUAL CONTROL uses observed attendance evidence.",
+        "All selected dates at governed Management LOB, Planning Group and Verint Staff Type grain. FUTURE PLAN uses forecast demand; ACTUAL CONTROL uses observed attendance evidence.",
         plan_headers, plan_rows,
     )
     if plan_rows:
@@ -2880,13 +2942,49 @@ def build_staffing_coverage_workbook(
             {"type": "text", "criteria": "containing", "value": "GAP", "format": book.report.error},
         )
     book.table(
-        "ACTIONS", "Staffing exceptions",
-        "Future shortages, missing forecasts, unmapped LOBs and actual gaps requiring action.",
+        "CAPACITY GAPS", "Current staffing exceptions",
+        "Read-only future shortages, missing forecasts and actual gaps. Capacity Key is the stable handoff identifier.",
         plan_headers, actions,
+    )
+    prior_actions = _load_persistent_rows(target, "ACTIONS", "capacity_key")
+    ledger_headers = [
+        "capacity_key", "business_date", "interval_start", "management_lob",
+        "planning_group", "staff_type", "gap_fte", "decision_state",
+        "action", "planned_fte", "owner", "status", "note", "last_updated",
+    ]
+    ledger_rows: list[tuple[Any, ...]] = []
+    current_keys: set[str] = set()
+    for row in actions:
+        key = str(row[22])
+        current_keys.add(key)
+        prior = prior_actions.get(key, {})
+        ledger_rows.append((
+            key, row[0], row[2], row[4], row[5], row[6],
+            max(float(row[15] or 0), float(row[18] or 0)), row[19],
+            prior.get("action"), prior.get("planned_fte"), prior.get("owner"),
+            prior.get("status") or "OPEN", prior.get("note"),
+            prior.get("last_updated"),
+        ))
+    for key, prior in sorted(prior_actions.items()):
+        if key in current_keys:
+            continue
+        ledger_rows.append(tuple(
+            prior.get(header) if header != "decision_state" else "RESOLVED BY DATA"
+            for header in ledger_headers
+        ))
+    book.table(
+        "ACTIONS", "Persistent staffing action ledger",
+        "One durable row per Capacity Key. Blue columns are retained when this report is rebuilt.",
+        ledger_headers, ledger_rows,
+        editable_headers={
+            "action", "planned_fte", "owner", "status", "note", "last_updated",
+        },
     )
     book.definitions([
         ("Required FTE", "Verint required FTE at native 15-minute grain; historical hourly files expand to four quarters", "Demand requirement", "Forecast only; missing stays blank"),
-        ("Gross scheduled FTE", "Scheduled agent-seconds / 900 before time off", "Roster capacity", "FTE roster LOB/language"),
+        ("Capacity grain", "Management LOB + Planning Group + Verint Staff Type", "Staff preparation identity", "Never Storm queue or activity label"),
+        ("Capacity Key", "Management LOB|Planning Group|Staff Type|date|15-minute interval", "Stable action and reconciliation key", "One requirement bucket"),
+        ("Gross scheduled FTE", "Scheduled agent-seconds / 900 before time off", "Roster capacity", "Published assignment mapped by capacity_mapping.csv"),
         ("Net scheduled FTE", "Gross scheduled FTE - approved PTO/effective Away FTE", "Usable planned capacity", "Planned Away affects future only"),
         ("Future capacity gap", "MAX(0, required FTE - net scheduled FTE)", "Hiring, OT or redeployment action", "15-minute interval"),
         ("Observed FTE", "Observed agent-seconds / 900", "Actual presence", "LILO + Agent Status evidence"),
@@ -2894,7 +2992,7 @@ def build_staffing_coverage_workbook(
         ("Actual staffing gap", "MAX(0, elapsed net scheduled FTE - observed FTE)", "Same-day staffing deficit", "Blank for future/missing evidence"),
     ])
     book.audit(_audit_rows(conn, config, "staffing", start, end, [
-        ("Service profile mapping", profiles.version, profiles.sha256),
+        ("Capacity mapping", capacity_mapping.sha256, str(capacity_mapping.file)),
         ("Planning grain", "15 minutes", "Weekly summary uses FTE-hours"),
     ]))
     return _finish(book, partial, target)
@@ -4019,31 +4117,74 @@ def build_attendance_corrections_workbook(
                   c.verint_activity AS final_activity_found,
                   c.verint_overlap_minutes AS final_overlap_minutes,
                   c.verint_reconciliation AS residual_status,
-                  c.confidence, c.observed_source
+                  c.confidence, c.observed_source,
+                  a.assignment AS published_assignment
            FROM mart.correction_candidate c
+           LEFT JOIN mart.attendance_agent_day a
+             ON a.business_date=c.business_date AND a.agent_id=c.agent_id
            WHERE c.business_date BETWEEN ? AND ? AND c.business_date<?
              AND c.gap_start IS NOT NULL AND c.gap_end IS NOT NULL
            ORDER BY c.business_date, c.priority, c.gap_minutes DESC,
                     c.agent_id, c.gap_start""",
         [start, end, today],
     )
+    capacity_mapping = load_capacity_mapping(config.capacity_mapping)
+    correction_indexes = {header: index for index, header in enumerate(headers)}
+    headers.extend([
+        "management_lob", "planning_group", "staff_type",
+        "capacity_mapping_status",
+    ])
+    rows = [
+        (*row, *(
+            lambda mapped: (
+                mapped.management_lob, mapped.planning_group,
+                mapped.staff_type, mapped.status,
+            )
+        )(capacity_mapping.map_schedule(
+            str(row[correction_indexes["lob"]] or ""),
+            str(row[correction_indexes["published_assignment"]] or ""),
+        )))
+        for row in rows
+    ]
     timeline_headers, timeline_rows = _query(
         conn,
-        """SELECT business_date, agent_id, agent_name, team_leader,
-                  ops_manager, lob, language, scheduled_start, scheduled_end,
-                  segment_start, segment_end, segment_minutes, planned_state,
-                  actual_status, actual_category, mismatch_type, is_gap,
-                  observed_source, source_file, evaluation_as_of
+        """SELECT t.segment_key, t.business_date, t.agent_id, t.agent_name, t.team_leader,
+                  t.ops_manager, t.lob, t.language, t.scheduled_start, t.scheduled_end,
+                  t.segment_start, t.segment_end, t.segment_minutes, t.planned_state,
+                  t.actual_status, t.actual_category, t.mismatch_type, t.is_gap,
+                  t.observed_source, t.source_file, t.evaluation_as_of,
+                  a.assignment AS published_assignment
            FROM mart.shift_timeline_segment t
-           WHERE business_date BETWEEN ? AND ? AND business_date<?
+           LEFT JOIN mart.attendance_agent_day a
+             ON a.business_date=t.business_date AND a.agent_id=t.agent_id
+           WHERE t.business_date BETWEEN ? AND ? AND t.business_date<?
              AND EXISTS (
                  SELECT 1 FROM mart.correction_candidate c
                  WHERE c.business_date=t.business_date AND c.agent_id=t.agent_id
                    AND c.gap_start IS NOT NULL AND c.gap_end IS NOT NULL
              )
-           ORDER BY business_date, agent_id, segment_start""",
+           ORDER BY t.business_date, t.agent_id, t.segment_start""",
         [start, end, today],
     )
+    timeline_indexes = {
+        header: index for index, header in enumerate(timeline_headers)
+    }
+    timeline_headers.extend([
+        "management_lob", "planning_group", "staff_type",
+        "capacity_mapping_status",
+    ])
+    timeline_rows = [
+        (*row, *(
+            lambda mapped: (
+                mapped.management_lob, mapped.planning_group,
+                mapped.staff_type, mapped.status,
+            )
+        )(capacity_mapping.map_schedule(
+            str(row[timeline_indexes["lob"]] or ""),
+            str(row[timeline_indexes["published_assignment"]] or ""),
+        )))
+        for row in timeline_rows
+    ]
     add_review_board(
         book.report, headers, rows,
         [dict(zip(timeline_headers, row)) for row in timeline_rows],

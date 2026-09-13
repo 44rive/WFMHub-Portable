@@ -1,7 +1,7 @@
 # Presentation contracts. These choose workbook composition, never calculate KPIs.
 
 [catalog]
-version = "2026.11.4"
+version = "2026.11.5"
 description = "Clear WFM reports with shared definitions and consistent presentation."
 
 [[packs]]
@@ -35,9 +35,9 @@ sheets = ["DASHBOARD", "LOB_RESULTS", "TREND", "DATA", "DEFINITIONS", "_AUDIT"]
 [[packs]]
 key = "staffing"
 title = "STAFFING & COVERAGE"
-purpose = "Past staffing control and future required-versus-net capacity by LOB, language and interval."
+purpose = "Past staffing control and future required-versus-net capacity by Management LOB, Planning Group, Verint Staff Type and 15-minute interval."
 finding_domains = ["staffing", "data_quality"]
-sheets = ["DASHBOARD", "WEEKLY_PLAN", "INTRADAY", "ACTIONS", "DEFINITIONS", "_AUDIT"]
+sheets = ["DASHBOARD", "WEEKLY_PLAN", "INTRADAY", "CAPACITY GAPS", "ACTIONS", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "attendance"

@@ -64,6 +64,20 @@ table 'Final Absence'
 		formatString: 0.0%
 		displayFolder: 'Final absence comparison'
 
+	/// Final absence rate for the explicitly selected comparison month.
+	measure 'Comparison Final Absence %' = ```
+			VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Final Absence %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))
+			```
+		formatString: 0.0%
+		displayFolder: 'Final absence comparison'
+
+	/// Current final absence less the selected comparison month in percentage points.
+	measure 'Final Absence Delta vs Comparison pp' = ```
+			([Final Absence %] - [Comparison Final Absence %]) * 100
+			```
+		formatString: 0.0;[Red]-0.0
+		displayFolder: 'Final absence comparison'
+
 	column 'Date'
 		dataType: dateTime
 		isHidden

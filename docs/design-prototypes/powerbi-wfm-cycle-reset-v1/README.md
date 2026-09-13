@@ -1,7 +1,6 @@
 # WFM Power BI cycle reset — validation prototype
 
-Status: design proposal only. These images do not change the current Power BI
-project until the design is approved.
+Status: approved implementation reference for Power BI project contract 7.
 
 ## Page contract
 

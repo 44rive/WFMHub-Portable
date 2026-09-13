@@ -1,79 +1,67 @@
 # Power BI — beginner operating guide
 
 The dashboard is already built. You do not create Power Query, relationships,
-DAX, charts or pages yourself.
+DAX, charts or navigation yourself.
 
 ## First installation
 
-1. Install Microsoft Power BI Desktop on the work computer.
-2. Install the current WFMHub portable release normally.
-3. Add the untouched extracts and run `UPDATE.cmd`.
-4. Wait for the Hub update and `Feed\PowerBI\POWERBI_MANIFEST_CURRENT.csv` to
-   complete.
-5. Open WFMHub and choose **Analyze > Open Power BI dashboard**, or double-click
-   `POWERBI.cmd`.
-6. WFMHub installs the governed project under
-   `Reports\Power BI\WFMHub BI`, writes the correct local `HubRoot` parameter,
-   and opens `WFMHub BI.pbip`.
+1. Install Microsoft Power BI Desktop.
+2. Install the current WFMHub portable release.
+3. Put the untouched extracts in their normal folders and run `UPDATE.cmd`.
+4. Wait until `Feed\PowerBI\POWERBI_MANIFEST_CURRENT.csv` exists.
+5. Double-click `POWERBI.cmd`, or choose **Analyze > Open Power BI dashboard**.
+6. WFMHub installs the project under `Reports\Power BI\WFMHub BI`, updates only
+   the local `HubRoot` parameter and opens `WFMHub BI.pbip`.
 7. In Power BI Desktop choose **Home > Refresh**.
 
 ## Normal routine
 
-1. Put the new extracts in their normal source folders without editing them.
-2. Close Excel files that the Hub must replace and run `UPDATE.cmd`.
-3. When the update finishes, open the same Power BI project with `POWERBI.cmd`.
-4. In Power BI Desktop choose **Home > Refresh**.
+1. Add the new untouched extracts.
+2. Run `UPDATE.cmd`. This validates them, updates the durable SQLite database
+   and publishes the clean Power BI CSV feed.
+3. Open the same installed PBIP with `POWERBI.cmd`.
+4. Choose **Home > Refresh** in Power BI Desktop. This imports the new CSV rows
+   and redraws the report.
 
-There are two refreshes because they do different jobs:
-
-- WFMHub validates sources, updates durable SQLite marts and atomically publishes
-  already-clean fixed CSV facts to `Feed\PowerBI`.
-- Power BI imports those CSV facts into its local semantic model and redraws the
-  visuals.
-
-Power BI never reads SQLite or raw extracts. It does not calculate source
-classification or silently replace missing data with zero.
+These two refreshes are different and both are required. A new WFMHub release
+does not require recreating the database; migrations upgrade it in place.
 
 ## The five pages
 
-1. **Forecast & Requirement** — Verint Volume and Absolute Required FTE at
-   native 15-minute Staff Type grain.
-2. **Staff Preparation** — required capacity versus gross/net published
-   schedules by Planning Group and Staff Type, including PTO/Away impact.
-3. **Intraday Control** — combined service result at Management LOB plus the
-   separate current resource position by Planning Group/Staff Type.
-4. **Attendance & Schedule Review** — published versus observed presence,
-   exact residual gaps after final Activities overlap, and break/meal control.
-5. **Performance Review** — standard WFM cycle close: demand, forecast,
-   requirement, schedule, observed/productive delivery, final absence and
-   shrinkage.
+1. **Today's Control** — latest service, resource and attendance priorities.
+2. **Staff Preparation** — required versus gross/PTO/Away/net published capacity
+   at 15-minute Planning Group and Staff Type grain.
+3. **Intraday Service** — combined service result by Management LOB and exact
+   queue diagnosis.
+4. **Attendance & Schedule Review** — published schedule above chronological
+   Agent Status evidence, with exact residual gaps below.
+5. **Historical Review** — demand, forecast, requirement, scheduled delivery,
+   final absence and final shrinkage, with a comparison period.
 
-RSA BE is intentionally one combined service-level result. RSA BE FR and RSA BE
-VL remain separate for forecast, requirements, schedules and staffing. A Verint
-forecast field called `Queue Name` contains a workforce Staff Type; it is not a
-Storm call queue.
+Use the horizontal menu to move between pages. Selectors are connected and
+synchronized: choosing a Management LOB limits its Planning Groups, Staff Types,
+employees or queues wherever that relationship applies. A blank card means its
+required evidence is unavailable in the selected scope; it is not a zero.
 
-## Filters and drill detail
+## When to open Excel
 
-Use the top strip from left to right: period/date, Management LOB, Planning
-Group or Team Leader, then Staff Type/checkpoint/exception depending on the
-page. Selecting Management LOB filters its governed children. The detail table
-at the bottom is the evidence behind the cards and charts.
+- open `RTM Daily Control.xlsx` for exact Flash and same-day callout rows;
+- open `Staffing Preparation.xlsx` for exact 15-minute shortages and maintain
+  only the blue columns in its persistent `ACTIONS` ledger;
+- open `Attendance Review.xlsx` for Gap ID, exact start/end and source evidence;
+- open `Realisations.xlsx` for detailed historical rows;
+- open `Final Absenteeism & Shrinkage.xlsx` for final Verint activity components.
 
-If a card is blank, check the source period and the mapping-status fields in its
-detail table. Blank means the required evidence was not supplied; it is not a
-zero.
+Power BI is for monitoring and prioritization. Excel is for exact portable rows
+or durable action fields. Attendance Review is read-only: make the correction in
+Verint, export final Activities and refresh; covered residuals then disappear.
 
-## Upgrades and safety
+## Upgrade check
 
-WFMHub project contract `6` has exactly these five pages. A newer portable
-release archives the installed older project under `Reports\Archive\Power BI`
-before installing the new one. The database, extracts and Excel products are
-not rebuilt just because the report layout changes.
+Project contract `7` has exactly these five pages. On the first open after an
+upgrade, choose **Home > Refresh**, then confirm the horizontal navigation,
+selector behavior, cards, timeline and tables render correctly. The repository
+validator cannot replace this one Power BI Desktop check.
 
-The final acceptance step is always to open the upgraded PBIP once in Power BI
-Desktop, refresh it, and confirm all five pages render. Source validation can
-prove JSON/TMDL and field bindings, but Desktop is the final renderer.
-
-PCS remains the separate permanent collaborative Excel tracker and is not
-included in this Power BI model.
+PCS remains its separate permanent collaborative Excel tracker and is not part
+of this Power BI model.

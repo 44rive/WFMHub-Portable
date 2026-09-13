@@ -30,7 +30,7 @@ class ReportPackTests(unittest.TestCase):
         self.assertIs(REPORT_COLORS, COLORS)
         self.assertIs(SHARED_REPORT_COLORS, COLORS)
         self.assertEqual((REPORT_DESIGN_ID, REPORT_DESIGN_VERSION), (
-            "WFMHUB-DESIGN", "3.3.0",
+            "WFMHUB-DESIGN", "3.4.0",
         ))
         reference = repo / "docs" / "WFMHub Report Design Reference.xlsx"
         self.assertTrue(reference.is_file())
@@ -95,6 +95,14 @@ class ReportPackTests(unittest.TestCase):
         self.assertEqual(REPORT_PACKS["realisations"].default_folder, "realisations")
         self.assertEqual(REPORT_PACKS["attendance"].default_folder, "attendance")
         self.assertEqual(REPORT_PACKS["absence"].default_folder, "absence")
+        self.assertEqual(
+            REPORT_PACKS["absence"].current_filename,
+            "Final Absenteeism & Shrinkage.xlsx",
+        )
+        self.assertEqual(
+            REPORT_PACKS["staffing"].current_filename,
+            "Staffing Preparation.xlsx",
+        )
         self.assertEqual(REPORT_PACKS["corrections"].default_folder, "corrections")
         # Old command/API keys remain callable for backwards compatibility, but
         # are deliberately absent from the interactive product menu.
@@ -128,6 +136,10 @@ class ReportPackTests(unittest.TestCase):
                 "Legacy Attendance Callout.xlsx",
             )
             self.assertEqual(report_current_path(config, "corrections").name, "Attendance Review.xlsx")
+            self.assertEqual(
+                report_current_path(config, "staffing").name,
+                "Staffing Preparation.xlsx",
+            )
 
     def test_replaced_operational_files_are_archived_not_deleted(self):
         with tempfile.TemporaryDirectory() as folder:

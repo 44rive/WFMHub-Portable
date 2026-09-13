@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "8f0d82162d305a1945c8",
   "position": {
-    "x": 1150,
-    "y": 24,
+    "x": 1260,
+    "y": 35,
     "z": 10,
-    "height": 20,
-    "width": 330,
+    "height": 18,
+    "width": 388,
     "tabOrder": 10
   },
   "visual": {
@@ -19,12 +19,12 @@
               {
                 "textRuns": [
                   {
-                    "value": "Last Hub update · refresh the governed feed",
+                    "value": "REFRESHED FROM GOVERNED WFMHUB FEED",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "10px",
+                      "fontSize": "8px",
                       "fontWeight": "normal",
-                      "color": "#607587"
+                      "color": "#DCE9F2"
                     }
                   }
                 ],

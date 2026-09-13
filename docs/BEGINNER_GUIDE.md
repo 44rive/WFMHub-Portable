@@ -92,11 +92,11 @@ refresh, the reports use the same prepared database.
 Current workbooks always have the same names:
 
 ```text
-Reports\Staffing Gaps.xlsx
+Reports\Staffing Preparation.xlsx
 Reports\RTM Daily Control.xlsx
 Reports\Realisations.xlsx
 Reports\Attendance Review.xlsx
-Reports\Final Absenteeism.xlsx
+Reports\Final Absenteeism & Shrinkage.xlsx
 Reports\Bonus Management.xlsx
 Reports\PCS Live Tracker.xlsx
 Reports\Analysis\...xlsx

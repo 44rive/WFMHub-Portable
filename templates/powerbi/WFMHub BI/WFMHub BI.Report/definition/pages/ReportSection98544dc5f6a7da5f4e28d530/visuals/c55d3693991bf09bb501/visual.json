@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "c55d3693991bf09bb501",
   "position": {
-    "x": 975,
-    "y": 244,
+    "x": 870,
+    "y": 311,
     "z": 10,
-    "height": 20,
-    "width": 305,
+    "height": 19,
+    "width": 360,
     "tabOrder": 10
   },
   "visual": {
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Completed shifts only",
+                    "value": "Exact late minutes above tolerance",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "9px",
+                      "fontSize": "8px",
                       "fontWeight": "normal",
                       "color": "#607587"
                     }

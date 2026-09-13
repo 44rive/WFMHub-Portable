@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "46dacfc1ac519dc2e9a4",
   "position": {
-    "x": 614,
-    "y": 244,
+    "x": 458,
+    "y": 311,
     "z": 10,
-    "height": 20,
-    "width": 305,
+    "height": 19,
+    "width": 360,
     "tabOrder": 10
   },
   "visual": {
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Worst net schedule position",
+                    "value": "Worst net-schedule interval",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "9px",
+                      "fontSize": "8px",
                       "fontWeight": "normal",
                       "color": "#607587"
                     }

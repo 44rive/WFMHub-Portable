@@ -49,7 +49,7 @@ transport; it does not calculate PCS.
 1. Put the latest final Verint Activities export in its normal source folder.
 2. Run **WFMHub > Refresh source data once > Attendance/absence**.
 3. Build **Final Absenteeism / Shrinkage**.
-4. Open `Reports\Final Absenteeism.xlsx`.
+4. Open `Reports\Final Absenteeism & Shrinkage.xlsx`.
 5. Use `TEAM_VIEW` for filtered agent results, `COMPONENT_VIEW` for category
    totals and `ACTIVITY_DETAIL` for exact source intervals.
 6. Use `ACTION_QUEUE` as a read-only list of incomplete or inconsistent coding.

@@ -45,27 +45,38 @@ class PowerBIProjectTests(unittest.TestCase):
         pages = json.loads(pages_file.read_text(encoding="utf-8"))
         self.assertEqual(len(pages["pageOrder"]), 5)
         names = []
+        expected_slicers = {
+            "Today's Control": 5,
+            "Staff Preparation": 4,
+            "Intraday Service": 4,
+            "Schedule Review": 5,
+            "Historical Review": 4,
+        }
         for page_id in pages["pageOrder"]:
             page_root = pages_file.parent / page_id
             page = json.loads((page_root / "page.json").read_text(encoding="utf-8"))
             names.append(page["displayName"])
             self.assertEqual((page["width"], page["height"]), (1680, 945))
             visuals = list((page_root / "visuals").glob("*/visual.json"))
-            self.assertGreaterEqual(len(visuals), 35)
+            self.assertGreaterEqual(len(visuals), 30)
             self.assertEqual(len({path.parent.name for path in visuals}), len(visuals))
             visual_types = [
                 json.loads(path.read_text(encoding="utf-8"))["visual"]["visualType"]
                 for path in visuals
             ]
-            self.assertEqual(visual_types.count("slicer"), 4)
-            self.assertEqual(visual_types.count("cardVisual"), 4)
+            self.assertEqual(visual_types.count("slicer"), expected_slicers[page["displayName"]])
+            self.assertEqual(
+                visual_types.count("cardVisual"),
+                8 if page["displayName"] == "Historical Review" else 4,
+            )
             self.assertIn("pageNavigator", visual_types)
-            self.assertGreaterEqual(visual_types.count("shape"), 12)
+            self.assertGreaterEqual(visual_types.count("shape"), 11)
+            self.assertNotIn("stackedBarChart", visual_types)
         self.assertEqual(
             names,
             [
-                "Forecast & Requirement", "Staff Preparation", "Intraday Control",
-                "Attendance & Schedule Review", "Performance Review",
+                "Today's Control", "Staff Preparation", "Intraday Service",
+                "Schedule Review", "Historical Review",
             ],
         )
         expressions = TEMPLATE / f"{PROJECT_NAME}.SemanticModel" / "definition"
@@ -119,26 +130,12 @@ class PowerBIProjectTests(unittest.TestCase):
     def test_every_page_keeps_the_approved_cycle_geometry(self):
         pages_root = TEMPLATE / f"{PROJECT_NAME}.Report" / "definition" / "pages"
         required_shapes = {
-            (0, 0, 210, 945),
-            (210, 0, 1470, 72),
-            (228, 85, 1434, 58),
-            (228, 153, 349, 119),
-            (590, 153, 349, 119),
-            (951, 153, 349, 119),
-            (1313, 153, 349, 119),
-            (228, 622, 1434, 248),
-        }
-        required_slicers = {
-            (240, 88, 270, 52),
-            (522, 88, 235, 52),
-            (769, 88, 235, 52),
-            (1016, 88, 270, 52),
-        }
-        required_cards = {
-            (236, 155, 337, 84),
-            (598, 155, 337, 84),
-            (959, 155, 337, 84),
-            (1321, 155, 337, 84),
+            (0, 0, 1680, 64),
+            (22, 124, 1636, 77),
+            (22, 211, 400, 132),
+            (434, 211, 400, 132),
+            (846, 211, 400, 132),
+            (1258, 211, 400, 132),
         }
         for page_dir in pages_root.glob("ReportSection*"):
             by_type: dict[str, set[tuple[int, int, int, int]]] = {}
@@ -151,10 +148,45 @@ class PowerBIProjectTests(unittest.TestCase):
                 by_type.setdefault(value["visual"]["visualType"], set()).add(geometry)
             with self.subTest(page=page_dir.name):
                 self.assertTrue(required_shapes <= by_type["shape"])
-                self.assertEqual(required_slicers, by_type["slicer"])
-                self.assertEqual(required_cards, by_type["cardVisual"])
-                self.assertIn((12, 105, 186, 340), by_type["pageNavigator"])
-                self.assertIn((228, 910, 1434, 18), by_type["textbox"])
+                self.assertTrue(all(item[3] >= 76 for item in by_type["slicer"]))
+                self.assertTrue(all(item[3] >= 36 for item in by_type["cardVisual"]))
+                self.assertIn((22, 68, 1636, 48), by_type["pageNavigator"])
+                self.assertIn((22, 917, 1636, 18), by_type["textbox"])
+                self.assertFalse(any(x == 0 and width == 210 for x, _, width, _ in by_type["shape"]))
+
+    def test_navigation_slicer_sync_and_native_timeline_contract(self):
+        pages_root = TEMPLATE / f"{PROJECT_NAME}.Report" / "definition" / "pages"
+        sync_bindings: dict[str, set[tuple[str, str]]] = {}
+        found_timeline = False
+        for path in pages_root.glob("*/visuals/*/visual.json"):
+            value = json.loads(path.read_text(encoding="utf-8"))
+            visual = value["visual"]
+            visual_type = visual["visualType"]
+            if visual_type == "pageNavigator":
+                layout = visual["objects"]["layout"][0]["properties"]
+                self.assertEqual(layout["columnCount"]["expr"]["Literal"]["Value"], "5L")
+                self.assertEqual(layout["rowCount"]["expr"]["Literal"]["Value"], "1L")
+                text_objects = visual["objects"]["text"]
+                self.assertTrue(all(
+                    item["properties"]["show"]["expr"]["Literal"]["Value"] == "true"
+                    for item in text_objects
+                ))
+            if visual_type == "slicer":
+                group = visual.get("syncGroup")
+                self.assertIsNotNone(group, path)
+                binding = next(self._bindings(visual, "Column"))
+                sync_bindings.setdefault(group["groupName"], set()).add(binding)
+            if visual_type == "barChart":
+                query_state = visual["query"]["queryState"]
+                self.assertEqual(set(query_state), {"Category", "Y", "Series"})
+                self.assertEqual(next(self._bindings(query_state["Category"], "Column")), ("Shift Placement", "Row Label"))
+                self.assertEqual(next(self._bindings(query_state["Series"], "Column")), ("Shift Placement", "Segment Series"))
+                found_timeline = True
+            if visual_type == "cardVisual":
+                title = visual["visualContainerObjects"]["title"][0]["properties"]["show"]
+                self.assertEqual(title["expr"]["Literal"]["Value"], "false")
+        self.assertTrue(found_timeline)
+        self.assertTrue(all(len(bindings) == 1 for bindings in sync_bindings.values()))
 
     @staticmethod
     def _bindings(value, binding_type: str):

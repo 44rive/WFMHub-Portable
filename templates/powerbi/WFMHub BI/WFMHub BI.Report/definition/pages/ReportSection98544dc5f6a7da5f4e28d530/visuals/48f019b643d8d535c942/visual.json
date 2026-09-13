@@ -2,15 +2,15 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "48f019b643d8d535c942",
   "position": {
-    "x": 236,
-    "y": 288,
+    "x": 30,
+    "y": 393,
     "z": 300,
-    "height": 318,
-    "width": 856,
+    "height": 306,
+    "width": 1620,
     "tabOrder": 300
   },
   "visual": {
-    "visualType": "stackedBarChart",
+    "visualType": "barChart",
     "query": {
       "queryState": {
         "Category": {
@@ -23,11 +23,11 @@
                       "Entity": "Shift Placement"
                     }
                   },
-                  "Property": "Placement Label"
+                  "Property": "Row Label"
                 }
               },
-              "queryRef": "Shift Placement.Placement Label",
-              "nativeQueryRef": "Placement Label"
+              "queryRef": "Shift Placement.Row Label",
+              "nativeQueryRef": "Row Label"
             }
           ]
         },
@@ -41,25 +41,29 @@
                       "Entity": "Shift Placement"
                     }
                   },
-                  "Property": "Start Hour Value"
+                  "Property": "Timeline Duration Hours"
                 }
               },
-              "queryRef": "Shift Placement.Start Hour Value",
-              "nativeQueryRef": "Start Hour Value"
-            },
+              "queryRef": "Shift Placement.Timeline Duration Hours",
+              "nativeQueryRef": "Timeline Duration Hours"
+            }
+          ]
+        },
+        "Series": {
+          "projections": [
             {
               "field": {
-                "Measure": {
+                "Column": {
                   "Expression": {
                     "SourceRef": {
                       "Entity": "Shift Placement"
                     }
                   },
-                  "Property": "Placement Duration Hours"
+                  "Property": "Segment Series"
                 }
               },
-              "queryRef": "Shift Placement.Placement Duration Hours",
-              "nativeQueryRef": "Placement Duration Hours"
+              "queryRef": "Shift Placement.Segment Series",
+              "nativeQueryRef": "Segment Series"
             }
           ]
         }
@@ -72,7 +76,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
@@ -150,7 +154,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#61758A'"
+                      "Value": "'#17324D'"
                     }
                   }
                 }
@@ -225,64 +229,53 @@
                   }
                 }
               }
-            }
-          }
-        }
-      ]
-    },
-    "visualContainerObjects": {
-      "title": [
-        {
-          "properties": {
-            "show": {
+            },
+            "start": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "0L"
                 }
               }
             },
-            "text": {
+            "end": {
               "expr": {
                 "Literal": {
-                  "Value": "'PUBLISHED SCHEDULE vs OBSERVED PRESENCE'"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#17324D'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11L"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'left'"
+                  "Value": "24L"
                 }
               }
             }
           }
         }
       ],
+      "dataPoint": [
+        {
+          "properties": {
+            "fill": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Aggregation": {
+                      "Expression": {
+                        "Column": {
+                          "Expression": {
+                            "SourceRef": {
+                              "Entity": "Shift Placement"
+                            }
+                          },
+                          "Property": "Segment Color"
+                        }
+                      },
+                      "Function": 3
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
       "background": [
         {
           "properties": {
@@ -328,28 +321,28 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "12L"
+                  "Value": "0L"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "0L"
                 }
               }
             },
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "14L"
+                  "Value": "0L"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "14L"
+                  "Value": "0L"
                 }
               }
             }

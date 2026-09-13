@@ -139,10 +139,10 @@ The shared SQLite hub can serve multiple workbooks without mixing their grains:
 | `bonus` | `Reports/Bonus Management.xlsx` | Imported Bonus Matrix result and release controls |
 | `service` | `Reports/RTM Daily Control.xlsx` | Same-day service, attendance call actions, and queue drivers for RSA NL/BE and Ford NL/OEM |
 | `realisations` | `Reports/Realisations.xlsx` | All mapped LOB actual/forecast, service, staffing, absence and shrinkage results |
-| `staffing` | `Reports/Staffing Gaps.xlsx` | Full-period actual staffing control and future capacity planning |
+| `staffing` | `Reports/Staffing Preparation.xlsx` | Governed 15-minute required/gross/PTO-Away/net capacity and persistent action ledger |
 | `attendance` | `_system/legacy_reports/Legacy Attendance Callout.xlsx` | Compatibility-only callout builder; absent from the normal menu |
 | `corrections` | `Reports/Attendance Review.xlsx` | Selected-period residual gaps, schedule/actual evidence, and break/meal control |
-| `absence` | `Reports/Final Absenteeism.xlsx` | Verint Activities final absence/shrinkage ledger and completeness review |
+| `absence` | `Reports/Final Absenteeism & Shrinkage.xlsx` | Verint Activities final absence/shrinkage ledger and completeness review |
 
 Products share the same visual identity but use purpose-specific layouts.
 The approved identity is versioned as `WFMHUB-DESIGN` in

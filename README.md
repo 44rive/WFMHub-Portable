@@ -213,7 +213,7 @@ can be compared. Exact source evidence remains hidden by default.
 them with the configurable break and meal allowances, and raises an overrun
 only when source coverage is sufficient.
 
-`Reports\Final Absenteeism.xlsx` follows the same long-lived-file principle and
+`Reports\Final Absenteeism & Shrinkage.xlsx` follows the same long-lived-file principle and
 uses final mapped Verint Activities, clipped to StartEndTimes shifts.
 `TEAM_VIEW` filters agent results and review cases; `COMPONENT_VIEW` explains
 absence and shrinkage by final category; `ACTIVITY_DETAIL` holds exact

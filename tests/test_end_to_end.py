@@ -888,6 +888,9 @@ class EndToEndTests(unittest.TestCase):
                 review_sheet = review_book["REVIEW BOARD"]
                 review_headers = {cell.value for cell in review_sheet[4]}
                 self.assertIn("Residual Status", review_headers)
+                self.assertIn("Management LOB", review_headers)
+                self.assertIn("Planning Group", review_headers)
+                self.assertIn("Staff Type", review_headers)
                 self.assertIn("Final Activity Found", review_headers)
                 self.assertNotIn("Decision Status", review_headers)
                 self.assertNotIn("Decision Category", review_headers)
@@ -1295,6 +1298,8 @@ class EndToEndTests(unittest.TestCase):
             staffing_book = load_workbook(staffing_report, read_only=False, data_only=True)
             try:
                 self.assertIn("WEEKLY_PLAN", staffing_book.sheetnames)
+                self.assertIn("CAPACITY GAPS", staffing_book.sheetnames)
+                self.assertIn("ACTIONS", staffing_book.sheetnames)
                 self.assertEqual(len(staffing_book["DASHBOARD"]._charts), 2)
                 self.assertEqual(
                     [staffing_book["DASHBOARD"][cell].value for cell in ("A5", "H5", "O5", "V5")],
@@ -1308,6 +1313,15 @@ class EndToEndTests(unittest.TestCase):
                     if row[0] is not None
                 }
                 self.assertEqual(staffing_dates, {date(2026, 8, 1), date(2026, 8, 2)})
+                intraday_headers = [cell.value for cell in staffing_book["INTRADAY"][4]]
+                self.assertIn("Capacity Key", intraday_headers)
+                self.assertIn("Planning Group", intraday_headers)
+                self.assertIn("Staff Type", intraday_headers)
+                action_headers = [cell.value for cell in staffing_book["ACTIONS"][4]]
+                self.assertEqual(action_headers[:6], [
+                    "Capacity Key", "Date", "Interval Start",
+                    "Management LOB", "Planning Group", "Staff Type",
+                ])
             finally:
                 staffing_book.close()
             self.assertEqual(analysis_report.parent, home / "Reports" / "Analysis")

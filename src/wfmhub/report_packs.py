@@ -52,15 +52,15 @@ REPORT_PACKS = {
         key="absence",
         default_folder="absence",
         filename_prefix="WFMHub_Final_Absence_Shrinkage",
-        current_filename="Final Absenteeism.xlsx",
-        purpose="Reviewed attendance-decision absence and shrinkage ledger.",
+        current_filename="Final Absenteeism & Shrinkage.xlsx",
+        purpose="Final Verint Activities absence and shrinkage totals with exact agent-day components.",
     ),
     "corrections": ReportPack(
         key="corrections",
         default_folder="corrections",
         filename_prefix="WFMHub_Attendance_Review",
         current_filename="Attendance Review.xlsx",
-        purpose="Selected-period exact gaps, editable decisions and a full-shift evidence timeline.",
+        purpose="Read-only exact residual gaps and full-shift evidence after final Verint reconciliation.",
     ),
     "pcs": ReportPack(
         key="pcs",
@@ -94,8 +94,8 @@ REPORT_PACKS = {
         key="staffing",
         default_folder="staffing",
         filename_prefix="WFMHub_Staffing_Coverage",
-        current_filename="Staffing Gaps.xlsx",
-        purpose="LOB/language staffing coverage and actionable interval gaps.",
+        current_filename="Staffing Preparation.xlsx",
+        purpose="15-minute required, gross, PTO/Away, net and gap capacity by governed Planning Group and Staff Type.",
     ),
     "attendance": ReportPack(
         key="attendance",
@@ -244,7 +244,10 @@ def build_report_pack(
     if key == "staffing":
         from .decision_products import build_staffing_coverage_workbook
 
-        return build_staffing_coverage_workbook(conn, config, start, end, output)
+        result = build_staffing_coverage_workbook(conn, config, start, end, output)
+        if output is None:
+            archive_superseded_reports(config, ("Staffing Gaps.xlsx",), datetime.now())
+        return result
     if key == "attendance":
         from .decision_products import build_attendance_today_workbook
 
@@ -252,7 +255,10 @@ def build_report_pack(
     if key == "absence":
         from .decision_products import build_final_absence_product_workbook
 
-        return build_final_absence_product_workbook(conn, config, start, end, output)
+        result = build_final_absence_product_workbook(conn, config, start, end, output)
+        if output is None:
+            archive_superseded_reports(config, ("Final Absenteeism.xlsx",), datetime.now())
+        return result
     if key == "corrections":
         from .decision_products import build_attendance_corrections_workbook
 

@@ -1,7 +1,7 @@
 # WFMHub mandatory context router
 
-Context version: `2.0.0`
-Applies to: WFMHub `0.32.1` and later
+Context version: `2.1.0`
+Applies to: WFMHub `0.33.0` and later
 Last reviewed: `2026-09-13`
 
 Before proposing or editing anything, read in this order:
@@ -30,7 +30,7 @@ Hard stops:
 - No adherence KPI, runtime AI, DuckDB, ODBC, hidden database server, or required
   Excel Data Model.
 - PCS is a permanent collaborative Excel tracker and is outside Power BI.
-- Power BI has exactly the five approved WFM-cycle pages in project contract 6.
+- Power BI has exactly the five approved WFM-cycle pages in project contract 7.
 - Missing evidence remains unknown; percentages are never averaged when their
   additive numerator and denominator exist.
 
@@ -44,7 +44,7 @@ Primary authorities:
 - attendance/activity classification: `config/wfm_rules.toml`
 - Power BI feed: `src/wfmhub/powerbi.py`
 - Power BI model/layout: `tools/build_powerbi_project.py`
-- approved pixels: `docs/design-prototypes/wfm-manager-cycle-v1/`
+- approved pixels: `docs/design-prototypes/powerbi-wfm-cycle-reset-v1/`
 - release behavior: tests plus `packaging/windows/build_portable.py`
 
 If documentation and active behavior differ, stop and reconcile the master,

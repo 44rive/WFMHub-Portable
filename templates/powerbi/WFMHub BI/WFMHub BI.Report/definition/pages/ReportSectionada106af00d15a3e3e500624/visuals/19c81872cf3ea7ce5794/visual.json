@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "19c81872cf3ea7ce5794",
   "position": {
-    "x": 236,
-    "y": 288,
+    "x": 30,
+    "y": 361,
     "z": 300,
-    "height": 318,
-    "width": 856,
+    "height": 304,
+    "width": 790,
     "tabOrder": 300
   },
   "visual": {
@@ -150,7 +150,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#61758A'"
+                      "Value": "'#17324D'"
                     }
                   }
                 }
@@ -244,7 +244,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'REQUIRED FTE vs NET SCHEDULED FTE'"
+                  "Value": "'REQUIRED vs NET SCHEDULED FTE — 15 MINUTES'"
                 }
               }
             },

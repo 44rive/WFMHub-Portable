@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `3.3.0` |
+| Version | `3.4.0` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
 | First compatible Hub version | `0.27.1` |
@@ -160,6 +160,10 @@ Every design change requires:
 
 ## Change log
 
+- `3.4.0`: replaces the Power BI side rail with native horizontal navigation,
+  synchronized conformed slicers, compact card geometry and a native
+  schedule-over-actual attendance timeline; aligns the Excel handoff to stable
+  Gap and Capacity keys.
 - `3.3.0`: standardizes the exact five-page Power BI WFM-cycle layout and its
   separate service-queue versus Staff Type/Planning Group semantic grains.
 - `3.2.0`: adds cascading Overview selectors and a filtered Coaching view using

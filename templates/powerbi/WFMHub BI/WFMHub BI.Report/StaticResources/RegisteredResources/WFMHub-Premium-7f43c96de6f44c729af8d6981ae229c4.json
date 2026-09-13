@@ -69,14 +69,7 @@
         ],
         "title": [
           {
-            "show": true,
-            "fontFamily": "Segoe UI Semibold",
-            "fontSize": 11,
-            "fontColor": {
-              "solid": {
-                "color": "#0B1F33"
-              }
-            }
+            "show": false
           }
         ]
       }

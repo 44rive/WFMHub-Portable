@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "6efda2a9182b50c1650b",
   "position": {
-    "x": 598,
-    "y": 155,
+    "x": 458,
+    "y": 246,
     "z": 200,
-    "height": 84,
-    "width": 337,
+    "height": 58,
+    "width": 356,
     "tabOrder": 200
   },
   "visual": {
@@ -72,7 +72,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "30L"
+                  "Value": "32L"
                 }
               }
             },
@@ -113,7 +113,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
@@ -163,34 +163,47 @@
           }
         }
       ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
       "padding": [
         {
           "properties": {
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "18L"
+                  "Value": "0L"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "12L"
+                  "Value": "0L"
                 }
               }
             },
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "24L"
+                  "Value": "0L"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "14L"
+                  "Value": "0L"
                 }
               }
             }

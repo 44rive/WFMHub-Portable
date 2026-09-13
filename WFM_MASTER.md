@@ -1,7 +1,7 @@
 # WFMHub master product and business contract
 
-Contract version: `2.0.0`
-Applies to: WFMHub `0.32.1` and later
+Contract version: `2.1.0`
+Applies to: WFMHub `0.33.0` and later
 Last reviewed: `2026-09-13`
 
 This is the single starting point for humans and coding assistants. Read it,
@@ -159,40 +159,50 @@ The PTO/Away submission app is a separate future Microsoft Power Platform
 project. Its accepted contract is `docs/PTO_AWAY_APP_IMPLEMENTATION.md`; tenant
 construction/deployment still requires the user's Microsoft environment.
 
-## Power BI contract 6
+## Power BI contract 7
 
 The shipped source-controlled project is
 `templates/powerbi/WFMHub BI/WFMHub BI.pbip`. `POWERBI.cmd` installs or upgrades
 it under `Reports\Power BI`, changes only the local `HubRoot` parameter and opens
-it. A Hub update publishes the fixed schema-6 feed and manifest atomically;
-Power BI Desktop then performs its own Refresh.
+it. A Hub update publishes the fixed schema-7 feed and manifest atomically;
+Power BI Desktop then performs its own Refresh. The feed and project can be
+upgraded without rebuilding the durable SQLite database.
 
 The report has exactly five 1680x945 pages following the approved screenshots:
 
-1. Forecast & Requirement
+1. Today's Control
 2. Staff Preparation
-3. Intraday Control
+3. Intraday Service
 4. Attendance & Schedule Review
-5. Performance Review
+5. Historical Review
 
-Every page uses the same 210-pixel navy rail, 72-pixel white header, 58-pixel
-filter/scope strip, four compact 119-pixel cards, two 330-pixel analysis panels,
-and one 248-pixel action/detail table. The pixel reference is
-`docs/design-prototypes/wfm-manager-cycle-v1/cycle-pages.html` and its five PNGs.
+Every page uses a 64-pixel navy header, a native horizontal page navigator, one
+connected selector strip, four compact cards, two decision panels and one
+evidence/action table. Slicers from the same conformed dimension are assigned
+to the same Power BI sync group. The pixel reference is
+`docs/design-prototypes/powerbi-wfm-cycle-reset-v1/` and its five PNGs.
 Do not replace this with generic cards, invented KPIs, AI-style prose or extra
 pages. PCS is not imported.
 
 Page grain rules:
 
-- Forecast: Staff Type at native 15 minutes; no service-level calculation.
+- Today's Control: latest operational service, resource and attendance actions.
 - Staff Preparation: Planning Group/Staff Type requirement versus published net
   schedule; no call queues.
-- Intraday: service stays combined at Management LOB while resource rows remain
-  split by Planning Group/Staff Type.
-- Attendance: Agent Status-first published/observed/residual bands, exact
-  Activities overlap, break and meal evidence.
-- Performance: standard WFM cycle measures only; no synthetic score or claimed
-  causal attribution.
+- Intraday Service: combined Management LOB result with exact configured queue
+  diagnosis; capacity Staff Types never appear on this page.
+- Attendance: a native stacked horizontal bar places published schedule above
+  chronological Agent Status evidence and exact residual gaps; no marketplace
+  visual is required.
+- Historical Review: forecast, actual, requirement, scheduled delivery, final
+  absence and final shrinkage remain separate measures; comparison month is a
+  disconnected analysis selector, not an organisational dimension.
+
+The matching Excel handoff is narrow: RTM Daily Control for today/service,
+Staffing Preparation for 15-minute capacity and its persistent action ledger,
+Attendance Review for exact residual evidence, Realisations for detailed cycle
+results, and Final Absenteeism & Shrinkage for final Verint components. PCS and
+Bonus retain their existing workflows outside this Power BI scope.
 
 ## Repository map and change discipline
 

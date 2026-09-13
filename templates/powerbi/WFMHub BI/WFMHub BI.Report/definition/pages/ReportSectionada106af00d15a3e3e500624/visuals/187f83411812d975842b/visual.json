@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "187f83411812d975842b",
   "position": {
-    "x": 236,
-    "y": 628,
+    "x": 30,
+    "y": 690,
     "z": 400,
-    "height": 236,
-    "width": 1418,
+    "height": 210,
+    "width": 1620,
     "tabOrder": 400
   },
   "visual": {
@@ -42,20 +42,6 @@
               },
               "queryRef": "Time.Time Label",
               "nativeQueryRef": "Time Label"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Management LOB"
-                    }
-                  },
-                  "Property": "Management LOB"
-                }
-              },
-              "queryRef": "Management LOB.Management LOB",
-              "nativeQueryRef": "Management LOB"
             },
             {
               "field": {
@@ -121,25 +107,39 @@
                       "Entity": "Staffing"
                     }
                   },
-                  "Property": "PTO / Away FTE"
-                }
-              },
-              "queryRef": "Staffing.PTO / Away FTE",
-              "nativeQueryRef": "PTO / Away FTE"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Staffing"
-                    }
-                  },
                   "Property": "Net Capacity Gap FTE"
                 }
               },
               "queryRef": "Staffing.Net Capacity Gap FTE",
               "nativeQueryRef": "Net Capacity Gap FTE"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staffing"
+                    }
+                  },
+                  "Property": "Staffing State"
+                }
+              },
+              "queryRef": "Staffing.Staffing State",
+              "nativeQueryRef": "Staffing State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Staffing"
+                    }
+                  },
+                  "Property": "Evidence Basis"
+                }
+              },
+              "queryRef": "Staffing.Evidence Basis",
+              "nativeQueryRef": "Evidence Basis"
             }
           ]
         }

@@ -162,6 +162,20 @@ table 'Staffing'
 		formatString: #,##0.0
 		displayFolder: 'Capacity'
 
+	/// Scheduled coverage for the explicitly selected comparison month.
+	measure 'Comparison Scheduled Coverage %' = ```
+			VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Scheduled Coverage %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))
+			```
+		formatString: 0.0%
+		displayFolder: 'Historical comparison'
+
+	/// Current scheduled coverage less the selected comparison month in percentage points.
+	measure 'Scheduled Coverage Delta vs Comparison pp' = ```
+			([Scheduled Coverage %] - [Comparison Scheduled Coverage %]) * 100
+			```
+		formatString: 0.0;[Red]-0.0
+		displayFolder: 'Historical comparison'
+
 	column 'Date'
 		dataType: dateTime
 		isHidden

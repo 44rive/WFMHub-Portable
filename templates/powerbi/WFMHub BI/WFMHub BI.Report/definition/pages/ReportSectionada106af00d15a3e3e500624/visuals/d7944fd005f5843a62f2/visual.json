@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "d7944fd005f5843a62f2",
   "position": {
-    "x": 235,
-    "y": 43,
+    "x": 224,
+    "y": 39,
     "z": 10,
-    "height": 20,
-    "width": 850,
+    "height": 19,
+    "width": 940,
     "tabOrder": 10
   },
   "visual": {
@@ -19,12 +19,12 @@
               {
                 "textRuns": [
                   {
-                    "value": "Required capacity versus published schedules — by planning group and Staff Type",
+                    "value": "Right people. Right time. A better day of service.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "11px",
+                      "fontSize": "10px",
                       "fontWeight": "normal",
-                      "color": "#607587"
+                      "color": "#DCE9F2"
                     }
                   }
                 ],

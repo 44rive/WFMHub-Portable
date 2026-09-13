@@ -27,8 +27,9 @@ LOBs On Target Label = FORMAT([LOBs On Target], "0") & " / " & FORMAT([LOBs With
 Routing Availability % = DIVIDE([Answered Calls], [Offered Calls])
 Abandon Rate % = DIVIDE([Abandoned Calls], [Offered Calls])
 AHT Seconds = DIVIDE(SUM('Service'[Handled Seconds]), [Answered Calls])
-Volume Variance = [Offered Calls] - [Forecast Volume]
-Volume Variance % = DIVIDE([Volume Variance], [Forecast Volume])
+Comparable Forecast Volume = IF(ISFILTERED('Queue'[Queue]), BLANK(), [Forecast Volume])
+Volume Variance = IF(ISBLANK([Comparable Forecast Volume]), BLANK(), [Offered Calls] - [Comparable Forecast Volume])
+Volume Variance % = DIVIDE([Volume Variance], [Comparable Forecast Volume])
 Forecast Accuracy % = VAR Grain =
 SUMMARIZECOLUMNS(
     'Date'[Date],
@@ -42,6 +43,10 @@ VAR ForecastTotal = SUMX(Comparable, [Forecast Volume At Grain])
 VAR AbsoluteError = SUMX(Comparable, ABS(COALESCE([Actual Volume], 0) - [Forecast Volume At Grain]))
 RETURN IF(ForecastTotal <= 0, BLANK(), MAX(0, 1 - DIVIDE(AbsoluteError, ForecastTotal)))
 Forecast Bias % = DIVIDE([Offered Calls] - [Forecast Volume], [Forecast Volume])
+Comparison Service Level % = VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Service Level %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))
+Service Level Delta vs Comparison pp = ([Service Level %] - [Comparison Service Level %]) * 100
+Comparison Volume Variance % = VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Volume Variance %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))
+Volume Variance Delta vs Comparison pp = ([Volume Variance %] - [Comparison Volume Variance %]) * 100
 AHT Error Seconds = [AHT Seconds] - [Forecast AHT Seconds]
 Peak Accuracy % = VAR Grain =
 SUMMARIZECOLUMNS(
@@ -104,6 +109,8 @@ Observed FTE Hours = SUM('Staffing'[Observed FTE]) * 0.25
 Productive FTE Hours = SUM('Staffing'[Productive FTE]) * 0.25
 Scheduled Coverage % = DIVIDE([Net Scheduled FTE Hours], [Required FTE Hours])
 Uncovered FTE Hours = MAX([Required FTE Hours] - [Net Scheduled FTE Hours], 0)
+Comparison Scheduled Coverage % = VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Scheduled Coverage %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))
+Scheduled Coverage Delta vs Comparison pp = ([Scheduled Coverage %] - [Comparison Scheduled Coverage %]) * 100
 
 // Attendance
 Due HC = CALCULATE(DISTINCTCOUNT('Attendance'[Agent Day Key]), 'Attendance'[Planned Work Minutes] > 0)
@@ -143,10 +150,7 @@ Early Leaves = CALCULATE(COUNTROWS('Schedule Integrity'), 'Schedule Integrity'[C
 Integrity Cases = CALCULATE(COUNTROWS('Schedule Integrity'), 'Schedule Integrity'[Requires Review] = 1)
 
 // Shift Placement
-Start Hour Value = SUM('Shift Placement'[Start Hour])
-Published Placement Hours = SUM('Shift Placement'[Published Hours])
-Observed Placement Hours = SUM('Shift Placement'[Observed Hours])
-Placement Duration Hours = SUM('Shift Placement'[Duration Hours])
+Timeline Duration Hours = SUM('Shift Placement'[Duration Hours])
 
 // Attendance Gap
 Total Gap Minutes = SUM('Attendance Gap'[Gap Minutes])
@@ -173,6 +177,8 @@ Final Shrinkage % = DIVIDE([Final Shrinkage Minutes], [Final Planned Minutes])
 Final PTO % = DIVIDE([Final PTO Minutes], [Final Planned Minutes])
 Absence Review HC = CALCULATE(DISTINCTCOUNT('Final Absence'[Agent Day Key]), NOT('Final Absence'[Final Ledger Status] IN {"CLEAR", "ABSENCE_RECORDED"}))
 Prior Month Final Absence % = CALCULATE([Final Absence %], DATEADD('Date'[Date], -1, MONTH))
+Comparison Final Absence % = VAR PeriodStart = SELECTEDVALUE('Comparison Period'[Month Start]) RETURN IF(ISBLANK(PeriodStart), BLANK(), CALCULATE([Final Absence %], REMOVEFILTERS('Date'), DATESBETWEEN('Date'[Date], PeriodStart, EOMONTH(PeriodStart, 0))))
+Final Absence Delta vs Comparison pp = ([Final Absence %] - [Comparison Final Absence %]) * 100
 
 // Absence Component
 Activity Minutes = SUM('Absence Component'[Minutes])

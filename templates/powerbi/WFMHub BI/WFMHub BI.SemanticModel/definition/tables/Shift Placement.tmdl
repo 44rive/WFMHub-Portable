@@ -1,29 +1,8 @@
-/// Published, observed and exact residual placement bands used by the schedule review timeline.
+/// Ordered native stacked-bar segments for published schedule and Agent Status actual bands.
 table 'Shift Placement'
 
-	/// Hours after midnight before the placement bar starts.
-	measure 'Start Hour Value' = ```
-			SUM('Shift Placement'[Start Hour])
-			```
-		formatString: 0.0
-		displayFolder: 'Schedule integrity'
-
-	/// Published shift duration for the placement chart.
-	measure 'Published Placement Hours' = ```
-			SUM('Shift Placement'[Published Hours])
-			```
-		formatString: 0.0
-		displayFolder: 'Schedule integrity'
-
-	/// Observed presence span for the placement chart.
-	measure 'Observed Placement Hours' = ```
-			SUM('Shift Placement'[Observed Hours])
-			```
-		formatString: 0.0
-		displayFolder: 'Schedule integrity'
-
-	/// Duration of the selected published, observed or residual band.
-	measure 'Placement Duration Hours' = ```
+	/// Ordered segment duration used by the native schedule review timeline.
+	measure 'Timeline Duration Hours' = ```
 			SUM('Shift Placement'[Duration Hours])
 			```
 		formatString: 0.0
@@ -42,6 +21,13 @@ table 'Shift Placement'
 		isAvailableInMdx: false
 		summarizeBy: none
 		sourceColumn: Placement Key
+
+	column 'Agent Day Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Agent Day Key
 
 	column 'Agent ID'
 		dataType: string
@@ -67,22 +53,48 @@ table 'Shift Placement'
 		summarizeBy: none
 		sourceColumn: Management LOB
 
-	column 'Placement'
+	column 'Row Label'
 		dataType: string
 		summarizeBy: none
-		sourceColumn: Placement
+		sourceColumn: Row Label
 
-	column 'Placement Label'
+	column 'Row Sort'
 		dataType: string
-		summarizeBy: none
-		sourceColumn: Placement Label
-
-	column 'Start Hour'
-		dataType: decimal
 		isHidden
 		isAvailableInMdx: false
 		summarizeBy: none
-		sourceColumn: Start Hour
+		sourceColumn: Row Sort
+
+	column 'Band'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Band
+
+	column 'Band Sort'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Band Sort
+
+	column 'Segment Order'
+		dataType: int64
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Segment Order
+
+	column 'Segment Type'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Segment Type
+
+	column 'Segment Series'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Segment Series
 
 	column 'Duration Hours'
 		dataType: decimal
@@ -91,19 +103,12 @@ table 'Shift Placement'
 		summarizeBy: none
 		sourceColumn: Duration Hours
 
-	column 'Published Hours'
-		dataType: decimal
+	column 'Segment Color'
+		dataType: string
 		isHidden
 		isAvailableInMdx: false
 		summarizeBy: none
-		sourceColumn: Published Hours
-
-	column 'Observed Hours'
-		dataType: decimal
-		isHidden
-		isAvailableInMdx: false
-		summarizeBy: none
-		sourceColumn: Observed Hours
+		sourceColumn: Segment Color
 
 	column 'Classification'
 		dataType: string
@@ -120,9 +125,9 @@ table 'Shift Placement'
 			let
 			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactShiftPlacement.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-			    Selected = Table.SelectColumns(Promoted, {"Date", "Placement Key", "Agent ID", "Agent", "Team Leader", "Management LOB", "Placement", "Placement Label", "Start Hour", "Duration Hours", "Published Hours", "Observed Hours", "Classification", "Requires Review"}, MissingField.Error),
-			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Start Hour", "Duration Hours", "Published Hours", "Observed Hours", "Requires Review"}),
-			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Placement Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Management LOB", type text}, {"Placement", type text}, {"Placement Label", type text}, {"Start Hour", type number}, {"Duration Hours", type number}, {"Published Hours", type number}, {"Observed Hours", type number}, {"Classification", type text}, {"Requires Review", Int64.Type}}, "en-US")
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Placement Key", "Agent Day Key", "Agent ID", "Agent", "Team Leader", "Management LOB", "Row Label", "Row Sort", "Band", "Band Sort", "Segment Order", "Segment Type", "Segment Series", "Duration Hours", "Segment Color", "Classification", "Requires Review"}, MissingField.Error),
+			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Band Sort", "Segment Order", "Duration Hours", "Requires Review"}),
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Placement Key", type text}, {"Agent Day Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Management LOB", type text}, {"Row Label", type text}, {"Row Sort", type text}, {"Band", type text}, {"Band Sort", Int64.Type}, {"Segment Order", Int64.Type}, {"Segment Type", type text}, {"Segment Series", type text}, {"Duration Hours", type number}, {"Segment Color", type text}, {"Classification", type text}, {"Requires Review", Int64.Type}}, "en-US")
 			in
 			    Typed
 

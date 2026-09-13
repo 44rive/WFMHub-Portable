@@ -136,6 +136,13 @@ table 'Attendance'
 		summarizeBy: none
 		sourceColumn: Staff Type
 
+	column 'Staff Type Key'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		summarizeBy: none
+		sourceColumn: Staff Type Key
+
 	column 'Capacity Mapping Status'
 		dataType: string
 		summarizeBy: none
@@ -259,9 +266,9 @@ table 'Attendance'
 			let
 			    Source = Csv.Document(File.Contents(HubRoot & "\Feed\PowerBI\FactAttendanceDay.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 			    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-			    Selected = Table.SelectColumns(Promoted, {"Date", "Agent Day Key", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Planning Group", "Staff Type", "Capacity Mapping Status", "Market", "Language", "Location", "Scheduled Start", "Scheduled End", "Scheduled Minutes", "Planned Work Minutes", "Planning Overlay", "First Login", "Last Logout", "Attendance Result", "Call Action", "Requires Call", "Shift State", "Actual Evidence", "Is Provisional", "Late Minutes", "Early Leave Minutes", "No Show Minutes", "Status Covered Minutes"}, MissingField.Error),
+			    Selected = Table.SelectColumns(Promoted, {"Date", "Agent Day Key", "Agent ID", "Agent", "Team Leader", "Ops Manager", "LOB", "Management LOB", "Planning Group", "Staff Type", "Staff Type Key", "Capacity Mapping Status", "Market", "Language", "Location", "Scheduled Start", "Scheduled End", "Scheduled Minutes", "Planned Work Minutes", "Planning Overlay", "First Login", "Last Logout", "Attendance Result", "Call Action", "Requires Call", "Shift State", "Actual Evidence", "Is Provisional", "Late Minutes", "Early Leave Minutes", "No Show Minutes", "Status Covered Minutes"}, MissingField.Error),
 			    NullBlanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Date", "Scheduled Minutes", "Planned Work Minutes", "Late Minutes", "Early Leave Minutes", "No Show Minutes", "Status Covered Minutes"}),
-			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Agent Day Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Planning Group", type text}, {"Staff Type", type text}, {"Capacity Mapping Status", type text}, {"Market", type text}, {"Language", type text}, {"Location", type text}, {"Scheduled Start", type text}, {"Scheduled End", type text}, {"Scheduled Minutes", Int64.Type}, {"Planned Work Minutes", Int64.Type}, {"Planning Overlay", type text}, {"First Login", type text}, {"Last Logout", type text}, {"Attendance Result", type text}, {"Call Action", type text}, {"Requires Call", type text}, {"Shift State", type text}, {"Actual Evidence", type text}, {"Is Provisional", type text}, {"Late Minutes", Int64.Type}, {"Early Leave Minutes", Int64.Type}, {"No Show Minutes", Int64.Type}, {"Status Covered Minutes", Int64.Type}}, "en-US")
+			    Typed = Table.TransformColumnTypes(NullBlanks, {{"Date", type date}, {"Agent Day Key", type text}, {"Agent ID", type text}, {"Agent", type text}, {"Team Leader", type text}, {"Ops Manager", type text}, {"LOB", type text}, {"Management LOB", type text}, {"Planning Group", type text}, {"Staff Type", type text}, {"Staff Type Key", type text}, {"Capacity Mapping Status", type text}, {"Market", type text}, {"Language", type text}, {"Location", type text}, {"Scheduled Start", type text}, {"Scheduled End", type text}, {"Scheduled Minutes", Int64.Type}, {"Planned Work Minutes", Int64.Type}, {"Planning Overlay", type text}, {"First Login", type text}, {"Last Logout", type text}, {"Attendance Result", type text}, {"Call Action", type text}, {"Requires Call", type text}, {"Shift State", type text}, {"Actual Evidence", type text}, {"Is Provisional", type text}, {"Late Minutes", Int64.Type}, {"Early Leave Minutes", Int64.Type}, {"No Show Minutes", Int64.Type}, {"Status Covered Minutes", Int64.Type}}, "en-US")
 			in
 			    Typed
 

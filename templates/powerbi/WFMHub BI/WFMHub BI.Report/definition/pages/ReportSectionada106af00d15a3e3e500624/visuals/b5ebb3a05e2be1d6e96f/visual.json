@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "b5ebb3a05e2be1d6e96f",
   "position": {
-    "x": 235,
-    "y": 11,
+    "x": 224,
+    "y": 3,
     "z": 10,
-    "height": 30,
-    "width": 720,
+    "height": 38,
+    "width": 760,
     "tabOrder": 10
   },
   "visual": {
@@ -22,9 +22,9 @@
                     "value": "STAFF PREPARATION",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "25px",
+                      "fontSize": "24px",
                       "fontWeight": "bold",
-                      "color": "#17324D"
+                      "color": "#FFFFFF"
                     }
                   }
                 ],

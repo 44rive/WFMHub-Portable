@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.33.0 - 2026-09-13
+
+- Replace the Power BI project with the approved five-page WFM cycle reset:
+  Today's Control, Staff Preparation, Intraday Service, Attendance & Schedule
+  Review and Historical Review.
+- Add native horizontal page navigation, synchronized conformed selectors and
+  compact visual geometry matching the approved contract-7 prototypes.
+- Replace the unsupported attendance custom visual with a native stacked
+  horizontal timeline showing published schedule above ordered Agent Status,
+  meal, break, PTO/Away, residual gap and Verint-covered segments.
+- Restrict Planning Group and Staff Type visuals to governed `MAPPED` capacity
+  identities and prevent queue selections from manufacturing forecast-volume
+  comparisons at incompatible grain.
+- Add an explicit historical comparison-period selector and comparison deltas
+  without creating a synthetic WFM score.
+- Rename the detailed handoffs to `Staffing Preparation.xlsx` and
+  `Final Absenteeism & Shrinkage.xlsx`, archive their retired fixed names, add
+  Hub refresh/data-through audit rows and align staffing detail to Management
+  LOB, Planning Group, Verint Staff Type and stable Capacity Key.
+- Make the staffing `ACTIONS` sheet a rebuild-safe editable ledger while
+  retaining a read-only exact `CAPACITY GAPS` sheet.
+- Add conformed capacity fields and source segment keys to Attendance Review,
+  and update the master, beginner and Power BI operating contracts.
+
 ## 0.32.1 - 2026-09-13
 
 - Fix refresh failures when one mapped Call-by-Call queue/hour contains more

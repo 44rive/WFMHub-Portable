@@ -2,15 +2,20 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "8a7fcf4a66647faf01a1",
   "position": {
-    "x": 1016,
-    "y": 88,
+    "x": 1017,
+    "y": 125,
     "z": 100,
-    "height": 52,
-    "width": 270,
+    "height": 76,
+    "width": 301,
     "tabOrder": 100
   },
   "visual": {
     "visualType": "slicer",
+    "syncGroup": {
+      "groupName": "AgentSync",
+      "fieldChanges": true,
+      "filterChanges": true
+    },
     "query": {
       "queryState": {
         "Values": {
@@ -20,14 +25,14 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Attendance Gap"
+                      "Entity": "Employee"
                     }
                   },
-                  "Property": "Detected Issue"
+                  "Property": "Agent"
                 }
               },
-              "queryRef": "Attendance Gap.Detected Issue",
-              "nativeQueryRef": "Detected Issue"
+              "queryRef": "Employee.Agent",
+              "nativeQueryRef": "Agent"
             }
           ]
         }
@@ -60,7 +65,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'EXCEPTION'"
+                  "Value": "'AGENT'"
                 }
               }
             },
@@ -134,6 +139,19 @@
     },
     "visualContainerObjects": {
       "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
         {
           "properties": {
             "show": {

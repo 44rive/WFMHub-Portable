@@ -11,6 +11,7 @@ model Model
 annotation __PBI_TimeIntelligenceEnabled = 0
 
 ref table 'Date'
+ref table 'Comparison Period'
 ref table 'Time'
 ref table 'Employee'
 ref table 'Management LOB'
