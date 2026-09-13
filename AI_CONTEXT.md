@@ -1,7 +1,7 @@
 # WFMHub mandatory context router
 
 Context version: `2.1.0`
-Applies to: WFMHub `0.33.0` and later
+Applies to: WFMHub `0.33.1` and later
 Last reviewed: `2026-09-13`
 
 Before proposing or editing anything, read in this order:
@@ -30,7 +30,7 @@ Hard stops:
 - No adherence KPI, runtime AI, DuckDB, ODBC, hidden database server, or required
   Excel Data Model.
 - PCS is a permanent collaborative Excel tracker and is outside Power BI.
-- Power BI has exactly the five approved WFM-cycle pages in project contract 7.
+- Power BI has exactly the five approved WFM-cycle pages in project contract 8.
 - Missing evidence remains unknown; percentages are never averaged when their
   additive numerator and denominator exist.
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.33.1 - 2026-09-13
+
+- Fix the Power BI Desktop project-load failure caused by two active filter paths
+  from `Management LOB` to `Attendance`. Attendance now uses its governed
+  `Employee` relationship for management-LOB filtering and no longer creates a
+  second route through `Staff Type` and `Planning Group`.
+- Add a semantic-model regression test that rejects multiple active directed
+  filter paths before a portable release can be published.
+- Advance the installed Power BI project contract to `8` so `POWERBI.cmd`
+  archives and replaces the affected contract-7 project during upgrade. The
+  feed schema remains `7`; no database rebuild is required.
+
 ## 0.33.0 - 2026-09-13
 
 - Replace the Power BI project with the approved five-page WFM cycle reset:

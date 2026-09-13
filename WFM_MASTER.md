@@ -1,7 +1,7 @@
 # WFMHub master product and business contract
 
 Contract version: `2.1.0`
-Applies to: WFMHub `0.33.0` and later
+Applies to: WFMHub `0.33.1` and later
 Last reviewed: `2026-09-13`
 
 This is the single starting point for humans and coding assistants. Read it,
@@ -159,7 +159,7 @@ The PTO/Away submission app is a separate future Microsoft Power Platform
 project. Its accepted contract is `docs/PTO_AWAY_APP_IMPLEMENTATION.md`; tenant
 construction/deployment still requires the user's Microsoft environment.
 
-## Power BI contract 7
+## Power BI contract 8
 
 The shipped source-controlled project is
 `templates/powerbi/WFMHub BI/WFMHub BI.pbip`. `POWERBI.cmd` installs or upgrades

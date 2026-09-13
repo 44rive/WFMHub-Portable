@@ -127,6 +127,41 @@ class PowerBIProjectTests(unittest.TestCase):
             with self.subTest(table=path.stem):
                 self.assertFalse(measures & columns)
 
+    def test_active_relationships_have_no_ambiguous_filter_paths(self):
+        relationships = (
+            TEMPLATE / f"{PROJECT_NAME}.SemanticModel" /
+            "definition" / "relationships.tmdl"
+        ).read_text(encoding="utf-8")
+        graph: dict[str, list[str]] = {}
+        for block in re.split(r"(?m)^relationship ", relationships)[1:]:
+            if re.search(r"(?m)^\tisActive:\s*false\s*$", block):
+                continue
+            from_match = re.search(r"(?m)^\tfromColumn: '([^']+)'", block)
+            to_match = re.search(r"(?m)^\ttoColumn: '([^']+)'", block)
+            self.assertIsNotNone(from_match)
+            self.assertIsNotNone(to_match)
+            # The one-side table filters the many-side table by default.
+            graph.setdefault(to_match.group(1), []).append(from_match.group(1))
+
+        ambiguities: list[str] = []
+        for source in graph:
+            paths: dict[str, list[list[str]]] = {}
+
+            def walk(node: str, path: list[str]) -> None:
+                for target in graph.get(node, []):
+                    if target in path:
+                        continue
+                    next_path = [*path, target]
+                    paths.setdefault(target, []).append(next_path)
+                    walk(target, next_path)
+
+            walk(source, [source])
+            for target, candidates in paths.items():
+                if len(candidates) > 1:
+                    rendered = " | ".join(" -> ".join(path) for path in candidates)
+                    ambiguities.append(f"{source} => {target}: {rendered}")
+        self.assertFalse(ambiguities, "Ambiguous active filter paths:\n" + "\n".join(ambiguities))
+
     def test_every_page_keeps_the_approved_cycle_geometry(self):
         pages_root = TEMPLATE / f"{PROJECT_NAME}.Report" / "definition" / "pages"
         required_shapes = {

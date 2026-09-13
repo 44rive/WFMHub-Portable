@@ -66,10 +66,6 @@ relationship bdf69956-d727-3ed6-38ce-0ddd79e4b116
 	fromColumn: 'Attendance'.'Agent ID'
 	toColumn: 'Employee'.'Agent ID'
 
-relationship a64e2476-58ca-0a4a-3c0e-1a51271bdc9b
-	fromColumn: 'Attendance'.'Staff Type Key'
-	toColumn: 'Staff Type'.'Staff Type Key'
-
 relationship 373803ef-2b57-0225-ce90-39a81edb2126
 	fromColumn: 'Status'.'Date'
 	toColumn: 'Date'.'Date'

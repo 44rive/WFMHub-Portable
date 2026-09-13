@@ -505,7 +505,7 @@ RETURN MAXX(TOPN(1, FILTER(Signals, NOT ISBLANK([Signal])), [Signal], DESC, [Dri
             m("Sources Ready %", "DIVIDE([Sources Ready], [Source Count])", "0.0%", "Ready source families divided by configured source families.", "Data quality"),
             m("Latest Data Date", "MAX('Source Health'[Newest Date])", "dd mmm yyyy", "Latest business date present across source families.", "Data quality"),
             m("Rows Accepted %", "DIVIDE(SUM('Source Health'[Rows]), SUM('Source Health'[Rows]) + SUM('Source Health'[Rejected]))", "0.0%", "Accepted source rows divided by accepted plus rejected rows.", "Data quality"),
-            m("Models Built", "22", "#,##0", "Imported semantic tables in Power BI project contract 5.", "Data quality"),
+            m("Models Built", "22", "#,##0", "Imported semantic tables in the current Power BI project contract.", "Data quality"),
             m("Manifest State", "IF([Critical Quality Issues] > 0, \"HOLD\", \"READY\")", "", "HOLD when blocking quality issues exist; READY otherwise.", "Data quality"),
         ),
     ),
@@ -538,7 +538,6 @@ RELATIONSHIPS = (
     ("Staffing", "Date", "Date", "Date"), ("Staffing", "Time Slot", "Time", "Quarter Hour Index"),
     ("Staffing", "Staff Type Key", "Staff Type", "Staff Type Key"),
     ("Attendance", "Date", "Date", "Date"), ("Attendance", "Agent ID", "Employee", "Agent ID"),
-    ("Attendance", "Staff Type Key", "Staff Type", "Staff Type Key"),
     ("Status", "Date", "Date", "Date"), ("Status", "Agent ID", "Employee", "Agent ID"),
     ("Status", "Time Slot", "Time", "Quarter Hour Index"),
     ("Schedule Integrity", "Date", "Date", "Date"),
@@ -1369,7 +1368,7 @@ def build() -> Path:
             staged / f"{PROJECT_NAME}.pbip",
             {"$schema": "https://developer.microsoft.com/json-schemas/fabric/pbip/pbipProperties/1.0.0/schema.json", "version": "1.0", "artifacts": [{"report": {"path": f"{PROJECT_NAME}.Report"}}], "settings": {"enableAutoRecovery": True}},
         )
-        (staged / "PROJECT_VERSION.txt").write_text("7\n", encoding="utf-8")
+        (staged / "PROJECT_VERSION.txt").write_text("8\n", encoding="utf-8")
         (staged / "README.txt").write_text(
             "WFMHUB BI\n=========\n\n"
             "Open WFMHub BI.pbip with Microsoft Power BI Desktop, then choose Home > Refresh.\n"

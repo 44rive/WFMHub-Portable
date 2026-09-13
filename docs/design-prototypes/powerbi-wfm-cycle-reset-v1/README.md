@@ -1,6 +1,6 @@
 # WFM Power BI cycle reset — validation prototype
 
-Status: approved implementation reference for Power BI project contract 7.
+Status: approved implementation reference for Power BI project contract 8.
 
 ## Page contract
 
