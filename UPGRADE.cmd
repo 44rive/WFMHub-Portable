@@ -4,6 +4,8 @@ title WFMHub Portable - Upgrade Existing Data
 if not defined NO_COLOR color 0B
 for %%I in ("%~dp0.") do set "WFMHUB_HOME=%%~fI"
 set "WFMHUB_PYTHON=%WFMHUB_HOME%\_system\runtime\python.exe"
+set "PYTHONHOME="
+set "PYTHONPATH="
 
 if not exist "%WFMHUB_PYTHON%" goto :missing_runtime
 
@@ -14,7 +16,7 @@ set /p "WFMHUB_OLD=Previous WFMHub folder: "
 set "WFMHUB_OLD=%WFMHUB_OLD:"=%"
 if not defined WFMHUB_OLD goto :missing_path
 
-"%WFMHUB_PYTHON%" -m wfmhub --home "%WFMHUB_HOME%" upgrade-install --from "%WFMHUB_OLD%"
+"%WFMHUB_PYTHON%" -I -m wfmhub --home "%WFMHUB_HOME%" upgrade-install --from "%WFMHUB_OLD%"
 set "EXIT_CODE=%ERRORLEVEL%"
 pause
 exit /b %EXIT_CODE%

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.35.1 - 2026-09-14
+
+- Hardened every Windows launcher against machine-level `PYTHONHOME` and `PYTHONPATH` settings.
+- Packaged OpenPyXL, XlsxWriter, et_xmlfile and timezone data as intact reviewed wheel archives so Explorer or OneDrive cannot leave half of a package behind during extraction.
+- Added a concise common startup diagnostic when Windows blocks or omits a runtime dependency.
+- Added Windows CI coverage that executes the bundled runtime and the real `SETUP.cmd` workflow.
+
 ## 0.35.0 - 2026-09-14
 
 - Expand the local visual surface into the approved 15-page WFM Manager

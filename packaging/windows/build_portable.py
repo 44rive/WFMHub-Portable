@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.35.0"
+DEFAULT_VERSION = "0.35.1"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -175,13 +175,19 @@ def build(args) -> Path:
         "--implementation", "cp", "--abi", "cp313", "--only-binary=:all:",
         "--require-hashes", "--no-deps",
     ], check=True)
-    site_packages = runtime / "site-packages"
-    site_packages.mkdir(exist_ok=True)
+    # Keep pure-Python dependencies as intact wheel archives. A portable ZIP
+    # with thousands of loose package files is vulnerable to partial Explorer
+    # extraction and OneDrive sync omissions (notably openpyxl/xml). CPython's
+    # zip importer can load these reviewed pure-Python wheels directly.
+    wheels = runtime / "wheels"
+    wheels.mkdir(exist_ok=True)
+    wheel_paths: list[str] = []
     for wheel in sorted(wheelhouse.glob("*.whl")):
         verify_wheel(wheel)
         print(f"Vendoring {wheel.name}")
-        with zipfile.ZipFile(wheel) as archive:
-            archive.extractall(site_packages)
+        target_wheel = wheels / wheel.name
+        shutil.copy2(wheel, target_wheel)
+        wheel_paths.append(f"wheels/{wheel.name}")
 
     pth = runtime / "python313._pth"
     lines = [
@@ -190,8 +196,10 @@ def build(args) -> Path:
     ]
     if "../app" not in lines:
         lines.append("../app")
-    if "site-packages" not in lines:
-        lines.append("site-packages")
+    lines = [line for line in lines if line.strip() != "site-packages"]
+    for wheel_path in wheel_paths:
+        if wheel_path not in lines:
+            lines.append(wheel_path)
     pth.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     copy_tree(ROOT / "src" / "wfmhub", stage / "_system" / "app" / "wfmhub")
@@ -276,10 +284,17 @@ def build(args) -> Path:
     (stage / "VERSION.txt").write_text(args.version + "\n", encoding="utf-8")
     manifest_lines = [f"{digest}  {name}" for name, digest in sorted(expected_native.items())]
     (stage / "_system" / "RUNTIME_MANIFEST.sha256").write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
+    package_manifest = [
+        f"{sha256(path)}  {path.relative_to(runtime).as_posix()}"
+        for path in sorted(wheels.glob("*.whl"))
+    ]
+    (stage / "_system" / "PACKAGE_MANIFEST.sha256").write_text(
+        "\n".join(package_manifest) + "\n", encoding="utf-8"
+    )
     (stage / "_system" / "RUNTIME_ORIGIN.txt").write_text(
         f"Official CPython {args.python_version} Windows embeddable x64 ZIP\n"
         f"Archive SHA-256: {PYTHON_EMBED_SHA256[args.python_version]}\n"
-        "Only pure-Python report libraries are added under runtime/site-packages.\n",
+        "Only reviewed pure-Python wheel archives are added under runtime/wheels.\n",
         encoding="utf-8",
     )
     for folder in (
