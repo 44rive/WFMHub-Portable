@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WFMHub Manager Desk</title>
+  <style>
+    :root{--navy:#0b1f33;--navy2:#163650;--teal:#007c83;--gold:#d6a84b;--canvas:#eef3f5;--ink:#1f2933;--muted:#627482;--line:#d4dee4;--line2:#e8edf0;--green:#1f7a53;--green-bg:#e0f1e8;--amber:#9c6400;--amber-bg:#fff1cc;--red:#b42318;--red-bg:#fde7e5}
+    *{box-sizing:border-box}html,body{margin:0;width:1680px;height:960px;overflow:hidden;background:var(--canvas);font-family:Aptos,"Segoe UI",Arial,sans-serif;color:var(--ink);font-size:13px}button{font:inherit}
+    .top{height:62px;background:var(--navy);color:#fff;display:flex;padding:0 24px;align-items:stretch}.brand{width:230px;display:flex;flex-direction:column;justify-content:center}.brand b{font-size:24px;letter-spacing:-1px}.brand b i{font-style:normal;color:var(--gold)}.brand small{font-size:7px;color:#a8bdca;letter-spacing:2.5px;margin-top:5px;font-weight:800}.nav{display:flex;flex:1}.nav span{min-width:125px;padding:17px 20px 0;color:#aebfcb;font-size:10px;font-weight:750;border-bottom:3px solid transparent}.nav span small{display:block;font-size:7px;letter-spacing:.8px;text-transform:uppercase;color:#70899b;margin-top:4px}.nav .on{background:var(--navy2);color:#fff;border-color:var(--gold)}.nav .on small{color:#b9cad5}.fresh{width:185px;display:flex;gap:10px;justify-content:flex-end;align-items:center}.dot{width:8px;height:8px;background:var(--green);border-radius:50%;box-shadow:0 0 0 4px #1f7a5330}.fresh b,.fresh small{display:block;text-align:right}.fresh b{font-size:10px}.fresh small{font-size:7px;color:#8fa4b3;letter-spacing:1px;margin-top:3px}
+    .subnav{height:58px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 24px}.title{width:450px;border-right:1px solid var(--line)}.title p{margin:0 0 2px;color:var(--teal);font-size:7px;font-weight:850;letter-spacing:1.3px}.title h1{margin:0;font-size:19px;color:var(--navy);letter-spacing:-.3px}.tabs{display:flex;height:58px}.tabs span{padding:22px 22px 0;font-size:9px;font-weight:750;color:#637684;border-bottom:2px solid transparent}.tabs .on{color:var(--navy);border-color:var(--teal)}.actions{display:flex;gap:7px;margin-left:auto}.actions button{height:32px;padding:0 13px;border:1px solid #b9c8d1;background:#fff;color:var(--navy);font-size:9px;font-weight:750;border-radius:3px}.actions .primary{background:var(--teal);border-color:var(--teal);color:#fff}
+    .filters{height:64px;background:#f8fafb;border-bottom:1px solid var(--line);padding:8px 24px;display:grid;grid-template-columns:160px 1.2fr 180px 1.2fr 1fr 38px}.filter{height:47px;background:#fff;border:1px solid var(--line);border-right:0;padding:6px 10px}.filter:nth-last-child(2){border-right:1px solid var(--line)}.filter label{display:block;font-size:7px;color:#687b89;font-weight:850;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px}.filter b{font-size:10px;color:var(--navy)}.filter i{float:right;font-style:normal;color:#70828f}.clear{border:0;background:transparent;color:#6c7f8c;font-size:9px;font-weight:750}.cut{height:27px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dce5e9;color:#607381;font-size:8px}.cut b{color:#344c5c}
+    main{padding:10px 24px 12px}.horizons{height:126px;display:grid;grid-template-columns:repeat(4,1fr);background:#fff;border:1px solid var(--line);margin-bottom:9px}.horizon{padding:11px 14px;border-right:1px solid var(--line)}.horizon:last-child{border:0}.horizon header{height:29px;display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid var(--line2)}.horizon h2{font-size:10px;margin:0;color:var(--navy);text-transform:uppercase;letter-spacing:.7px}.horizon header span{font-size:7px;color:#718391}.horizon ul{list-style:none;padding:6px 0 0;margin:0}.horizon li{height:23px;display:grid;grid-template-columns:54px 1fr auto;align-items:center;font-size:8px;color:#4f626f}.horizon li b{color:var(--navy);font-size:9px}.flag{font-size:7px;font-weight:850;padding:3px 6px;border-radius:8px}.red{color:var(--red);background:var(--red-bg)}.amber{color:var(--amber);background:var(--amber-bg)}.green{color:var(--green);background:var(--green-bg)}
+    .workspace{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(390px,.75fr);grid-template-rows:335px 238px;gap:9px}.panel{background:#fff;border:1px solid var(--line);overflow:hidden}.panel>header{height:48px;padding:8px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center}.panel>header p{margin:0 0 2px;color:var(--teal);font-size:7px;font-weight:850;letter-spacing:1.2px}.panel>header h2{font-size:12px;margin:0;color:var(--navy)}.panel>header>span{margin-left:auto;font-size:7px;color:#607583;background:#edf3f5;padding:5px 8px;border-radius:9px;font-weight:800;letter-spacing:.6px}.matrix{grid-column:1;grid-row:1}.queue{grid-column:2;grid-row:1}.risks{grid-column:1;grid-row:2}.system{grid-column:2;grid-row:2}
+    table{width:100%;border-collapse:collapse;font-size:9px}th{height:28px;background:#edf3f5;color:#415766;font-size:7px;text-transform:uppercase;letter-spacing:.45px;text-align:left;padding:6px 9px;border-bottom:1px solid #cad7df;white-space:nowrap}td{height:51px;padding:7px 9px;border-bottom:1px solid var(--line2);white-space:nowrap;color:#344855}td small{display:block;color:#748793;font-size:7px;margin-top:3px}.num{text-align:right;font-variant-numeric:tabular-nums}.strong{font-weight:850;color:var(--navy)}tr.focus td{background:#e9f6f6}.status{font-size:7px;font-weight:850;letter-spacing:.55px;padding:4px 7px;border-radius:9px}.status.ok{color:var(--green);background:var(--green-bg)}.status.bad{color:var(--red);background:var(--red-bg)}.neg{color:var(--red)!important}.pos{color:var(--green)!important}.matrix footer{height:26px;padding:7px 11px;background:#f6f9fa;font-size:8px;color:#5e7280}
+    .worklist{list-style:none;margin:0;padding:0 12px}.worklist li{display:grid;grid-template-columns:49px 1fr 50px;gap:8px;padding:10px 0;border-bottom:1px solid var(--line2);align-items:start}.worklist li:before{content:"";position:absolute}.worklist time{font-size:7px;font-weight:850;color:#526977;padding-top:2px}.worklist b{display:block;font-size:9px;color:var(--navy)}.worklist small{display:block;font-size:7px;color:#708391;margin-top:3px;line-height:1.25}.worklist em{font-size:7px;font-style:normal;font-weight:800;text-align:right}.worklist .urgent{border-left:3px solid var(--red);padding-left:8px}.worklist .check{border-left:3px solid var(--gold);padding-left:8px}
+    .risks td{height:37px}.risks .priority{font-size:7px;color:#fff;background:var(--red);padding:3px 5px;border-radius:2px}.system-body{display:grid;grid-template-columns:1.2fr .8fr;height:189px}.source-list{padding:6px 12px;border-right:1px solid var(--line)}.source-list div{height:29px;display:grid;grid-template-columns:1fr auto;align-items:center;border-bottom:1px solid var(--line2);font-size:8px}.source-list b{font-size:8px;color:var(--navy)}.source-list span{color:var(--green);font-weight:750}.job{padding:11px}.job label{display:block;font-size:7px;color:#687b89;font-weight:850;letter-spacing:.8px}.job strong{font-size:15px;color:var(--navy);display:block;margin:5px 0 2px}.job p{font-size:8px;color:#667a88;line-height:1.35;margin:0 0 10px}.progress{height:5px;background:#e4eaee}.progress i{display:block;height:100%;width:72%;background:var(--teal)}.job button{width:100%;height:29px;border:1px solid #b9c8d1;background:#fff;color:var(--navy);font-size:8px;font-weight:750;margin-top:11px}
+    footer.appfoot{height:28px;background:#e6ecef;border-top:1px solid var(--line);padding:0 24px;display:flex;align-items:center;justify-content:space-between;color:#687a87;font-size:7px;letter-spacing:.5px}
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><b>WFM<i>HUB</i></b><small>MANAGER WORKBENCH</small></div>
+    <nav class="nav"><span class="on">Manager Desk<small>Today</small></span><span>Plan<small>Demand · capacity</small></span><span>Operate<small>Service · people</small></span><span>Review<small>Integrity · outcomes</small></span><span>Deliver<small>Reports · analysis</small></span><span>Govern<small>Data · rules</small></span></nav>
+    <div class="fresh"><span class="dot"></span><div><b>ACTUALS THROUGH 17:00</b><small>14 SEP 2026 · READY</small></div></div>
+  </header>
+  <section class="subnav">
+    <div class="title"><p>YOUR WFM DAY</p><h1>Manager Desk</h1></div>
+    <div class="tabs"><span class="on">Today</span><span>Work queue</span><span>Calendar</span></div>
+    <div class="actions"><button>Run analysis</button><button>Generate report</button><button class="primary">Update data</button></div>
+  </section>
+  <section class="filters">
+    <div class="filter"><label>Business date</label><b>14 Sep 2026</b><i>⌄</i></div>
+    <div class="filter"><label>Management LOB · multi-select</label><b>RSA NL · RSA BE · FORD NL · OEM</b><i>⌄</i></div>
+    <div class="filter"><label>Checkpoint</label><b>17:00 · latest</b><i>⌄</i></div>
+    <div class="filter"><label>Planning group · multi-select</label><b>All five planning groups</b><i>⌄</i></div>
+    <div class="filter"><label>Team leader · multi-select</label><b>All active teams</b><i>⌄</i></div>
+    <button class="clear">Clear</button>
+  </section>
+  <div class="cut"><span>Operational date 14 Sep 2026 · active FTE scope · PTO/Away applied</span><span><b>Call-by-Call</b> 17:00 · <b>Agent Status</b> 17:03 · <b>Schedule</b> 30 Sep · <b>Forecast</b> 12 Oct</span></div>
+  <main>
+    <section class="horizons">
+      <article class="horizon"><header><h2>Now</h2><span>TO 17:15</span></header><ul><li><span class="flag red">SERVICE</span><b>RSA BE 75.8%</b><em>−4.2 pp</em></li><li><span class="flag red">PEOPLE</span><b>2 confirmed no-shows</b><em>Call</em></li><li><span class="flag amber">EVIDENCE</span><b>1 unknown case</b><em>Check</em></li></ul></article>
+      <article class="horizon"><header><h2>By end of day</h2><span>POST-DAY</span></header><ul><li><span class="flag amber">GAPS</span><b>11 residual intervals</b><em>4.6 h</em></li><li><span class="flag amber">MEAL</span><b>3 completed-shift reviews</b><em>Open</em></li><li><span class="flag green">ACTIVITIES</span><b>13 Sep finalized</b><em>Ready</em></li></ul></article>
+      <article class="horizon"><header><h2>Next 7 days</h2><span>PLAN</span></header><ul><li><span class="flag red">CAPACITY</span><b>86 uncovered FTE-hours</b><em>11 runs</em></li><li><span class="flag amber">PTO/AWAY</span><b>42.5 FTE-hours</b><em>Applied</em></li><li><span class="flag red">PEAK</span><b>RSA BE VL · Wednesday</b><em>−3.4</em></li></ul></article>
+      <article class="horizon"><header><h2>Current month</h2><span>REVIEW</span></header><ul><li><span class="flag amber">VOLUME</span><b>Actual +4.2% vs forecast</b><em>MTD</em></li><li><span class="flag red">ABSENCE</span><b>Final 5.8%</b><em>+0.6 pp</em></li><li><span class="flag green">DELIVERY</span><b>95.6% scheduled coverage</b><em>MTD</em></li></ul></article>
+    </section>
+    <section class="workspace">
+      <article class="panel matrix">
+        <header><div><p>CURRENT POSITION</p><h2>Management LOB operating matrix · 17:00</h2></div><span>NO SYNTHETIC TOTAL SL</span></header>
+        <table><thead><tr><th>Management LOB</th><th>State</th><th class="num">SL</th><th class="num">Offered</th><th class="num">Handled</th><th class="num">Vs forecast</th><th class="num">Present gap</th><th class="num">No show</th><th class="num">Unknown</th></tr></thead><tbody>
+          <tr><td><b>RSA Netherlands</b><small>Combined configured service queues</small></td><td><span class="status ok">STABLE</span></td><td class="num strong">89.9%</td><td class="num">1,824</td><td class="num">1,738</td><td class="num pos">+3.6%</td><td class="num pos">+1.0</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr class="focus"><td><b>RSA Belgium</b><small>Combined service · FR/VL capacity split</small></td><td><span class="status bad">RECOVER</span></td><td class="num strong neg">75.8%</td><td class="num">1,296</td><td class="num">1,198</td><td class="num neg">+9.4%</td><td class="num neg">−2.5</td><td class="num neg">2</td><td class="num">1</td></tr>
+          <tr><td><b>Ford Netherlands</b><small>Six configured service queues</small></td><td><span class="status ok">STABLE</span></td><td class="num strong">96.8%</td><td class="num">485</td><td class="num">467</td><td class="num">−3.4%</td><td class="num">0.0</td><td class="num">0</td><td class="num">1</td></tr>
+          <tr><td><b>Ford OEM France</b><small>Ford · Toyota · Chery</small></td><td><span class="status ok">STABLE</span></td><td class="num strong">94.9%</td><td class="num">392</td><td class="num">374</td><td class="num pos">+2.9%</td><td class="num pos">+0.5</td><td class="num">0</td><td class="num">0</td></tr>
+        </tbody></table>
+        <footer>Selected: RSA Belgium · service is combined; present-capacity evidence identifies RSA BE VL as the short planning group.</footer>
+      </article>
+      <aside class="panel queue">
+        <header><div><p>WFM WORK QUEUE</p><h2>Next actions by deadline</h2></div><span>6 OPEN</span></header>
+        <ol class="worklist">
+          <li class="urgent"><time>NOW</time><div><b>Contact 2 confirmed no-shows</b><small>RSA BE · completed shift evidence · PTO/Away excluded</small></div><em class="neg">P1</em></li>
+          <li class="check"><time>17:05</time><div><b>Validate unknown attendance case</b><small>FORD NL · schedule exists, no positive status evidence</small></div><em>CHECK</em></li>
+          <li class="urgent"><time>17:10</time><div><b>Review RSA BE VL cover</b><small>Net 18.5 vs required 21.0 through 18:30</small></div><em class="neg">P1</em></li>
+          <li><time>17:15</time><div><b>Recheck RSA BE service</b><small>Close only after combined ratio-of-sums recovers</small></div><em>LIVE</em></li>
+          <li class="check"><time>EOD</time><div><b>Review 11 exact residual gaps</b><small>Final Activities overlap already subtracted</small></div><em>POST</em></li>
+        </ol>
+      </aside>
+      <article class="panel risks">
+        <header><div><p>FORWARD RISK</p><h2>Upcoming shortage intervals</h2></div><span>NET SCHEDULE VS REQUIREMENT</span></header>
+        <table><thead><tr><th>Priority</th><th>Date</th><th>Interval</th><th>Planning group</th><th>Staff type</th><th class="num">Required</th><th class="num">Net</th><th class="num">Gap</th><th>Evidence</th></tr></thead><tbody>
+          <tr><td><span class="priority">P1</span></td><td>14 Sep</td><td>17:00–17:15</td><td><b>RSA BE VL</b></td><td>BE RSA FO VL</td><td class="num">21.0</td><td class="num">18.5</td><td class="num strong neg">−2.5</td><td>Forecast + schedule</td></tr>
+          <tr><td><span class="priority">P1</span></td><td>16 Sep</td><td>10:30–11:15</td><td><b>RSA BE VL</b></td><td>BE RSA FO VL</td><td class="num">24.4</td><td class="num">21.0</td><td class="num strong neg">−3.4</td><td>PTO/Away applied</td></tr>
+          <tr><td><span class="flag amber">P2</span></td><td>17 Sep</td><td>12:00–12:30</td><td><b>RSA BE FR</b></td><td>BE RSA FO FR</td><td class="num">18.2</td><td class="num">17.1</td><td class="num strong neg">−1.1</td><td>Forecast + schedule</td></tr>
+        </tbody></table>
+      </article>
+      <aside class="panel system">
+        <header><div><p>SYSTEM READINESS</p><h2>Sources and current job</h2></div><span>READY</span></header>
+        <div class="system-body"><div class="source-list"><div><b>Call-by-Call</b><span>17:00 · READY</span></div><div><b>Agent Status</b><span>17:03 · READY</span></div><div><b>Published schedules</b><span>30 SEP · READY</span></div><div><b>Forecast / requirement</b><span>12 OCT · READY</span></div><div><b>Verint Activities</b><span>13 SEP · REVIEW</span></div><div><b>FTE / PTO / Away</b><span>READY</span></div></div><div class="job"><label>LAST JOB</label><strong>Update completed</strong><p>8 sources processed<br>0 failed · 14 skipped</p><div class="progress"><i></i></div><button>Open jobs &amp; logs</button></div></div>
+      </aside>
+    </section>
+  </main>
+  <footer class="appfoot"><span>Prepared by Anass ASSRI | WFM</span><span>Illustrative product mockup · governed business boundaries</span><span>LOCAL · READ-ONLY EVIDENCE</span></footer>
+</body>
+</html>
