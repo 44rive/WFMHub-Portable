@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import re
 import shutil
 import tempfile
 import unittest
@@ -25,7 +24,6 @@ from wfmhub.models import (
 )
 from wfmhub.on_demand_analysis import build_analysis_workbook
 from wfmhub.pcs_tracker import PCS_TRACKER_FILENAME
-from wfmhub.powerbi import publish_powerbi_feeds
 from wfmhub.shared_feeds import (
     PCS_AGENT_SCORECARD_HEADERS,
     PCS_COACHING_HEADERS,
@@ -581,58 +579,6 @@ class EndToEndTests(unittest.TestCase):
                     progress=lambda current, total, label: model_progress.append((current, total, label)),
                 )
                 self.assertEqual(model_progress[-1], (22, 22, "Models ready"))
-                powerbi = publish_powerbi_feeds(
-                    conn, config, model.start, model.end,
-                )
-                self.assertEqual(powerbi.family, "POWERBI")
-                self.assertTrue((config.feed / "PowerBI" / "FactService15Min.csv").is_file())
-                self.assertTrue((config.feed / "PowerBI" / "FactStatusInterval.csv").is_file())
-                self.assertTrue((config.feed / "PowerBI" / "FactScheduleIntegrity.csv").is_file())
-                self.assertTrue((config.feed / "PowerBI" / "FactFinalAbsenceDay.csv").is_file())
-                self.assertTrue((config.feed / "PowerBI" / "POWERBI_MANIFEST_CURRENT.csv").is_file())
-                with (config.feed / "PowerBI" / "FactService15Min.csv").open(
-                    encoding="utf-8-sig", newline="",
-                ) as handle:
-                    service_feed = list(csv.DictReader(handle))
-                self.assertIn("Management LOB", service_feed[0])
-                self.assertIn("Time Slot", service_feed[0])
-                management_lobs = {row["Management LOB"] for row in service_feed}
-                self.assertTrue(management_lobs <= {"RSA NL", "RSA BE", "FORD NL", "OEM"})
-                self.assertIn("RSA BE", management_lobs)
-                with (config.feed / "PowerBI" / "FactAttendanceDay.csv").open(
-                    encoding="utf-8-sig", newline="",
-                ) as handle:
-                    attendance_feed = list(csv.DictReader(handle))
-                self.assertIn("Management LOB", attendance_feed[0])
-                self.assertTrue(
-                    (config.feed / "PowerBI" / "DimManagementLOB.csv").is_file()
-                )
-                # The shipped PBIP selects only columns that the current feed
-                # contract actually publishes. This catches stale report-model
-                # schemas before Power BI Desktop ever sees them.
-                model_tables = (
-                    REPO / "templates" / "powerbi" / "WFMHub BI" /
-                    "WFMHub BI.SemanticModel" / "definition" / "tables"
-                )
-                for table_file in model_tables.glob("*.tmdl"):
-                    tmdl = table_file.read_text(encoding="utf-8")
-                    source_name = re.search(
-                        r'\\Feed\\PowerBI\\([^"\\]+\.csv)', tmdl,
-                    )
-                    selected = re.search(
-                        r'Table\.SelectColumns\(Promoted, \{([^}]*)\}', tmdl,
-                    )
-                    self.assertIsNotNone(source_name, table_file)
-                    self.assertIsNotNone(selected, table_file)
-                    with (config.feed / "PowerBI" / source_name.group(1)).open(
-                        encoding="utf-8-sig", newline="",
-                    ) as handle:
-                        published_headers = next(csv.reader(handle))
-                    selected_headers = re.findall(r'"([^"]+)"', selected.group(1))
-                    self.assertTrue(
-                        set(selected_headers) <= set(published_headers),
-                        f"{table_file.name} selects columns missing from {source_name.group(1)}",
-                    )
                 attendance_before_pcs = conn.execute(
                     "SELECT agent_day_key, attendance_result "
                     "FROM mart.attendance_agent_day ORDER BY agent_day_key"

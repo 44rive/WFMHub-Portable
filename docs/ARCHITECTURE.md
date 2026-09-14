@@ -71,8 +71,15 @@ The only current dashboard surface is a standard-library HTTP server bound to
 `127.0.0.1`. `WEBAPP.cmd` starts it with the embedded runtime. API requests use
 short-lived read-only SQLite connections, static assets are packaged under
 `wfmhub/web`, and the browser receives only governed projections. No port is
-opened to the network. Legacy PBIP source is retained only as history; it is not
-regenerated, packaged, opened from the menu, or fed during a normal update.
+opened to the network. Retired Power BI product files are absent; migration 016
+remains only so older databases continue to upgrade additively.
+
+Routine ingestion first compares the active file's size, precise modification
+time, and parser/scope fingerprint. A true match skips full-file hashing, which
+is important for giant Call-by-Call and Agent Status extracts. Any file metadata,
+roster, parser policy, rulebook or queue-map change falls through to the strong
+SHA-256 content check. Model-stage durations are written to the normal Hub log
+so a slow rebuild can be attributed to a specific WFM model instead of guessed.
 
 Logical names such as `raw.lilo` are translated by the database facade into
 SQLite tables such as `raw_lilo`. Business code stays readable and backend

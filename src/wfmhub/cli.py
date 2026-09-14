@@ -209,9 +209,9 @@ def refresh(
                 conn.execute(
                     """UPDATE meta.refresh_run SET finished_at=?, status='SUCCESS', files_loaded=?, files_skipped=?, files_failed=?, details=? WHERE run_id=?""",
                     [datetime.now(), ingested.loaded, ingested.skipped, ingested.failed, (
-                        f"pcs={model.pcs_rows}; targeted=PCS; scoped_out={ingested.scoped_out}"
+                        f"pcs={model.pcs_rows}; targeted=PCS; fast_skipped={getattr(ingested, 'metadata_skipped', 0)}; scoped_out={ingested.scoped_out}"
                         if pcs_only else
-                        f"attendance={model.attendance_rows}; absence={model.absence_rows}; service={model.service_rows}; gaps={model.correction_rows}; metrics={model.metric_rows}; findings={model.finding_rows}; quality={model.quality_rows}; scoped_out={ingested.scoped_out}"
+                        f"attendance={model.attendance_rows}; absence={model.absence_rows}; service={model.service_rows}; gaps={model.correction_rows}; metrics={model.metric_rows}; findings={model.finding_rows}; quality={model.quality_rows}; fast_skipped={getattr(ingested, 'metadata_skipped', 0)}; scoped_out={ingested.scoped_out}"
                     ), run_id],
                 )
             except Exception as exc:
@@ -226,6 +226,8 @@ def refresh(
     print("\nRefresh complete.")
     print(f"Period      : {model.start} to {model.end}")
     print(f"Files       : {ingested.loaded} loaded, {ingested.skipped} unchanged, {ingested.failed} failed")
+    if getattr(ingested, "metadata_skipped", 0):
+        print(f"Fast skip   : {ingested.metadata_skipped} unchanged files avoided full hashing")
     print(f"Agent scope : {ingested.scoped_out:,} outside-roster source rows excluded")
     if not pcs_only:
         print(f"Attendance  : {model.attendance_rows:,} rows")

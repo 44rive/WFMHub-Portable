@@ -1,7 +1,7 @@
 # WFMHub master product and business contract
 
-Contract version: `2.3.0`
-Applies to: WFMHub `0.35.0` and later
+Contract version: `2.4.0`
+Applies to: WFMHub `0.36.0` and later
 Last reviewed: `2026-09-14`
 
 This is the single starting point for humans and coding assistants. Read it,
@@ -84,6 +84,9 @@ Current planning roll-ups:
 PTO/Away reduces gross published capacity to net published capacity while the
 underlying published assignment remains the Staff Type key. Unknown Staff Types
 or assignments remain visible with an `UNMAPPED_*` state; they are never guessed.
+The complete user-readable service/non-service register and Ford VL dual-view
+ownership rule are documented in `docs/QUEUE_CATALOG.md` and exposed under
+**Govern > Mappings & Rules**.
 
 ## Core calculations
 
@@ -125,14 +128,17 @@ Capacity arithmetic:
 ```text
 net scheduled FTE = gross published FTE - approved PTO/effective Away FTE
 scheduled coverage = net scheduled FTE-hours / required FTE-hours
-future gap = net scheduled FTE - required FTE
+future staffing variance = net scheduled FTE - required FTE
+future staffing gap = max(required FTE - net scheduled FTE, 0)
 intraday present gap = Agent Status-first observed FTE - required FTE
 required FTE-hours = sum(required FTE * source interval minutes / 60)
 ```
 
 Forecast Volume and Absolute Required FTE are independent measures. A blank
 Volume is not converted into zero requirement and a supplied requirement remains
-valid even when Volume is blank.
+valid even when Volume is blank. If retained monthly forecast exports overlap at
+the same governed Staff Type/native interval, the newest source version wins;
+levels and volume are never added across replacement files.
 
 PCS is ratio-of-sums: valid inbound Q1 score sum / valid inbound Q1 response
 count. Participation is nonblank inbound Q1 responses / inbound PCSStatus=1.
@@ -231,8 +237,9 @@ Never delete or overwrite user configuration, database, backups, extracts,
 reports, Feed, attachments or coaching history during an upgrade. Default-map
 changes merge missing identities into user copies and create a backup first.
 Database migrations are append-only and existing history survives a release.
-The retired PBIP implementation is historical source only. Do not regenerate,
-package, publish feeds for, or repair Power BI unless the user explicitly revives
+The retired Power BI implementation has been removed from the active repository;
+only its append-only database migration remains for upgrade compatibility. Do
+not regenerate, package, publish feeds for, or repair Power BI unless the user revives
 that route in a later project.
 
 Release gate: compile Python and JavaScript, run the complete unit suite, validate

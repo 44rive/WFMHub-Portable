@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+import time as clock
 import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
@@ -2288,6 +2290,42 @@ def _map_forecast_interval_rows(
     return output
 
 
+def _select_current_forecast_rows(
+    source_rows: list[dict[str, Any]],
+    mapping: QueueMapping,
+) -> list[dict[str, Any]]:
+    """Select one current source row per governed Staff Type interval.
+
+    Operations can retain prior monthly exports beside a newer replacement.
+    Summing those overlapping level rows would duplicate both requirement and
+    volume. The newest source modification wins at the native interval grain;
+    different Staff Types and non-overlapping periods remain independent.
+    """
+
+    selected: dict[tuple[Any, ...], tuple[tuple[str, str, str], dict[str, Any]]] = {}
+    for row in source_rows:
+        mapped = mapping.map_forecast(row["source_file"], row.get("queue_name"))
+        key = (
+            row.get("business_date"), row.get("interval_start"),
+            int(row.get("interval_minutes") or 0),
+            mapped.service_scope.casefold(),
+            str(row.get("queue_name") or "").strip().casefold(),
+        )
+        rank = (
+            str(row.get("source_modified_at") or ""),
+            str(row.get("source_loaded_at") or ""),
+            str(row.get("source_file") or ""),
+        )
+        current = selected.get(key)
+        if current is None or rank > current[0]:
+            selected[key] = (rank, row)
+    return [
+        item[1] for _, item in sorted(
+            selected.items(), key=lambda pair: tuple(str(value or "") for value in pair[0]),
+        )
+    ]
+
+
 def _aggregate_forecast_hour_rows(
     source_rows: list[dict[str, Any]],
     mapping: QueueMapping,
@@ -2364,9 +2402,12 @@ def _build_intraday(
         SELECT business_date, interval_start, interval_minutes, queue_name,
                volume_forecast, abandons_forecast, fte_forecast, fte_required,
                headcount_forecast, net_staffing_forecast, sl_forecast,
-               sl_required, aht_forecast_seconds, source_file
+               sl_required, aht_forecast_seconds, source_file,
+               source_modified_at, source_loaded_at
         FROM (
             SELECT r.*, f.file_name AS source_file, f.source_path,
+                   f.modified_at AS source_modified_at,
+                   f.loaded_at AS source_loaded_at,
                    row_number() OVER (
                        PARTITION BY f.source_path, queue_name, interval_start, interval_minutes
                        ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, source_row DESC
@@ -2377,6 +2418,7 @@ def _build_intraday(
         """,
         [start, end],
     ))
+    forecast_source = _select_current_forecast_rows(forecast_source, mapping)
     forecast_interval_rows = _map_forecast_interval_rows(
         forecast_source, mapping,
     )
@@ -3589,8 +3631,19 @@ def refresh_models(
     as_of: datetime | None = None,
 ) -> ModelSummary:
     total_stages = 22
+    active_stage: str | None = None
+    stage_started = clock.perf_counter()
 
     def stage(completed: int, label: str) -> None:
+        nonlocal active_stage, stage_started
+        now = clock.perf_counter()
+        if active_stage is not None:
+            logging.info(
+                "Model stage complete stage=%s seconds=%.3f",
+                active_stage, now - stage_started,
+            )
+        active_stage = label
+        stage_started = now
         if progress is not None:
             progress(completed, total_stages, label)
 

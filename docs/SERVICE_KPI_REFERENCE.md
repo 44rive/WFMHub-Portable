@@ -75,6 +75,10 @@ No queue is admitted by substring, suffix, designation or inferred LOB. A
 mapped Call-by-Call queue that is absent from the exact profile allowlist stays
 out of that Flash.
 
+The complete operator-facing register, including every `SL Related = Y/N` row
+from the supplied REF workbook and the Ford VL ownership rule, is maintained in
+`docs/QUEUE_CATALOG.md` and shown live under **Govern > Mappings & Rules**.
+
 Every RTM LOB sheet uses `No Show HC` as its absence callout. It counts only a
 scheduled agent who has no observed presence and whose agent-specific evidence
 proves a no-show. An agent who arrived late, left early, or is currently offline

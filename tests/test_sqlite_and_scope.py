@@ -60,6 +60,20 @@ def make_lilo(path: Path, first_100: str = "2026-08-01 08:00:00") -> None:
 
 
 class AgentScopeTests(unittest.TestCase):
+    def test_unchanged_source_uses_metadata_fast_path_without_rehashing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home, source = make_home(folder)
+            make_fte(source / "FTE" / "FTE Count.xlsx", [("100", "Agent 100")])
+            config = load_config(home)
+            with write_session(config) as conn:
+                first = ingest_all(conn, config, {"fte"})
+                self.assertEqual(first.loaded, 1)
+                with patch("wfmhub.ingestion.file_sha256") as digest:
+                    second = ingest_all(conn, config, {"fte"})
+                digest.assert_not_called()
+                self.assertEqual(second.skipped, 1)
+                self.assertEqual(second.metadata_skipped, 1)
+
     def test_scope_fingerprint_reloads_unchanged_extract_when_roster_expands(self):
         with tempfile.TemporaryDirectory() as folder:
             home, source = make_home(folder)

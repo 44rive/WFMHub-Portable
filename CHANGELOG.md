@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.36.0 - 2026-09-14
+
+- Add a governed queue register that visibly separates exact service-related
+  Flash queues from mapped non-service queues and shows each queue's primary
+  data scope, Flash views, workforce owner and intentional overlap state.
+- Confirm the four shared RSA BE/Ford NL VL/DE queues as dual service views
+  while retaining Ford NL / Ford Dutch as their primary staffing ownership.
+- Standardize staffing shortage as a positive `required - net` magnitude,
+  preserve signed variance separately, add coverage/evidence, and align the
+  Manager Desk, Capacity page, Scenario Lab and Excel preparation contract.
+- Prevent overlapping old/new monthly forecast extracts from double-counting a
+  governed Staff Type interval; the newest source version wins at native grain.
+- Accelerate routine updates by skipping full SHA-256 reads for files whose
+  size, precise timestamp and governing scope/policy are unchanged. Add model
+  stage timings to logs so remaining bottlenecks are visible.
+- Strengthen the Manager Workbench visual hierarchy and make the three daily
+  horizons direct entry points to Attendance, Schedule Review and Capacity.
+- Remove the retired Power BI implementation, duplicated PBIP assets, old
+  Power BI documentation, superseded UI/prototype builders and obsolete tracked
+  management workbook copies. Migration 016 remains append-only for
+  existing-database compatibility.
+
 ## 0.35.1 - 2026-09-14
 
 - Hardened every Windows launcher against machine-level `PYTHONHOME` and `PYTHONPATH` settings.

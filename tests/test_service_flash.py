@@ -16,6 +16,7 @@ from wfmhub.models import (
     _aggregate_forecast_hour_rows,
     _build_call_service,
     _map_forecast_interval_rows,
+    _select_current_forecast_rows,
 )
 from wfmhub.rules import load_rulebook
 from wfmhub.service_flash import (
@@ -262,6 +263,29 @@ class CallServiceModelTests(unittest.TestCase):
         self.assertEqual(native[1]["interval_start"], datetime(2026, 9, 1, 8, 15))
         self.assertEqual(native[1]["interval_end"], datetime(2026, 9, 1, 8, 30))
         self.assertEqual(native[1]["fte_required"], 4)
+
+    def test_newest_overlapping_forecast_replaces_prior_source(self):
+        mapping = load_queue_mapping(REPO / "config" / "default_queue_mapping.csv")
+        common = {
+            "business_date": date(2026, 9, 1),
+            "interval_start": datetime(2026, 9, 1, 8),
+            "interval_minutes": 15,
+            "queue_name": "NL RSA FO",
+        }
+        rows = [
+            {**common, "volume_forecast": 10, "fte_required": 2,
+             "source_file": "RSA_NL_old.txt",
+             "source_modified_at": "2026-09-01 10:00:00",
+             "source_loaded_at": "2026-09-01 10:05:00"},
+            {**common, "volume_forecast": 12, "fte_required": 3,
+             "source_file": "RSA_NL_new.txt",
+             "source_modified_at": "2026-09-02 10:00:00",
+             "source_loaded_at": "2026-09-02 10:05:00"},
+        ]
+        selected = _select_current_forecast_rows(rows, mapping)
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["source_file"], "RSA_NL_new.txt")
+        self.assertEqual(selected[0]["fte_required"], 3)
 
     def test_storm_visible_scopes_and_oem_layout(self):
         catalog = load_service_profiles(

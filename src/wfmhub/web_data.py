@@ -575,10 +575,14 @@ class DashboardData:
         intervals = []
         actions = []
         for key in keys:
-            needed = required.get(key)
+            needed = required.get(key) if key in required else None
             values = scheduled.get(key, {})
             net = values.get("scheduled_fte", 0)
-            gap = net - needed if key in required else None
+            variance = net - needed if needed is not None else None
+            # Staffing gap is always the positive shortage magnitude.  Keep
+            # signed variance separately so every WFM surface uses the same
+            # definition as mart.staffing_interval and the Excel pack.
+            gap = max(needed - net, 0) if needed is not None else None
             record = {
                 "date": key[0], "time": key[1], "planning_group": key[2],
                 "staff_type": key[3], "required_fte": needed,
@@ -586,10 +590,14 @@ class DashboardData:
                 "time_off_fte": values.get("planned_time_off_fte", 0),
                 "scheduled_fte": net, "observed_fte": values.get("observed_fte", 0),
                 "productive_fte": values.get("productive_fte", 0),
-                "gap_fte": gap, "evidence": evidence.get(key, "NO_SCHEDULE"),
+                "variance_fte": variance, "gap_fte": gap,
+                "coverage": _ratio(net, needed) if needed is not None else None,
+                "evidence": evidence.get(
+                    key, "NO_SCHEDULE" if needed is not None else "NO_FORECAST",
+                ),
             }
             intervals.append(record)
-            if gap is not None and gap < -0.001:
+            if gap is not None and gap > 0.001:
                 actions.append(record)
         return {
             "cards": [
@@ -598,7 +606,8 @@ class DashboardData:
                 self._card("PTO / Away FTE hours", time_off_hours, "decimal", f"Gross {gross_hours:.1f} FTE hours"),
                 self._card("Shortage intervals", len(actions), "integer", "Net schedule below explicit requirement"),
             ],
-            "intervals": intervals, "actions": sorted(actions, key=lambda row: row["gap_fte"] or 0)[:500],
+            "intervals": intervals,
+            "actions": sorted(actions, key=lambda row: row["gap_fte"] or 0, reverse=True)[:500],
             "empty": not staffing and not forecast,
         }
 
@@ -703,10 +712,12 @@ class DashboardData:
                 adjusted_gap = None
                 baseline_gap = None
             else:
-                baseline_gap = _number(baseline) - _number(required)
-                adjusted_gap = _number(baseline) + adjustment - _number(required)
-                baseline_uncovered += max(-baseline_gap, 0) * .25
-                adjusted_uncovered += max(-adjusted_gap, 0) * .25
+                baseline_gap = max(_number(required) - _number(baseline), 0)
+                adjusted_gap = max(
+                    _number(required) - (_number(baseline) + adjustment), 0,
+                )
+                baseline_uncovered += baseline_gap * .25
+                adjusted_uncovered += adjusted_gap * .25
             record = dict(row)
             record.update({
                 "baseline_gap_fte": baseline_gap,
@@ -715,7 +726,7 @@ class DashboardData:
             })
             intervals.append(record)
         recovered = max(baseline_uncovered - adjusted_uncovered, 0)
-        peak_gap = min(
+        peak_gap = max(
             (row["adjusted_gap_fte"] for row in intervals if row["adjusted_gap_fte"] is not None),
             default=None,
         )
@@ -730,8 +741,8 @@ class DashboardData:
             "peak_gap_fte": peak_gap,
             "intervals": intervals,
             "actions": sorted(
-                [row for row in intervals if row.get("adjusted_gap_fte") is not None and row["adjusted_gap_fte"] < 0],
-                key=lambda row: row["adjusted_gap_fte"],
+                [row for row in intervals if row.get("adjusted_gap_fte") is not None and row["adjusted_gap_fte"] > 0],
+                key=lambda row: row["adjusted_gap_fte"], reverse=True,
             )[:500],
             "empty": staffing["empty"],
         }
@@ -1020,10 +1031,7 @@ class DashboardData:
         service_focus = selected_service or min(
             service_rows, key=lambda row: row["service_level"], default=None,
         )
-        uncovered = sum(
-            max(-_number(row.get("gap_fte")), 0) * .25
-            for row in forward["actions"]
-        )
+        uncovered = sum(_number(row.get("gap_fte")) * .25 for row in forward["actions"])
         work_queue = []
         for row in today["attendance_actions"]:
             work_queue.append({
@@ -1036,7 +1044,7 @@ class DashboardData:
             })
         for row in forward["actions"][:8]:
             work_queue.append({
-                "priority": "P1" if _number(row.get("gap_fte")) <= -2 else "P2",
+                "priority": "P1" if _number(row.get("gap_fte")) >= 2 else "P2",
                 "deadline": str(row.get("time") or "")[-8:-3],
                 "type": "CAPACITY",
                 "title": f"{row.get('planning_group')} shortage {row.get('gap_fte'):.1f} FTE",
@@ -1333,13 +1341,55 @@ class DashboardData:
         with self.config.capacity_mapping.open("r", encoding="utf-8-sig", newline="") as handle:
             for row in csv.DictReader(handle):
                 capacity_rows.append(dict(row))
+        workforce_by_scope: dict[str, str] = {}
+        views_by_queue: dict[str, list[str]] = defaultdict(list)
+        for profile in self.services.profiles:
+            if not profile.active_on(scope.end):
+                continue
+            for service_scope, workforce_lob in profile.staffing_pairs():
+                workforce_by_scope[service_scope.casefold()] = workforce_lob
+            for queue in profile.flash_queues:
+                views_by_queue[queue.casefold()].append(profile.management_lob)
+        queue_rows = []
+        seen: set[tuple[str, str]] = set()
+        with self.config.queue_mapping.open("r", encoding="utf-8-sig", newline="") as handle:
+            for row in csv.DictReader(handle):
+                if str(row.get("mapping_type") or "").strip().casefold() != "queue":
+                    continue
+                queue = str(row.get("source_value") or "").strip()
+                source_system = str(row.get("source_system") or "").strip()
+                identity = (source_system.casefold(), queue.casefold())
+                if not queue or identity in seen:
+                    continue
+                seen.add(identity)
+                primary_scope = str(row.get("service_scope") or "UNMAPPED").strip()
+                service_views = sorted(set(views_by_queue.get(queue.casefold(), [])))
+                queue_rows.append({
+                    "queue": queue,
+                    "source_system": source_system,
+                    "primary_service_scope": primary_scope,
+                    "service_views": " · ".join(service_views) or "Excluded from Flash",
+                    "service_related": bool(service_views),
+                    "workforce_owner": workforce_by_scope.get(
+                        primary_scope.casefold(), "Not a capacity assignment",
+                    ),
+                    "designation": str(row.get("designation") or "").strip(),
+                    "overlap": "DUAL VIEW" if len(service_views) > 1 else "SINGLE VIEW" if service_views else "NOT USED",
+                })
+        queue_rows.sort(key=lambda row: (
+            not row["service_related"], row["primary_service_scope"], row["queue"],
+        ))
+        service_queue_count = sum(1 for row in queue_rows if row["service_related"])
+        non_service_count = sum(1 for row in queue_rows if not row["service_related"])
+        overlap_count = sum(1 for row in queue_rows if row["overlap"] == "DUAL VIEW")
         return {
             "cards": [
-                self._card("Service profiles", len(profiles), "integer", f"Catalog {self.services.version}"),
-                self._card("Exact service queues", sum(row["queue_count"] for row in profiles), "integer", "Profile memberships; overlaps allowed"),
+                self._card("Service-related queues", service_queue_count, "integer", "Included in at least one exact Flash view"),
+                self._card("Non-service queues", non_service_count, "integer", "Mapped for clean data but excluded from Flash"),
+                self._card("Dual-view queues", overlap_count, "integer", "One queue visible in two governed service views"),
                 self._card("Capacity mappings", len(capacity_rows), "integer", "Staff Type and schedule assignments"),
-                self._card("Metric methods", len(self.metrics.methods), "integer", f"Catalog {self.metrics.version}"),
             ],
+            "queue_register": queue_rows,
             "service_profiles": profiles, "capacity_mappings": capacity_rows,
             "hashes": {
                 "service_profiles": self.services.sha256,

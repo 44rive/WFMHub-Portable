@@ -39,6 +39,51 @@ def make_home(folder: str) -> Path:
 
 
 class WebConsoleTests(unittest.TestCase):
+    def test_staffing_gap_is_positive_shortage_and_variance_is_signed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            service = DashboardData(load_config(make_home(folder)))
+            scope = DashboardFilter(date(2026, 9, 14), date(2026, 9, 14))
+            forecast = [{
+                "business_date": date(2026, 9, 14),
+                "interval_start": datetime(2026, 9, 14, 8),
+                "interval_minutes": 15, "planning_group": "RSA BE VL",
+                "staff_type": "BE RSA Dispatch VL", "fte_required": 4.0,
+            }]
+            staffing = [{
+                "business_date": date(2026, 9, 14),
+                "interval_start": datetime(2026, 9, 14, 8),
+                "planning_group": "RSA BE VL", "staff_type": "BE RSA Dispatch VL",
+                "scheduled_fte": 2.5, "gross_scheduled_fte": 3.0,
+                "planned_time_off_fte": .5, "observed_fte": 0,
+                "productive_fte": 0, "evidence_basis": "MAPPED",
+            }]
+            connection = MagicMock()
+            with (
+                patch.object(service, "_connect", return_value=connection),
+                patch.object(service, "_staffing_rows", return_value=staffing),
+                patch.object(service, "_forecast_rows", return_value=forecast),
+            ):
+                result = service.staffing(scope)
+            self.assertEqual(result["actions"][0]["gap_fte"], 1.5)
+            self.assertEqual(result["actions"][0]["variance_fte"], -1.5)
+            self.assertAlmostEqual(result["actions"][0]["coverage"], .625)
+
+    def test_queue_register_exposes_service_use_and_ford_workforce_owner(self):
+        with tempfile.TemporaryDirectory() as folder:
+            service = DashboardData(load_config(make_home(folder)))
+            result = service.mappings(DashboardFilter(
+                date(2026, 9, 14), date(2026, 9, 14),
+            ))
+            by_queue = {row["queue"]: row for row in result["queue_register"]}
+            ford_vl = by_queue["APBN_BRU_MOBILITY_Ford_Assistance_VL"]
+            self.assertEqual(ford_vl["primary_service_scope"], "Ford NL")
+            self.assertEqual(ford_vl["workforce_owner"], "Ford Dutch")
+            self.assertEqual(ford_vl["service_views"], "FORD NL · RSA BE")
+            self.assertEqual(ford_vl["overlap"], "DUAL VIEW")
+            non_service = by_queue["APBN_AMS_RSA_Ford_Dealers_NL"]
+            self.assertFalse(non_service["service_related"])
+            self.assertEqual(non_service["service_views"], "Excluded from Flash")
+
     def test_governed_service_ratio_and_meta_are_available(self):
         with tempfile.TemporaryDirectory() as folder:
             home = make_home(folder)

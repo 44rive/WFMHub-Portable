@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "0.35.1"
+DEFAULT_VERSION = "0.36.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -203,33 +203,12 @@ def build(args) -> Path:
     pth.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     copy_tree(ROOT / "src" / "wfmhub", stage / "_system" / "app" / "wfmhub")
-    for legacy_module in ("powerbi.py", "powerbi_project.py"):
-        legacy_path = stage / "_system" / "app" / "wfmhub" / legacy_module
-        if legacy_path.exists():
-            legacy_path.unlink()
     copy_tree(ROOT / "sql", stage / "_system" / "app" / "sql")
     copy_tree(ROOT / "docs", stage / "_system" / "docs")
-    packaged_docs = stage / "_system" / "docs"
-    for legacy_doc in packaged_docs.glob("POWERBI*"):
-        if legacy_doc.is_dir():
-            shutil.rmtree(legacy_doc)
-        else:
-            legacy_doc.unlink()
-    for legacy_doc in packaged_docs.glob("WFMHub-PowerBI*"):
-        legacy_doc.unlink()
-    prototype_root = packaged_docs / "design-prototypes"
-    if prototype_root.exists():
-        for legacy_prototype in prototype_root.glob("powerbi-*"):
-            shutil.rmtree(legacy_prototype)
     shutil.copy2(ROOT / "AI_CONTEXT.md", stage / "_system" / "docs" / "AI_CONTEXT.md")
     shutil.copy2(ROOT / "WFM_MASTER.md", stage / "_system" / "docs" / "WFM_MASTER.md")
     copy_tree(ROOT / "prompts", stage / "_system" / "prompts")
     copy_tree(ROOT / "templates", stage / "_system" / "templates")
-    # The Power BI route is retired from the default portable product. Keep
-    # its source in Git history, but do not ship unused project files.
-    legacy_powerbi = stage / "_system" / "templates" / "powerbi"
-    if legacy_powerbi.exists():
-        shutil.rmtree(legacy_powerbi)
     # Excel-authored masters are local user assets and can contain refreshed
     # operational data. Ship the instructions/query pattern, never the files.
     report_template_dir = stage / "_system" / "templates" / "reports"

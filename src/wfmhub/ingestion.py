@@ -61,6 +61,7 @@ class SourceCandidate:
 class IngestSummary:
     loaded: int = 0
     skipped: int = 0
+    metadata_skipped: int = 0
     failed: int = 0
     rows: int = 0
     scoped_out: int = 0
@@ -1343,7 +1344,6 @@ def ingest_all(
         path = candidate.path
         if progress is not None:
             progress(index - 1, total, f"Loading {candidate.family}: {path.name}")
-        sha256 = file_sha256(path)
         path_text = str(path)
         try:
             scope = _load_agent_scope(conn) if candidate.family in AGENT_SCOPED_FAMILIES else None
@@ -1372,6 +1372,31 @@ def ingest_all(
                 f"{scope_fingerprint}|{CALL_PARSER_POLICY_VERSION}|"
                 f"queue-map:{queue_mapping.sha256}"
             )
+        # Unchanged operational exports can be several gigabytes.  Reading the
+        # entire file only to recompute SHA-256 made every routine refresh pay
+        # the full source-I/O cost before ingestion could decide to skip it.
+        # Size + precise mtime + parser/scope fingerprint is the fast path;
+        # any metadata or governing-config change falls through to the strong
+        # content hash and the existing immutable-content logic below.
+        stat = path.stat()
+        modified_at = datetime.fromtimestamp(stat.st_mtime)
+        active = conn.execute(
+            """SELECT scoped_out_count, size_bytes, modified_at
+               FROM meta.source_file
+               WHERE source_family=? AND source_path=? AND active=true
+                 AND coalesce(scope_fingerprint, '')=? AND status='SUCCESS'""",
+            [candidate.family, path_text, scope_fingerprint],
+        ).fetchone()
+        if active:
+            active_scoped_out, active_size, active_modified = active
+            if int(active_size or -1) == stat.st_size and active_modified == modified_at:
+                summary.skipped += 1
+                summary.metadata_skipped += 1
+                summary.scoped_out += active_scoped_out or 0
+                if progress is not None:
+                    progress(index, total, f"Unchanged {candidate.family}: {path.name}")
+                continue
+        sha256 = file_sha256(path)
         existing = conn.execute(
             """SELECT file_id, active, row_count, scoped_out_count FROM meta.source_file
                WHERE source_family=? AND source_path=? AND sha256=?
@@ -1410,12 +1435,10 @@ def ingest_all(
             if progress is not None:
                 progress(index, total, f"Reactivated {candidate.family}: {path.name}")
             continue
-        stat = path.stat()
         file_id = hashlib.sha256(
             f"{candidate.family}|{path_text}|{sha256}|{scope_fingerprint}".encode("utf-8")
         ).hexdigest()
         discovered_at = datetime.now()
-        modified_at = datetime.fromtimestamp(stat.st_mtime)
         try:
             result = None if candidate.family in {"lilo", "agent_status", "calls"} else PARSERS[candidate.family](path, file_id, scope)
             conn.execute("BEGIN TRANSACTION")

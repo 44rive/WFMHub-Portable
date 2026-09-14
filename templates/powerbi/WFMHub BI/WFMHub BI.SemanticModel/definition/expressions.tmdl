@@ -1,2 +1,0 @@
-expression HubRoot = "C:\WFMHub" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
-	annotation PBI_ResultType = Text

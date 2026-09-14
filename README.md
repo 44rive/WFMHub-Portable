@@ -253,8 +253,9 @@ its metric, comparison, and evidence filter.
 Attendance/absence refreshes update the fixed Absenteeism CSV feeds under
 `Feed`. PCS updates its own six governed fixed CSV feeds under `Feed\PCS`.
 The local console reads SQLite directly, so a complete update does not create a
-second dashboard-sized CSV copy. The old Power BI route is retired and not part
-of normal setup, update, packaging, or support.
+second dashboard-sized CSV copy. Retired Power BI product files are not part of
+the repository, setup, update, packaging, or support; its old schema migration
+remains only for compatibility with existing databases.
 
 **Export clean data** produces any additional CSV or
 XLSX dataset you request for a selected period. Large call datasets should use

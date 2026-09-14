@@ -3,13 +3,18 @@
 | Field | Value |
 |---|---|
 | Contract | `WFMHUB-DESIGN` |
-| Version | `4.0.0` |
+| Version | `4.1.0` |
 | Status | Approved |
 | Owner | Anass ASSRI / WFM |
 | First compatible Hub version | `0.27.1` |
 
 This is the visual contract for every WFMHub workbook. It changes presentation,
 never business calculations, source scope, table keys, or report maturity.
+
+The local Manager Workbench applies the same palette and density contract with
+separate evidence cards, bordered operational panels, compact tables and direct
+cycle actions. Visual hierarchy must point to a decision; decorative cards or
+invented KPIs are prohibited.
 
 ## Design objective
 
