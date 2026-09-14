@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-title WFMHub Operations Console
+title WFMHub Manager Workbench
 if not defined NO_COLOR color 0B
 for %%I in ("%~dp0.") do set "WFMHUB_HOME=%%~fI"
 set "WFMHUB_PYTHON=%WFMHUB_HOME%\_system\runtime\python.exe"

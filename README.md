@@ -1,7 +1,7 @@
 # WFMHub Portable
 
 WFMHub reads untouched WFM extracts, keeps a durable SQLite history, opens a
-local WFM operations console, and produces focused Excel workbooks. It runs on a
+local WFM Manager Workbench, and produces focused Excel workbooks. It runs on a
 locked-down Windows work machine without admin rights, installed Python, ODBC,
 DuckDB, or Python in Excel.
 
@@ -94,15 +94,15 @@ only the remaining read-only residuals are shown.
 3. Paste the folder containing `FTE`, `Storm`, and `Verint`.
 4. Double-click `WFMHub.cmd`.
 5. Choose **Refresh source data once**.
-6. Choose **Open local WFM operations console**, or double-click `WEBAPP.cmd`.
+6. Choose **Open local WFM Manager Workbench**, or double-click `WEBAPP.cmd`.
 7. Use Excel only when you need a detailed handoff or the collaborative PCS
    tracker.
 
 See the [beginner guide](docs/BEGINNER_GUIDE.md) for the normal routine and the
 [Excel refresh guide](docs/EXCEL_REFRESH_GUIDE.md) for the one-time PCS Power
 Query installation and the optional shared-Absenteeism setup.
-The [local console guide](docs/LOCAL_WEB_CONSOLE.md) explains the five WFM-cycle
-views, filters, Update action and visible-detail exports. It requires no Power
+The [local console guide](docs/LOCAL_WEB_CONSOLE.md) explains the complete
+Manager Workbench, filters, Update action, output jobs and detail exports. It requires no Power
 BI, Excel refresh, browser extension or internet connection.
 
 The approved visual contract is in the

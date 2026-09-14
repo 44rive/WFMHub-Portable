@@ -4,16 +4,18 @@ import json
 import shutil
 import tempfile
 import threading
+import time
 import unittest
 import urllib.request
 import urllib.error
 from datetime import date, datetime
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from wfmhub.config import ensure_user_config, load_config
 from wfmhub.database import migrate, write_session
 from wfmhub.web_data import DashboardData, DashboardFilter
-from wfmhub.webapp import ConsoleServer
+from wfmhub.webapp import ActionState, ConsoleServer
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -97,11 +99,26 @@ class WebConsoleTests(unittest.TestCase):
             try:
                 with urllib.request.urlopen(root + "/", timeout=5) as response:
                     html = response.read().decode("utf-8")
-                    self.assertIn("WFMHub Operations Console", html)
+                    self.assertIn("WFMHub Manager Workbench", html)
                     self.assertEqual(response.headers["X-Frame-Options"], "DENY")
                 with urllib.request.urlopen(root + "/api/meta", timeout=5) as response:
                     payload = json.load(response)
                     self.assertEqual(payload["database"], "wfm.sqlite3")
+                    self.assertEqual(payload["product"], "WFMHub Manager Workbench")
+                canonical_views = (
+                    "desk", "demand", "capacity", "scenario", "service", "pulse",
+                    "integrity", "realisations", "absence", "patterns", "reports",
+                    "archive", "readiness", "mappings", "jobs",
+                )
+                for view in canonical_views:
+                    with urllib.request.urlopen(
+                        root + f"/api/view/{view}?start=2026-09-14&end=2026-09-14",
+                        timeout=5,
+                    ) as response:
+                        payload = json.load(response)
+                        self.assertEqual(payload["view"], view)
+                        self.assertEqual(len(payload["cards"]), 4)
+                # Old route names remain readable for stable bookmarks.
                 for view in ("today", "staffing", "service", "attendance", "history"):
                     with urllib.request.urlopen(
                         root + f"/api/view/{view}?start=2026-09-14&end=2026-09-14",
@@ -116,6 +133,21 @@ class WebConsoleTests(unittest.TestCase):
                 with self.assertRaises(urllib.error.HTTPError) as rejected:
                     urllib.request.urlopen(request, timeout=5)
                 self.assertEqual(rejected.exception.code, 415)
+                invalid = urllib.request.Request(
+                    root + "/api/actions/report", data=b'{"pack":"pcs"}', method="POST",
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-WFMHub-Action": "report",
+                    },
+                )
+                with self.assertRaises(urllib.error.HTTPError) as rejected:
+                    urllib.request.urlopen(invalid, timeout=5)
+                self.assertEqual(rejected.exception.code, 400)
+                with self.assertRaises(urllib.error.HTTPError) as rejected:
+                    urllib.request.urlopen(
+                        root + "/api/download?file=../config/wfmhub.toml", timeout=5,
+                    )
+                self.assertEqual(rejected.exception.code, 404)
             finally:
                 server.shutdown()
                 server.server_close()
@@ -129,6 +161,53 @@ class WebConsoleTests(unittest.TestCase):
         self.assertNotIn("https://", html)
         self.assertNotIn("powerbi", (script + server).lower())
         self.assertIn('("127.0.0.1", candidate)', server)
+        self.assertIn('frame-ancestors \'none\'', server)
+
+    def test_dashboard_filter_validates_scenario_adjustment(self):
+        scope = DashboardFilter.from_values(
+            "2026-09-01", "2026-09-14", date(2026, 9, 14),
+            scenario_fte="2.5",
+        )
+        self.assertEqual(scope.scenario_fte, 2.5)
+        with self.assertRaisesRegex(ValueError, "must be a number"):
+            DashboardFilter.from_values(
+                "2026-09-01", "2026-09-14", date(2026, 9, 14),
+                scenario_fte="lots",
+            )
+        with self.assertRaisesRegex(ValueError, "between -100 and 100"):
+            DashboardFilter.from_values(
+                "2026-09-01", "2026-09-14", date(2026, 9, 14),
+                scenario_fte="101",
+            )
+
+    def test_report_action_reads_current_marts_and_returns_a_download(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = make_home(folder)
+            config = load_config(home)
+            config.reports.mkdir(parents=True, exist_ok=True)
+            output = config.reports / "RTM Daily Control.xlsx"
+            output.write_bytes(b"fixture")
+            connection = MagicMock()
+            state = ActionState()
+            scope = DashboardFilter(date(2026, 9, 14), date(2026, 9, 14))
+            with (
+                patch("wfmhub.webapp.connect", return_value=connection),
+                patch("wfmhub.webapp.build_report_pack", return_value=output) as build,
+            ):
+                self.assertTrue(state.start(
+                    config, "report", output.name, scope, {"pack": "service"},
+                ))
+                deadline = time.monotonic() + 2
+                while state.snapshot()["status"] == "RUNNING" and time.monotonic() < deadline:
+                    time.sleep(.01)
+            result = state.snapshot()
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(result["output"], output.name)
+            self.assertEqual(len(result["history"]), 1)
+            build.assert_called_once_with(
+                "service", connection, config, scope.start, scope.end,
+            )
+            connection.close.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # WFMHub master product and business contract
 
-Contract version: `2.2.0`
-Applies to: WFMHub `0.34.0` and later
+Contract version: `2.3.0`
+Applies to: WFMHub `0.35.0` and later
 Last reviewed: `2026-09-14`
 
 This is the single starting point for humans and coding assistants. Read it,
@@ -15,7 +15,7 @@ and unreachable builders are not current authority.
 WFMHub is a deterministic, portable WFM system for a restricted Windows work
 machine. It leaves source extracts untouched, scopes rows to the effective FTE
 roster, persists history in SQLite, calculates governed Python/SQL marts, and
-serves a localhost operations console plus focused Excel reports. There is no
+serves a localhost Manager Workbench plus focused Excel reports. There is no
 runtime AI, DuckDB, ODBC dependency, server database, Excel Data Model
 requirement, or adherence KPI. `prompts/COPILOT_WFM_ANALYST.md` is only an
 optional manual aid.
@@ -24,14 +24,14 @@ The normal pipeline is:
 
 ```text
 untouched extracts -> validated raw/core SQLite -> governed marts
-                   -> localhost operations console
+                   -> localhost Manager Workbench
                    -> focused Excel decision products + fixed collaboration feeds
 ```
 
 The Update action refreshes the durable database and collaboration feeds. The
 local console and report commands read the database; they do not parse raw files
 independently. PCS remains its own permanent collaborative Excel tracker and is
-deliberately outside the single-user operations console.
+deliberately outside the single-user Manager Workbench.
 
 ## Source authority
 
@@ -161,44 +161,57 @@ The PTO/Away submission app is a separate future Microsoft Power Platform
 project. Its accepted contract is `docs/PTO_AWAY_APP_IMPLEMENTATION.md`; tenant
 construction/deployment still requires the user's Microsoft environment.
 
-## Local operations-console contract 1
+## Local Manager Workbench contract
 
 `WEBAPP.cmd` starts a standard-library Python HTTP server on `127.0.0.1` and
 opens the default browser. It is reachable only from the work machine, reads
 governed SQLite marts through read-only connections, serves no CDN assets and
 never exposes raw extracts. Its Update button launches the same governed Hub
-refresh used by the command-line menu. The console has five WFM-cycle views:
+refresh used by the command-line menu. The approved interface is the 15-page
+Manager Workbench, grouped around the actual WFM cycle:
 
-1. Today's Control
-2. Staff Preparation
-3. Intraday Service
-4. Attendance & Schedule Review
-5. Historical Review
+| Workspace | Pages | Decision purpose |
+|---|---|---|
+| Manager Desk | Manager Desk | prioritize now, post-day reconciliation and the next seven days |
+| Plan | Demand & Requirement; Capacity & Schedule; Scenario Lab | understand Staff Type demand, protect published net coverage and test a temporary FTE assumption |
+| Operate | Live Service; Attendance Pulse | recover service by exact Management LOB and contact people using supported attendance evidence |
+| Review | Schedule Integrity; Realisations; Absence & Shrinkage; Workforce Patterns | reconcile schedules, review plan-to-delivery, finalize Verint outcomes and surface recurrence evidence |
+| Deliver | Reports & Analysis; Generated Archive | generate focused workbooks or deterministic analyses from the current database and retrieve prior outputs |
+| Govern | Data Readiness; Mappings & Rules; Jobs & Logs | verify freshness, inspect effective logic and trace execution |
 
-Every view uses a fixed 64-pixel navy WFM-cycle navigator, one cascading selector
-strip, four compact cards, two decision panels and one evidence/action table.
-All charts are locally rendered SVG. Do not replace this with generic cards,
-invented KPIs, AI-style prose or extra pages. PCS is not imported.
+All pages share the compact navy navigator, a single cascading filter strip,
+four evidence cards where appropriate, restrained native SVG visuals and exact
+tables. Pages differ when their decision requires it: Attendance uses a
+schedule-over-status timeline, Mappings uses a configuration register, and
+Deliver uses explicit forms. The checked-in acceptance reference is
+`docs/design-prototypes/manager-workbench-v2/all-pages-review.png`.
 
-Page grain rules:
+Page grain rules remain strict:
 
-- Today's Control: latest operational service, resource and attendance actions.
-- Staff Preparation: Planning Group/Staff Type requirement versus published net
-  schedule; no call queues.
-- Intraday Service: combined Management LOB result with exact configured queue
-  diagnosis; capacity Staff Types never appear on this page.
-- Attendance: a horizontal timeline places published schedule above
-  chronological Agent Status evidence and exact residual gaps; no marketplace
-  visual is required.
-- Historical Review: forecast, actual, requirement, scheduled delivery, final
-  absence and final shrinkage remain separate measures; comparison month is a
-  disconnected analysis selector, not an organisational dimension.
+- Live Service and service portions of Manager Desk/Realisations operate at
+  configured Management LOB plus exact call-queue membership. There is no
+  invented portfolio SL; the Desk may show the lowest individual LOB as a
+  prioritization signal.
+- Demand, Capacity and Scenario operate at Verint Staff Type -> Planning Group
+  -> Management LOB. Scenario adjustments exist only in the request and never
+  rewrite source, schedule, database or configuration.
+- Attendance Pulse is latest-day contact control. Schedule Integrity supports
+  a selected date range and places the published schedule above chronological
+  Agent Status/LILO evidence and exact residual gaps.
+- Absence & Shrinkage uses only finalized Verint Activities outcomes and keeps
+  incomplete evidence in a visible review state.
+- Patterns reports configured recurrence evidence; it never infers intent,
+  misconduct or a management decision.
+- Reports and analyses read the current governed database. Generating one does
+  not re-ingest sources. Only **Update data** runs ingestion and modelling.
+- PCS is not imported and remains its permanent collaborative Excel workflow.
 
 The matching Excel handoff is narrow: RTM Daily Control for today/service,
 Staffing Preparation for 15-minute capacity and its persistent action ledger,
 Attendance Review for exact residual evidence, Realisations for detailed cycle
-results, and Final Absenteeism & Shrinkage for final Verint components. PCS and
-Bonus retain their existing workflows outside this local-console scope.
+results, and Final Absenteeism & Shrinkage for final Verint components. Bonus
+keeps its dedicated management workbook and can be generated from Deliver. PCS
+retains its separate permanent collaborative workflow outside the Workbench.
 
 ## Repository map and change discipline
 

@@ -1,4 +1,4 @@
-"""Read-only projections for the local WFM operations console.
+"""Read-only projections for the local WFM Manager Workbench.
 
 The browser never receives raw extracts and never calculates business KPIs.
 Every projection below reads governed marts and effective configuration only.
@@ -6,6 +6,7 @@ Every projection below reads governed marts and effective configuration only.
 
 from __future__ import annotations
 
+import csv
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -14,6 +15,7 @@ from typing import Any, Iterable
 from .capacity_mapping import CapacityMapping, load_capacity_mapping
 from .config import Config
 from .database import DatabaseConnection, connect
+from .metrics import MetricCatalog, load_metric_catalog
 from .service_profiles import ServiceProfileCatalog, load_service_profiles
 
 
@@ -64,6 +66,7 @@ class DashboardFilter:
     staff_type: str | None = None
     team_leader: str | None = None
     agent_id: str | None = None
+    scenario_fte: float = 0.0
 
     @classmethod
     def from_values(
@@ -76,6 +79,7 @@ class DashboardFilter:
         staff_type: str | None = None,
         team_leader: str | None = None,
         agent_id: str | None = None,
+        scenario_fte: str | float | None = None,
     ) -> "DashboardFilter":
         left = date.fromisoformat(start) if start else fallback
         right = date.fromisoformat(end) if end else left
@@ -90,9 +94,16 @@ class DashboardFilter:
                 raise ValueError("A filter value is too long")
             return None if not text or text.casefold() == "all" else text
 
+        try:
+            adjustment = float(scenario_fte or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Scenario FTE adjustment must be a number") from exc
+        if not -100 <= adjustment <= 100:
+            raise ValueError("Scenario FTE adjustment must be between -100 and 100")
+
         return cls(
             left, right, clean(management_lob), clean(planning_group),
-            clean(staff_type), clean(team_leader), clean(agent_id),
+            clean(staff_type), clean(team_leader), clean(agent_id), adjustment,
         )
 
 
@@ -104,6 +115,9 @@ class DashboardData:
         self.capacity: CapacityMapping = load_capacity_mapping(config.capacity_mapping)
         self.services: ServiceProfileCatalog = load_service_profiles(
             config.home, config.service_profiles,
+        )
+        self.metrics: MetricCatalog = load_metric_catalog(
+            config.home, config.metric_catalog,
         )
 
     def _connect(self) -> DatabaseConnection:
@@ -125,17 +139,40 @@ class DashboardData:
     def _capacity_for_attendance(self, row: dict[str, Any]):
         return self.capacity.map_schedule(row.get("lob"), row.get("assignment"))
 
+    def _service_target(self, management_lob: str, on_date: date) -> float | None:
+        profiles = [
+            profile for profile in self.services.profiles
+            if profile.management_lob == management_lob and profile.active_on(on_date)
+        ]
+        if len(profiles) != 1:
+            return None
+        method = self.metrics.method_for(
+            profiles[0].service_level_metric, on_date,
+            {"lob": management_lob, "source_system": "CALL_BY_CALL"},
+        )
+        return method.target if method else None
+
     def latest_date(self) -> date:
         conn = self._connect()
         try:
+            # Forecasts and published schedules can extend weeks into the
+            # future. They must never move the default operational day beyond
+            # the newest actual call/status evidence.
             value = conn.execute(
                 """SELECT max(business_date) FROM (
                      SELECT business_date FROM mart.call_service_15min
-                     UNION ALL SELECT business_date FROM mart.attendance_agent_day
-                     UNION ALL SELECT business_date FROM mart.staffing_interval
-                     UNION ALL SELECT business_date FROM mart.forecast_interval
+                     UNION ALL SELECT extract_date AS business_date FROM raw.agent_status
+                     UNION ALL SELECT extract_date AS business_date FROM raw.lilo
                    )"""
             ).fetchone()[0]
+            if value is None:
+                value = conn.execute(
+                    """SELECT max(business_date) FROM (
+                         SELECT business_date FROM mart.attendance_agent_day
+                         UNION ALL SELECT business_date FROM mart.staffing_interval
+                         UNION ALL SELECT business_date FROM mart.forecast_interval
+                       )"""
+                ).fetchone()[0]
         finally:
             conn.close()
         return _day(value) if value else date.today()
@@ -213,7 +250,7 @@ class DashboardData:
             key=lambda value: (lob_order.get(value, 999), value.casefold()),
         )
         return {
-            "product": "WFMHub Operations Console",
+            "product": "WFMHub Manager Workbench",
             "latest_date": latest.isoformat(),
             "database": self.config.database.name,
             "last_refresh": {
@@ -248,7 +285,8 @@ class DashboardData:
                       team_leader, ops_manager, lob, language, assignment,
                       scheduled_start, scheduled_end, scheduled_minutes,
                       planned_work_minutes, planning_overlay, first_login,
-                      last_logout, attendance_result, call_action, requires_call,
+                      last_logout, actual_first_seen, actual_last_seen,
+                      attendance_result, call_action, requires_call,
                       shift_state, actual_evidence, is_provisional,
                       uncoded_late_minutes, uncoded_early_leave_minutes,
                       no_show_minutes, status_covered_minutes, evaluation_as_of
@@ -345,16 +383,31 @@ class DashboardData:
         # calculate the headline and time series for one selected Management LOB.
         scoped_service = service if scope.management_lob else []
         service_summary = self._service_bucket(scoped_service)
-        due = [row for row in attendance if _number(row.get("planned_work_minutes")) > 0]
-        present = [row for row in due if row.get("attendance_result") in PRESENT_RESULTS]
+        due = [
+            row for row in attendance
+            if _number(row.get("planned_work_minutes")) > 0
+            and str(row.get("shift_state") or "") != "NOT_STARTED"
+        ]
+        present = [
+            row for row in due
+            if row.get("attendance_result") in PRESENT_RESULTS
+            and (row.get("actual_first_seen") is not None or row.get("first_login") is not None)
+        ]
         no_show = [row for row in due if row.get("attendance_result") in NO_SHOW_RESULTS]
         unknown = [row for row in due if row not in present and row not in no_show]
-        calls = [
-            self._attendance_record(row) for row in attendance
-            if bool(row.get("requires_call"))
-            or _number(row.get("uncoded_late_minutes")) > 0
-            or _number(row.get("uncoded_early_leave_minutes")) > 0
-        ]
+        calls = []
+        for row in due:
+            needs_evidence_check = row in unknown
+            if (
+                bool(row.get("requires_call"))
+                or _number(row.get("uncoded_late_minutes")) > 0
+                or _number(row.get("uncoded_early_leave_minutes")) > 0
+                or needs_evidence_check
+            ):
+                record = self._attendance_record(row)
+                if needs_evidence_check and str(record.get("action") or "NONE") == "NONE":
+                    record["action"] = "CHECK DATA — POSSIBLE NO SHOW"
+                calls.append(record)
         by_lob: dict[str, dict[str, Any]] = {}
         all_lobs = {row["management_lob"] for row in service} | {
             row["management_lob"] for row in attendance
@@ -362,10 +415,15 @@ class DashboardData:
         for lob in sorted(all_lobs):
             lob_service = self._service_bucket(row for row in service if row["management_lob"] == lob)
             lob_att = [row for row in due if row["management_lob"] == lob]
-            lob_present = [row for row in lob_att if row.get("attendance_result") in PRESENT_RESULTS]
+            lob_present = [
+                row for row in lob_att
+                if row.get("attendance_result") in PRESENT_RESULTS
+                and (row.get("actual_first_seen") is not None or row.get("first_login") is not None)
+            ]
             lob_no_show = [row for row in lob_att if row.get("attendance_result") in NO_SHOW_RESULTS]
             by_lob[lob] = {
                 "management_lob": lob, **lob_service,
+                "target": self._service_target(lob, focus.end),
                 "due_hc": len(lob_att), "present_hc": len(lob_present),
                 "no_show_hc": len(lob_no_show),
                 "unknown_hc": max(len(lob_att) - len(lob_present) - len(lob_no_show), 0),
@@ -544,6 +602,140 @@ class DashboardData:
             "empty": not staffing and not forecast,
         }
 
+    def demand(self, scope: DashboardFilter) -> dict[str, Any]:
+        """Forecast Volume and absolute requirement at governed Staff Type grain."""
+
+        conn = self._connect()
+        try:
+            rows = self._forecast_rows(conn, scope)
+        finally:
+            conn.close()
+        total_volume = sum(
+            _number(row.get("volume_forecast")) for row in rows
+            if row.get("volume_forecast") is not None
+        )
+        required_hours = sum(
+            _number(row.get("fte_required")) * _number(row.get("interval_minutes")) / 60
+            for row in rows if row.get("fte_required") is not None
+        )
+        interval_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            interval_groups[_iso(row.get("interval_start")) or ""].append(row)
+        profile = []
+        for key, values in sorted(interval_groups.items()):
+            requirements = [
+                _number(row.get("fte_required")) for row in values
+                if row.get("fte_required") is not None
+            ]
+            profile.append({
+                "time": key,
+                "volume": sum(_number(row.get("volume_forecast")) for row in values),
+                "required_fte": sum(requirements) if requirements else None,
+            })
+        peak = max(
+            (row for row in profile if row["required_fte"] is not None),
+            key=lambda row: row["required_fte"], default=None,
+        )
+        source_groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        ledger_groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            source_groups[(
+                str(row.get("source_file") or ""), row["management_lob"],
+                row["planning_group"], row["staff_type"],
+            )].append(row)
+            ledger_groups[(
+                _iso(row.get("business_date")) or "", row["management_lob"],
+                row["planning_group"], row["staff_type"],
+            )].append(row)
+        source_register = []
+        for key, values in sorted(source_groups.items()):
+            source_register.append({
+                "source_file": key[0], "management_lob": key[1],
+                "planning_group": key[2], "staff_type": key[3],
+                "latest_date": max(_iso(row.get("business_date")) or "" for row in values),
+                "intervals": len(values),
+                "volume": sum(_number(row.get("volume_forecast")) for row in values),
+            })
+        ledger = []
+        for key, values in sorted(ledger_groups.items()):
+            by_interval: dict[str, float] = defaultdict(float)
+            requirement_present = False
+            for row in values:
+                if row.get("fte_required") is not None:
+                    requirement_present = True
+                    by_interval[_iso(row.get("interval_start")) or ""] += _number(row["fte_required"])
+            peak_item = max(by_interval.items(), key=lambda item: item[1], default=(None, None))
+            ledger.append({
+                "date": key[0], "management_lob": key[1],
+                "planning_group": key[2], "staff_type": key[3],
+                "volume": sum(_number(row.get("volume_forecast")) for row in values),
+                "required_fte_hours": sum(
+                    _number(row.get("fte_required")) * _number(row.get("interval_minutes")) / 60
+                    for row in values if row.get("fte_required") is not None
+                ) if requirement_present else None,
+                "peak_fte": peak_item[1], "peak_interval": peak_item[0],
+            })
+        latest = max((_day(row["business_date"]) for row in rows), default=None)
+        return {
+            "cards": [
+                self._card("Forecast volume", total_volume, "integer", "Selected Staff Type demand"),
+                self._card("Required FTE hours", required_hours, "decimal", "Absolute requirement × interval duration"),
+                self._card("Peak requirement", peak["required_fte"] if peak else None, "decimal", _iso(peak["time"]) if peak else "No requirement"),
+                self._card("Forecast through", _iso(latest), "date", "Latest mapped forecast interval"),
+            ],
+            "profile": profile, "sources": source_register,
+            "ledger": ledger[:1000], "empty": not rows,
+        }
+
+    def scenario(self, scope: DashboardFilter) -> dict[str, Any]:
+        """Non-persistent capacity what-if using one explicit FTE adjustment."""
+
+        staffing = self.staffing(scope)
+        adjustment = scope.scenario_fte
+        intervals = []
+        baseline_uncovered = 0.0
+        adjusted_uncovered = 0.0
+        recovered = 0.0
+        for row in staffing["intervals"]:
+            required = row.get("required_fte")
+            baseline = row.get("scheduled_fte")
+            if required is None:
+                adjusted_gap = None
+                baseline_gap = None
+            else:
+                baseline_gap = _number(baseline) - _number(required)
+                adjusted_gap = _number(baseline) + adjustment - _number(required)
+                baseline_uncovered += max(-baseline_gap, 0) * .25
+                adjusted_uncovered += max(-adjusted_gap, 0) * .25
+            record = dict(row)
+            record.update({
+                "baseline_gap_fte": baseline_gap,
+                "adjusted_fte": _number(baseline) + adjustment,
+                "adjusted_gap_fte": adjusted_gap,
+            })
+            intervals.append(record)
+        recovered = max(baseline_uncovered - adjusted_uncovered, 0)
+        peak_gap = min(
+            (row["adjusted_gap_fte"] for row in intervals if row["adjusted_gap_fte"] is not None),
+            default=None,
+        )
+        return {
+            "cards": [
+                self._card("Baseline uncovered", baseline_uncovered, "decimal", "FTE hours before scenario"),
+                self._card("Recovered", recovered, "decimal", "FTE hours recovered by explicit adjustment"),
+                self._card("Applied adjustment", adjustment, "decimal", "FTE across selected scope; not persisted"),
+                self._card("Remaining exposure", adjusted_uncovered, "decimal", "Adjusted uncovered FTE hours"),
+            ],
+            "adjustment_fte": adjustment,
+            "peak_gap_fte": peak_gap,
+            "intervals": intervals,
+            "actions": sorted(
+                [row for row in intervals if row.get("adjusted_gap_fte") is not None and row["adjusted_gap_fte"] < 0],
+                key=lambda row: row["adjusted_gap_fte"],
+            )[:500],
+            "empty": staffing["empty"],
+        }
+
     def service(self, scope: DashboardFilter) -> dict[str, Any]:
         conn = self._connect()
         try:
@@ -559,7 +751,11 @@ class DashboardData:
             timeline.append({"time": _iso(key), **self._service_bucket(values)})
         by_lob = []
         for key, values in self._group(rows, "management_lob"):
-            by_lob.append({"management_lob": key, **self._service_bucket(values)})
+            by_lob.append({
+                "management_lob": key,
+                "target": self._service_target(str(key), scope.end),
+                **self._service_bucket(values),
+            })
         by_queue = []
         for key, values in self._group(rows, "queue"):
             first = values[0]
@@ -576,6 +772,8 @@ class DashboardData:
                 self._card("Abandon rate", summary["abandon_rate"], "percent", f"AHT {summary['aht_seconds'] or 0:.0f}s"),
             ],
             "timeline": timeline, "by_lob": by_lob, "queues": by_queue[:500],
+            "target": self._service_target(scope.management_lob, scope.end)
+            if scope.management_lob else None,
             "empty": not rows,
             "service_scope_required": not scope.management_lob,
         }
@@ -791,6 +989,364 @@ class DashboardData:
                 "shrinkage_rate": _ratio(shrink, planned),
             },
             "empty": not daily,
+        }
+
+    def manager_desk(self, scope: DashboardFilter) -> dict[str, Any]:
+        """Prioritized current-day, post-day and forward WFM evidence."""
+
+        today = self.today(scope)
+        forward_scope = DashboardFilter(
+            scope.end, scope.end + timedelta(days=6), scope.management_lob,
+            scope.planning_group, scope.staff_type, scope.team_leader,
+            scope.agent_id,
+        )
+        forward = self.staffing(forward_scope)
+        review_scope = DashboardFilter(
+            scope.end - timedelta(days=6), scope.end, scope.management_lob,
+            scope.planning_group, scope.staff_type, scope.team_leader,
+            scope.agent_id,
+        )
+        review = self.attendance(review_scope)
+        service_rows = [
+            row for row in today["service_by_lob"]
+            if row.get("service_level") is not None
+        ]
+        selected_service = None
+        if scope.management_lob:
+            selected_service = next(
+                (row for row in service_rows if row["management_lob"] == scope.management_lob),
+                None,
+            )
+        service_focus = selected_service or min(
+            service_rows, key=lambda row: row["service_level"], default=None,
+        )
+        uncovered = sum(
+            max(-_number(row.get("gap_fte")), 0) * .25
+            for row in forward["actions"]
+        )
+        work_queue = []
+        for row in today["attendance_actions"]:
+            work_queue.append({
+                "priority": "P1" if "CALL" in str(row.get("action") or "") else "CHECK",
+                "deadline": "NOW",
+                "type": "PEOPLE",
+                "title": f"{row.get('agent') or row.get('agent_id')} · {row.get('result') or 'Unknown'}",
+                "detail": f"{row.get('management_lob') or 'Unmapped'} · {row.get('evidence') or 'Evidence missing'}",
+                "source": "Attendance Pulse",
+            })
+        for row in forward["actions"][:8]:
+            work_queue.append({
+                "priority": "P1" if _number(row.get("gap_fte")) <= -2 else "P2",
+                "deadline": str(row.get("time") or "")[-8:-3],
+                "type": "CAPACITY",
+                "title": f"{row.get('planning_group')} shortage {row.get('gap_fte'):.1f} FTE",
+                "detail": f"{row.get('date')} · {row.get('staff_type')}",
+                "source": "Staff Preparation",
+            })
+        label = "Selected LOB service" if selected_service else "Lowest LOB service"
+        service_note = (
+            str(service_focus.get("management_lob")) if service_focus
+            else "No service evidence"
+        )
+        return {
+            "cards": [
+                self._card(label, service_focus.get("service_level") if service_focus else None, "percent", service_note),
+                self._card("Calls requiring action", len(today["attendance_actions"]), "integer", "Confirmed calls and evidence checks"),
+                self._card("Residual gaps", len(review["gaps"]), "integer", "Exact unresolved intervals"),
+                self._card("Forward uncovered", uncovered, "decimal", "FTE hours across next seven days"),
+            ],
+            "lob_matrix": today["service_by_lob"],
+            "work_queue": sorted(work_queue, key=lambda row: (row["priority"] != "P1", row["deadline"]))[:12],
+            "forward_risk": forward["actions"][:100],
+            "horizons": {
+                "today": {
+                    "call_now": len(today["attendance_actions"]),
+                    "no_show": today["cards"][2]["value"],
+                    "unknown": today["cards"][3]["value"],
+                },
+                "post_day": {
+                    "residual_gaps": len(review["gaps"]),
+                    "gap_hours": sum(_number(row.get("minutes")) for row in review["gaps"]) / 60,
+                    "break_meal": len(review["break_meal"]),
+                },
+                "forward": {
+                    "shortage_intervals": len(forward["actions"]),
+                    "uncovered_fte_hours": uncovered,
+                    "pto_away_fte_hours": forward["cards"][2]["value"],
+                },
+            },
+            "empty": today["empty"] and forward["empty"] and review["empty"],
+        }
+
+    def realisations(self, scope: DashboardFilter) -> dict[str, Any]:
+        """Plan-to-delivery reconciliation without blending service contracts."""
+
+        conn = self._connect()
+        try:
+            service = self._service_rows(conn, scope)
+            staffing = self._staffing_rows(conn, scope)
+            forecast = self._forecast_rows(conn, scope)
+            absence = _rows(conn.execute(
+                """SELECT business_date, agent_id, agent_name, team_leader, lob,
+                          planned_net_minutes, final_absence_minutes,
+                          final_shrinkage_minutes, final_ledger_status
+                   FROM mart.verint_final_absence_agent_day
+                   WHERE business_date BETWEEN ? AND ?""",
+                (scope.start, scope.end),
+            ))
+        finally:
+            conn.close()
+        if any((scope.management_lob, scope.planning_group, scope.staff_type, scope.team_leader, scope.agent_id)):
+            valid_agents = {
+                str(row["agent_id"])
+                for row in self._attendance_filter_from_dimension(scope)
+            }
+            absence = [row for row in absence if str(row.get("agent_id")) in valid_agents]
+
+        by_day: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        by_lob: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        for row in service:
+            for bucket in (by_day[_iso(row["business_date"]) or ""], by_lob[row["management_lob"]]):
+                bucket["offered"] += _number(row.get("offered"))
+                bucket["answered_target"] += _number(row.get("answered_within_target"))
+                bucket["abandoned_target"] += _number(row.get("abandoned_within_target"))
+        for row in forecast:
+            hours = _number(row.get("fte_required")) * _number(row.get("interval_minutes")) / 60
+            for bucket in (by_day[_iso(row["business_date"]) or ""], by_lob[row["management_lob"]]):
+                bucket["forecast"] += _number(row.get("volume_forecast"))
+                bucket["required_hours"] += hours
+        for row in staffing:
+            for bucket in (by_day[_iso(row["business_date"]) or ""], by_lob[row["management_lob"]]):
+                bucket["scheduled_hours"] += _number(row.get("scheduled_fte")) * .25
+                bucket["observed_hours"] += _number(row.get("observed_fte")) * .25
+                bucket["productive_hours"] += _number(row.get("productive_fte")) * .25
+        for row in absence:
+            management_lob = self._workforce_lob(row.get("lob"), _day(row["business_date"]))
+            for bucket in (by_day[_iso(row["business_date"]) or ""], by_lob[management_lob]):
+                bucket["planned_minutes"] += _number(row.get("planned_net_minutes"))
+                bucket["absence_minutes"] += _number(row.get("final_absence_minutes"))
+                bucket["shrinkage_minutes"] += _number(row.get("final_shrinkage_minutes"))
+
+        def complete(key: str, values: dict[str, float]) -> dict[str, Any]:
+            return {
+                "key": key, "actual_volume": values["offered"],
+                "forecast_volume": values["forecast"],
+                "volume_variance": _ratio(values["offered"] - values["forecast"], values["forecast"]),
+                "service_level": _ratio(values["answered_target"], values["offered"] - values["abandoned_target"]),
+                "target": self._service_target(key, scope.end) if key in {item.management_lob for item in self.services.profiles} else None,
+                "required_fte_hours": values["required_hours"],
+                "scheduled_fte_hours": values["scheduled_hours"],
+                "observed_fte_hours": values["observed_hours"],
+                "productive_fte_hours": values["productive_hours"],
+                "scheduled_coverage": _ratio(values["scheduled_hours"], values["required_hours"]),
+                "absence_rate": _ratio(values["absence_minutes"], values["planned_minutes"]),
+                "shrinkage_rate": _ratio(values["shrinkage_minutes"], values["planned_minutes"]),
+            }
+
+        daily = [{"date": key, **complete(key, values)} for key, values in sorted(by_day.items())]
+        lob_rows = [{"management_lob": key, **complete(key, values)} for key, values in sorted(by_lob.items())]
+        total_forecast = sum(row["forecast_volume"] for row in daily)
+        total_actual = sum(row["actual_volume"] for row in daily)
+        total_required = sum(row["required_fte_hours"] for row in daily)
+        total_scheduled = sum(row["scheduled_fte_hours"] for row in daily)
+        total_observed = sum(row["observed_fte_hours"] for row in daily)
+        total_productive = sum(row["productive_fte_hours"] for row in daily)
+        lowest = min(
+            (row for row in lob_rows if row["service_level"] is not None),
+            key=lambda row: row["service_level"], default=None,
+        )
+        return {
+            "cards": [
+                self._card("Lowest LOB service", lowest["service_level"] if lowest else None, "percent", lowest["management_lob"] if lowest else "No service evidence"),
+                self._card("Actual vs forecast", _ratio(total_actual - total_forecast, total_forecast), "percent", "Volume variance; not a performance score"),
+                self._card("Scheduled coverage", _ratio(total_scheduled, total_required), "percent", "Net scheduled / required FTE hours"),
+                self._card("Observed productive", _ratio(total_productive, total_scheduled), "percent", f"Observed {(_ratio(total_observed, total_scheduled) or 0):.1%}"),
+            ],
+            "daily": daily, "by_lob": lob_rows,
+            "capacity_chain": {
+                "required": total_required, "scheduled": total_scheduled,
+                "observed": total_observed, "productive": total_productive,
+            },
+            "empty": not daily,
+        }
+
+    def absence(self, scope: DashboardFilter) -> dict[str, Any]:
+        """Final Verint Activities components and completeness exceptions."""
+
+        conn = self._connect()
+        try:
+            days = _rows(conn.execute(
+                """SELECT business_date, agent_id, agent_name, team_leader, lob,
+                          planned_net_minutes, final_absence_minutes,
+                          final_vacation_minutes, final_unpaid_minutes,
+                          final_shrinkage_minutes, final_unmapped_minutes,
+                          final_ledger_status
+                   FROM mart.verint_final_absence_agent_day
+                   WHERE business_date BETWEEN ? AND ?
+                   ORDER BY business_date DESC, team_leader, agent_name""",
+                (scope.start, scope.end),
+            ))
+            events = _rows(conn.execute(
+                """SELECT business_date, agent_id, agent_name, team_leader, lob,
+                          activity, category, event_start, event_end, minutes,
+                          counts_as_absence, counts_as_vacation, counts_as_unpaid,
+                          counts_as_shrinkage, mapped, evidence_type, source_file
+                   FROM mart.verint_final_absence_event
+                   WHERE business_date BETWEEN ? AND ?
+                   ORDER BY business_date DESC, team_leader, agent_name, event_start""",
+                (scope.start, scope.end),
+            ))
+            exceptions = _rows(conn.execute(
+                """SELECT business_date, agent_id, agent_name, activity, category,
+                          event_start, event_end, minutes, exception_type, source_file
+                   FROM mart.verint_final_exception
+                   WHERE business_date BETWEEN ? AND ?
+                   ORDER BY business_date DESC, exception_type, agent_name""",
+                (scope.start, scope.end),
+            ))
+        finally:
+            conn.close()
+        if any((scope.management_lob, scope.planning_group, scope.staff_type, scope.team_leader, scope.agent_id)):
+            valid_agents = {
+                str(row["agent_id"])
+                for row in self._attendance_filter_from_dimension(scope)
+            }
+            days = [row for row in days if str(row.get("agent_id")) in valid_agents]
+            events = [row for row in events if str(row.get("agent_id")) in valid_agents]
+            exceptions = [row for row in exceptions if str(row.get("agent_id")) in valid_agents]
+        planned = sum(_number(row.get("planned_net_minutes")) for row in days)
+        absent = sum(_number(row.get("final_absence_minutes")) for row in days)
+        shrinkage = sum(_number(row.get("final_shrinkage_minutes")) for row in days)
+        final_states = {"CLEAR", "ABSENCE_RECORDED"}
+        ready = [row for row in days if str(row.get("final_ledger_status")) in final_states]
+        review = [row for row in days if str(row.get("final_ledger_status")) not in final_states]
+        components: dict[str, dict[str, Any]] = {}
+        for row in events:
+            category = str(row.get("category") or "UNMAPPED")
+            item = components.setdefault(category, {
+                "category": category, "minutes": 0, "events": 0,
+                "counts_as_absence": False, "counts_as_vacation": False,
+                "counts_as_unpaid": False, "counts_as_shrinkage": False,
+            })
+            item["minutes"] += int(row.get("minutes") or 0)
+            item["events"] += 1
+            for flag in ("counts_as_absence", "counts_as_vacation", "counts_as_unpaid", "counts_as_shrinkage"):
+                item[flag] = item[flag] or bool(row.get(flag))
+        return {
+            "cards": [
+                self._card("Final absence", _ratio(absent, planned), "percent", "Verint Activities final components"),
+                self._card("Final shrinkage", _ratio(shrinkage, planned), "percent", "Reported separately from absence"),
+                self._card("Final-ready rows", len(ready), "integer", "CLEAR or ABSENCE_RECORDED"),
+                self._card("Rows for review", len(review) + len(exceptions), "integer", "Incomplete or exceptional evidence"),
+            ],
+            "components": sorted(components.values(), key=lambda row: -row["minutes"]),
+            "days": [
+                {
+                    **row,
+                    "date": _iso(row.get("business_date")),
+                    "management_lob": self._workforce_lob(row.get("lob"), _day(row["business_date"])),
+                }
+                for row in days
+            ][:1000],
+            "events": [{**row, "date": _iso(row.get("business_date")), "start": _iso(row.get("event_start")), "end": _iso(row.get("event_end"))} for row in events[:1000]],
+            "exceptions": [{**row, "date": _iso(row.get("business_date")), "start": _iso(row.get("event_start")), "end": _iso(row.get("event_end"))} for row in exceptions[:1000]],
+            "completeness": {
+                "total": len(days), "ready": len(ready), "review": len(review),
+                "rate": _ratio(len(ready), len(days)),
+            },
+            "empty": not days and not events and not exceptions,
+        }
+
+    def patterns(self, scope: DashboardFilter) -> dict[str, Any]:
+        """Supported recurrence evidence, never an inference about intent."""
+
+        history = self.history(scope)
+        rows = history["patterns"]
+        families: dict[str, set[str]] = defaultdict(set)
+        agents: set[str] = set()
+        for row in rows:
+            agent_id = str(row.get("agent_id") or "")
+            agents.add(agent_id)
+            families[str(row.get("pattern") or "Other")].add(agent_id)
+        ranked = sorted(families.items(), key=lambda item: (-len(item[1]), item[0]))
+        cards = [
+            self._card(label, len(agent_ids), "integer", "Agents meeting configured recurrence evidence")
+            for label, agent_ids in ranked[:4]
+        ]
+        while len(cards) < 4:
+            cards.append(self._card("No additional pattern", None, "integer", "No governed evidence"))
+        return {
+            "cards": cards, "patterns": rows,
+            "families": [{"pattern": key, "agents": len(value)} for key, value in ranked],
+            "recurring_agents": len(agents), "empty": not rows,
+        }
+
+    def readiness(self, scope: DashboardFilter) -> dict[str, Any]:
+        """Source health and current quality backlog."""
+
+        meta = self.meta()
+        conn = self._connect()
+        try:
+            issues = _rows(conn.execute(
+                """SELECT detected_at, source_family, source_file, business_date,
+                          agent_id, issue_type, severity, details
+                   FROM meta.quality_issue
+                   WHERE business_date IS NULL OR business_date BETWEEN ? AND ?
+                   ORDER BY detected_at DESC, severity, issue_type LIMIT 500""",
+                (scope.start, scope.end),
+            ))
+        finally:
+            conn.close()
+        ready = sum(1 for row in meta["sources"] if str(row.get("status") or "").upper() in {"READY", "OK", "CURRENT"})
+        blocking = sum(1 for row in issues if str(row.get("severity") or "").upper() in {"ERROR", "CRITICAL"})
+        return {
+            "cards": [
+                self._card("Required feeds ready", ready, "integer", f"{len(meta['sources'])} configured source families"),
+                self._card("Latest actual date", meta["latest_date"], "date", "Calls / Agent Status evidence"),
+                self._card("Rejected source rows", sum(int(row.get("rejected") or 0) for row in meta["sources"]), "integer", "Visible data-quality boundary"),
+                self._card("Blocking issues", blocking, "integer", "ERROR or CRITICAL quality findings"),
+            ],
+            "sources": meta["sources"],
+            "issues": [{**row, "detected_at": _iso(row.get("detected_at")), "business_date": _iso(row.get("business_date"))} for row in issues],
+            "last_refresh": meta["last_refresh"], "empty": not meta["sources"],
+        }
+
+    def mappings(self, scope: DashboardFilter) -> dict[str, Any]:
+        """Effective read-only service and capacity configuration."""
+
+        profiles = []
+        for profile in sorted(self.services.profiles, key=lambda item: item.display_order):
+            if not profile.active_on(scope.end):
+                continue
+            profiles.append({
+                "id": profile.profile_id, "label": profile.label,
+                "management_lob": profile.management_lob,
+                "service_scopes": list(profile.service_scopes),
+                "staffing_lobs": list(profile.staffing_lobs),
+                "queue_count": len(profile.flash_queues),
+                "queues": list(profile.flash_queues),
+                "target": self._service_target(profile.management_lob, scope.end),
+                "effective_from": _iso(profile.effective_from),
+                "effective_to": _iso(profile.effective_to),
+            })
+        capacity_rows = []
+        with self.config.capacity_mapping.open("r", encoding="utf-8-sig", newline="") as handle:
+            for row in csv.DictReader(handle):
+                capacity_rows.append(dict(row))
+        return {
+            "cards": [
+                self._card("Service profiles", len(profiles), "integer", f"Catalog {self.services.version}"),
+                self._card("Exact service queues", sum(row["queue_count"] for row in profiles), "integer", "Profile memberships; overlaps allowed"),
+                self._card("Capacity mappings", len(capacity_rows), "integer", "Staff Type and schedule assignments"),
+                self._card("Metric methods", len(self.metrics.methods), "integer", f"Catalog {self.metrics.version}"),
+            ],
+            "service_profiles": profiles, "capacity_mappings": capacity_rows,
+            "hashes": {
+                "service_profiles": self.services.sha256,
+                "capacity_mapping": self.capacity.sha256,
+                "metric_catalog": self.metrics.sha256,
+            },
+            "empty": not profiles and not capacity_rows,
         }
 
     def _attendance_filter_from_dimension(self, scope: DashboardFilter) -> list[dict[str, Any]]:

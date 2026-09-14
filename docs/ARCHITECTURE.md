@@ -19,7 +19,7 @@ files are never edited.
 ```text
 WFMHub/
 ├── WFMHub.cmd                  daily menu
-├── WEBAPP.cmd                  localhost WFM operations console
+├── WEBAPP.cmd                  localhost WFM Manager Workbench
 ├── SETUP.cmd                   system check and first setup
 ├── UPGRADE.cmd                 adopt an older portable database into a new folder
 ├── Reports/                    fixed-name reports + dated archive
@@ -196,6 +196,14 @@ call-queue allowlists. Forecast and staffing facts use a separate Staff Type ->
 Planning Group -> Management LOB bridge; Verint forecast `Queue Name` is a Staff
 Type and never joins the call-queue domain. RSA BE SL is combined while RSA BE
 FR/VL remain separate in capacity.
+
+The presentation is the 15-page Manager Workbench grouped into Desk, Plan,
+Operate, Review, Deliver and Govern. `web_data.py` owns its read-only projections;
+`webapp.py` owns localhost routing, filtered CSV/download boundaries, the one
+explicit refresh process and background report/analysis jobs. The browser does
+not calculate business metrics. Scenario requests are intentionally ephemeral
+and never write into SQLite. Report/analysis jobs use a read-only database
+connection and publish only through the established report builders.
 
 ## Agent scope and identity
 

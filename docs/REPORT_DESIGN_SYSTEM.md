@@ -66,25 +66,28 @@ defines a target; WFMHub never invents the pictured PCS target.
 
 ## Report blueprints
 
-### Local Operations Console
+### Local Manager Workbench
 
 The checked-in pixel reference is
-[`WFMHub-Operations-Console.png`](WFMHub-Operations-Console.png). It contains
-synthetic demonstration rows only and is the visual acceptance reference for
-desktop density, navigation, selector geometry, cards, charts and action tables.
-Future changes must compare against it before altering the console CSS or page
-composition.
+[`manager-workbench-v2/all-pages-review.png`](design-prototypes/manager-workbench-v2/all-pages-review.png).
+It contains synthetic demonstration rows only and is the acceptance reference
+for all 15 pages, desktop density, navigation, selector geometry, cards, charts,
+forms and evidence tables. Future changes must compare against it before
+altering the console CSS or page composition.
 
-- Five horizontal WFM-cycle views: Today, Staff Preparation, Intraday,
-  Attendance, and History.
+- Six horizontal workspaces: Manager Desk, Plan, Operate, Review, Deliver and
+  Govern; their 15 page tabs are defined in `WFM_MASTER.md`.
 - One cascading period/Management LOB/Planning Group/Staff Type/Team
-  Leader/Agent selector strip. Service and capacity remain separate grains.
-- Four evidence cards, at most two decision charts, and one exact action table
-  in the first working surface. Attendance uses schedule above actual status.
+  Leader/Agent selector strip. Inapplicable selectors remain visibly disabled;
+  service and capacity remain separate grains.
+- Four evidence cards where useful, no decorative KPI wall, restrained native
+  SVG charts and an exact register. Attendance uses schedule above actual status;
+  Deliver uses task forms; Mappings uses governed read-only registers.
 - Native local SVG only: no CDN, marketplace visual, Power BI, Excel engine,
   Node.js, or internet dependency.
-- `127.0.0.1` only. Browser views are read-only; Update invokes the governed Hub
-  pipeline and visible-detail export creates a filtered CSV.
+- `127.0.0.1` only. Update invokes the governed Hub pipeline. Scenario is
+  non-persistent; report/analysis jobs read current marts; filtered export and
+  generated-output download are explicit local actions.
 
 ### PCS Report & Coaching
 
@@ -179,6 +182,10 @@ Every design change requires:
 7. a version bump when the report contract changes.
 
 ## Change log
+
+- `4.1.0`: expands the approved local surface into the 15-page Manager
+  Workbench, adds WFM-cycle planning/review/governance views and explicit local
+  report/analysis jobs while preserving the separate service/capacity grains.
 
 - `4.0.0`: makes the portable localhost Operations Console the default WFM
   cycle surface and retires automatic Power BI feed publishing.

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.35.0 - 2026-09-14
+
+- Expand the local visual surface into the approved 15-page WFM Manager
+  Workbench across Manager Desk, Plan, Operate, Review, Deliver and Govern.
+- Add governed projections for native Staff Type demand, a non-persistent FTE
+  scenario, Manager Desk prioritization, plan-to-delivery reconciliation, final
+  absence/shrinkage, recurrence evidence, source readiness and effective maps.
+- Add explicit background workbook and deterministic analysis generation from
+  current read-only marts, a safe generated-file archive/download surface and a
+  jobs/logs register. Only Update ingests extracts and rebuilds models.
+- Preserve service/capacity grain separation, combined RSA BE service, separate
+  RSA BE FR/VL capacity, Agent Status-first attendance, Verint Activities-only
+  final outcomes, and Unknown for missing evidence.
+- Keep the console fully offline and localhost-only with native HTML/CSS/SVG;
+  preserve old read-only API aliases while making the 15 page names canonical.
+
 ## 0.34.0 - 2026-09-14
 
 - Add a fully functional, offline localhost WFM Operations Console with five

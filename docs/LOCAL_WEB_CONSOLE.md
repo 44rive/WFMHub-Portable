@@ -1,59 +1,111 @@
-# WFMHub local Operations Console
+# WFMHub local Manager Workbench
 
-The Operations Console is the default visual surface from WFMHub `0.34.0`.
+The Manager Workbench is the default visual surface from WFMHub `0.35.0`.
 Double-click `WEBAPP.cmd`; the bundled Python runtime starts a small server on
-`127.0.0.1` and opens your normal browser. Close the command window to stop it.
+`127.0.0.1` and opens the normal browser. Close the command window to stop it.
 
-![WFMHub Operations Console visual reference](WFMHub-Operations-Console.png)
+The approved complete design is
+[`manager-workbench-v2/all-pages-review.png`](design-prototypes/manager-workbench-v2/all-pages-review.png).
+Its numbers are illustrative. The installed application reads the operator's
+governed SQLite database.
 
-The picture uses illustrative rows only. The installed console reads the
-governed marts from the operator's own SQLite database.
+The application is deliberately local and single-user. Another computer cannot
+reach it, it cannot run inside SharePoint, and it sends no WFM data to the
+internet. The browser receives governed presentation rows only; it never opens
+raw extracts, SQL or the SQLite file.
 
-Visual reference: [`WFMHub-Operations-Console.png`](WFMHub-Operations-Console.png).
-The screenshot uses synthetic data; the installed console reads the local
-governed database.
+## The simple operating model
 
-It is intentionally local and single-user. It cannot be reached from another
-computer, does not send data to the internet, and does not run inside
-SharePoint. The browser receives governed report rows only; it never opens raw
-extracts or the SQLite file itself.
+```text
+new untouched extracts -> Update data -> SQLite raw/core/marts
+                                      -> Manager Workbench pages
+                                      -> report / analysis when requested
+```
 
-## Daily use
+- **Update data** is the only Workbench operation that ingests new extracts and
+  rebuilds governed marts. Run it after placing new files in the existing source
+  folders.
+- Opening a page only reads the current database. It does not rebuild anything.
+- **Export detail** downloads the selected page's exact filtered register as CSV.
+- **Generate report** opens Deliver, where a workbook or deterministic period
+  analysis can be generated from current marts. This does not run Update first.
+- Generated files are available from **Generated Archive**. Execution evidence
+  is visible in **Jobs & Logs**.
 
-1. Put new extracts in their existing source folders without editing them.
-2. Open `WEBAPP.cmd`.
-3. Choose **Update data** and wait for Success. This runs the same deterministic
-   ingestion and modelling pipeline as WFMHub's Update menu.
-4. Select period and organisational filters from left to right.
-5. Use **Export visible detail** when an exact CSV handoff is required.
+There is no Power BI refresh, Excel query, ODBC connection, Node service, cloud
+login or runtime AI in this workflow. PCS remains the permanent collaborative
+Excel tracker and is not a Workbench page.
 
-The console reads SQLite directly after an update. There is no second Power BI
-refresh, Excel query refresh, ODBC connection, Node.js service or cloud login.
+## Pages and when to use them
 
-## Five WFM-cycle views
+### Manager Desk
 
-- **Today's Control**: same-day combined service pulse, present/no-show/unknown
-  reconciliation and exact call/follow-up list.
-- **Staff Preparation**: native 15-minute Verint required FTE versus gross,
-  PTO/Away and net published schedule by Planning Group and Staff Type.
-- **Intraday Service**: ratio-of-sums service, offered/handled/handled-in-SL and
-  exact configured Flash queue diagnosis. RSA BE remains one combined SL.
-- **Attendance**: published schedule above Agent Status evidence, exact
-  residual start/end gaps and evidence-gated break/meal exceptions.
-- **History**: separate service, required/scheduled/observed/productive capacity,
-  final Verint absence/shrinkage and recurring schedule-placement evidence.
+Start here. It combines three decision horizons without manufacturing a blended
+KPI: people to contact now, post-day residual review, and exact capacity risks
+for the next seven days. Service remains listed separately by Management LOB.
 
-PCS remains the permanent collaborative Excel tracker. The console does not
-copy coaching actions or turn PCS into a single-user dashboard.
+### Plan
 
-## Filters and evidence
+- **Demand & Requirement** shows Verint Volume and Absolute Required FTE at
+  Staff Type grain. Forecast `Queue Name` is a workforce Staff Type, not a call
+  queue.
+- **Capacity & Schedule** compares required FTE with gross published schedules,
+  approved PTO/Away and net scheduled FTE at 15-minute grain.
+- **Scenario Lab** applies one visible temporary FTE adjustment to the selected
+  scope. It does not save or rewrite any schedule, extract, mapping or database
+  row.
 
-Management LOB, Planning Group, Staff Type, Team Leader and Agent selectors
-cascade. Service queues and capacity Staff Types remain separate domains.
-Missing evidence renders as blank or Unknown; it is never converted to zero or
-No Show. Rates are calculated by Python from summed additive components.
+### Operate
 
-The console is read-only except for two explicit operations: the governed Hub
-update and downloading a filtered CSV. Attendance corrections still happen in
-Verint and disappear from the residual view only after final Activities are
-exported and the Hub is refreshed.
+- **Live Service** shows one selected Management LOB's service curve, target and
+  exact configured queue facts. RSA BE service is combined; no portfolio-wide
+  SL is invented.
+- **Attendance Pulse** is the latest-day contact list. Present includes late;
+  confirmed No Show and evidence-missing possible No Show remain distinct.
+
+### Review
+
+- **Schedule Integrity** overlays the published schedule and chronological
+  Agent Status/LILO evidence. It shows exact residual gaps after final Verint
+  Activities overlap and a separate break/meal register.
+- **Realisations** keeps service, demand, requirement, net schedule, observed
+  and productive delivery as separate questions and presents ratios of sums.
+- **Absence & Shrinkage** uses finalized Verint Activities components only.
+  Empty/unmapped/incomplete evidence remains in the exception register.
+- **Workforce Patterns** shows configured recurring schedule-placement evidence.
+  It does not infer intent or decide a management action.
+
+### Deliver
+
+- **Reports & Analysis** generates focused current workbooks or an on-demand
+  analysis for a selected domain, period and comparison.
+- **Generated Archive** finds current and timestamped prior outputs and downloads
+  them through the local application.
+
+### Govern
+
+- **Data Readiness** shows source freshness, rejected rows and quality findings.
+- **Mappings & Rules** displays effective service profiles, exact queue counts,
+  capacity mappings, targets and configuration fingerprints. It is read-only.
+- **Jobs & Logs** traces Update, report and analysis execution.
+
+## Filters
+
+Choose filters from left to right: period, Management LOB, Planning Group, Staff
+Type, Team Leader and Agent. Later selectors cascade from earlier choices.
+Capacity selectors are disabled on service-only pages because service queues and
+workforce Staff Types are different domains. Attendance Pulse and Live Service
+always return to the latest operational day; Schedule Integrity retains the full
+selected range.
+
+Missing evidence renders as blank or Unknown. Rates are calculated in Python
+from summed additive components; the browser only formats them.
+
+## If something fails
+
+1. Open **Govern > Data Readiness** to check source dates and quality findings.
+2. Open **Govern > Jobs & Logs** for the exact job result.
+3. If a generated workbook is open in Excel, close it before replacing the fixed
+   current file and run the report again.
+4. Do not delete the database and do not edit the source extracts. A normal
+   release upgrade preserves the existing SQLite history.

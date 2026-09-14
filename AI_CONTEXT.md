@@ -1,7 +1,7 @@
 # WFMHub mandatory context router
 
-Context version: `2.2.0`
-Applies to: WFMHub `0.34.0` and later
+Context version: `2.3.0`
+Applies to: WFMHub `0.35.0` and later
 Last reviewed: `2026-09-14`
 
 Before proposing or editing anything, read in this order:
@@ -30,8 +30,10 @@ Hard stops:
 - No adherence KPI, runtime AI, DuckDB, ODBC, hidden database server, or required
   Excel Data Model.
 - PCS is a permanent collaborative Excel tracker and is outside the local console.
-- The default presentation is the localhost Operations Console. It reads
+- The default presentation is the 15-page localhost Manager Workbench. It reads
   governed SQLite marts directly and binds only to `127.0.0.1`.
+- Manager Workbench pages follow Desk, Plan, Operate, Review, Deliver and Govern.
+  Report/analysis actions read current marts; only Update rebuilds data.
 - Power BI is retired historical source. Do not regenerate or package it unless
   the user explicitly starts a future Power BI project; normal updates never
   publish its duplicated CSV feed.
