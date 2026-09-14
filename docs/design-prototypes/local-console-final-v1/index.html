@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WFMHub — Manager Workbench Prototype</title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+  <header class="appbar">
+    <a class="brand" href="?view=today" aria-label="WFMHub manager workbench">
+      <span>WFM<b>HUB</b></span>
+      <small>MANAGER WORKBENCH</small>
+    </a>
+    <nav class="cycle-nav" aria-label="WFM cycle">
+      <button data-view="today"><i>01</i><span>Daily control</span><small>Operate</small></button>
+      <button data-view="staffing"><i>02</i><span>Staff preparation</span><small>Protect</small></button>
+      <button data-view="service"><i>03</i><span>Intraday service</span><small>Recover</small></button>
+      <button data-view="attendance"><i>04</i><span>Schedule review</span><small>Reconcile</small></button>
+      <button data-view="history"><i>05</i><span>Historical review</span><small>Improve</small></button>
+    </nav>
+    <div class="freshness">
+      <span class="ready-dot"></span>
+      <div><b>ACTUALS 17:00</b><small>14 SEP 2026</small></div>
+    </div>
+  </header>
+
+  <section class="contextbar">
+    <div class="page-identity">
+      <p id="page-phase">OPERATE · TODAY</p>
+      <h1 id="page-title">Daily Control</h1>
+      <span id="page-question">Where does WFM need to intervene before the next checkpoint?</span>
+    </div>
+    <div class="toolbar">
+      <button class="utility">Open workbook</button>
+      <button class="primary">Update sources</button>
+    </div>
+  </section>
+
+  <section class="filterbar" aria-label="Global filters">
+    <div class="filter" data-filter="period">
+      <label>Period</label><button class="filter-button"><span>14 Sep 2026</span><i>⌄</i></button>
+      <div class="filter-menu radio-menu">
+        <label><input type="radio" name="period" checked> Latest operational day</label>
+        <label><input type="radio" name="period"> Current week</label>
+        <label><input type="radio" name="period"> Current month</label>
+        <label><input type="radio" name="period"> Next 28 days</label>
+      </div>
+    </div>
+    <div class="filter" data-filter="lob">
+      <label>Management LOB</label><button class="filter-button"><span>All 4 selected</span><i>⌄</i></button>
+      <div class="filter-menu multi-menu">
+        <label><input type="checkbox" value="RSA NL" checked> RSA Netherlands</label>
+        <label><input type="checkbox" value="RSA BE" checked> RSA Belgium</label>
+        <label><input type="checkbox" value="FORD NL" checked> Ford Netherlands</label>
+        <label><input type="checkbox" value="OEM" checked> Ford OEM France</label>
+      </div>
+    </div>
+    <div class="filter" data-filter="planning">
+      <label>Planning group</label><button class="filter-button"><span>All planning groups</span><i>⌄</i></button>
+      <div class="filter-menu multi-menu">
+        <label><input type="checkbox" checked> RSA NL</label>
+        <label><input type="checkbox" checked> RSA BE FR</label>
+        <label><input type="checkbox" checked> RSA BE VL</label>
+        <label><input type="checkbox" checked> FORD NL</label>
+        <label><input type="checkbox" checked> Ford FR</label>
+      </div>
+    </div>
+    <div class="filter" data-filter="staff">
+      <label>Staff type</label><button class="filter-button"><span>All mapped staff types</span><i>⌄</i></button>
+      <div class="filter-menu multi-menu">
+        <label><input type="checkbox" checked> Front office</label>
+        <label><input type="checkbox" checked> Dispatch</label>
+        <label><input type="checkbox" checked> Back office</label>
+        <label><input type="checkbox" checked> Ford Level 1 / 2</label>
+      </div>
+    </div>
+    <div class="filter" data-filter="leader">
+      <label>Team leader</label><button class="filter-button"><span>All active teams</span><i>⌄</i></button>
+      <div class="filter-menu multi-menu">
+        <label><input type="checkbox" checked> Team Atlas</label>
+        <label><input type="checkbox" checked> Team North</label>
+        <label><input type="checkbox" checked> Team Delta</label>
+      </div>
+    </div>
+    <div class="filter agent-filter" data-filter="agent">
+      <label>Agent</label><button class="filter-button"><span>All active agents</span><i>⌄</i></button>
+      <div class="filter-menu multi-menu">
+        <label><input type="checkbox" checked> All eligible agents</label>
+        <label><input type="checkbox"> Emma De Vries · 204046</label>
+        <label><input type="checkbox"> Sara El Amrani · 224100</label>
+      </div>
+    </div>
+    <button class="clear-filter" title="Clear selections">Clear</button>
+  </section>
+
+  <div class="scopebar">
+    <span id="scope-copy">14 Sep 2026 · all operational LOBs · all active teams</span>
+    <span><b>Call-by-call</b> 17:00 · <b>Agent Status</b> 17:03 · <b>Schedule</b> 23:59 · <b>Forecast</b> 28 days</span>
+  </div>
+
+  <main>
+    <section class="view" data-page="today">
+      <div class="metric-ledger">
+        <article><label>LOBs below service target</label><strong class="risk">1 / 4</strong><span>RSA Belgium · −4.2 pp</span></article>
+        <article><label>Present capacity gap</label><strong class="risk">−2.5 FTE</strong><span>RSA BE VL · 17:00</span></article>
+        <article><label>Attendance calls now</label><strong>3 HC</strong><span>2 confirmed · 1 evidence check</span></article>
+        <article><label>Next decision checkpoint</label><strong>17:15</strong><span>Four source cuts available</span></article>
+      </div>
+
+      <div class="today-grid">
+        <article class="work-panel control-board">
+          <header><div><p>LIVE OPERATING BOARD</p><h2>Management LOB control · 17:00</h2></div><span class="method">SERVICE: RATIO OF SUMS</span></header>
+          <table class="dense-table control-table">
+            <thead><tr><th>Management LOB</th><th>State</th><th class="num">SL</th><th class="num">Target</th><th class="num">Offered</th><th class="num">Handled</th><th class="num">In SL</th><th class="num">Vs forecast</th><th class="num">Present gap</th><th class="num">No show</th><th class="num">Unknown</th></tr></thead>
+            <tbody>
+              <tr data-lob="RSA NL"><td><b>RSA Netherlands</b><small>Combined configured queues</small></td><td><span class="state good">STABLE</span></td><td class="num strong">89.9%</td><td class="num">80.0%</td><td class="num">1,824</td><td class="num">1,738</td><td class="num">1,547</td><td class="num pos">+3.6%</td><td class="num pos">+1.0</td><td class="num">0</td><td class="num">0</td></tr>
+              <tr class="selected" data-lob="RSA BE"><td><b>RSA Belgium</b><small>Combined FR + VL service</small></td><td><span class="state bad">RECOVER</span></td><td class="num strong neg">75.8%</td><td class="num">80.0%</td><td class="num">1,296</td><td class="num">1,198</td><td class="num">1,036</td><td class="num neg">+9.4%</td><td class="num neg">−2.5</td><td class="num neg">2</td><td class="num warn-text">1</td></tr>
+              <tr data-lob="FORD NL"><td><b>Ford Netherlands</b><small>Six configured queues</small></td><td><span class="state good">STABLE</span></td><td class="num strong">96.8%</td><td class="num">80.0%</td><td class="num">485</td><td class="num">467</td><td class="num">441</td><td class="num">−3.4%</td><td class="num">0.0</td><td class="num">0</td><td class="num warn-text">1</td></tr>
+              <tr data-lob="OEM"><td><b>Ford OEM France</b><small>Ford · Toyota · Chery</small></td><td><span class="state good">STABLE</span></td><td class="num strong">94.9%</td><td class="num">80.0%</td><td class="num">392</td><td class="num">374</td><td class="num">349</td><td class="num pos">+2.9%</td><td class="num pos">+0.5</td><td class="num">0</td><td class="num">0</td></tr>
+            </tbody>
+          </table>
+          <footer><b>Selected evidence:</b> RSA BE service is combined. Capacity remains split: FR +0.5 FTE, VL −2.5 FTE.</footer>
+        </article>
+
+        <aside class="work-panel dispatch-panel">
+          <header><div><p>WFM DISPATCH</p><h2>Before 17:15</h2></div><span class="count">4 ITEMS</span></header>
+          <ol class="dispatch-list">
+            <li class="urgent"><time>NOW</time><div><b>Call 2 confirmed no-shows</b><span>RSA BE · Team Atlas · PTO/Away excluded</span></div></li>
+            <li class="check"><time>17:05</time><div><b>Validate 1 unknown case</b><span>FORD NL · no positive status evidence</span></div></li>
+            <li class="urgent"><time>17:10</time><div><b>Review RSA BE VL coverage</b><span>−2.5 FTE through 18:30</span></div></li>
+            <li><time>17:15</time><div><b>Recheck combined RSA BE service</b><span>Close only on recovered ratio-of-sums</span></div></li>
+          </ol>
+        </aside>
+
+        <article class="work-panel action-ledger">
+          <header><div><p>EXACT HANDOFF</p><h2>People and intervals requiring treatment</h2></div><div class="table-actions"><button>Attendance workbook</button><button>Export visible rows</button></div></header>
+          <table class="dense-table">
+            <thead><tr><th>Priority</th><th>Checkpoint</th><th>LOB / planning group</th><th>Person or interval</th><th>Evidence</th><th>WFM treatment</th><th>Owner</th></tr></thead>
+            <tbody>
+              <tr data-lob="RSA BE"><td><span class="priority p1">P1</span></td><td>Now</td><td><b>RSA BE</b> · Attendance</td><td>Sara El Amrani · no show</td><td>Completed shift + Logged Off</td><td>Call and confirm operational status</td><td>TL Atlas</td></tr>
+              <tr data-lob="RSA BE"><td><span class="priority p1">P1</span></td><td>17:00–18:30</td><td><b>RSA BE VL</b> · FO VL</td><td>Net scheduled 18.5 / required 21.0</td><td>Forecast + Schedule + PTO/Away</td><td>Review available cover</td><td>WFM</td></tr>
+              <tr data-lob="FORD NL"><td><span class="priority p2">P2</span></td><td>17:05</td><td><b>FORD NL</b> · Attendance</td><td>Noah Janssen · possible no-show</td><td>Schedule exists; evidence missing</td><td>Validate evidence before contact</td><td>WFM</td></tr>
+            </tbody>
+          </table>
+        </article>
+      </div>
+    </section>
+
+    <section class="view" data-page="staffing">
+      <div class="metric-ledger">
+        <article><label>Required FTE-hours</label><strong>316.4</strong><span>Selected planning horizon</span></article>
+        <article><label>Net scheduled coverage</label><strong class="warn">94.2%</strong><span>Gross less approved PTO/Away</span></article>
+        <article><label>Uncovered FTE-hours</label><strong class="risk">18.3 h</strong><span>11 shortage intervals</span></article>
+        <article><label>PTO / Away impact</label><strong>8.5 h</strong><span>2.7% of required hours</span></article>
+      </div>
+
+      <div class="staff-grid">
+        <article class="work-panel heatmap-panel">
+          <header><div><p>FORWARD CAPACITY</p><h2>Worst 15-minute gap by hour</h2></div><div class="legend"><span><i class="heat-ok"></i>Covered</span><span><i class="heat-watch"></i>Watch</span><span><i class="heat-bad"></i>Short</span><span><i class="heat-none"></i>No requirement</span></div></header>
+          <div class="capacity-map">
+            <div class="heat-head"><span>Planning group</span><span>08</span><span>09</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span><span>18</span><span>19</span><span>Risk h</span></div>
+            <div class="heat-row" data-lob="RSA NL"><b>RSA NL<small>NL RSA FO</small></b><i class="ok">+1.0</i><i class="ok">+0.5</i><i class="watch">−0.3</i><i class="ok">+0.8</i><i class="ok">+0.4</i><i class="ok">+0.6</i><i class="watch">−0.4</i><i class="ok">+0.2</i><i class="ok">+0.5</i><i class="ok">+1.0</i><i class="ok">+0.8</i><i class="none">—</i><strong>0.5</strong></div>
+            <div class="heat-row" data-lob="RSA BE"><b>RSA BE FR<small>BE RSA FO FR</small></b><i class="ok">+0.8</i><i class="ok">+0.4</i><i class="watch">−0.5</i><i class="bad">−1.2</i><i class="watch">−0.6</i><i class="ok">+0.3</i><i class="ok">+0.4</i><i class="watch">−0.5</i><i class="watch">−0.3</i><i class="ok">+0.5</i><i class="ok">+0.8</i><i class="none">—</i><strong>2.8</strong></div>
+            <div class="heat-row focus" data-lob="RSA BE"><b>RSA BE VL<small>BE RSA FO VL</small></b><i class="ok">+0.4</i><i class="watch">−0.5</i><i class="bad">−1.8</i><i class="bad">−2.4</i><i class="bad">−1.6</i><i class="watch">−0.7</i><i class="watch">−0.5</i><i class="bad">−1.4</i><i class="bad">−2.0</i><i class="bad">−2.5</i><i class="bad">−1.8</i><i class="watch">−0.4</i><strong>11.6</strong></div>
+            <div class="heat-row" data-lob="FORD NL"><b>FORD NL<small>Ford Level 1 / 2</small></b><i class="ok">+0.5</i><i class="ok">+0.6</i><i class="ok">+0.4</i><i class="ok">+0.2</i><i class="watch">−0.3</i><i class="watch">−0.4</i><i class="ok">+0.1</i><i class="ok">+0.2</i><i class="ok">+0.4</i><i class="ok">+0.6</i><i class="ok">+0.5</i><i class="none">—</i><strong>0.7</strong></div>
+            <div class="heat-row" data-lob="OEM"><b>Ford FR<small>FR RSA Ford 1 / 2</small></b><i class="ok">+0.3</i><i class="ok">+0.2</i><i class="watch">−0.3</i><i class="watch">−0.4</i><i class="ok">+0.2</i><i class="ok">+0.3</i><i class="ok">+0.5</i><i class="ok">+0.6</i><i class="ok">+0.4</i><i class="ok">+0.5</i><i class="ok">+0.4</i><i class="none">—</i><strong>0.7</strong></div>
+          </div>
+          <footer>Each cell shows the lowest 15-minute net scheduled FTE − required FTE result inside that hour. Verint Queue Name remains a Staff Type.</footer>
+        </article>
+
+        <aside class="work-panel planning-brief">
+          <header><div><p>PREPARATION NOTE</p><h2>RSA BE VL · selected risk</h2></div><span class="state bad">11.6 FTEh</span></header>
+          <dl class="evidence-list">
+            <div><dt>Peak requirement</dt><dd>21.0 FTE · 17:00</dd></div>
+            <div><dt>Gross published</dt><dd>19.6 FTE</dd></div>
+            <div><dt>Approved PTO / Away</dt><dd>1.1 FTE</dd></div>
+            <div><dt>Net published</dt><dd class="neg">18.5 FTE</dd></div>
+            <div><dt>Longest shortage run</dt><dd>16:15–18:30</dd></div>
+          </dl>
+          <div class="manager-note"><b>Decision boundary</b><p>The Hub identifies exact shortage intervals. Staffing treatment remains a manager decision and is recorded in the Staffing workbook.</p></div>
+        </aside>
+
+        <article class="work-panel action-ledger">
+          <header><div><p>INTERVAL BACKLOG</p><h2>Capacity intervals requiring preparation</h2></div><div class="table-actions"><button>Staffing workbook</button><button>Export visible rows</button></div></header>
+          <table class="dense-table">
+            <thead><tr><th>Date</th><th>Interval</th><th>Planning group</th><th>Staff type</th><th class="num">Required</th><th class="num">Gross</th><th class="num">PTO/Away</th><th class="num">Net</th><th class="num">Gap</th><th>Evidence state</th></tr></thead>
+            <tbody>
+              <tr data-lob="RSA BE"><td>14 Sep</td><td>17:00–17:15</td><td><b>RSA BE VL</b></td><td>BE RSA FO VL</td><td class="num">21.0</td><td class="num">19.6</td><td class="num">1.1</td><td class="num">18.5</td><td class="num strong neg">−2.5</td><td>Requirement + schedule</td></tr>
+              <tr data-lob="RSA BE"><td>14 Sep</td><td>16:45–17:00</td><td><b>RSA BE VL</b></td><td>BE RSA FO VL</td><td class="num">20.3</td><td class="num">19.4</td><td class="num">1.1</td><td class="num">18.3</td><td class="num strong neg">−2.0</td><td>Requirement + schedule</td></tr>
+              <tr data-lob="RSA BE"><td>14 Sep</td><td>11:00–11:15</td><td><b>RSA BE FR</b></td><td>BE RSA FO FR</td><td class="num">14.4</td><td class="num">14.0</td><td class="num">0.8</td><td class="num">13.2</td><td class="num strong neg">−1.2</td><td>Requirement + schedule</td></tr>
+            </tbody>
+          </table>
+        </article>
+      </div>
+    </section>
+
+    <section class="view" data-page="service">
+      <div class="metric-ledger">
+        <article><label>Service level · RSA BE</label><strong class="risk">75.8%</strong><span>Target 80.0% · −4.2 pp</span></article>
+        <article><label>Offered volume</label><strong>1,296</strong><span>+9.4% versus forecast</span></article>
+        <article><label>Volume handled</label><strong>1,198</strong><span>1,036 handled in SL</span></article>
+        <article><label>AHT</label><strong>356 s</strong><span>Weighted handled seconds</span></article>
+      </div>
+
+      <div class="service-grid">
+        <article class="work-panel service-curve">
+          <header><div><p>INTRADAY DELIVERY</p><h2>RSA Belgium · 15-minute service curve</h2></div><div class="legend"><span><i class="series-teal"></i>Service level</span><span><i class="series-gold"></i>Target</span><span><i class="series-volume"></i>Offered</span></div></header>
+          <svg viewBox="0 0 920 300" role="img" aria-label="Service level and offered volume through 17:00">
+            <g class="gridlines"><line x1="54" y1="26" x2="900" y2="26"/><line x1="54" y1="82" x2="900" y2="82"/><line x1="54" y1="138" x2="900" y2="138"/><line x1="54" y1="194" x2="900" y2="194"/><line x1="54" y1="250" x2="900" y2="250"/></g>
+            <g class="axis-labels"><text x="44" y="30">100%</text><text x="44" y="86">75%</text><text x="44" y="142">50%</text><text x="44" y="198">25%</text><text x="44" y="254">0%</text><text x="54" y="278">07:00</text><text x="244" y="278">10:00</text><text x="434" y="278">13:00</text><text x="624" y="278">16:00</text><text x="856" y="278">20:00</text></g>
+            <g class="volume-bars"><rect x="67" y="214" width="23" height="36"/><rect x="105" y="202" width="23" height="48"/><rect x="143" y="187" width="23" height="63"/><rect x="181" y="169" width="23" height="81"/><rect x="219" y="157" width="23" height="93"/><rect x="257" y="151" width="23" height="99"/><rect x="295" y="155" width="23" height="95"/><rect x="333" y="160" width="23" height="90"/><rect x="371" y="164" width="23" height="86"/><rect x="409" y="168" width="23" height="82"/><rect x="447" y="176" width="23" height="74"/><rect x="485" y="181" width="23" height="69"/><rect x="523" y="188" width="23" height="62"/><rect x="561" y="192" width="23" height="58"/><rect x="599" y="199" width="23" height="51"/><rect x="637" y="204" width="23" height="46"/></g>
+            <polyline class="target-line" points="54,71 900,71"/>
+            <polyline class="service-line" points="67,88 105,80 143,75 181,68 219,66 257,70 295,82 333,96 371,105 409,116 447,102 485,91 523,84 561,78 599,98 637,119"/>
+            <line class="checkpoint" x1="637" y1="22" x2="637" y2="250"/><circle class="focus-dot" cx="637" cy="119" r="5"/><text class="checkpoint-label" x="637" y="16">17:00</text>
+          </svg>
+          <footer>Actual stops at the latest Call-by-Call interval. Future space is intentionally blank; no forecast line is presented as actual service.</footer>
+        </article>
+
+        <aside class="work-panel lob-results">
+          <header><div><p>PORTFOLIO VIEW</p><h2>Management LOB results</h2></div><span class="method">NO GLOBAL SL</span></header>
+          <table class="dense-table">
+            <thead><tr><th>LOB</th><th class="num">SL</th><th class="num">Offered</th><th class="num">Handled</th><th>State</th></tr></thead>
+            <tbody>
+              <tr data-lob="RSA NL"><td><b>RSA NL</b></td><td class="num pos">89.9%</td><td class="num">1,824</td><td class="num">1,738</td><td><span class="state good">STABLE</span></td></tr>
+              <tr class="selected" data-lob="RSA BE"><td><b>RSA BE</b></td><td class="num neg">75.8%</td><td class="num">1,296</td><td class="num">1,198</td><td><span class="state bad">RECOVER</span></td></tr>
+              <tr data-lob="FORD NL"><td><b>FORD NL</b></td><td class="num pos">96.8%</td><td class="num">485</td><td class="num">467</td><td><span class="state good">STABLE</span></td></tr>
+              <tr data-lob="OEM"><td><b>OEM</b></td><td class="num pos">94.9%</td><td class="num">392</td><td class="num">374</td><td><span class="state good">STABLE</span></td></tr>
+            </tbody>
+          </table>
+          <div class="oem-strip"><b>OEM sub-LOB check</b><span>Ford 94.1%</span><span>Toyota 97.2%</span><span>Chery 93.6%</span></div>
+        </aside>
+
+        <article class="work-panel action-ledger queue-ledger">
+          <header><div><p>QUEUE EVIDENCE</p><h2>What is moving the selected LOB result</h2></div><div class="table-actions"><button>RTM Daily Control</button><button>Export visible rows</button></div></header>
+          <table class="dense-table">
+            <thead><tr><th>Configured queue</th><th>Display group</th><th class="num">Offered</th><th class="num">Handled</th><th class="num">Handled in SL</th><th class="num">Abandoned</th><th class="num">SL</th><th class="num">AHT</th><th class="num">Share of offered</th></tr></thead>
+            <tbody>
+              <tr data-lob="RSA BE"><td><b>APBN_BRU_RSA_INSURAN_All_FR</b></td><td>Insurance FR</td><td class="num">412</td><td class="num">381</td><td class="num">298</td><td class="num">31</td><td class="num neg">72.4%</td><td class="num">368 s</td><td class="num">31.8%</td></tr>
+              <tr data-lob="RSA BE"><td><b>APBN_BRU_RSA_INSURAN_All_VL</b></td><td>Insurance VL</td><td class="num">308</td><td class="num">289</td><td class="num">249</td><td class="num">19</td><td class="num">82.1%</td><td class="num">341 s</td><td class="num">23.8%</td></tr>
+              <tr data-lob="RSA BE"><td><b>APBN_BRU_RSA_OEM_All_FR</b></td><td>OEM FR</td><td class="num">244</td><td class="num">218</td><td class="num">170</td><td class="num">26</td><td class="num neg">73.8%</td><td class="num">379 s</td><td class="num">18.8%</td></tr>
+              <tr data-lob="RSA BE"><td><b>APBN_BRU_RSA_OEM_All_VL</b></td><td>OEM VL</td><td class="num">187</td><td class="num">174</td><td class="num">158</td><td class="num">13</td><td class="num">88.3%</td><td class="num">322 s</td><td class="num">14.4%</td></tr>
+            </tbody>
+          </table>
+        </article>
+      </div>
+    </section>
+
+    <section class="view" data-page="attendance">
+      <div class="metric-ledger">
+        <article><label>Confirmed no show</label><strong class="risk">2 HC</strong><span>Completed + positive evidence</span></article>
+        <article><label>Possible no show</label><strong class="warn">1 HC</strong><span>Evidence remains unknown</span></article>
+        <article><label>Residual gaps</label><strong>11</strong><span>4.6 hours after Activities overlap</span></article>
+        <article><label>Break / meal review</label><strong>3</strong><span>Completed shifts with coverage</span></article>
+      </div>
+
+      <div class="attendance-grid">
+        <article class="work-panel timeline-panel">
+          <header><div><p>SCHEDULE INTEGRITY</p><h2>Published schedule over observed Agent Status</h2></div><div class="legend"><span><i class="tl-schedule"></i>Schedule</span><span><i class="tl-logged"></i>Logged</span><span><i class="tl-meal"></i>Meal</span><span><i class="tl-break"></i>Break</span><span><i class="tl-travel"></i>Travel</span><span><i class="tl-gap"></i>Residual gap</span></div></header>
+          <div class="time-scale"><span>Agent / evidence</span><i>06</i><i>08</i><i>10</i><i>12</i><i>14</i><i>16</i><i>18</i><i>20</i><i>22</i><i>24</i></div>
+          <div class="agent-case" data-lob="RSA BE">
+            <div class="case-meta"><b>Sara El Amrani</b><span>224100 · RSA BE · TL Atlas</span><em class="bad-text">NO SHOW</em></div>
+            <div class="case-tracks"><label>PLAN</label><div class="track"><i class="schedule" style="left:20%;width:40%"></i></div><label>ACTUAL</label><div class="track"><i class="off" style="left:20%;width:40%"></i><i class="gap" style="left:20%;width:40%"></i></div></div>
+          </div>
+          <div class="agent-case" data-lob="RSA NL">
+            <div class="case-meta"><b>Emma De Vries</b><span>204046 · RSA NL · TL North</span><em class="warn-text">EARLY LEAVE</em></div>
+            <div class="case-tracks"><label>PLAN</label><div class="track"><i class="schedule" style="left:15%;width:45%"></i></div><label>ACTUAL</label><div class="track"><i class="logged" style="left:15%;width:16%"></i><i class="meal" style="left:31%;width:3%"></i><i class="logged" style="left:34%;width:19%"></i><i class="gap" style="left:53%;width:7%"></i></div></div>
+          </div>
+          <div class="agent-case" data-lob="RSA BE">
+            <div class="case-meta"><b>Youssef Idrissi</b><span>96457 · RSA BE · TL Atlas</span><em class="bad-text">INTERNAL GAP</em></div>
+            <div class="case-tracks"><label>PLAN</label><div class="track"><i class="schedule" style="left:25%;width:42%"></i></div><label>ACTUAL</label><div class="track"><i class="logged" style="left:25%;width:15%"></i><i class="gap" style="left:40%;width:5%"></i><i class="logged" style="left:45%;width:8%"></i><i class="break" style="left:53%;width:2.5%"></i><i class="logged" style="left:55.5%;width:11.5%"></i></div></div>
+          </div>
+          <div class="agent-case" data-lob="OEM">
+            <div class="case-meta"><b>Leila Benali</b><span>A7712 · OEM · TL Delta</span><em class="ok-text">MEAL VISIBLE</em></div>
+            <div class="case-tracks"><label>PLAN</label><div class="track"><i class="schedule" style="left:17%;width:43%"></i></div><label>ACTUAL</label><div class="track"><i class="logged" style="left:17%;width:18%"></i><i class="meal" style="left:35%;width:4%"></i><i class="logged" style="left:39%;width:12%"></i><i class="travel" style="left:51%;width:3%"></i><i class="logged" style="left:54%;width:6%"></i></div></div>
+          </div>
+        </article>
+
+        <aside class="work-panel case-panel">
+          <header><div><p>CASE NAVIGATOR</p><h2>Review sequence</h2></div><span class="count">4 SHOWN</span></header>
+          <ol class="case-list">
+            <li class="active"><b>Sara El Amrani</b><span>Full shift residual · 480 min</span><em>Exact gap</em></li>
+            <li><b>Emma De Vries</b><span>Trailing residual · 63 min</span><em>Partial overlap</em></li>
+            <li><b>Youssef Idrissi</b><span>Returned later · 48 min</span><em>Internal gap</em></li>
+            <li><b>Leila Benali</b><span>Meal AUX classified</span><em>No gap</em></li>
+          </ol>
+          <div class="manager-note"><b>Read-only boundary</b><p>Correct in Verint. Refresh Activities; fully covered intervals disappear and partial coverage leaves the exact remainder.</p></div>
+        </aside>
+
+        <article class="work-panel action-ledger gap-ledger">
+          <header><div><p>RESIDUAL EVIDENCE</p><h2>Exact intervals still requiring Verint review</h2></div><div class="table-actions"><button>Attendance Review</button><button>Export visible rows</button></div></header>
+          <table class="dense-table">
+            <thead><tr><th>Gap ID</th><th>Date</th><th>Agent</th><th>LOB / TL</th><th>Issue</th><th>Exact start</th><th>Exact end</th><th class="num">Minutes</th><th>Activities overlap</th><th>Observed source</th></tr></thead>
+            <tbody>
+              <tr data-lob="RSA BE"><td><b>GAP-0914-224100-01</b></td><td>14 Sep</td><td>Sara El Amrani</td><td>RSA BE · Atlas</td><td><span class="state bad">NO SHOW</span></td><td>16:00</td><td>00:00 +1</td><td class="num strong">480</td><td>None</td><td>Agent Status</td></tr>
+              <tr data-lob="RSA NL"><td><b>GAP-0914-204046-02</b></td><td>14 Sep</td><td>Emma De Vries</td><td>RSA NL · North</td><td>Early leave</td><td>18:57</td><td>20:00</td><td class="num strong">63</td><td>Partial · 18 min</td><td>Agent Status</td></tr>
+              <tr data-lob="RSA BE"><td><b>GAP-0914-96457-01</b></td><td>14 Sep</td><td>Youssef Idrissi</td><td>RSA BE · Atlas</td><td>Internal gap</td><td>14:36</td><td>15:24</td><td class="num strong">48</td><td>None</td><td>Agent Status</td></tr>
+            </tbody>
+          </table>
+        </article>
+      </div>
+    </section>
+
+    <section class="view" data-page="history">
+      <div class="metric-ledger">
+        <article><label>Lowest LOB service result</label><strong class="warn">86.1%</strong><span>FORD NL · LOB results remain separate</span></article>
+        <article><label>Volume variance</label><strong class="warn">+4.2%</strong><span>1,307,040 actual</span></article>
+        <article><label>Net scheduled coverage</label><strong>95.6%</strong><span>254,400 / 266,000 FTEh</span></article>
+        <article><label>Final absence</label><strong class="risk">5.8%</strong><span>Activities-final rows only</span></article>
+      </div>
+
+      <div class="history-grid">
+        <article class="work-panel weekly-chart">
+          <header><div><p>DEMAND REALISATION</p><h2>Actual volume versus forecast · weekly</h2></div><div class="legend"><span><i class="series-teal"></i>Actual</span><span><i class="series-gold"></i>Forecast</span></div></header>
+          <svg viewBox="0 0 830 245" role="img" aria-label="Weekly actual and forecast volume">
+            <g class="gridlines"><line x1="58" y1="24" x2="808" y2="24"/><line x1="58" y1="78" x2="808" y2="78"/><line x1="58" y1="132" x2="808" y2="132"/><line x1="58" y1="186" x2="808" y2="186"/><line x1="58" y1="222" x2="808" y2="222"/></g>
+            <g class="axis-labels"><text x="46" y="28">120k</text><text x="46" y="82">90k</text><text x="46" y="136">60k</text><text x="46" y="190">30k</text><text x="74" y="241">W27</text><text x="192" y="241">W28</text><text x="310" y="241">W29</text><text x="428" y="241">W30</text><text x="546" y="241">W31</text><text x="664" y="241">W32</text><text x="782" y="241">W33</text></g>
+            <polyline class="forecast-line" points="78,118 196,100 314,93 432,108 550,84 668,96 786,88"/>
+            <polyline class="service-line" points="78,109 196,91 314,76 432,99 550,71 668,83 786,74"/>
+            <g class="chart-points"><circle cx="78" cy="109" r="4"/><circle cx="196" cy="91" r="4"/><circle cx="314" cy="76" r="4"/><circle cx="432" cy="99" r="4"/><circle cx="550" cy="71" r="4"/><circle cx="668" cy="83" r="4"/><circle cx="786" cy="74" r="4"/></g>
+          </svg>
+        </article>
+
+        <aside class="work-panel outcome-panel">
+          <header><div><p>WORKFORCE OUTCOME</p><h2>Requirement to delivery</h2></div><span class="method">FTE-HOURS</span></header>
+          <div class="outcome-bars">
+            <div><label>Required</label><span><i style="width:100%"></i></span><b>266.0k</b></div>
+            <div><label>Gross published</label><span><i style="width:98%;background:#375e7a"></i></span><b>260.7k</b></div>
+            <div><label>Net scheduled</label><span><i style="width:95.6%;background:#007c83"></i></span><b>254.4k</b></div>
+            <div><label>Observed</label><span><i style="width:91.3%;background:#d6a84b"></i></span><b>242.8k</b></div>
+            <div><label>Productive</label><span><i style="width:82.4%;background:#1f7a53"></i></span><b>219.2k</b></div>
+          </div>
+          <dl class="final-rates"><div><dt>Final absence</dt><dd>5.8%</dd></div><div><dt>Final shrinkage</dt><dd>33.9%</dd></div><div><dt>Final-ready agent days</dt><dd>1,482</dd></div></dl>
+        </aside>
+
+        <article class="work-panel action-ledger scorecard-ledger">
+          <header><div><p>MONTHLY SCORECARD</p><h2>Realisation by Management LOB · Sep 2026</h2></div><div class="table-actions"><button>Realisations workbook</button><button>Export visible rows</button></div></header>
+          <table class="dense-table">
+            <thead><tr><th>Management LOB</th><th class="num">Service level</th><th class="num">Actual volume</th><th class="num">Forecast</th><th class="num">Variance</th><th class="num">Required FTEh</th><th class="num">Net scheduled</th><th class="num">Observed</th><th class="num">Final absence</th><th class="num">Final shrinkage</th></tr></thead>
+            <tbody>
+              <tr data-lob="RSA NL"><td><b>RSA NL</b></td><td class="num pos">90.2%</td><td class="num">480,210</td><td class="num">461,900</td><td class="num">+4.0%</td><td class="num">98,400</td><td class="num">94,500</td><td class="num">90,200</td><td class="num">5.1%</td><td class="num">32.6%</td></tr>
+              <tr data-lob="RSA BE"><td><b>RSA BE</b></td><td class="num">87.6%</td><td class="num">352,440</td><td class="num">336,100</td><td class="num neg">+4.9%</td><td class="num">72,600</td><td class="num">69,100</td><td class="num">66,800</td><td class="num neg">6.3%</td><td class="num neg">34.8%</td></tr>
+              <tr data-lob="FORD NL"><td><b>FORD NL</b></td><td class="num">86.1%</td><td class="num">281,770</td><td class="num">270,400</td><td class="num neg">+4.2%</td><td class="num">56,300</td><td class="num">53,600</td><td class="num">50,900</td><td class="num neg">6.1%</td><td class="num neg">35.1%</td></tr>
+              <tr data-lob="OEM"><td><b>OEM</b></td><td class="num pos">91.4%</td><td class="num">193,620</td><td class="num">186,800</td><td class="num">+3.6%</td><td class="num">38,700</td><td class="num">37,200</td><td class="num">34,900</td><td class="num">5.9%</td><td class="num">32.9%</td></tr>
+            </tbody>
+          </table>
+          <footer>Service values remain separate by Management LOB. Final absence and shrinkage use finalized Verint Activities and are never added together.</footer>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer"><span>Prepared by Anass ASSRI | WFM</span><span>Illustrative data · design prototype</span><span>LOCAL · READ-ONLY</span></footer>
+  <script src="prototype.js"></script>
+</body>
+</html>
