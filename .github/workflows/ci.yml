@@ -43,3 +43,11 @@ jobs:
           foreach ($name in @("SETUP.cmd", "UPGRADE.cmd", "WFMHub.cmd", "WEBAPP.cmd")) {
             if (-not (Test-Path (Join-Path $root $name))) { throw "Missing $name" }
           }
+      - name: Execute SETUP.cmd with the bundled runtime
+        shell: cmd
+        run: |
+          mkdir build\portable\source-fixture\FTE
+          mkdir build\portable\source-fixture\Storm
+          mkdir build\portable\source-fixture\Verint
+          (echo %CD%\build\portable\source-fixture) | call build\portable\WFMHub\SETUP.cmd
+          if errorlevel 1 exit /b %errorlevel%
