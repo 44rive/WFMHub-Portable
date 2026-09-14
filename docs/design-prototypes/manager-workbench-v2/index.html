@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WFMHub Manager Workbench</title>
+  <link rel="stylesheet" href="workbench.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="?page=desk"><b>WFM<i>HUB</i></b><small>MANAGER WORKBENCH</small></a>
+    <nav id="workspace-nav" class="workspace-nav"></nav>
+    <div class="fresh"><span></span><div><b>ACTUALS THROUGH 17:00</b><small>14 SEP 2026 · READY</small></div></div>
+  </header>
+  <section class="pagebar">
+    <div class="page-id"><p id="phase">YOUR WFM DAY</p><h1 id="title">Manager Desk</h1></div>
+    <nav id="subnav" class="subnav"></nav>
+    <div class="actions"><button>Run analysis</button><button>Generate report</button><button class="primary">Update data</button></div>
+  </section>
+  <section class="filterbar">
+    <div><label>Period</label><b id="period-value">14 Sep 2026</b><i>⌄</i></div>
+    <div><label>Management LOB</label><b>All 4 selected</b><i>⌄</i></div>
+    <div id="planning-filter"><label>Planning group</label><b>All planning groups</b><i>⌄</i></div>
+    <div id="staff-filter"><label>Staff type</label><b>All mapped staff types</b><i>⌄</i></div>
+    <div id="people-filter"><label>Team / agent</label><b>All active teams</b><i>⌄</i></div>
+    <button>Clear</button>
+  </section>
+  <div class="cutbar"><span id="scope">Active FTE scope · PTO/Away applied</span><span><b>Calls</b> 17:00 · <b>Status</b> 17:03 · <b>Schedules</b> 30 Sep · <b>Forecast</b> 12 Oct · <b>Activities</b> 13 Sep</span></div>
+  <main id="page"></main>
+  <footer><span>Prepared by Anass ASSRI | WFM</span><span>Illustrative design prototype · governed business boundaries</span><span>LOCAL · PORTABLE</span></footer>
+  <script src="workbench.js"></script>
+</body>
+</html>
