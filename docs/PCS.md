@@ -40,36 +40,31 @@ WFMHub PCS refresh → SQLite PCS mart
 fixed Feed/PCS CSV files replaced atomically
           │
           ▼
-Excel Data > Refresh All
+Close Excel; WFMHub > PCS > Sync PCS workbook
           │
           ▼
 OVERVIEW / PERFORMANCE update; COACHING remains human-owned
 ```
 
-WFMHub does not need Excel open to refresh data. Excel does not query SQLite.
-Power Query reads the fixed CSV paths so the collaborative workbook can remain
-the same file. The setup script installs query definitions once.
+WFMHub does not need Excel open to calculate and publish feeds. To put the new
+data into the permanent tracker, close Excel and choose **Sync PCS workbook**.
+The sync opens Excel briefly, copies the six CSV feeds into ordinary tables,
+recalculates, and saves. It never edits the human-owned coaching action table.
 
-The selector feed has separate physical columns for Period, LOB, Team Key,
-Team Leader, Agent Key, and Agent. The installer binds each dropdown to its
-own column and validates that the resolved Team/Agent list stays inside its
-selected LOB/team group. This prevents a month label from appearing in a LOB
-list after Power Query refresh. On a newly generated tracker, run **Install /
-repair Power Query** with Excel closed, then open it and use **Data > Refresh
-All**. Do not regenerate the shared tracker for normal PCS updates.
-Release 1.0.2 upgrades the tracker contract once before installing Power Query;
-keyed coaching actions are copied forward. Close Excel before choosing
-Install / repair and keep the archived pre-upgrade copy until you have checked
-the filters and coaching rows.
+The selector feed keeps Period, LOB, Team Leader and Agent in separate columns.
+Sync updates those columns in place, so the previous Power Query table
+delete/recreate cycle cannot move a month into the LOB dropdown. The first
+update with this release migrates the old tracker once and copies keyed coaching
+actions forward. Keep the archived pre-upgrade copy until you verify them.
 
 ## Human roles
 
-- WFM: load sources, run PCS refresh, check feed manifest and refresh the
+- WFM: load sources, run PCS refresh, check feed manifest and sync the
   workbook before publishing.
 - Team leaders / Quality: filter performance and maintain coaching status,
   owner, date, action, notes, and Call ID in the coaching table.
 - Management: use overview LOB/agent tables and period comparisons; do not edit
-  hidden query/calculation sheets.
+  hidden feed/calculation sheets.
 
 Rebuilding the permanent tracker is exceptional. The builder reads coaching
 rows from the current tracker before replacement and restores them by Coaching
@@ -78,10 +73,9 @@ each delivery interval.
 
 ## Troubleshooting
 
-- Data feeds updated but cards/charts empty: open Excel, **Data > Refresh All**,
-  wait for all queries, then recalculate.
-- Query tables show a path error: run **Install / repair Power Query** once with
-  the tracker closed.
+- Data feeds updated but cards/charts old: close Excel and run **Sync PCS workbook**.
+- Sync says the old workbook has queries: run **Update PCS data** with this
+  release once to migrate it, then sync.
 - WFMHub cannot replace tracker: close Excel and wait for sync. Coaching is
   preserved from the existing tracker before replacement.
 - Dates look numeric: use the table's date column format; source CSV contains

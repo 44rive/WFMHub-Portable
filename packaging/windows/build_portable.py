@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PYTHON = "3.13.7"
-DEFAULT_VERSION = "1.0.2"
+DEFAULT_VERSION = "1.1.0"
 PYTHON_EMBED_SHA256 = {
     "3.13.7": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
 }
@@ -228,8 +228,8 @@ def build(args) -> Path:
     shutil.copy2(ROOT / "UPGRADE.cmd", stage / "UPGRADE.cmd")
     (stage / "_system" / "scripts").mkdir(parents=True, exist_ok=True)
     shutil.copy2(
-        ROOT / "packaging" / "windows" / "Install-PCSWorkbook.ps1",
-        stage / "_system" / "scripts" / "Install-PCSWorkbook.ps1",
+        ROOT / "packaging" / "windows" / "Sync-PCSWorkbook.ps1",
+        stage / "_system" / "scripts" / "Sync-PCSWorkbook.ps1",
     )
     shutil.copy2(ROOT / "README.md", stage / "README.md")
     shutil.copy2(ROOT / "PROJECT.md", stage / "PROJECT.md")

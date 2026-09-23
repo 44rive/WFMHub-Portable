@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 from wfmhub.cli import (
     _build_latest_pcs_report,
     _build_pcs_from_database,
-    _install_pcs_power_query,
+    _sync_pcs_workbook,
     refresh,
 )
 from wfmhub.models import ModelSummary
@@ -38,7 +38,6 @@ from wfmhub.shared_feeds import (
     PCS_RESULTS_HEADERS,
     pcs_dashboard_cache_rows,
     pcs_result_rows,
-    publish_pcs_power_query_scripts,
     _pcs_reporting_windows,
 )
 
@@ -93,17 +92,6 @@ def _rows() -> dict[str, list[tuple[object, ...]]]:
 
 
 class PCSWorkflowTests(unittest.TestCase):
-    def test_power_query_contract_can_be_recreated_without_business_refresh(self):
-        with tempfile.TemporaryDirectory() as folder:
-            paths = publish_pcs_power_query_scripts(Path(folder) / "Feed" / "PCS")
-            self.assertEqual(len(paths), 6)
-            for path in paths:
-                self.assertTrue(path.is_file())
-                self.assertIn("Excel.CurrentWorkbook", path.read_text(encoding="utf-8"))
-            self.assertTrue(
-                (Path(folder) / "Feed" / "PCS" / "POWER_QUERY_PCS_FILTERS_LOCAL.txt").is_file()
-            )
-
     def test_text_business_dates_are_parsed_for_sqlite_rows(self):
         self.assertEqual(_as_date("2026-09-08 17:00:00"), date(2026, 9, 8))
 
@@ -219,6 +207,8 @@ class PCSWorkflowTests(unittest.TestCase):
             self.assertEqual(_tracker_contract_version(path), PCS_TRACKER_VERSION)
             with zipfile.ZipFile(path) as archive:
                 self.assertIsNone(archive.testzip())
+                self.assertNotIn(b"plotVisOnly", archive.read("xl/charts/chart1.xml"))
+                self.assertNotIn(b"plotVisOnly", archive.read("xl/charts/chart2.xml"))
                 self.assertNotIn("xl/metadata.xml", archive.namelist())
                 self.assertNotIn("xl/connections.xml", archive.namelist())
                 worksheet_xml = b"".join(
@@ -353,6 +343,17 @@ class PCSWorkflowTests(unittest.TestCase):
             finally:
                 migrated.close()
 
+    def test_migration_refuses_to_replace_unreadable_coaching_workbook(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = SimpleNamespace(reports=root / "Reports", feed=root / "Feed")
+            path = config.reports / PCS_TRACKER_FILENAME
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"unreadable old workbook")
+            with self.assertRaisesRegex(RuntimeError, "coaching actions"):
+                ensure_pcs_tracker(config, **_rows())
+            self.assertEqual(path.read_bytes(), b"unreadable old workbook")
+
     def test_latest_report_is_the_fixed_permanent_tracker(self):
         with tempfile.TemporaryDirectory() as folder:
             reports = Path(folder)
@@ -412,8 +413,8 @@ class PCSWorkflowTests(unittest.TestCase):
                 ),
                 patch("wfmhub.cli.run_pcs_excel_action", return_value="ready") as run,
             ):
-                _install_pcs_power_query(home)
-            run.assert_called_once_with(config, report, "Install")
+                _sync_pcs_workbook(home)
+            run.assert_called_once_with(config, report, "Sync")
 
     def test_install_repairs_an_outdated_tracker_before_excel_automation(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -436,9 +437,9 @@ class PCSWorkflowTests(unittest.TestCase):
                 ) as repair,
                 patch("wfmhub.cli.run_pcs_excel_action", return_value="ready") as run,
             ):
-                _install_pcs_power_query(home)
+                _sync_pcs_workbook(home)
             repair.assert_called_once_with(home)
-            run.assert_called_once_with(config, repaired_report, "Install")
+            run.assert_called_once_with(config, repaired_report, "Sync")
 
     def test_pcs_refresh_uses_targeted_model_without_all_shared_feeds(self):
         home = Path("/test/wfmhub")

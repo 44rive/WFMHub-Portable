@@ -240,7 +240,7 @@ def refresh(
         )
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
     if pcs_only:
-        print("Excel layer : Fixed CSV feeds updated; Power Query refresh remains in Excel")
+        print("Excel layer : Fixed CSV feeds updated; run Sync PCS workbook with Excel closed")
     else:
         print(f"Shared data : {sum(item.rows for item in shared_feeds):,} feed rows updated")
     if pcs_only:
@@ -798,7 +798,7 @@ def _build_latest_pcs_report(home: Path) -> None:
         raise RuntimeError("PCS processing finished but no tracker was created")
     print(f"PCS tracker   : {report}")
     print(f"PCS CSV feeds : {config.feed / 'PCS'}")
-    print("Next          : Open the tracker and choose Data > Refresh All")
+    print("Next          : Close Excel and choose Sync PCS workbook")
 
 
 def _build_pcs_from_database(home: Path) -> Path:
@@ -811,12 +811,12 @@ def _build_pcs_from_database(home: Path) -> Path:
         report = build_report_pack("pcs", conn, config, start, end)
     print(f"PCS tracker   : {report}")
     print(f"PCS CSV feeds : {config.feed / 'PCS'}")
-    print("Next          : Open the tracker and choose Data > Refresh All")
+    print("Next          : Close Excel and choose Sync PCS workbook")
     return report
 
 
-def _install_pcs_power_query(home: Path) -> None:
-    """Install or repair the six governed direct-CSV query tables."""
+def _sync_pcs_workbook(home: Path) -> None:
+    """Synchronize read-only PCS feed tables in the permanent workbook."""
 
     config = load_config(home)
     report = latest_pcs_report(config)
@@ -831,20 +831,20 @@ def _install_pcs_power_query(home: Path) -> None:
         state = inspect_pcs_tracker(report, config.feed / "PCS")
         if not state.current_template or state.problem:
             raise RuntimeError(
-                "PCS tracker repair did not produce a safe workbook: "
+            "PCS tracker migration did not produce a safe workbook: "
                 f"{state.problem or 'template version is still outdated'}"
             )
-    print("\nINSTALL / REPAIR PCS POWER QUERY")
+    print("\nSYNC PCS WORKBOOK")
     print("Close PCS Live Tracker.xlsx before continuing.")
-    print(run_pcs_excel_action(config, report, "Install"))
-    print("Ready         : Open the tracker; future updates use Data > Refresh All")
+    print(run_pcs_excel_action(config, report, "Sync"))
+    print("Ready         : Open the tracker; repeat Sync after each PCS data update")
 
 
 def _pcs_menu(home: Path) -> None:
     print("\nPCS LIVE TRACKER")
     print("1. Update PCS data (load new FTE + Call-by-Call)")
     print("2. Update CSV feeds from current database (fast)")
-    print("3. Install / repair Power Query (one time; close Excel)")
+    print("3. Sync PCS workbook from CSV feeds (close Excel)")
     print("4. Open permanent PCS Live Tracker")
     print("5. Back")
     choice = input("Choose 1-5: ").strip()
@@ -853,7 +853,7 @@ def _pcs_menu(home: Path) -> None:
     elif choice == "2":
         _build_pcs_from_database(home)
     elif choice == "3":
-        _install_pcs_power_query(home)
+        _sync_pcs_workbook(home)
     elif choice == "4":
         config = load_config(home)
         report = latest_pcs_report(config)
@@ -943,15 +943,6 @@ def menu(home: Path) -> int:
             elif choice == "5":
                 _build_menu_product(home, "realisations")
             elif choice == "6":
-                print("\nBONUS MANAGEMENT")
-                print("1. Import Bonus Matrix v1.2, then build")
-                print("2. Build from the already imported matrix")
-                bonus_choice = input("Choose 1-2: ").strip()
-                if bonus_choice == "1":
-                    source = Path(input("Paste the Bonus Matrix v1.2 workbook path: ").strip().strip('"'))
-                    import_bonus_tool(home, source)
-                elif bonus_choice != "2":
-                    raise ValueError("Please choose 1 or 2")
                 _build_menu_product(home, "bonus")
             elif choice == "7":
                 domain, comparison = _choose_analysis()
@@ -1020,10 +1011,10 @@ def parser() -> argparse.ArgumentParser:
     bonus_p = commands.add_parser("import-bonus", help="Import Bonus Matrix v1.2 without changing the source")
     bonus_p.add_argument("workbook", type=Path)
     pcs_p = commands.add_parser(
-        "pcs", help="Update PCS CSV feeds, install Power Query, or open the permanent tracker",
+        "pcs", help="Update PCS CSV feeds, sync the permanent tracker, or open it",
     )
     pcs_p.add_argument(
-        "action", choices=("build", "rebuild", "install", "open-tracker"),
+        "action", choices=("build", "rebuild", "sync", "install", "open-tracker"),
     )
     analysis_p = commands.add_parser("analyze", help="Run on-demand period analysis")
     analysis_p.add_argument("domain", choices=ANALYSIS_DOMAINS)
@@ -1069,8 +1060,8 @@ def main(argv: list[str] | None = None) -> int:
                 _build_latest_pcs_report(home)
             elif args.action == "rebuild":
                 _build_pcs_from_database(home)
-            elif args.action == "install":
-                _install_pcs_power_query(home)
+            elif args.action in {"sync", "install"}:
+                _sync_pcs_workbook(home)
             elif args.action == "open-tracker":
                 config = load_config(home)
                 report = latest_pcs_report(config)

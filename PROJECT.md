@@ -51,7 +51,7 @@ All locations are relative to `paths.source_root` in `config/wfmhub.toml`.
 | LILO | `Storm/LILO/*.csv` | fallback login/logout boundary evidence |
 | Call by Call | `Storm/Call by Call/*.csv` | service demand, handling counters and PCS call legs |
 | Verint forecast/requirement | `Verint/Forecast/*.txt` | 15-minute Volume and required/forecast FTE by Verint Staff Type |
-| Bonus Matrix | selected manually | governed monthly bonus source imported read-only |
+| Bonus Matrix | optional read-only import | original KPI baseline; routine work uses the permanent editable Bonus workbook |
 
 Files may cover one or many dates. Business dates are read from rows, never
 inferred as the only truth from filenames.
@@ -131,15 +131,19 @@ PCS is calculated from deduplicated, in-scope Call-by-Call legs. Numerators and
 denominators are aggregated separately; percentages and averages are never
 averaged from row-level percentages. The permanent `PCS Live Tracker.xlsx`
 contains the collaborative coaching table. WFMHub updates fixed CSV feeds;
-Excel Power Query refreshes presentation tables. Rebuilding the tracker first
-reads and preserves keyed coaching rows from that same tracker.
+WFMHub's PCS Sync updates six ordinary presentation tables from CSV in place
+using desktop Excel, without Power Query or table replacement. The tracker
+keeps keyed coaching rows. Migrating an old tracker first reads and preserves
+those rows from the same workbook.
 
 ### Bonus and realisations
 
 `Bonus Management.xlsx` is a permanent, formula-driven monthly working file.
 Its editable Policy Decisions, KPI Config, and Raw Data sheets follow the
 supplied Bonus Matrix v1.2 structure; results and dashboards recalculate in
-Excel. WFMHub does not overwrite a current canonical workbook on each refresh.
+Excel. Tenured targets copy the original matrix; Untenured targets must be
+approved and entered separately before payout. WFMHub does not overwrite a
+current canonical workbook on each refresh.
 
 `Realisations.xlsx` includes actual-versus-forecast service and staffing plus
 `HOURS_BY_LOB` and `HOURS_BY_AGENT` allocation of every published-shift minute

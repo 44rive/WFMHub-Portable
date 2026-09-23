@@ -29,8 +29,8 @@ lock. Close it, wait for sync to finish, and retry.
 ## PCS cycle
 
 Use **PCS Report & Coaching > Update PCS data** to process new FTE and calls.
-Then open the permanent tracker and choose **Data > Refresh All**. Power Query
-installation is a one-time repair action for a newly created tracker. Coaching
+Then close Excel and choose **Sync PCS workbook** in the PCS menu. The Hub
+updates the six data tables in place and leaves coaching actions untouched. Coaching
 owners edit the coaching table only. See [PCS.md](PCS.md).
 
 ## Bonus Management

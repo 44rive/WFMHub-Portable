@@ -31,7 +31,7 @@ et_xmlfile, and tzdata versions are pinned.
 python -m compileall -q src tests packaging
 python -m unittest discover -s tests -v
 python -m wfmhub --home /path/to/test-home rules validate
-python packaging/windows/build_portable.py --version 1.0.2
+python packaging/windows/build_portable.py --version 1.1.0
 ```
 
 ## Database changes
@@ -47,8 +47,8 @@ possible.
 ## Workbook validation
 
 Generated workbooks must be closed before replacement. Validate the ZIP central
-directory, parse every XML part, reject external links unless explicitly part
-of the PCS query contract, and open with openpyxl in formula and data-only mode.
+directory, parse every XML part, reject external links, and open with openpyxl
+in formula and data-only mode.
 
 ## Security
 

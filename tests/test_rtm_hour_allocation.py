@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from wfmhub.database import DatabaseConnection
 from wfmhub.decision_products import (
@@ -10,6 +12,7 @@ from wfmhub.decision_products import (
     _realisations_hours,
 )
 from wfmhub.metrics import evaluate_metric, load_metric_catalog
+from wfmhub.models import STAFFING_COLUMNS, _build_staffing, _rtm_timeline_attendance
 from wfmhub.rules import load_rulebook
 from wfmhub.service_flash import _attendance_pulse, _issues_and_drivers_rows, _workforce_by_hour
 from wfmhub.service_profiles import load_service_profiles
@@ -206,6 +209,51 @@ def test_rtm_carries_yesterdays_overnight_shift_into_today():
     assert hourly[1]["scheduled_hc"] == 1
     assert hourly[1]["logged_hc"] == 1
     assert hourly[1]["available_hc"] == 1
+    conn.close()
+
+
+def test_today_timeline_keeps_only_yesterdays_carry_over_shift():
+    previous = DAY - timedelta(days=1)
+    rows = [
+        {"business_date": previous, "scheduled_end": datetime.combine(DAY, time(2)), "agent_id": "night"},
+        {"business_date": previous, "scheduled_end": datetime.combine(previous, time(18)), "agent_id": "day"},
+        {"business_date": DAY, "scheduled_end": datetime.combine(DAY, time(16)), "agent_id": "today"},
+    ]
+    assert [row["agent_id"] for row in _rtm_timeline_attendance(rows, DAY, DAY)] == ["night", "today"]
+
+
+def test_staffing_uses_physical_day_for_overnight_status():
+    raw = sqlite3.connect(":memory:", detect_types=sqlite3.PARSE_DECLTYPES)
+    conn = DatabaseConnection(raw)
+    columns = ", ".join(f'"{name}" TEXT' for name in STAFFING_COLUMNS)
+    conn.execute(f"CREATE TABLE mart.staffing_interval ({columns})")
+    previous = DAY - timedelta(days=1)
+    start = datetime.combine(previous, time(22))
+    midnight = datetime.combine(DAY, time.min)
+    end = datetime.combine(DAY, time(2))
+    row = {
+        "business_date": previous, "agent_id": "night", "lob": "RSA NL",
+        "language": "NL", "assignment": "Working", "assignment_type": "Working",
+        "scheduled_start": start, "scheduled_end": end,
+        "_planned_time_off_segments": [], "source_loaded": True,
+        "_evidence_complete": True, "actual_first_seen": start,
+        "actual_last_seen": end,
+        "_status_exclusive_gross": [
+            {"interval_start": midnight, "interval_end": end, "actual_category": "Productive"},
+        ],
+    }
+    capacity = SimpleNamespace(planning_group="RSA NL", staff_type="RSA NL", status="MAPPED")
+    mapper = SimpleNamespace(map_schedule=lambda lob, assignment: capacity)
+    config = SimpleNamespace(capacity_mapping=Path("unused"))
+    with patch("wfmhub.models.load_capacity_mapping", return_value=mapper):
+        assert _build_staffing(conn, config, [row], end, DAY, DAY) == 8
+    dates = {value[0] for value in conn.execute(
+        "SELECT DISTINCT business_date FROM mart.staffing_interval"
+    ).fetchall()}
+    assert dates == {DAY.isoformat()}
+    assert conn.execute(
+        "SELECT min(observed_fte), max(scheduled_fte) FROM mart.staffing_interval"
+    ).fetchone() == ("1.0", "1.0")
     conn.close()
 
 

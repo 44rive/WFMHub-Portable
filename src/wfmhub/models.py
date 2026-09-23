@@ -1292,6 +1292,8 @@ def _build_staffing(
     config: Config,
     attendance: list[dict[str, Any]],
     as_of: datetime,
+    period_start: date,
+    period_end: date,
 ) -> int:
     capacity_mapping = load_capacity_mapping(config.capacity_mapping)
     buckets: dict[tuple[date, datetime, str, str, str, str], dict[str, Any]] = {}
@@ -1303,11 +1305,11 @@ def _build_staffing(
             lob, row.get("_published_assignment") or row.get("assignment"),
         )
         key = (
-            row["business_date"], left, lob, language,
+            left.date(), left, lob, language,
             capacity.planning_group, capacity.staff_type,
         )
         return buckets.setdefault(key, {
-            "business_date": row["business_date"], "interval_start": left,
+            "business_date": left.date(), "interval_start": left,
             "interval_end": right, "lob": lob, "language": language,
             "planning_group": capacity.planning_group,
             "staff_type": capacity.staff_type,
@@ -1336,6 +1338,8 @@ def _build_staffing(
         working_intervals = subtract_intervals(start, end, time_off_intervals)
         elapsed_end = min(end, as_of)
         for left, right in _quarter_intervals(start, end):
+            if not period_start <= left.date() <= period_end:
+                continue
             bucket = bucket_for(row, left, right)
             gross = _overlap_seconds(left, right, start, end)
             scheduled = sum(_overlap_seconds(left, right, a, b) for a, b in working_intervals)
@@ -1381,6 +1385,8 @@ def _build_staffing(
             if actual_end <= actual_start:
                 continue
             for left, right in _quarter_intervals(actual_start, actual_end):
+                if not period_start <= left.date() <= period_end:
+                    continue
                 bucket = bucket_for(row, left, right)
                 seconds = _overlap_seconds(left, right, actual_start, actual_end)
                 if not seconds:
@@ -1556,6 +1562,24 @@ def _build_shift_timeline(
     conn.execute("DELETE FROM mart.shift_timeline_segment")
     _insert_dicts(conn, "mart.shift_timeline_segment", TIMELINE_COLUMNS, output)
     return len(output)
+
+
+def _rtm_timeline_attendance(
+    attendance: list[dict[str, Any]], start: date, end: date,
+) -> list[dict[str, Any]]:
+    """Keep the previous day's night shifts without widening today's KPIs."""
+
+    midnight = datetime.combine(start, time.min)
+    previous_day = start - timedelta(days=1)
+    return [
+        row for row in attendance
+        if start <= row["business_date"] <= end
+        or (
+            row["business_date"] == previous_day
+            and row["scheduled_end"] is not None
+            and row["scheduled_end"] > midnight
+        )
+    ]
 
 
 SCHEDULE_INTEGRITY_COLUMNS = [
@@ -3519,6 +3543,10 @@ def refresh_models(
         integrity_start = _schedule_integrity_history_start(
             conn, start, end, rulebook.integrity_rolling_scheduled_days,
         )
+        # A Today/Current Week refresh still needs yesterday's published night
+        # shifts.  Their post-midnight status belongs to today's RTM hour, but
+        # the shift timeline retains the previous schedule business date.
+        integrity_start = min(integrity_start, start - timedelta(days=1))
         stage(2, "Loading schedules and integrity history")
         schedules = _load_schedules(conn, integrity_start, end)
         stage(3, "Loading final Verint Activities for post-day reconciliation")
@@ -3547,9 +3575,12 @@ def refresh_models(
         stage(8, "Reconciling observed gaps against final Verint Activities")
         corrections = _build_corrections(conn, rulebook, selected_attendance)
         stage(9, "Building LOB and language staffing intervals")
-        staffing = _build_staffing(conn, config, selected_attendance, evaluation_as_of)
+        timeline_attendance = _rtm_timeline_attendance(attendance, start, end)
+        staffing = _build_staffing(
+            conn, config, timeline_attendance, evaluation_as_of, start, end,
+        )
         stage(10, "Building shift evidence timelines")
-        timeline = _build_shift_timeline(conn, selected_attendance, evaluation_as_of)
+        timeline = _build_shift_timeline(conn, timeline_attendance, evaluation_as_of)
         schedule_integrity = _build_schedule_integrity(
             conn, rulebook, attendance, statuses, evaluation_as_of,
         )

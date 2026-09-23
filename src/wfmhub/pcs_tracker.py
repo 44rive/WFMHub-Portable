@@ -1,9 +1,8 @@
-"""Permanent, lightweight PCS Power Query tracker lifecycle.
+"""Permanent PCS tracker with in-place CSV feed synchronization.
 
-Python and SQLite calculate the governed PCS products and publish fixed CSV
-feeds. Desktop Excel uses Power Query only as transport. The permanent workbook
-contains lightweight report tables and a permanent human-owned coaching action
-log; raw call-leg data is never loaded to a worksheet.
+Python and SQLite calculate governed PCS products and publish fixed CSV feeds.
+Desktop Excel updates six ordinary tables in place; it never deletes formulas,
+charts, selectors or the human-owned coaching log.
 """
 
 from __future__ import annotations
@@ -48,7 +47,7 @@ from .shared_feeds import (
 
 
 PCS_TRACKER_FILENAME = "PCS Live Tracker.xlsx"
-PCS_TRACKER_VERSION = "1.2.0"
+PCS_TRACKER_VERSION = "1.3.0"
 COACHING_ACTION_HEADERS = (
     "Coaching Key", "Call ID", "Coaching Status", "Coach",
     "Coaching Date", "Due Date", "Coaching Comment",
@@ -111,11 +110,14 @@ def _read_actions_from(path: Path) -> list[dict[str, Any]]:
         workbook = load_workbook(
             path, read_only=True, data_only=True, keep_links=False,
         )
-    except Exception:
-        return []
+    except Exception as exc:
+        raise RuntimeError(
+            "Cannot read existing PCS coaching actions; the tracker was not replaced. "
+            "Repair or copy its coaching rows before migration."
+        ) from exc
     try:
         if "COACHING" not in workbook.sheetnames:
-            return []
+            raise RuntimeError("Existing PCS tracker has no COACHING sheet; migration stopped.")
         sheet = workbook["COACHING"]
         header_row = None
         headers: dict[str, int] = {}
@@ -130,7 +132,7 @@ def _read_actions_from(path: Path) -> list[dict[str, Any]]:
                 headers = candidate
                 break
         if header_row is None:
-            return []
+            raise RuntimeError("Existing PCS coaching columns were not recognized; migration stopped.")
         output: list[dict[str, Any]] = []
         seen: set[str] = set()
         for values in sheet.iter_rows(min_row=header_row + 1, values_only=True):
@@ -331,14 +333,7 @@ _LOOKUP_DATASETS: dict[str, tuple[str, Sequence[str]]] = {
 
 
 def _table_lookup(table: str, header: str, key_expression: str) -> str:
-    """Return a lookup that survives Power Query table replacement.
-
-    Desktop Excel must delete each starter ListObject before it can create the
-    Power Query destination. A structured reference such as
-    ``tblPcsLob[PCS]`` is rewritten to ``#REF!`` at deletion time. The stable
-    workbook names below point to sheet ranges instead, so installation cannot
-    mutate presentation formulas.
-    """
+    """Return a stable lookup over the feed sheet's named data range."""
 
     try:
         range_name, headers = _LOOKUP_DATASETS[table]
@@ -391,9 +386,8 @@ def _add_filter_names(workbook) -> None:
         "PCS_AGENT_ACTIVE",
         group_range(agent_group, "E", "F"),
     )
-    # Dynamic sheet-backed ranges deliberately do not reference ListObject
-    # names. Power Query installation replaces the starter tables; these names
-    # and every dependent formula remain valid throughout that operation.
+    # The feed sync resizes ordinary tables in place. Sheet-backed names are
+    # retained to keep formulas independent of Excel table implementation.
     for name, sheet, width in (
         ("PCS_LOB_DATA", "_PCS_LOB", len(PCS_LOB_SCORECARD_HEADERS)),
         ("PCS_AGENT_DATA", "_PCS_AGENT", len(PCS_AGENT_SCORECARD_HEADERS)),
@@ -472,6 +466,7 @@ def _add_overview(
     ))
 
     lob_chart = workbook.add_chart({"type": "bar"})
+    lob_chart.show_hidden_data()
     lob_chart.add_series({
         "name": "Selected", "categories": "='_PCS_CALC'!$A$2:$A$13",
         "values": "='_PCS_CALC'!$B$2:$B$13",
@@ -488,6 +483,7 @@ def _add_overview(
     lob_chart.set_y_axis({"reverse": True})
 
     trend_chart = workbook.add_chart({"type": "line"})
+    trend_chart.show_hidden_data()
     trend_chart.add_series({
         "name": "Daily PCS", "categories": "='_PCS_CALC'!$D$2:$D$32",
         "values": "='_PCS_CALC'!$E$2:$E$32",
@@ -714,20 +710,13 @@ def _add_setup(report: ExcelReport, config: Config) -> None:
     worksheet = report.add_table_sheet(
         "SETUP",
         "PCS CONNECTION SETUP",
-        "Install once with WFMHub; normal updates replace CSV feeds, then Excel Data > Refresh All reloads the tables.",
+        "Run Sync PCS workbook after Update PCS data. The Hub updates read-only tables in place; coaching stays yours.",
         ["Setting", "Value", "Why it exists"],
         [
-            ("Power Query Installed", "NO", "Set automatically after all six query tables refresh"),
-            ("Connection Owner", "Anass ASSRI", "One owner controls connection changes"),
+            ("Feed Sync", "NOT RUN", "Set to READY after the six feed tables are updated"),
+            ("Connection Owner", "Anass ASSRI", "One owner controls workbook updates"),
             ("Local Feed Folder", str(folder), "Fixed clean CSV folder outside the workbook"),
-            ("Filter Script", str(folder / "POWER_QUERY_PCS_FILTERS_LOCAL.txt"), "Cascading Period, LOB, Team Leader and Agent lists"),
-            ("LOB Script", str(folder / "POWER_QUERY_PCS_LOB_LOCAL.txt"), "Overview LOB scorecard"),
-            ("Agent Script", str(folder / "POWER_QUERY_PCS_AGENT_LOCAL.txt"), "Overview agent scorecard"),
-            ("Daily Script", str(folder / "POWER_QUERY_PCS_DAILY_LOCAL.txt"), "Overview daily trend"),
-            ("Performance Script", str(folder / "POWER_QUERY_PCS_RESULTS_LOCAL.txt"), "Native-filter and slicer-ready performance table"),
-            ("Coaching Script", str(folder / "POWER_QUERY_COACHING_QUEUE_LOCAL.txt"), "Period/LOB coaching view cache"),
-            ("Workbook Last Refreshed", "Never", "Written after desktop Excel finishes Refresh All"),
-            ("Last Installer Result", "Not run", "Latest desktop Excel connection result"),
+            ("Workbook Last Refreshed", "Never", "Written after desktop Excel saves the synchronized tables"),
             ("Template Version", PCS_TRACKER_VERSION, "Controls safe tracker rebuilds"),
         ],
         editable_headers={"Value"},
@@ -741,12 +730,12 @@ def _add_help(report: ExcelReport) -> None:
     worksheet = report.add_table_sheet(
         "HELP",
         "PCS — SIMPLE OPERATING MODEL",
-        "Power Query is transport only. Python/SQLite calculate every governed result before Excel reads the CSVs.",
+        "Python/SQLite calculate every governed result. The workbook keeps your coaching actions permanently.",
         ["Step", "What to do", "Where", "Result"],
         [
             (1, "Run Update PCS data", "WFMHub", "SQLite and the fixed clean CSV feeds are refreshed"),
-            (2, "Run Install/repair Power Query once after this upgrade", "PCS menu", "The permanent workbook is connected to the CSV feeds"),
-            (3, "Open PCS Live Tracker and choose Data > Refresh All", "Excel", "All six lightweight query caches reload"),
+            (2, "Close Excel and run Sync PCS workbook", "PCS menu", "Six feed tables update in place; coaching remains unchanged"),
+            (3, "Open PCS Live Tracker", "Excel", "Overview cards, charts and dropdowns reflect the synced feed"),
             (4, "Choose Period, then LOB, Team Leader and Agent", "OVERVIEW", "Cards, charts and both tables update together"),
             (5, "After changing a parent, reset child filters to All", "OVERVIEW", "Every selection remains valid and easy to understand"),
             (6, "Use Period and LOB", "COACHING", "The exact low-score calls appear with Call ID and Coaching Key"),
@@ -772,7 +761,7 @@ def _add_audit(report: ExcelReport, generated: datetime) -> None:
             ("Created", generated),
             ("Workbook grain", "Precomputed selection caches and low-score calls"),
             ("Raw data", "External fixed CSV feeds only; no raw-data worksheet"),
-            ("Update method", "Power Query from six fixed CSV feeds"),
+            ("Update method", "In-place Excel sync from six fixed CSV feeds"),
             ("KPI method", "Python/SQLite ratio of additive sums"),
             ("Human-owned table", "COACHING!tblCoachingActions"),
         ],
@@ -814,7 +803,7 @@ def ensure_pcs_tracker(
             report,
             name="PERFORMANCE",
             title="PCS PERFORMANCE",
-            subtitle="Lightweight Power Query output · use native table filters or add slicers · rates are ratio-of-sums results from the Hub",
+            subtitle="Lightweight governed feed · use native table filters or add slicers · rates are ratio-of-sums results from the Hub",
             table_name="tblPcsPerformance",
             headers=PCS_RESULTS_HEADERS,
             rows=result_rows,
@@ -826,7 +815,7 @@ def ensure_pcs_tracker(
             report,
             name="_PCS_FILTERS",
             title="PCS FILTER STAGING",
-            subtitle="Power Query destination for governed cascading dropdown lists.",
+            subtitle="Governed cascading dropdown lists.",
             table_name="tblPcsFilters",
             headers=PCS_FILTER_HEADERS,
             rows=filter_rows,
@@ -836,7 +825,7 @@ def ensure_pcs_tracker(
             report,
             name="_PCS_LOB",
             title="PCS LOB STAGING",
-            subtitle="Power Query destination for the lightweight Overview LOB scorecard.",
+            subtitle="Lightweight Overview LOB scorecard.",
             table_name="tblPcsLob",
             headers=PCS_LOB_SCORECARD_HEADERS,
             rows=lob_rows,
@@ -846,7 +835,7 @@ def ensure_pcs_tracker(
             report,
             name="_PCS_AGENT",
             title="PCS AGENT STAGING",
-            subtitle="Power Query destination for the lightweight Overview agent scorecard.",
+            subtitle="Lightweight Overview agent scorecard.",
             table_name="tblPcsAgent",
             headers=PCS_AGENT_SCORECARD_HEADERS,
             rows=agent_rows,
@@ -856,7 +845,7 @@ def ensure_pcs_tracker(
             report,
             name="_PCS_DAILY",
             title="PCS DAILY STAGING",
-            subtitle="Power Query destination for the lightweight Overview trend.",
+            subtitle="Lightweight Overview trend.",
             table_name="tblPcsDaily",
             headers=PCS_DAILY_SCORECARD_HEADERS,
             rows=daily_rows,
@@ -866,7 +855,7 @@ def ensure_pcs_tracker(
             report,
             name="_PCS_COACH",
             title="PCS COACHING STAGING",
-            subtitle="Power Query destination for the period and LOB coaching cache.",
+            subtitle="Period and LOB coaching cache.",
             table_name="tblPcsCoachingView",
             headers=PCS_COACHING_HEADERS,
             rows=coaching_rows,

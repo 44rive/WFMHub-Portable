@@ -34,7 +34,7 @@ from .report_packs import report_current_path
 
 
 BONUS_IMPORT_VERSION = "2026.09.1-org-fields"
-BONUS_TRACKER_VERSION = "1.2.0"
+BONUS_TRACKER_VERSION = "1.3.0"
 BONUS_INPUT_ROWS = 1000
 
 # Exact six populations and thresholds in the uploaded Bonus Matrix v1.2.
@@ -86,7 +86,7 @@ def _bonus_tracker_version(path: Path) -> str | None:
                 if match is None or int(match.group(1)) < 4 + BONUS_INPUT_ROWS:
                     return None
             config_end = re.search(r"(\d+)$", tables.get("tblKpiConfig", ""))
-            if config_end is None or int(config_end.group(1)) < 4 + len(DEFAULT_BONUS_KPIS):
+            if config_end is None or int(config_end.group(1)) < 4 + 2 * len(DEFAULT_BONUS_KPIS):
                 return None
             # Spreadsheet writers can discard custom properties. Never accept
             # the broken v1.1 workbook as current solely from table dimensions.
@@ -110,8 +110,8 @@ def _existing_bonus_inputs(path: Path) -> dict[str, list[tuple[Any, ...]]]:
         output: dict[str, list[tuple[Any, ...]]] = {}
         for sheet_name, width, key_index in (
             ("Policy_Decisions", 7, 0),
-            ("KPI_Config", 7, 0),
-            ("Raw_Data", 21, 0),
+            ("KPI_Config", 8, 0),
+            ("Raw_Data", 22, 0),
         ):
             if sheet_name not in workbook.sheetnames:
                 continue
@@ -310,7 +310,10 @@ def _selected_period(conn: DatabaseConnection, end: date) -> str:
 def _bonus_earned_formula(row: int, raw_column: str, kpi: str) -> str:
     """Return the v1.2 tier-one-then-tier-two award formula."""
 
-    criteria = f'tblKpiConfig[Population],$C{row},tblKpiConfig[KPI],"{kpi}"'
+    criteria = (
+        f'tblKpiConfig[Population],$C{row},tblKpiConfig[KPI],"{kpi}",'
+        f'tblKpiConfig[Tenure Group],Raw_Data!$V{row}'
+    )
     def amount(column: str) -> str:
         return f'SUMIFS(tblKpiConfig[{column}],{criteria})'
     bonus1 = amount("Tier 1 Bonus %")
@@ -345,6 +348,8 @@ def _bonus_control_rows(period: str) -> list[tuple[Any, ...]]:
         ("Proration", "Eligible Days above Scheduled Days", '=SUMPRODUCT(--(tblRawData[Agent ID]<>""),--(tblRawData[Eligible Days]>tblRawData[Scheduled Days]))', 0, None, "WFM / HR", "Eligible days are capped at scheduled days", None),
         ("Period", "Period differs from Dashboard selection", '=COUNTIFS(tblRawData[Agent ID],"<>",tblRawData[Period],"<>"&Dashboard!$C$2)', 0, None, "WFM", "All rows should use the selected month", None),
         ("Configuration", "Population missing from KPI configuration", '=SUMPRODUCT(--(tblRawData[Agent ID]<>""),--(COUNTIF(tblKpiConfig[Population],tblRawData[Population])=0))', 0, None, "WFM / HR", "Add the population before release", None),
+        ("Tenure", "Agents with missing or invalid tenure", '=COUNTIF(tblResults[Status],"Tenure review")', 0, None, "WFM / HR", "Mark each agent Tenured or Untenured", None),
+        ("Configuration", "Agents using incomplete tenure targets", '=COUNTIF(tblResults[Status],"KPI config review")', 0, None, "HR / Compensation", "Approve every tier-one target for the agent's population and tenure", None),
         ("Data", "Duplicate Agent ID and Period", '=SUMPRODUCT((tblRawData[Agent ID]<>"")*(COUNTIFS(tblRawData[Agent ID],tblRawData[Agent ID],tblRawData[Period],tblRawData[Period])>1))/2', 0, None, "WFM", "One agent row per month", None),
         ("Policy", "Policy decisions not validated", '=COUNTIF(tblPolicyDecisions[Status],"<>Validated")', 0, None, "WFM / HR", "Every policy decision needs an owner", None),
         ("Data status", "Rows requiring review", '=COUNTIFS(tblRawData[Agent ID],"<>",tblRawData[Data Status],"<>VALIDATED")', 0, None, "WFM / HR", "Confirm incomplete records", None),
@@ -443,6 +448,7 @@ def build_bonus_performance_workbook(
     kpi_headers = [
         "population", "kpi", "direction", "tier_1_bonus_percent",
         "tier_1_target", "tier_2_bonus_percent", "tier_2_target",
+        "tenure_group",
     ]
     kpi_rows = conn.execute(
         """SELECT population, kpi, direction, tier1_bonus, tier1_target,
@@ -464,13 +470,23 @@ def build_bonus_performance_workbook(
             kpi_rows = list(DEFAULT_BONUS_KPIS)
     if not kpi_rows:
         kpi_rows = list(DEFAULT_BONUS_KPIS)
+    # Original v1.2 targets are the approved tenured baseline. Untenured
+    # targets are explicit blanks until HR/Compensation approves them; a new
+    # performance tier would change payout policy and is not inferred here.
+    if kpi_rows and all(len(row) < 8 or not row[7] for row in kpi_rows):
+        baseline = [tuple(row[:7]) + ("Tenured",) for row in kpi_rows]
+        kpi_rows = baseline + [
+            (row[0], row[1], row[2], None, None, None, None, "Untenured")
+            for row in baseline
+        ]
     kpi_sheet = book.table(
         "KPI_Config", "Bonus configuration",
-        "Population-specific targets and awards. Direction H means higher is better; L means lower is better.",
+        "Targets by population and tenure. Untenured targets require HR approval before payout.",
         kpi_headers, kpi_rows,
         editable_headers={
             "Direction", "Tier 1 Bonus %", "Tier 1 Target",
             "Tier 2 Bonus %", "Tier 2 Target",
+            "Tenure Group",
         },
     )
     voc_rows = [(0, 0), (1, .10), (2, .20), (3, .50), (4, .75), (5, 1.0)]
@@ -492,6 +508,7 @@ def build_bonus_performance_workbook(
         "monthly_fixed_salary", "target_bonus_rate",
         "reference_bonus_override", "eligible_days", "scheduled_days",
         "data_status", "team_lead", "ops_manager",
+        "tenure_group",
     ]
     raw_rows = conn.execute(
         """SELECT r.agent_id, r.agent_name, r.population, r.period, r.aht,
@@ -510,7 +527,8 @@ def build_bonus_performance_workbook(
         raw_rows = preserved["Raw_Data"]
     if len(raw_rows) > BONUS_INPUT_ROWS:
         raise ValueError(f"Bonus input has {len(raw_rows)} rows; capacity is {BONUS_INPUT_ROWS}")
-    raw_rows = list(raw_rows) + [tuple(None for _ in raw_headers)] * (BONUS_INPUT_ROWS - len(raw_rows))
+    raw_rows = [tuple(row[:21]) + ((row[21],) if len(row) > 21 else (None,)) for row in raw_rows]
+    raw_rows += [tuple(None for _ in raw_headers)] * (BONUS_INPUT_ROWS - len(raw_rows))
     raw_sheet = book.table(
         "Raw_Data", "Raw performance data",
         f"Monthly inputs for {period}. Paste or validate values here before reviewing Results.",
@@ -521,17 +539,21 @@ def build_bonus_performance_workbook(
     raw_sheet.data_validation(4, 18, 3 + BONUS_INPUT_ROWS, 18, {
         "validate": "list", "source": ["TEMPLATE", "TO REVIEW", "VALIDATED"],
     })
+    raw_sheet.data_validation(4, 21, 3 + BONUS_INPUT_ROWS, 21, {
+        "validate": "list", "source": ["Tenured", "Untenured"],
+    })
+    raw_sheet.set_column(21, 21, 18)
     raw_sheet.set_column(13, 14, None, None, {"hidden": True})
     # A legacy-formula first-occurrence index keeps Team Lead analysis live
     # when the user pastes new rows, without SORT/UNIQUE/FILTER or array CSE.
-    raw_sheet.write(3, 21, "Team Lead Index", book.report.header)
+    raw_sheet.write(3, 22, "Team Lead Index", book.report.header)
     for row in range(5, 5 + BONUS_INPUT_ROWS):
         raw_sheet.write_formula(
-            row - 1, 21,
+            row - 1, 22,
             f'=IF(T{row}="","",IF(COUNTIF($T$5:T{row},T{row})=1,'
-            f'MAX($V$4:V{row - 1})+1,""))',
+            f'MAX($W$4:W{row - 1})+1,""))',
         )
-    raw_sheet.set_column(21, 21, None, None, {"hidden": True})
+    raw_sheet.set_column(22, 22, None, None, {"hidden": True})
 
     result_headers = [
         "Agent ID", "Agent Name", "LOB", "Period", "AHT Earned",
@@ -541,7 +563,7 @@ def build_bonus_performance_workbook(
         "Currency", "Monthly Fixed Salary", "Target Bonus Rate",
         "Reference Bonus Amount", "Proration Factor", "Prorated Bonus Base",
         "Gross Payout", "Malus Deduction", "Final Payout", "Team Lead",
-        "Ops Manager",
+        "Ops Manager", "Tenure Group",
     ]
     result_rows: list[tuple[Any, ...]] = []
     row_count = BONUS_INPUT_ROWS
@@ -563,7 +585,7 @@ def build_bonus_performance_workbook(
             f'=IF($A{row}="","",Raw_Data!K{row})',
             f'=IF($A{row}="","",IFERROR(INDEX(tblVocMalus[Malus Impact],MATCH(MIN(5,MAX(0,M{row})),tblVocMalus[VOC Detractor Count],1)),1))',
             f'=IF($A{row}="","",IF({_policy_formula("Malus method", "Proportional")}="Percentage points",MAX(0,L{row}-N{row}),L{row}*(1-N{row})))',
-            f'=IF($A{row}="","",IF(COUNTIF(tblPolicyDecisions[Status],"<>Validated")>0,"Policy review",IF(Raw_Data!S{row}<>"VALIDATED","Data review",IF(U{row}="","Proration review",IF(O{row}=0,"No payout",IF(N{row}>0,"Malus applied","Eligible"))))))',
+            f'=IF($A{row}="","",IF(AND(Raw_Data!V{row}<>"Tenured",Raw_Data!V{row}<>"Untenured"),"Tenure review",IF(OR(COUNTIFS(tblKpiConfig[Population],C{row},tblKpiConfig[Tenure Group],Raw_Data!V{row})=0,COUNTIFS(tblKpiConfig[Population],C{row},tblKpiConfig[Tenure Group],Raw_Data!V{row},tblKpiConfig[Tier 1 Target],"<>")<COUNTIFS(tblKpiConfig[Population],C{row},tblKpiConfig[Tenure Group],Raw_Data!V{row})),"KPI config review",IF(COUNTIF(tblPolicyDecisions[Status],"<>Validated")>0,"Policy review",IF(Raw_Data!S{row}<>"VALIDATED","Data review",IF(U{row}="","Proration review",IF(O{row}=0,"No payout",IF(N{row}>0,"Malus applied","Eligible"))))))))',
             f'=IF($A{row}="","",Raw_Data!M{row})',
             f'=IF($A{row}="","",Raw_Data!N{row})',
             f'=IF($A{row}="","",Raw_Data!O{row})',
@@ -572,9 +594,10 @@ def build_bonus_performance_workbook(
             f'=IF(OR($A{row}="",U{row}=""),"",T{row}*U{row})',
             f'=IF(OR($A{row}="",V{row}=""),"",V{row}*L{row})',
             f'=IF(OR($A{row}="",V{row}=""),"",V{row}*L{row}-V{row}*O{row})',
-            f'=IF(OR($A{row}="",V{row}=""),"",ROUND(V{row}*O{row},IF({_policy_formula("Rounding", "Centime")}="Whole MAD",0,2)))',
+            f'=IF(OR($A{row}="",V{row}="",P{row}="Tenure review",P{row}="KPI config review"),"",ROUND(V{row}*O{row},IF({_policy_formula("Rounding", "Centime")}="Whole MAD",0,2)))',
             f'=IF($A{row}="","",Raw_Data!T{row})',
             f'=IF($A{row}="","",Raw_Data!U{row})',
+            f'=IF($A{row}="","",Raw_Data!V{row})',
         ))
     results = book.table(
         "Results", "Bonus results",
@@ -590,6 +613,7 @@ def build_bonus_performance_workbook(
     kpi_analysis_headers = [
         "kpi", "population", "configured_agents", "average_actual",
         "average_earned_weight", "agents_earning", "attainment_rate",
+        "tenure_group",
     ]
     actual_column = {
         "AHT": "E", "Productivity": "F", "PCS Score": "G",
@@ -610,30 +634,47 @@ def build_bonus_performance_workbook(
         earned = earned_column.get(kpi, "E")
         kpi_analysis_rows.append((
             f"=KPI_Config!B{row}", f"=KPI_Config!A{row}",
-            f'=COUNTIFS(Raw_Data!$C$5:$C${last},B{row},Raw_Data!$D$5:$D${last},Dashboard!$C$2)',
-            f'=IFERROR(AVERAGEIFS(Raw_Data!${actual}$5:${actual}${last},Raw_Data!$C$5:$C${last},B{row},Raw_Data!$D$5:$D${last},Dashboard!$C$2),0)',
-            f'=IFERROR(AVERAGEIFS(Results!${earned}$5:${earned}${last},Results!$C$5:$C${last},B{row},Results!$D$5:$D${last},Dashboard!$C$2),0)',
-            f'=COUNTIFS(Results!$C$5:$C${last},B{row},Results!$D$5:$D${last},Dashboard!$C$2,Results!${earned}$5:${earned}${last},">0")',
+            f'=IF(KPI_Config!E{row}="",0,COUNTIFS(Raw_Data!$C$5:$C${last},B{row},Raw_Data!$D$5:$D${last},Dashboard!$C$2,Raw_Data!$V$5:$V${last},H{row}))',
+            f'=IFERROR(AVERAGEIFS(Raw_Data!${actual}$5:${actual}${last},Raw_Data!$C$5:$C${last},B{row},Raw_Data!$D$5:$D${last},Dashboard!$C$2,Raw_Data!$V$5:$V${last},H{row}),0)',
+            f'=IFERROR(AVERAGEIFS(Results!${earned}$5:${earned}${last},Results!$C$5:$C${last},B{row},Results!$D$5:$D${last},Dashboard!$C$2,Results!$AB$5:$AB${last},H{row}),0)',
+            f'=COUNTIFS(Results!$C$5:$C${last},B{row},Results!$D$5:$D${last},Dashboard!$C$2,Results!$AB$5:$AB${last},H{row},Results!${earned}$5:${earned}${last},">0")',
             f'=IFERROR(F{row}/C{row},0)',
+            f'=KPI_Config!H{row}',
         ))
     kpi_analysis = book.table(
         "KPI_Analysis", "KPI analysis",
-        "Coverage and target attainment by KPI and population.",
+        "Coverage and target attainment by KPI, population and tenure.",
         kpi_analysis_headers,
         kpi_analysis_rows,
     )
     if kpi_analysis_rows:
+        populations_for_chart = list(dict.fromkeys(str(row[0]) for row in kpi_rows if row[0]))
+        last_analysis_row = 4 + len(kpi_analysis_rows)
+        for column, title in enumerate(("Population", "Tenured", "Untenured"), 8):
+            kpi_analysis.write(3, column, title, book.report.header)
+        for offset, population in enumerate(populations_for_chart):
+            excel_row = offset + 5
+            kpi_analysis.write(offset + 4, 8, population, book.report.body)
+            for column, tenure in ((9, "Tenured"), (10, "Untenured")):
+                kpi_analysis.write_formula(
+                    offset + 4, column,
+                    f'=IFERROR(SUMIFS($F$5:$F${last_analysis_row},$B$5:$B${last_analysis_row},I{excel_row},$H$5:$H${last_analysis_row},"{tenure}")/'
+                    f'SUMIFS($C$5:$C${last_analysis_row},$B$5:$B${last_analysis_row},I{excel_row},$H$5:$H${last_analysis_row},"{tenure}"),0)',
+                    book.report.percent,
+                )
+        kpi_analysis.set_column(8, 10, 18)
         chart = book.report.workbook.add_chart({"type": "column"})
-        chart.add_series({
-            "name": "Attainment rate",
-            "categories": ["KPI_Analysis", 4, 0, 3 + len(kpi_analysis_rows), 0],
-            "values": ["KPI_Analysis", 4, 6, 3 + len(kpi_analysis_rows), 6],
-            "fill": {"color": COLORS["teal"]}, "border": {"none": True},
-        })
-        chart.set_title({"name": "KPI attainment"})
+        for column, title, color in ((9, "Tenured", COLORS["teal"]), (10, "Untenured", COLORS["gold"])):
+            chart.add_series({
+                "name": title,
+                "categories": ["KPI_Analysis", 4, 8, 3 + len(populations_for_chart), 8],
+                "values": ["KPI_Analysis", 4, column, 3 + len(populations_for_chart), column],
+                "fill": {"color": color}, "border": {"none": True},
+            })
+        chart.set_title({"name": "KPI attainment by population and tenure"})
         chart.set_y_axis({"num_format": "0%", "major_gridlines": {"visible": False}})
-        chart.set_legend({"none": True})
-        kpi_analysis.insert_chart("I5", chart, {"x_scale": 1.1, "y_scale": 1.0})
+        chart.set_legend({"position": "bottom"})
+        kpi_analysis.insert_chart("M5", chart, {"x_scale": 1.25, "y_scale": 1.2})
 
     tl_headers = [
         "team_lead", "population", "agents", "paid_agents", "payout_rate",
@@ -644,7 +685,7 @@ def build_bonus_performance_workbook(
     for index in range(100):
         row = index + 5
         tl_rows.append((
-            f'=IFERROR(INDEX(Raw_Data!$T$5:$T${last},MATCH(ROWS($A$5:A{row}),Raw_Data!$V$5:$V${last},0)),"")',
+            f'=IFERROR(INDEX(Raw_Data!$T$5:$T${last},MATCH(ROWS($A$5:A{row}),Raw_Data!$W$5:$W${last},0)),"")',
             "All",
             f'=IF(A{row}="","",COUNTIFS(Results!$Z$5:$Z${last},A{row},Results!$D$5:$D${last},Dashboard!$C$2))',
             f'=IF(A{row}="","",COUNTIFS(Results!$Z$5:$Z${last},A{row},Results!$D$5:$D${last},Dashboard!$C$2,Results!$Y$5:$Y${last},">0"))',
@@ -683,7 +724,9 @@ def build_bonus_performance_workbook(
             population,
             f'=COUNTIFS(Results!$C$5:$C${last},A{row},Results!$D$5:$D${last},$C$2)',
             f'=COUNTIFS(Results!$C$5:$C${last},A{row},Results!$D$5:$D${last},$C$2,Results!$Y$5:$Y${last},">0")',
-            f'=IFERROR(C{row}/B{row},0)',
+            # Dashboard action cells occupy A, E, I, M... because each value
+            # is a four-column visual block. C/B were both empty cells.
+            f'=IFERROR(I{row}/E{row},0)',
             f'=SUMIFS(Results!$Y$5:$Y${last},Results!$C$5:$C${last},A{row},Results!$D$5:$D${last},$C$2)',
             f'=IFERROR(AVERAGEIFS(Results!$Y$5:$Y${last},Results!$C$5:$C${last},A{row},Results!$D$5:$D${last},$C$2,Results!$Y$5:$Y${last},">0"),0)',
             f'=IFERROR(AVERAGEIFS(Results!$O$5:$O${last},Results!$C$5:$C${last},A{row},Results!$D$5:$D${last},$C$2),0)',
@@ -714,10 +757,15 @@ def build_bonus_performance_workbook(
             (("Total payout", tuple(row[4] for row in population_rows), COLORS["gold"]),),
         ),
         right_chart=V2ChartSpec(
-            "KPI ATTAINMENT", "bar",
-            tuple(f'=KPI_Config!B{index + 5}&" / "&KPI_Config!A{index + 5}'
-                  for index, _row in enumerate(kpi_analysis_rows)),
-            (("Attainment rate", tuple(row[6] for row in kpi_analysis_rows), COLORS["teal"]),),
+            "KPI ATTAINMENT BY POPULATION", "bar",
+            tuple(populations[:8]),
+            (("KPI opportunities earned", tuple(
+                f'=IFERROR(SUMIFS(KPI_Analysis!$F$5:$F${4 + len(kpi_analysis_rows)},'
+                f'KPI_Analysis!$B$5:$B${4 + len(kpi_analysis_rows)},A{index + 25})/'
+                f'SUMIFS(KPI_Analysis!$C$5:$C${4 + len(kpi_analysis_rows)},'
+                f'KPI_Analysis!$B$5:$B${4 + len(kpi_analysis_rows)},A{index + 25}),0)'
+                for index, _ in enumerate(population_rows)
+            ), COLORS["teal"]),),
             "percent", 0, 1,
         ),
         action_title="Population payout summary",

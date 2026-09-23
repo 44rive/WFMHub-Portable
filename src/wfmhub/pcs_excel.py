@@ -1,9 +1,7 @@
-"""Inspect and operate the permanent PCS workbook on Windows Excel.
+"""Inspect and synchronize the permanent PCS workbook on Windows Excel.
 
-The Python report generator can create a valid ``.xlsx`` file, but Power Query's
-binary mashup parts are owned by desktop Excel.  The packaged Windows helper uses
-Excel automation to install the six governed queries, refresh them, and save the
-same collaborative workbook.
+The packaged Windows helper copies six governed CSV feeds into ordinary Excel
+tables without replacing the tables or touching the collaborative coaching log.
 """
 
 from __future__ import annotations
@@ -22,7 +20,7 @@ from openpyxl import load_workbook
 from .config import Config
 
 
-PCS_TEMPLATE_VERSION = "1.2.0"
+PCS_TEMPLATE_VERSION = "1.3.0"
 PCS_PRESENTATION_SHEETS = ("OVERVIEW", "COACHING", "_PCS_CALC")
 PCS_PRESENTATION_NAMES = (
     "PCS_LOB_DATA", "PCS_AGENT_DATA", "PCS_DAILY_DATA", "PCS_COACH_DATA",
@@ -55,11 +53,9 @@ class PCSTrackerState:
         return self.template_version == PCS_TEMPLATE_VERSION
 
     @property
-    def queries_installed(self) -> bool:
+    def feeds_synced(self) -> bool:
         return (
-            self.setup_state == "YES"
-            and self.has_connections
-            and self.query_parts >= 6
+            self.setup_state == "READY"
         )
 
 
@@ -119,7 +115,7 @@ def _pcs_data_freshness(workbook) -> tuple[str | None, str | None]:
 
 
 def _presentation_problem(workbook) -> str | None:
-    """Detect presentation formulas that Power Query installation could break."""
+    """Detect presentation formulas or names broken by external workbook edits."""
 
     problems: list[str] = []
     for sheet_name in PCS_PRESENTATION_SHEETS:
@@ -193,7 +189,7 @@ def inspect_pcs_tracker(path: Path, feed_folder: Path | None = None) -> PCSTrack
         path=path,
         exists=True,
         template_version=setup.get("Template Version"),
-        setup_state=setup.get("Power Query Installed", "NO").upper(),
+        setup_state=setup.get("Feed Sync", "NOT RUN").upper(),
         workbook_data_through=workbook_through,
         workbook_feed_refreshed_at=workbook_feed_refreshed,
         workbook_refreshed_at=setup.get("Workbook Last Refreshed"),
@@ -207,10 +203,10 @@ def inspect_pcs_tracker(path: Path, feed_folder: Path | None = None) -> PCSTrack
 
 
 def _helper_path(config: Config) -> Path:
-    packaged = config.home / "_system" / "scripts" / "Install-PCSWorkbook.ps1"
+    packaged = config.home / "_system" / "scripts" / "Sync-PCSWorkbook.ps1"
     if packaged.is_file():
         return packaged
-    development = config.home / "packaging" / "windows" / "Install-PCSWorkbook.ps1"
+    development = config.home / "packaging" / "windows" / "Sync-PCSWorkbook.ps1"
     if development.is_file():
         return development
     raise PCSExcelError("The packaged PCS Excel helper is missing")
@@ -235,33 +231,22 @@ def run_pcs_excel_action(
     *,
     open_after: bool = False,
 ) -> str:
-    """Run the reviewed Excel COM helper on Windows and return its status line."""
+    """Update the six feed tables in place using desktop Excel."""
 
     if os.name != "nt":
         raise PCSExcelError(
-            "PCS Power Query installation and workbook refresh require Windows desktop Excel"
+            "PCS workbook feed sync requires Windows desktop Excel"
         )
     normalized_action = action.strip().title()
-    if normalized_action not in {"Install", "Refresh"}:
+    if normalized_action != "Sync":
         raise PCSExcelError(f"Unknown PCS Excel action: {action}")
     folder = config.feed / "PCS"
-    if normalized_action == "Install":
-        # Recreate query definitions before every explicit install/repair.
-        from .shared_feeds import publish_pcs_power_query_scripts
-
-        publish_pcs_power_query_scripts(folder)
     command = [
         _powershell(), "-NoLogo", "-NoProfile", "-NonInteractive",
         "-ExecutionPolicy", "Bypass", "-File", str(_helper_path(config)),
         "-Action", normalized_action,
         "-WorkbookPath", str(workbook.resolve()),
         "-FeedFolder", str(folder.resolve()),
-        "-FilterQueryPath", str(folder / "POWER_QUERY_PCS_FILTERS_LOCAL.txt"),
-        "-AgentQueryPath", str(folder / "POWER_QUERY_PCS_AGENT_LOCAL.txt"),
-        "-CoachingQueryPath", str(folder / "POWER_QUERY_COACHING_QUEUE_LOCAL.txt"),
-        "-LobQueryPath", str(folder / "POWER_QUERY_PCS_LOB_LOCAL.txt"),
-        "-ResultsQueryPath", str(folder / "POWER_QUERY_PCS_RESULTS_LOCAL.txt"),
-        "-DailyQueryPath", str(folder / "POWER_QUERY_PCS_DAILY_LOCAL.txt"),
     ]
     if open_after:
         command.append("-OpenAfter")

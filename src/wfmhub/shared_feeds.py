@@ -98,19 +98,6 @@ def _atomic_csv(path: Path, headers: Sequence[str], rows: Iterable[Sequence[Any]
     return count
 
 
-def _atomic_text(path: Path, content: str) -> None:
-    """Replace a small instruction asset without exposing a partial file."""
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.with_name(f".{path.name}.partial")
-    try:
-        partial.write_text(content.rstrip() + "\n", encoding="utf-8")
-        partial.replace(path)
-    except Exception:
-        partial.unlink(missing_ok=True)
-        raise
-
-
 def _available_period(
     conn: DatabaseConnection,
     table: str,
@@ -177,41 +164,6 @@ def _manifest(
     rows.extend(("Rows", count, name) for name, count in counts)
     _atomic_csv(path, ("Item", "Value", "Details"), rows)
     return path
-
-
-def _power_query_script(
-    *,
-    filename: str,
-    headers: Sequence[str],
-    types: Sequence[tuple[str, str]],
-) -> str:
-    """Return copy-ready M for a deliberately simple PCS transport query."""
-
-    required = ", ".join(f'"{value}"' for value in headers)
-    type_rows = ",\n            ".join(f'{{"{name}", {kind}}}' for name, kind in types)
-    source = f'''    FeedFolder = Setting("Local Feed Folder"),
-    FilePath = FeedFolder & (if Text.EndsWith(FeedFolder, "\\") then "" else "\\") & "{filename}",
-    Csv = Csv.Document(File.Contents(FilePath), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),'''
-    return f'''// WFMHub PCS schema {PCS_FEED_SCHEMA_VERSION}
-// Excel: Data > Get Data > Blank Query > Advanced Editor. Replace everything with this script.
-let
-    Setup = Excel.CurrentWorkbook(){{[Name="tblSetup"]}}[Content],
-    Setting = (Name as text) as text =>
-        let
-            Matches = Table.SelectRows(Setup, each Text.From([Setting]) = Name),
-            Result = if Table.RowCount(Matches) = 1 then Text.Trim(Text.From(Matches{{0}}[Value])) else error Error.Record("PCS setup", "Missing or duplicate SETUP row", [Setting = Name])
-        in
-            Result,
-{source}
-    Promoted = Table.PromoteHeaders(Csv, [PromoteAllScalars = true]),
-    Required = {{{required}}},
-    Missing = List.Difference(Required, Table.ColumnNames(Promoted)),
-    CheckedColumns = if List.IsEmpty(Missing) then Promoted else error Error.Record("PCS feed schema", "Missing required columns", [Missing = Text.Combine(Missing, ", ")]),
-    Typed = Table.TransformColumnTypes(CheckedColumns, {{
-            {type_rows}
-        }}, "en-US")
-in
-    Typed'''
 
 
 def _pcs_reporting_periods(
@@ -517,7 +469,7 @@ def pcs_filter_rows(
 ) -> list[tuple[Any, ...]]:
     """Keep each selector family in its own column pair.
 
-    Excel may resize the Power Query table on refresh. Separate columns make
+    Excel resizes the ordinary feed table in place. Separate columns make
     it impossible for the last period to become the first LOB, or for a LOB
     to appear as a team leader, even while the table changes height.
     """
@@ -841,84 +793,6 @@ def pcs_coaching_cache_rows(
     return output
 
 
-def publish_pcs_power_query_scripts(folder: Path) -> tuple[Path, ...]:
-    """Materialize the six local PCS query definitions.
-
-    Query definitions are a versioned workbook contract, not business data.
-    They are recreated from code so installation never depends on feed state.
-    """
-    filter_types = (
-        ("Period", "type text"), ("LOB", "type text"),
-        ("Team Key", "type text"), ("Team Leader", "type text"),
-        ("Agent Key", "type text"), ("Agent", "type text"),
-    )
-    queue_types = (
-        ("View Key", "type text"), ("Rank", "Int64.Type"),
-        ("Date", "type date"), ("LOB", "type text"),
-        ("Team Leader", "type text"), ("Agent", "type text"),
-        ("Agent ID", "type text"),
-        ("Q1 Score", "type number"), ("Customer Comment", "type text"),
-        ("Priority", "type text"), ("Call ID", "type text"),
-        ("Coaching Key", "type text"), ("Data Through", "type date"),
-        ("Feed Refreshed At", "type datetime"),
-    )
-    lob_types = (
-        ("View Key", "type text"), ("Record Type", "type text"),
-        ("Rank", "Int64.Type"), ("LOB", "type text"),
-        ("Valid Q1", "Int64.Type"), ("PCS", "type number"),
-        ("Prior PCS", "type number"), ("Change", "type number"),
-        ("Participation", "type number"), ("Coaching Due", "Int64.Type"),
-        ("Data Through", "type date"),
-        ("Feed Refreshed At", "type datetime"),
-    )
-    result_types = (
-        ("Period View", "type text"), ("Period Start", "type date"),
-        ("Period End", "type date"), ("Scope Level", "type text"),
-        ("LOB", "type text"), ("Team Leader", "type text"),
-        ("Agent Selector", "type text"), ("Agent ID", "type text"),
-        ("Agent", "type text"), ("Language", "type text"),
-        ("PCS Average", "type number"), ("Participation Rate", "type number"),
-        ("Valid Q1", "Int64.Type"), ("PCS Status 1", "Int64.Type"),
-        ("Q1 Nonblank", "Int64.Type"), ("Score <= 3", "Int64.Type"),
-        ("Score > 3", "Int64.Type"), ("Inbound Call Legs", "Int64.Type"),
-        ("Sample State", "type text"), ("Data Through", "type date"),
-        ("Feed Refreshed At", "type datetime"),
-    )
-    agent_types = (
-        ("View Key", "type text"), ("Rank", "Int64.Type"),
-        ("Agent", "type text"), ("Agent ID", "type text"),
-        ("LOB", "type text"), ("Team Leader", "type text"),
-        ("PCS", "type number"), ("Prior PCS", "type number"),
-        ("Change", "type number"), ("Participation", "type number"),
-        ("Valid Q1", "Int64.Type"), ("Coaching Due", "Int64.Type"),
-        ("Data Through", "type date"),
-        ("Feed Refreshed At", "type datetime"),
-    )
-    daily_types = (
-        ("View Key", "type text"), ("Rank", "Int64.Type"),
-        ("Date", "type date"), ("PCS", "type number"),
-        ("Participation", "type number"), ("Valid Q1", "Int64.Type"),
-        ("Coaching Due", "Int64.Type"), ("Data Through", "type date"),
-        ("Feed Refreshed At", "type datetime"),
-    )
-    specifications = (
-        ("POWER_QUERY_PCS_FILTERS_LOCAL.txt", "PCS_FILTER_LIST_CURRENT.csv", PCS_FILTER_HEADERS, filter_types),
-        ("POWER_QUERY_COACHING_QUEUE_LOCAL.txt", "PCS_COACHING_OPPORTUNITY_CURRENT.csv", PCS_COACHING_HEADERS, queue_types),
-        ("POWER_QUERY_PCS_LOB_LOCAL.txt", "PCS_LOB_SCORECARD_CURRENT.csv", PCS_LOB_SCORECARD_HEADERS, lob_types),
-        ("POWER_QUERY_PCS_AGENT_LOCAL.txt", "PCS_AGENT_SCORECARD_CURRENT.csv", PCS_AGENT_SCORECARD_HEADERS, agent_types),
-        ("POWER_QUERY_PCS_DAILY_LOCAL.txt", "PCS_DAILY_SCORECARD_CURRENT.csv", PCS_DAILY_SCORECARD_HEADERS, daily_types),
-        ("POWER_QUERY_PCS_RESULTS_LOCAL.txt", "PCS_RESULTS_CURRENT.csv", PCS_RESULTS_HEADERS, result_types),
-    )
-    paths = []
-    for script_name, filename, headers, types in specifications:
-        path = folder / script_name
-        _atomic_text(path, _power_query_script(
-            filename=filename, headers=headers, types=types,
-        ))
-        paths.append(path)
-    return tuple(paths)
-
-
 def publish_pcs_feeds(
     conn: DatabaseConnection,
     config: Config,
@@ -967,13 +841,12 @@ def publish_pcs_feeds(
     path = folder / "PCS_COACHING_OPPORTUNITY_CURRENT.csv"
     counts.append((path.name, _atomic_csv(path, PCS_COACHING_HEADERS, rows)))
     files.append(path)
-    files.extend(publish_pcs_power_query_scripts(folder))
     files.append(_manifest(
         folder, "PCS", start, end, counts,
         schema_version=PCS_FEED_SCHEMA_VERSION,
         extra=(
             ("Metric catalog version", metric_catalog.version, metric_catalog.sha256),
-            ("Workbook load", "Lightweight tables only", "No raw PCS data worksheet"),
+            ("Workbook load", "Six read-only tables synced in place", "No raw PCS data worksheet"),
         ),
     ))
     return SharedFeedResult("PCS", tuple(files), sum(count for _, count in counts))

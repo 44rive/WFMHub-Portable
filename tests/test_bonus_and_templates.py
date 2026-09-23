@@ -114,8 +114,18 @@ class BonusImportTests(unittest.TestCase):
                 )
                 workbook = load_workbook(path, read_only=False, data_only=False)
                 try:
-                    self.assertEqual(workbook["KPI_Config"].max_row, 46)
+                    self.assertEqual(workbook["KPI_Config"].max_row, 88)
                     self.assertEqual(len(DEFAULT_BONUS_KPIS), 42)
+                    self.assertEqual(workbook["KPI_Config"]["H5"].value, "Tenured")
+                    self.assertEqual(workbook["KPI_Config"]["H47"].value, "Untenured")
+                    self.assertIsNone(workbook["KPI_Config"]["E47"].value)
+                    self.assertEqual(workbook["Raw_Data"]["V4"].value, "Tenure Group")
+                    self.assertIn("Raw_Data!$V5", workbook["Results"]["E5"].value)
+                    self.assertEqual(workbook["Dashboard"]["M25"].value, "=IFERROR(I25/E25,0)")
+                    self.assertEqual(workbook["KPI_Analysis"]["I4"].value, "Population")
+                    self.assertEqual(workbook["KPI_Analysis"]["J4"].value, "Tenured")
+                    self.assertEqual(workbook["KPI_Analysis"]["K4"].value, "Untenured")
+                    self.assertEqual(len(workbook["KPI_Analysis"]._charts[0].series), 2)
                     self.assertEqual(
                         {row[0] for row in DEFAULT_BONUS_KPIS},
                         {"Ford GER", "Ford Dutch", "OEM FR", "RSA FR", "RSA NL", "RSA VL"},
@@ -196,7 +206,7 @@ class BonusImportTests(unittest.TestCase):
                 ])
                 self.assertEqual(workbook.active.title, "Dashboard")
                 self.assertEqual(len(workbook["Dashboard"]._charts), 2)
-                self.assertTrue(workbook["Dashboard"]["AJ2"].value.startswith('=KPI_Config!B5&'))
+                self.assertEqual(workbook["Dashboard"]["AJ2"].value, "OEM")
                 self.assertEqual(
                     [workbook["Dashboard"][cell].value for cell in ("A5", "H5", "O5", "V5")],
                     ["TOTAL PAYOUT", "PAID AGENTS", "AVG PAID PAYOUT", "REVIEW ITEMS"],
@@ -211,6 +221,8 @@ class BonusImportTests(unittest.TestCase):
             namespace = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
             with ZipFile(path) as archive:
                 self.assertIsNone(archive.testzip())
+                self.assertNotIn(b"plotVisOnly", archive.read("xl/charts/chart3.xml"))
+                self.assertNotIn(b"plotVisOnly", archive.read("xl/charts/chart4.xml"))
                 for filename in archive.namelist():
                     if not filename.startswith("xl/worksheets/sheet") or not filename.endswith(".xml"):
                         continue

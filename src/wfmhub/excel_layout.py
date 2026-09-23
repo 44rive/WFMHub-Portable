@@ -498,6 +498,9 @@ def _v2_chart(workbook, ws, spec: V2ChartSpec, start_column: int):
     for row, value in enumerate(categories, first_row):
         ws.write(row, category_column, value)
     chart = workbook.add_chart({"type": spec.kind})
+    # The dashboard's chart source cells live in hidden helper columns.
+    # Without this flag Excel silently plots no series after recalculation.
+    chart.show_hidden_data()
     for offset, (name, values, color) in enumerate(spec.series, 1):
         normalized = tuple(values)
         if not normalized:

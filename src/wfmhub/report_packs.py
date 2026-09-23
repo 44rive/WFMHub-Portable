@@ -34,7 +34,7 @@ REPORT_PACKS = {
     "pcs": ReportPack(
         key="pcs",
         current_filename="PCS Live Tracker.xlsx",
-        purpose="Permanent direct-CSV Power Query PCS tracker with one combined coaching workspace.",
+        purpose="Permanent PCS tracker with in-place CSV feed sync and collaborative coaching.",
     ),
     "bonus": ReportPack(
         key="bonus",

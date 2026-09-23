@@ -37,7 +37,8 @@ versions deterministically, and reads row-level dates from multi-day files.
 
 `PCS Live Tracker.xlsx` is one permanent shared file. WFMHub processes new FTE
 and Call-by-Call evidence and replaces the fixed CSV files under `Feed/PCS`.
-Excel's **Data > Refresh All** pulls those CSVs into the tracker. Team leaders
+Close Excel and choose **Sync PCS workbook** in WFMHub to update the six data
+tables in place. Team leaders
 and Quality update only the coaching table. See [PCS workflow](docs/PCS.md).
 
 ## Updates

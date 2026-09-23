@@ -1,5 +1,20 @@
 # Release notes
 
+## 1.1.0
+
+- Fixed RTM overnight carry-over: prior-day night shifts now contribute their
+  after-midnight Agent Status to today's Logged, Productive, Available and
+  staffing intervals without adding yesterday's attendance to today's KPIs.
+- Replaced the fragile PCS Power Query installer with an in-place Excel CSV
+  sync. The permanent tracker keeps its ordinary tables, dropdowns, charts and
+  human-owned coaching actions; old trackers migrate once with coaching backup.
+- Fixed the shared dashboard charts to plot hidden helper data, corrected
+  Bonus population payout-rate references, and made KPI attainment readable by
+  population and tenure.
+- Added Tenure Group to Bonus Raw_Data and separate Untenured KPI configuration.
+  The original matrix remains the Tenured baseline; missing Untenured targets
+  block final payout until approved rather than inventing a third tier.
+
 ## 1.0.0
 
 - Established one clean WFMHub product baseline and current SQLite schema.
