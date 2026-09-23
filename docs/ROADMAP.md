@@ -1,5 +1,13 @@
 # Roadmap
 
+## RTM Flash reassessment
+
+`roadmap/rtm-flash-reassessment/README.md` records the proposed per-LOB Flash,
+hourly/15-minute detail, Agent Status workforce reconciliation, unscheduled
+coverage, live not-logged action wording, and PCS manual Power Query guide.
+It preserves `Other Tasks` as BO. This is a design note, not active behavior;
+the proposed report split awaits validation.
+
 ## Absence submission app
 
 `roadmap/absence-submission-app/` contains the approved future Power Apps /
