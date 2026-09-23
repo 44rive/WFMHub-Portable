@@ -9,9 +9,9 @@ real operational examples before implementation.
 - Keep `Other Tasks` classified as BO in the effective status rulebook. Do not
   recategorize it merely to make an OEM headcount look smaller.
 - PCS remains one collaborative workbook. WFM will set up its own Power Query
-  connections to the six stable `Feed/PCS/*_CURRENT.csv` presentation feeds.
-  Provide a beginner-friendly, exact click-by-click setup and validation guide
-  before changing the PCS workbook contract. Raw Call-by-Call rows must not be
+  connections to the six `*_CURRENT.csv` presentation feeds after copying them
+  from the Hub to a fixed SharePoint CSV folder. Provide a beginner-friendly,
+  exact click-by-click setup and validation guide. Raw Call-by-Call rows must not be
   loaded into worksheets. The current six hidden feed tables and overview
   formulas need an explicit one-time transition if Power Query replaces the
   desktop Excel sync; connection-only queries cannot feed those formulas by
@@ -80,6 +80,26 @@ The internal index should flag `handled calls > 0 AND logged HC = 0`, BO HC
 above plausible roster capacity, stale Agent Status, missing schedules,
 unmapped statuses, overlapping shifts, and missing Staff Type mappings. These
 are review alerts, not invented explanations of service-level loss.
+
+## Issues and drivers — approved direction, not yet implemented
+
+Make a small actionable diagnosis block on each Flash, not a decorative KPI
+wall. Separate four classes: (1) coverage shortfall from scheduled/no-show or
+logged-but-unavailable capacity, (2) demand above the Staff Type forecast,
+(3) service symptoms from Call-by-Call queues and interval SL components, and
+(4) source/data confidence such as stale Agent Status or missing schedule.
+Name the exact affected 15-minute intervals and agents where evidence allows.
+Do not claim a no-show *caused* an SL drop just because both happened in the
+same interval; call it a plausible capacity contributor and show other drivers.
+
+For current-day requirements, keep Verint required FTE as the planning
+benchmark. A no-show does **not** reduce that requirement. Show separately:
+required FTE, scheduled net FTE after approved PTO/Away, observed on-service
+FTE, and each gap versus required. For completed intervals, use observed
+evidence; for future intervals, use a clearly labelled scenario that carries
+forward only confirmed unfilled coverage, not a false certainty about future
+attendance. The Flash should answer whom to call or redeploy now and where
+coverage is likely at risk, with no manual action ledger inside the workbook.
 
 ## Acceptance gate
 

@@ -243,7 +243,7 @@ def refresh(
         )
     print(f"Agent PCS   : {model.pcs_rows:,} agent-day rows")
     if pcs_only:
-        print("Excel layer : Fixed CSV feeds updated; run Sync PCS workbook with Excel closed")
+        print("Excel layer : Fixed PCS CSV feeds updated; copy them to the shared source folder, then refresh Excel")
     else:
         print(f"Shared data : {sum(item.rows for item in shared_feeds):,} feed rows updated")
     if pcs_only:
@@ -801,7 +801,7 @@ def _build_latest_pcs_report(home: Path) -> None:
         raise RuntimeError("PCS processing finished but no tracker was created")
     print(f"PCS tracker   : {report}")
     print(f"PCS CSV feeds : {config.feed / 'PCS'}")
-    print("Next          : Close Excel and choose Sync PCS workbook")
+    print("Next          : Copy the six CSVs to the fixed SharePoint folder, then Excel > Data > Refresh All")
 
 
 def _build_pcs_from_database(home: Path) -> Path:
@@ -814,7 +814,7 @@ def _build_pcs_from_database(home: Path) -> Path:
         report = build_report_pack("pcs", conn, config, start, end)
     print(f"PCS tracker   : {report}")
     print(f"PCS CSV feeds : {config.feed / 'PCS'}")
-    print("Next          : Close Excel and choose Sync PCS workbook")
+    print("Next          : Copy the six CSVs to the fixed SharePoint folder, then Excel > Data > Refresh All")
     return report
 
 
@@ -828,6 +828,13 @@ def _sync_pcs_workbook(home: Path) -> None:
             "No PCS Live Tracker exists. Choose Update PCS data first."
         )
     state = inspect_pcs_tracker(report, config.feed / "PCS")
+    if state.has_connections or state.query_parts:
+        raise RuntimeError(
+            "This PCS workbook has Excel queries/connections. Do not run legacy Hub Sync: "
+            "copy the six current CSVs to its SharePoint source folder, then use "
+            "Excel desktop > Data > Refresh All and save the same workbook. "
+            "The Hub has not changed your workbook."
+        )
     if not state.current_template or state.problem:
         print("PCS tracker   : rebuilding the workbook contract first")
         report = _build_pcs_from_database(home)
@@ -854,7 +861,7 @@ def _pcs_menu(home: Path) -> None:
     print(f"Workbook: {workbook}")
     print("1. Update PCS data (load new FTE + Call-by-Call)")
     print("2. Update CSV feeds from current database (fast)")
-    print("3. Sync PCS workbook from CSV feeds (close Excel)")
+    print("3. Show PCS CSV-to-Excel refresh steps")
     print("4. Open permanent PCS Live Tracker")
     print("5. Set permanent PCS workbook path")
     print("6. Back")
@@ -864,7 +871,14 @@ def _pcs_menu(home: Path) -> None:
     elif choice == "2":
         _build_pcs_from_database(home)
     elif choice == "3":
-        _sync_pcs_workbook(home)
+        guide = home / "_system" / "docs" / "PCS_POWER_QUERY_SETUP.md"
+        if not guide.is_file():
+            guide = home / "docs" / "PCS_POWER_QUERY_SETUP.md"
+        print(f"\n1. Copy the SIX *_CURRENT.csv files from {config.feed / 'PCS'}")
+        print("2. Replace the same filenames in your fixed, synced SharePoint PCS source folder.")
+        print("3. Wait for OneDrive sync. Open the ONE shared tracker in desktop Excel.")
+        print("4. Data > Refresh All; wait for all six queries, check cards and coaching, save.")
+        print(f"First-time setup: read {guide}. Do not use legacy Hub Sync.")
     elif choice == "4":
         report = latest_pcs_report(config)
         if report is None:
@@ -883,7 +897,7 @@ def _pcs_menu(home: Path) -> None:
         print(f"Permanent PCS workbook: {path.resolve()}")
         print("Close the existing local PCS tracker before the first update.")
         print("The next PCS update will copy the current tracker once if this file is absent.")
-        print("Share this ONE SharePoint file link with the team; future syncs update it in place.")
+        print("Share this ONE SharePoint file link with the team; you refresh it in desktop Excel.")
     elif choice != "6":
         raise ValueError("Please choose a number from 1 to 6")
 

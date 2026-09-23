@@ -123,7 +123,7 @@ try {
         throw "PCS tracker is open or locked by OneDrive. Close Excel, wait for sync, then retry."
     }
     if ($script:Workbook.Queries.Count -gt 0) {
-        throw "This is the old Power Query tracker. Run Update PCS data with this release to migrate it once."
+        throw "This workbook has Power Query. Hub Sync is legacy and must not edit it. Replace the six SharePoint CSVs, then use Excel desktop > Data > Refresh All and save the same workbook."
     }
     # Recalculate once after all six bulk writes, not after every table resize.
     $script:Excel.Calculation = -4135  # xlCalculationManual

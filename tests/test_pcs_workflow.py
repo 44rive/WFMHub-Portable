@@ -29,6 +29,7 @@ from wfmhub.pcs_tracker import (
     PCS_TRACKER_VERSION,
     _as_date,
     _tracker_contract_version,
+    build_pcs_live_tracker,
     ensure_pcs_tracker,
     latest_pcs_report,
     tracker_path,
@@ -433,6 +434,53 @@ class PCSWorkflowTests(unittest.TestCase):
             finally:
                 migrated.close()
 
+    def test_query_tracker_is_not_rebuilt_on_template_version_change(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = SimpleNamespace(reports=root / "Reports", feed=root / "Feed")
+            with patch("wfmhub.pcs_tracker.PCS_TRACKER_VERSION", "1.0.0"):
+                path = ensure_pcs_tracker(config, **_rows())
+            with zipfile.ZipFile(path, "a") as archive:
+                archive.writestr(
+                    "xl/connections.xml",
+                    '<connections xmlns="http://schemas.openxmlformats.org/'
+                    'spreadsheetml/2006/main" count="0"/>',
+                )
+            before = path.read_bytes()
+            self.assertEqual(ensure_pcs_tracker(config, **_rows()), path)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(_tracker_contract_version(path), "1.0.0")
+
+    def test_pcs_update_publishes_csv_without_rebuilding_query_tracker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            path = root / PCS_TRACKER_FILENAME
+            path.write_bytes(b"shared workbook stays untouched")
+            conn = MagicMock()
+            conn.execute.return_value.fetchone.return_value = (
+                date(2026, 9, 1), date(2026, 9, 8),
+            )
+            config = SimpleNamespace(reports=root, feed=root / "Feed")
+            with (
+                patch("wfmhub.pcs_tracker.publish_pcs_feeds") as publish,
+                patch("wfmhub.pcs_tracker._seed_dedicated_tracker", return_value=path),
+                patch("wfmhub.pcs_tracker._tracker_contract_version", return_value="1.0.0"),
+                patch(
+                    "wfmhub.pcs_tracker.inspect_pcs_tracker",
+                    return_value=SimpleNamespace(has_connections=True, query_parts=6),
+                ),
+                patch("wfmhub.pcs_tracker.pcs_dashboard_cache_rows") as rebuild,
+            ):
+                self.assertEqual(
+                    build_pcs_live_tracker(
+                        conn, config, date(2026, 9, 1), date(2026, 9, 8),
+                    ),
+                    path,
+                )
+            publish.assert_called_once()
+            rebuild.assert_not_called()
+            self.assertEqual(path.read_bytes(), b"shared workbook stays untouched")
+
     def test_migration_refuses_to_replace_unreadable_coaching_workbook(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -499,7 +547,10 @@ class PCSWorkflowTests(unittest.TestCase):
                 patch("wfmhub.cli.latest_pcs_report", return_value=report),
                 patch(
                     "wfmhub.cli.inspect_pcs_tracker",
-                    return_value=SimpleNamespace(current_template=True, problem=None),
+                    return_value=SimpleNamespace(
+                        current_template=True, problem=None,
+                        has_connections=False, query_parts=0,
+                    ),
                 ),
                 patch("wfmhub.cli.run_pcs_excel_action", return_value="ready") as run,
             ):
@@ -512,8 +563,14 @@ class PCSWorkflowTests(unittest.TestCase):
             old_report = home / "Reports" / PCS_TRACKER_FILENAME
             repaired_report = home / "Reports" / PCS_TRACKER_FILENAME
             config = SimpleNamespace(reports=old_report.parent, feed=home / "Feed")
-            old_state = SimpleNamespace(current_template=False, problem="#REF!")
-            repaired_state = SimpleNamespace(current_template=True, problem=None)
+            old_state = SimpleNamespace(
+                current_template=False, problem="#REF!",
+                has_connections=False, query_parts=0,
+            )
+            repaired_state = SimpleNamespace(
+                current_template=True, problem=None,
+                has_connections=False, query_parts=0,
+            )
             with (
                 patch("wfmhub.cli.load_config", return_value=config),
                 patch("wfmhub.cli.latest_pcs_report", return_value=old_report),
@@ -530,6 +587,29 @@ class PCSWorkflowTests(unittest.TestCase):
                 _sync_pcs_workbook(home)
             repair.assert_called_once_with(home)
             run.assert_called_once_with(config, repaired_report, "Sync")
+
+    def test_legacy_sync_refuses_query_workbook_without_rebuild(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            report = home / "Reports" / PCS_TRACKER_FILENAME
+            report.parent.mkdir()
+            report.write_bytes(b"tracker")
+            config = SimpleNamespace(reports=report.parent, feed=home / "Feed")
+            state = SimpleNamespace(
+                current_template=False, problem="#REF!",
+                has_connections=True, query_parts=6,
+            )
+            with (
+                patch("wfmhub.cli.load_config", return_value=config),
+                patch("wfmhub.cli.latest_pcs_report", return_value=report),
+                patch("wfmhub.cli.inspect_pcs_tracker", return_value=state),
+                patch("wfmhub.cli._build_pcs_from_database") as rebuild,
+                patch("wfmhub.cli.run_pcs_excel_action") as sync,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Excel queries/connections"):
+                    _sync_pcs_workbook(home)
+            rebuild.assert_not_called()
+            sync.assert_not_called()
 
     def test_pcs_refresh_uses_targeted_model_without_all_shared_feeds(self):
         home = Path("/test/wfmhub")

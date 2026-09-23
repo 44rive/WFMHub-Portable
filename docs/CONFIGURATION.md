@@ -21,7 +21,9 @@ local writable disk.
 `paths.pcs_workbook = ""` keeps PCS under `Reports`. Set it through the PCS
 menu to the local `.xlsx` path in a synced WFM SharePoint library. This does
 not relocate the database, feeds, or other reports. A SharePoint web URL is
-not supported by the desktop-Excel sync.
+not a local Excel file path. For PCS Power Query, put the six current CSVs in
+a fixed SharePoint folder and connect using its locally synced File Explorer
+path; see [the PCS setup guide](PCS_POWER_QUERY_SETUP.md).
 
 ## Mappings
 

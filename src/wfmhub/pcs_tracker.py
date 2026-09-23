@@ -1,8 +1,8 @@
-"""Permanent PCS tracker with in-place CSV feed synchronization.
+"""Permanent PCS tracker with six governed CSV presentation feeds.
 
 Python and SQLite calculate governed PCS products and publish fixed CSV feeds.
-Desktop Excel updates six ordinary tables in place; it never deletes formulas,
-charts, selectors or the human-owned coaching log.
+WFM refreshes the same shared Excel workbook through Power Query. The Hub does
+not rewrite its formulas, charts, selectors or human-owned coaching log.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ from .shared_feeds import (
     pcs_result_rows,
     publish_pcs_feeds,
 )
+from .pcs_excel import inspect_pcs_tracker
 
 
 PCS_TRACKER_FILENAME = "PCS Live Tracker.xlsx"
@@ -417,8 +418,8 @@ def _add_filter_names(workbook) -> None:
         "PCS_AGENT_ACTIVE",
         group_range(agent_group, "E", "F"),
     )
-    # The feed sync resizes ordinary tables in place. Sheet-backed names are
-    # retained to keep formulas independent of Excel table implementation.
+    # Sheet-backed names keep formulas independent of whether Excel's table is
+    # populated by the legacy sync or by a user-created Power Query.
     for name, sheet, width in (
         ("PCS_LOB_DATA", "_PCS_LOB", len(PCS_LOB_SCORECARD_HEADERS)),
         ("PCS_AGENT_DATA", "_PCS_AGENT", len(PCS_AGENT_SCORECARD_HEADERS)),
@@ -741,13 +742,13 @@ def _add_setup(report: ExcelReport, config: Config) -> None:
     worksheet = report.add_table_sheet(
         "SETUP",
         "PCS CONNECTION SETUP",
-        "Run Sync PCS workbook after Update PCS data. The Hub updates read-only tables in place; coaching stays yours.",
+        "WFMHub updates local CSVs. Replace the six SharePoint CSVs, then refresh this one shared workbook in desktop Excel.",
         ["Setting", "Value", "Why it exists"],
         [
-            ("Feed Sync", "NOT RUN", "Set to READY after the six feed tables are updated"),
+            ("Feed Sync", "PQ SETUP", "After six queries work, mark PQ READY; see PCS_POWER_QUERY_SETUP.md in Hub docs"),
             ("Connection Owner", "Anass ASSRI", "One owner controls workbook updates"),
-            ("Local Feed Folder", str(folder), "Fixed clean CSV folder outside the workbook"),
-            ("Workbook Last Refreshed", "Never", "Written after desktop Excel saves the synchronized tables"),
+            ("Hub CSV Folder", str(folder), "Copy six current CSVs from here to a fixed SharePoint folder"),
+            ("Workbook Last Refreshed", "See Excel Queries", "Refresh in desktop Excel, then save the shared workbook"),
             ("Template Version", PCS_TRACKER_VERSION, "Controls safe tracker rebuilds"),
         ],
         editable_headers={"Value"},
@@ -765,8 +766,8 @@ def _add_help(report: ExcelReport) -> None:
         ["Step", "What to do", "Where", "Result"],
         [
             (1, "Run Update PCS data", "WFMHub", "SQLite and the fixed clean CSV feeds are refreshed"),
-            (2, "Close Excel and run Sync PCS workbook", "PCS menu", "Six feed tables update in place; coaching remains unchanged"),
-            (3, "Open PCS Live Tracker", "Excel", "Overview cards, charts and dropdowns reflect the synced feed"),
+            (2, "Replace six CSVs in the fixed SharePoint folder", "File Explorer", "Keep filenames and wait for OneDrive sync"),
+            (3, "Open the shared tracker; Data > Refresh All; save", "Excel desktop", "Power Query reads the six SharePoint CSVs; coaching remains unchanged"),
             (4, "Choose Period, then LOB, Team Leader and Agent", "OVERVIEW", "Cards, charts and both tables update together"),
             (5, "After changing a parent, reset child filters to All", "OVERVIEW", "Every selection remains valid and easy to understand"),
             (6, "Use Period and LOB", "COACHING", "The exact low-score calls appear with Call ID and Coaching Key"),
@@ -792,7 +793,7 @@ def _add_audit(report: ExcelReport, generated: datetime) -> None:
             ("Created", generated),
             ("Workbook grain", "Precomputed selection caches and low-score calls"),
             ("Raw data", "External fixed CSV feeds only; no raw-data worksheet"),
-            ("Update method", "In-place Excel sync from six fixed CSV feeds"),
+            ("Update method", "Manual CSV copy, then Excel Power Query Refresh All"),
             ("KPI method", "Python/SQLite ratio of additive sums"),
             ("Human-owned table", "COACHING!tblCoachingActions"),
         ],
@@ -815,6 +816,12 @@ def ensure_pcs_tracker(
     target = _seed_dedicated_tracker(config)
     if target.is_file() and _tracker_contract_version(target) == PCS_TRACKER_VERSION:
         return target
+    if target.is_file():
+        state = inspect_pcs_tracker(target)
+        if state.has_connections or state.query_parts:
+            # Workbook-owned queries and coaching cannot safely be rebuilt by
+            # a template-version change. CSV publication may still continue.
+            return target
     existing_actions = _existing_actions(config)
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(f"{target.stem}.partial{target.suffix}")
@@ -936,6 +943,10 @@ def build_pcs_live_tracker(
     target = _seed_dedicated_tracker(config)
     if target.is_file() and _tracker_contract_version(target) == PCS_TRACKER_VERSION:
         return target
+    if target.is_file():
+        state = inspect_pcs_tracker(target)
+        if state.has_connections or state.query_parts:
+            return target
     generated = datetime.now()
     filter_rows, lob_rows, agent_rows, daily_rows = pcs_dashboard_cache_rows(
         conn, available_end, generated,

@@ -130,11 +130,12 @@ deducted explicitly. Shortage is `max(required FTE - net scheduled FTE, 0)`.
 PCS is calculated from deduplicated, in-scope Call-by-Call legs. Numerators and
 denominators are aggregated separately; percentages and averages are never
 averaged from row-level percentages. The permanent `PCS Live Tracker.xlsx`
-contains the collaborative coaching table. WFMHub updates fixed CSV feeds;
-WFMHub's PCS Sync updates six ordinary presentation tables from CSV in place
-using desktop Excel, without Power Query or table replacement. The tracker
-keeps keyed coaching rows. Migrating an old tracker first reads and preserves
-those rows from the same workbook.
+contains the collaborative coaching table. WFMHub updates fixed local CSV
+feeds only during normal operation; WFM copies the six CSVs to a fixed
+SharePoint folder and refreshes the same shared workbook in desktop Excel
+through user-created Power Query tables. Query-enabled workbooks must never be
+automatically rebuilt or replaced on a tracker template change. The older
+desktop Excel Sync command is legacy and forbidden after Power Query setup.
 Only PCS may use the optional dedicated `paths.pcs_workbook` location, such as
 a locally synced WFM SharePoint library file. All other reports remain under
 `paths.reports`. On first use of an empty dedicated path, the existing local

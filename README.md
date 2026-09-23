@@ -37,12 +37,13 @@ versions deterministically, and reads row-level dates from multi-day files.
 
 `PCS Live Tracker.xlsx` is one permanent shared file. WFMHub processes new FTE
 and Call-by-Call evidence and replaces the fixed CSV files under `Feed/PCS`.
-Close Excel and choose **Sync PCS workbook** in WFMHub to update the six data
-tables in place. Team leaders
-and Quality update only the coaching table. See [PCS workflow](docs/PCS.md).
+WFM copies those six files to a fixed SharePoint CSV folder and refreshes the
+**same** shared workbook in desktop Excel. Team Leaders and Quality update
+only the coaching table. Follow the [one-time Power Query setup](docs/PCS_POWER_QUERY_SETUP.md)
+and [PCS workflow](docs/PCS.md).
 To keep one shared link, set **PCS Report & Coaching > Set permanent PCS workbook
-path** to the locally synced WFM SharePoint folder. Future PCS syncs update
-that same file; other reports and the SQLite database stay local.
+path** to the existing, locally synced WFM SharePoint workbook. Future Excel
+Refresh All operations update that same file; other reports and SQLite stay local.
 
 ## Updates
 

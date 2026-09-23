@@ -1,5 +1,15 @@
 # Release notes
 
+## 1.1.2
+
+- Switched PCS's normal shared-workbook workflow to six Hub-generated CSVs
+  manually copied to a fixed SharePoint folder, then desktop Excel Power Query
+  Refresh All in the same workbook. Added a beginner one-time setup guide.
+- Protected query-enabled PCS workbooks from the legacy Hub Sync command and
+  automatic template rebuilds, preserving coaching through later Hub updates.
+- Recorded the RTM Issues & Drivers/no-show capacity direction for later work;
+  no RTM calculation was changed in this release.
+
 ## 1.1.1
 
 - Added an independent permanent PCS workbook path for a locally synced WFM

@@ -55,7 +55,7 @@ class PCSTrackerState:
     @property
     def feeds_synced(self) -> bool:
         return (
-            self.setup_state == "READY"
+            self.setup_state in {"READY", "PQ READY"}
         )
 
 

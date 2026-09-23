@@ -846,7 +846,7 @@ def publish_pcs_feeds(
         schema_version=PCS_FEED_SCHEMA_VERSION,
         extra=(
             ("Metric catalog version", metric_catalog.version, metric_catalog.sha256),
-            ("Workbook load", "Six read-only tables synced in place", "No raw PCS data worksheet"),
+            ("Workbook load", "Excel Power Query Refresh All", "No raw PCS data worksheet"),
         ),
     ))
     return SharedFeedResult("PCS", tuple(files), sum(count for _, count in counts))
