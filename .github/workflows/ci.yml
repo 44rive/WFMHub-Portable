@@ -43,6 +43,19 @@ jobs:
           foreach ($name in @("SETUP.cmd", "UPGRADE.cmd", "WFMHub.cmd", "WEBAPP.cmd")) {
             if (-not (Test-Path (Join-Path $root $name))) { throw "Missing $name" }
           }
+      - name: Parse PCS desktop Excel installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "packaging/windows/Install-PCSWorkbook.ps1"),
+            [ref]$tokens, [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.ToString() }
+            exit 1
+          }
       - name: Execute SETUP.cmd with the bundled runtime
         shell: cmd
         run: |

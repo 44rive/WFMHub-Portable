@@ -36,12 +36,18 @@ but does not count that person as a confirmed No Show. Confirmed No Show HC
 requires a completed scheduled shift, no presence, and agent-specific LILO or
 Agent Status evidence. Missing extracts remain Unknown / Possible No Show.
 
-The RTM hourly headcounts are distinct-agent snapshots at the end of each
-completed hour, or at the latest Agent Status checkpoint for the current
-hour. Scheduled HC excludes PTO/Away. Logged HC requires observed Agent Status
-or LILO presence. Productive HC includes Available and BO; those two HC
-columns are subsets, not extra people to add to Productive HC. Unavailable HC
-covers other AUX, Break, Lunch, and Unavailable. Future hours remain blank.
+The RTM hourly headcounts are distinct agents with evidence overlapping each
+completed hour, or the elapsed part of the current hour through the latest
+Agent Status checkpoint. Scheduled HC excludes PTO/Away. Overnight shifts are carried into the
+next calendar day using their actual start/end timestamps. An agent is counted
+in a column when their corresponding scheduled or observed state overlaps any
+part of that clock hour; this prevents a call handled at 01:15 from showing
+zero available agents simply because the agent logged off before 01:59.
+Logged HC requires observed Agent Status or LILO presence. Productive HC
+includes Available and BO. One agent can occupy more than one state within an
+hour, so these HC columns are **not additive** and are not average FTE.
+Unavailable HC covers other AUX, Break, Lunch, and Unavailable. Future hours
+remain blank.
 The Issues & Drivers sheet shows below-target queue-hours and named same-LOB
 agents with logged-off, AUX, break/lunch, BO, or missing-evidence states
 overlapping those hours. It is staffing context, not proof that a particular
@@ -89,6 +95,13 @@ PTO/Away only when the attendance register proves that state, otherwise as
 unknown. No scheduled shift disappears just because status evidence is absent.
 These sheets explain where scheduled hours went, not payroll hours or a new
 agent-adherence KPI.
+
+`AUX_BY_TL` and `AUX_BY_AGENT` expose exact Agent Status labels and their
+governed AUX class, including BO, inside published shifts. `ABS_BY_LOB` and
+`ABS_BY_AGENT` use final Verint Activities. Their absenteeism numerator unions
+overlapping absence events but excludes the `UNPAID_LEAVE` category. No Show
+remains absenteeism even if Verint also marks it unpaid. Days without final
+Activities evidence remain visible as missing/review, never zero by assumption.
 
 ## Staffing
 

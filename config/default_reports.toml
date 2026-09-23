@@ -30,7 +30,7 @@ key = "realisations"
 title = "REALISATIONS"
 purpose = "Actual versus forecast, service, staffing and reconciled scheduled-hour allocation across every mapped LOB."
 finding_domains = ["service", "forecast", "absence", "staffing", "data_quality"]
-sheets = ["DASHBOARD", "LOB_RESULTS", "TREND", "DATA", "HOURS_BY_LOB", "HOURS_BY_AGENT", "DEFINITIONS", "_AUDIT"]
+sheets = ["DASHBOARD", "LOB_RESULTS", "TREND", "DATA", "HOURS_BY_LOB", "HOURS_BY_AGENT", "AUX_BY_TL", "AUX_BY_AGENT", "ABS_BY_LOB", "ABS_BY_AGENT", "DEFINITIONS", "_AUDIT"]
 
 [[packs]]
 key = "staffing"

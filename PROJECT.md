@@ -145,6 +145,10 @@ Excel. WFMHub does not overwrite a current canonical workbook on each refresh.
 `HOURS_BY_LOB` and `HOURS_BY_AGENT` allocation of every published-shift minute
 from the exclusive Agent Status timeline. LILO-only, unknown evidence, future,
 and PTO/Away remain distinct categories rather than guessed productivity.
+It also includes `AUX_BY_TL` and `AUX_BY_AGENT` with exact Agent Status labels,
+and `ABS_BY_LOB` and `ABS_BY_AGENT` from final Verint Activities. The
+Realisations absenteeism numerator excludes unpaid leave while retaining No
+Show; the report leaves incomplete final evidence visible for review.
 
 ## Configuration ownership
 

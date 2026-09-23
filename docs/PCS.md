@@ -57,6 +57,10 @@ selected LOB/team group. This prevents a month label from appearing in a LOB
 list after Power Query refresh. On a newly generated tracker, run **Install /
 repair Power Query** with Excel closed, then open it and use **Data > Refresh
 All**. Do not regenerate the shared tracker for normal PCS updates.
+Release 1.0.1 upgrades the tracker contract once before installing Power Query;
+keyed coaching actions are copied forward. Close Excel before choosing
+Install / repair and keep the archived pre-upgrade copy until you have checked
+the filters and coaching rows.
 
 ## Human roles
 

@@ -34,7 +34,7 @@ from .report_packs import report_current_path
 
 
 BONUS_IMPORT_VERSION = "2026.09.1-org-fields"
-BONUS_TRACKER_VERSION = "1.1.0"
+BONUS_TRACKER_VERSION = "1.2.0"
 BONUS_INPUT_ROWS = 1000
 
 # Exact six populations and thresholds in the uploaded Bonus Matrix v1.2.
@@ -87,6 +87,13 @@ def _bonus_tracker_version(path: Path) -> str | None:
                     return None
             config_end = re.search(r"(\d+)$", tables.get("tblKpiConfig", ""))
             if config_end is None or int(config_end.group(1)) < 4 + len(DEFAULT_BONUS_KPIS):
+                return None
+            # Spreadsheet writers can discard custom properties. Never accept
+            # the broken v1.1 workbook as current solely from table dimensions.
+            result_xml = archive.read("xl/worksheets/sheet5.xml")
+            dashboard_xml = archive.read("xl/worksheets/sheet8.xml")
+            if (b"XLOOKUP" in result_xml or b"LET(" in result_xml
+                    or b"KPI_Config!B5 / =" in dashboard_xml):
                 return None
             return BONUS_TRACKER_VERSION
     except (BadZipFile, KeyError, OSError, ElementTree.ParseError):
@@ -303,18 +310,29 @@ def _selected_period(conn: DatabaseConnection, end: date) -> str:
 def _bonus_earned_formula(row: int, raw_column: str, kpi: str) -> str:
     """Return the v1.2 tier-one-then-tier-two award formula."""
 
-    lookup = f'tblKpiConfig[Population]&"|"&tblKpiConfig[KPI]'
-    wanted = f'$C{row}&"|{kpi}"'
+    criteria = f'tblKpiConfig[Population],$C{row},tblKpiConfig[KPI],"{kpi}"'
+    def amount(column: str) -> str:
+        return f'SUMIFS(tblKpiConfig[{column}],{criteria})'
+    bonus1 = amount("Tier 1 Bonus %")
+    target1 = amount("Tier 1 Target")
+    bonus2 = amount("Tier 2 Bonus %")
+    target2 = amount("Tier 2 Target")
+    lower = f'COUNTIFS({criteria},tblKpiConfig[Direction],"L")>0'
+    actual = f'Raw_Data!{raw_column}{row}'
     return (
-        f'=IF($A{row}="","",LET(actual,Raw_Data!{raw_column}{row},'
-        f'direction,XLOOKUP({wanted},{lookup},tblKpiConfig[Direction],""),'
-        f'bonus1,XLOOKUP({wanted},{lookup},tblKpiConfig[Tier 1 Bonus %],0),'
-        f'target1,XLOOKUP({wanted},{lookup},tblKpiConfig[Tier 1 Target],0),'
-        f'bonus2,XLOOKUP({wanted},{lookup},tblKpiConfig[Tier 2 Bonus %],0),'
-        f'target2,XLOOKUP({wanted},{lookup},tblKpiConfig[Tier 2 Target],0),'
-        'IF(actual="",0,IF(direction="L",IF(actual<=target1,bonus1,'
-        'IF(AND(bonus2>0,actual<=target2),bonus2,0)),IF(actual>=target1,bonus1,'
-        'IF(AND(bonus2>0,actual>=target2),bonus2,0))))))'
+        f'=IF($A{row}="","",IF({actual}="",0,'
+        f'IF({lower},IF({actual}<={target1},{bonus1},'
+        f'IF(AND({bonus2}>0,{actual}<={target2}),{bonus2},0)),'
+        f'IF({actual}>={target1},{bonus1},'
+        f'IF(AND({bonus2}>0,{actual}>={target2}),{bonus2},0)))))'
+    )
+
+
+def _policy_formula(name: str, default: str | float) -> str:
+    fallback = f'"{default}"' if isinstance(default, str) else str(default)
+    return (
+        'IFERROR(INDEX(tblPolicyDecisions[Selected Decision],'
+        f'MATCH("{name}",tblPolicyDecisions[Policy],0)),{fallback})'
     )
 
 
@@ -504,6 +522,16 @@ def build_bonus_performance_workbook(
         "validate": "list", "source": ["TEMPLATE", "TO REVIEW", "VALIDATED"],
     })
     raw_sheet.set_column(13, 14, None, None, {"hidden": True})
+    # A legacy-formula first-occurrence index keeps Team Lead analysis live
+    # when the user pastes new rows, without SORT/UNIQUE/FILTER or array CSE.
+    raw_sheet.write(3, 21, "Team Lead Index", book.report.header)
+    for row in range(5, 5 + BONUS_INPUT_ROWS):
+        raw_sheet.write_formula(
+            row - 1, 21,
+            f'=IF(T{row}="","",IF(COUNTIF($T$5:T{row},T{row})=1,'
+            f'MAX($V$4:V{row - 1})+1,""))',
+        )
+    raw_sheet.set_column(21, 21, None, None, {"hidden": True})
 
     result_headers = [
         "Agent ID", "Agent Name", "LOB", "Period", "AHT Earned",
@@ -531,20 +559,20 @@ def build_bonus_performance_workbook(
             _bonus_earned_formula(row, "I", "QM"),
             _bonus_earned_formula(row, "J", "Abs%"),
             _bonus_earned_formula(row, "G", "Extra Bonus (PCS Score)"),
-            f'=IF($A{row}="","",MIN(XLOOKUP("Achievement cap",tblPolicyDecisions[Policy],tblPolicyDecisions[Selected Decision],1.3),IF(XLOOKUP("Extra PCS treatment",tblPolicyDecisions[Policy],tblPolicyDecisions[Selected Decision],"Additive")="Additive",SUM(E{row}:K{row}),SUM(E{row}:J{row})-G{row}+MAX(G{row},K{row}))))',
+            f'=IF($A{row}="","",MIN({_policy_formula("Achievement cap", 1.3)},IF({_policy_formula("Extra PCS treatment", "Additive")}="Additive",SUM(E{row}:K{row}),SUM(E{row}:J{row})-G{row}+MAX(G{row},K{row}))))',
             f'=IF($A{row}="","",Raw_Data!K{row})',
-            f'=IF($A{row}="","",XLOOKUP(M{row},tblVocMalus[VOC Detractor Count],tblVocMalus[Malus Impact],1,1))',
-            f'=IF($A{row}="","",IF(XLOOKUP("Malus method",tblPolicyDecisions[Policy],tblPolicyDecisions[Selected Decision],"Proportional")="Percentage points",MAX(0,L{row}-N{row}),L{row}*(1-N{row})))',
+            f'=IF($A{row}="","",IFERROR(INDEX(tblVocMalus[Malus Impact],MATCH(MIN(5,MAX(0,M{row})),tblVocMalus[VOC Detractor Count],1)),1))',
+            f'=IF($A{row}="","",IF({_policy_formula("Malus method", "Proportional")}="Percentage points",MAX(0,L{row}-N{row}),L{row}*(1-N{row})))',
             f'=IF($A{row}="","",IF(COUNTIF(tblPolicyDecisions[Status],"<>Validated")>0,"Policy review",IF(Raw_Data!S{row}<>"VALIDATED","Data review",IF(U{row}="","Proration review",IF(O{row}=0,"No payout",IF(N{row}>0,"Malus applied","Eligible"))))))',
             f'=IF($A{row}="","",Raw_Data!M{row})',
             f'=IF($A{row}="","",Raw_Data!N{row})',
             f'=IF($A{row}="","",Raw_Data!O{row})',
-            f'=IF($A{row}="","",IF(Raw_Data!P{row}>0,Raw_Data!P{row},Raw_Data!N{row}*Raw_Data!O{row}/IF(XLOOKUP("Target bonus rate basis",tblPolicyDecisions[Policy],tblPolicyDecisions[Selected Decision],"Monthly")="Annual",12,1)))',
+            f'=IF($A{row}="","",IF(Raw_Data!P{row}>0,Raw_Data!P{row},Raw_Data!N{row}*Raw_Data!O{row}/IF({_policy_formula("Target bonus rate basis", "Monthly")}="Annual",12,1)))',
             f'=IF($A{row}="","",IF(OR(Raw_Data!R{row}="",Raw_Data!R{row}<=0),"",MIN(1,MAX(0,Raw_Data!Q{row}/Raw_Data!R{row}))))',
             f'=IF(OR($A{row}="",U{row}=""),"",T{row}*U{row})',
             f'=IF(OR($A{row}="",V{row}=""),"",V{row}*L{row})',
             f'=IF(OR($A{row}="",V{row}=""),"",V{row}*L{row}-V{row}*O{row})',
-            f'=IF(OR($A{row}="",V{row}=""),"",ROUND(V{row}*O{row},IF(XLOOKUP("Rounding",tblPolicyDecisions[Policy],tblPolicyDecisions[Selected Decision],"Centime")="Whole MAD",0,2)))',
+            f'=IF(OR($A{row}="",V{row}=""),"",ROUND(V{row}*O{row},IF({_policy_formula("Rounding", "Centime")}="Whole MAD",0,2)))',
             f'=IF($A{row}="","",Raw_Data!T{row})',
             f'=IF($A{row}="","",Raw_Data!U{row})',
         ))
@@ -616,9 +644,7 @@ def build_bonus_performance_workbook(
     for index in range(100):
         row = index + 5
         tl_rows.append((
-            f'=IFERROR(INDEX(SORT(UNIQUE(FILTER(Raw_Data!$T$5:$T${last},'
-            f'(Raw_Data!$T$5:$T${last}<>"")*(Raw_Data!$D$5:$D${last}=Dashboard!$C$2)))),'
-            f'ROWS($A$5:A{row})),"")',
+            f'=IFERROR(INDEX(Raw_Data!$T$5:$T${last},MATCH(ROWS($A$5:A{row}),Raw_Data!$V$5:$V${last},0)),"")',
             "All",
             f'=IF(A{row}="","",COUNTIFS(Results!$Z$5:$Z${last},A{row},Results!$D$5:$D${last},Dashboard!$C$2))',
             f'=IF(A{row}="","",COUNTIFS(Results!$Z$5:$Z${last},A{row},Results!$D$5:$D${last},Dashboard!$C$2,Results!$Y$5:$Y${last},">0"))',
@@ -689,7 +715,8 @@ def build_bonus_performance_workbook(
         ),
         right_chart=V2ChartSpec(
             "KPI ATTAINMENT", "bar",
-            tuple(f"{row[0]} / {row[1]}" for row in kpi_analysis_rows),
+            tuple(f'=KPI_Config!B{index + 5}&" / "&KPI_Config!A{index + 5}'
+                  for index, _row in enumerate(kpi_analysis_rows)),
             (("Attainment rate", tuple(row[6] for row in kpi_analysis_rows), COLORS["teal"]),),
             "percent", 0, 1,
         ),

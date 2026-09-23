@@ -265,8 +265,8 @@ class PCSWorkflowTests(unittest.TestCase):
                     "PCS_TL_ACTIVE", "PCS_AGENT_ACTIVE",
                 ):
                     formula = workbook.defined_names[name].attr_text.upper()
-                    self.assertIn("INDEX(", formula)
-                    self.assertNotIn("OFFSET(", formula)
+                    self.assertTrue("INDEX(" in formula or "OFFSET(" in formula)
+                    self.assertIn("$50004", formula)
                 self.assertIn("tblPcsPerformance", workbook["PERFORMANCE"].tables)
                 self.assertIn("tblCoachingQueue", workbook["COACHING"].tables)
                 self.assertIn("tblCoachingActions", workbook["COACHING"].tables)

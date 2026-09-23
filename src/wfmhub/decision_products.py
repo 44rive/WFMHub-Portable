@@ -35,6 +35,7 @@ from .reports import COLORS, _query
 from .rules import load_rulebook
 from .service_profiles import ServiceProfile, load_service_profiles
 from .template_reports import DecisionWorkbook, KpiCard, ModelTable
+from .utils import merge_intervals
 
 
 @dataclass(frozen=True)
@@ -210,6 +211,164 @@ def _realisations_hours(
             allocated / 60, (item["scheduled"] - allocated) / 60,
         ))
     return headers, agent_rows, lob_rows
+
+
+def _realisations_aux_breakdown(
+    conn: DatabaseConnection,
+    profiles: Sequence[ServiceProfile],
+    start: date,
+    end: date,
+    rulebook: Any,
+) -> tuple[list[str], list[tuple[Any, ...]], list[str], list[tuple[Any, ...]]]:
+    """Break down exact Verint Agent Status AUX inside published shifts."""
+
+    lob_to_profile = {
+        lob: profile.label for profile in profiles for lob in profile.staffing_lobs
+    }
+    agent_headers = [
+        "business_date", "reporting_lob", "workforce_lob", "team_leader",
+        "agent_id", "agent_name", "aux_class", "exact_status", "hours",
+    ]
+    tl_headers = [
+        "business_date", "reporting_lob", "workforce_lob", "team_leader",
+        "aux_class", "exact_status", "agents", "hours",
+    ]
+    if not lob_to_profile:
+        return agent_headers, [], tl_headers, []
+    marks = ",".join("?" for _ in lob_to_profile)
+    rows = conn.execute(
+        f"""SELECT business_date, lob, agent_id, agent_name, team_leader,
+                   actual_status, actual_category, segment_minutes
+            FROM mart.shift_timeline_segment
+            WHERE business_date BETWEEN ? AND ? AND lob IN ({marks})
+              AND observed_source='AGENT_STATUS'
+            ORDER BY business_date, lob, team_leader, agent_name, segment_start""",
+        [start, end, *lob_to_profile],
+    ).fetchall()
+    agent_totals: dict[tuple[Any, ...], int] = defaultdict(int)
+    tl_totals: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for day, lob, agent_id, name, leader, status, category, minutes in rows:
+        rule = rulebook.classify_status(status)
+        aux = str(rule.aux_classification if rule else "").strip()
+        category_name = str(category or "").strip().casefold()
+        if aux.casefold() in {"", "available", "inbound", "outbound"}:
+            if category_name not in {"auxiliary", "break", "lunch", "unavailable"}:
+                continue
+            aux = "Other AUX" if category_name in {"auxiliary", "unavailable"} else category_name.title()
+        exact_status = str(status or "Unknown AUX").strip()
+        key = (str(day)[:10], lob_to_profile[lob], lob, leader or "Unassigned",
+               str(agent_id), name or str(agent_id), aux, exact_status)
+        amount = max(0, int(minutes or 0))
+        agent_totals[key] += amount
+        tl_key = key[:4] + key[6:]
+        item = tl_totals.setdefault(tl_key, {"agents": set(), "minutes": 0})
+        item["agents"].add(str(agent_id))
+        item["minutes"] += amount
+    agent_rows = [(*key, amount / 60) for key, amount in sorted(agent_totals.items())]
+    tl_rows = [(*key, len(item["agents"]), item["minutes"] / 60)
+               for key, item in sorted(tl_totals.items())]
+    return agent_headers, agent_rows, tl_headers, tl_rows
+
+
+def _realisations_final_absence(
+    conn: DatabaseConnection,
+    profiles: Sequence[ServiceProfile],
+    start: date,
+    end: date,
+) -> tuple[dict[tuple[str, str], tuple[float, float, float, float, int]],
+           list[str], list[tuple[Any, ...]], list[str], list[tuple[Any, ...]]]:
+    """Final Activities absence; exclude UNPAID_LEAVE but retain No Show."""
+
+    lob_to_profile = {
+        lob: profile.label for profile in profiles for lob in profile.staffing_lobs
+    }
+    agent_headers = [
+        "business_date", "reporting_lob", "workforce_lob", "team_leader",
+        "agent_id", "agent_name", "planned_net_hours", "absence_hours",
+        "absence_rate", "unpaid_leave_hours", "vacation_hours",
+        "shrinkage_hours", "ledger_status",
+    ]
+    lob_headers = [
+        "business_date", "reporting_lob", "planned_net_hours",
+        "absence_hours", "absence_rate", "unpaid_leave_hours",
+        "vacation_hours", "shrinkage_hours", "review_cases",
+    ]
+    if not lob_to_profile:
+        return {}, agent_headers, [], lob_headers, []
+    marks = ",".join("?" for _ in lob_to_profile)
+    event_rows = conn.execute(
+        f"""SELECT agent_day_key, category, counts_as_absence,
+                   event_start, event_end
+            FROM mart.verint_final_absence_event
+            WHERE business_date BETWEEN ? AND ? AND lob IN ({marks})""",
+        [start, end, *lob_to_profile],
+    ).fetchall()
+    intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+    unpaid_intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+    for key, category, counts, event_start, event_end in event_rows:
+        left = event_start if isinstance(event_start, datetime) else datetime.fromisoformat(str(event_start))
+        right = event_end if isinstance(event_end, datetime) else datetime.fromisoformat(str(event_end))
+        if right > left:
+            if str(category or "").upper() == "UNPAID_LEAVE":
+                unpaid_intervals[str(key)].append((left, right))
+            elif counts:
+                intervals[str(key)].append((left, right))
+    day_rows = conn.execute(
+        f"""SELECT agent_day_key, business_date, lob, team_leader,
+                   agent_id, agent_name, planned_net_minutes,
+                   final_vacation_minutes, final_shrinkage_minutes,
+                   final_ledger_status
+            FROM mart.verint_final_absence_agent_day
+            WHERE business_date BETWEEN ? AND ? AND lob IN ({marks})
+            ORDER BY business_date, lob, team_leader, agent_name""",
+        [start, end, *lob_to_profile],
+    ).fetchall()
+    agent_rows: list[tuple[Any, ...]] = []
+    totals: dict[tuple[str, str], dict[str, float | int]] = defaultdict(
+        lambda: {"planned": 0, "absence": 0, "unpaid": 0,
+                 "vacation": 0, "shrinkage": 0, "review": 0}
+    )
+    for key, day, lob, leader, agent_id, name, planned, vacation, shrinkage, status in day_rows:
+        planned_minutes = max(0, int(planned or 0))
+        merged = merge_intervals(intervals.get(str(key), ()))
+        absence_minutes = min(planned_minutes, int(sum((right - left).total_seconds()
+                                                        for left, right in merged) // 60))
+        # Unpaid leave has a separate diagnostic column; it is not deducted
+        # from No Show, which may also carry the source's unpaid flag.
+        unpaid_minutes = int(sum((right - left).total_seconds()
+                                 for left, right in merge_intervals(unpaid_intervals.get(str(key), ()))) // 60)
+        reporting_lob = lob_to_profile[lob]
+        day_key = (str(day)[:10], reporting_lob)
+        review = str(status or "") not in {"CLEAR", "ABSENCE_RECORDED"}
+        item = totals[day_key]
+        for field, amount in (
+            ("planned", planned_minutes), ("absence", absence_minutes),
+            ("unpaid", min(planned_minutes, unpaid_minutes)),
+            ("vacation", int(vacation or 0)), ("shrinkage", int(shrinkage or 0)),
+        ):
+            item[field] += amount
+        item["review"] += int(review)
+        agent_rows.append((
+            str(day)[:10], reporting_lob, lob, leader, str(agent_id), name,
+            planned_minutes / 60, absence_minutes / 60,
+            absence_minutes / planned_minutes if planned_minutes else None,
+            min(planned_minutes, unpaid_minutes) / 60,
+            float(vacation or 0) / 60, float(shrinkage or 0) / 60, status,
+        ))
+    lob_rows = [
+        (day, lob, item["planned"] / 60, item["absence"] / 60,
+         item["absence"] / item["planned"] if item["planned"] else None,
+         item["unpaid"] / 60, item["vacation"] / 60,
+         item["shrinkage"] / 60, item["review"])
+        for (day, lob), item in sorted(totals.items())
+    ]
+    daily = {
+        key: (item["planned"] / 60, item["absence"] / 60,
+              item["vacation"] / 60, item["shrinkage"] / 60,
+              int(item["review"]))
+        for key, item in totals.items()
+    }
+    return daily, agent_headers, agent_rows, lob_headers, lob_rows
 
 
 def _ratio(numerator: float | int | None, denominator: float | int | None) -> float | None:
@@ -521,6 +680,10 @@ def build_realisations_workbook(
     daily_rows: list[tuple[Any, ...]] = []
     all_source_rows: list[dict[str, Any]] = []
     profile_by_label = {profile.label: profile for profile in selected_profiles}
+    (final_absence_by_day, absence_agent_headers, absence_agent_rows,
+     absence_lob_headers, absence_lob_rows) = _realisations_final_absence(
+        conn, selected_profiles, start, end,
+    )
 
     for profile in selected_profiles:
         source_rows = _service_rows(conn, profile, start, end)
@@ -578,22 +741,6 @@ def build_realisations_workbook(
             [start, end, *profile.staffing_lobs],
         ).fetchall()
         staffing_by_day = {str(row[0])[:10]: row[1:] for row in staffing_rows}
-        absence_rows = conn.execute(
-            f"""SELECT d.business_date, sum(d.planned_net_minutes)/60.0,
-                       sum(d.absence_minutes)/60.0,
-                       sum(d.vacation_minutes)/60.0,
-                       sum(d.shrinkage_minutes)/60.0,
-                       sum(CASE WHEN d.unverified_minutes>0
-                                     OR coalesce(a.is_provisional,false)
-                                THEN 1 ELSE 0 END)
-                FROM mart.absence_agent_day d
-                LEFT JOIN mart.attendance_agent_day a
-                  ON a.agent_day_key=d.agent_day_key
-                WHERE d.business_date BETWEEN ? AND ? AND d.lob IN ({staffing_marks})
-                GROUP BY d.business_date""",
-            [start, end, *profile.staffing_lobs],
-        ).fetchall()
-        absence_by_day = {str(row[0])[:10]: row[1:] for row in absence_rows}
         rows_by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in source_rows:
             rows_by_day[str(row["business_date"])[:10]].append(row)
@@ -606,14 +753,18 @@ def build_realisations_workbook(
             )
             forecast = forecast_by_day.get(key, (None, None, None, None, None, None))
             staffing = staffing_by_day.get(key, (None, None, None, None))
-            absence_values = absence_by_day.get(key, (None, None, None, None, 0))
+            absence_values = final_absence_by_day.get((key, profile.label))
             forecast_volume = forecast[0]
-            planned_hours, absence_hours, vacation_hours, shrinkage_hours, review_cases = absence_values
+            planned_hours, absence_hours, vacation_hours, shrinkage_hours, review_cases = (
+                absence_values if absence_values is not None
+                else (None, None, None, None, None)
+            )
             has_actual = bool(rows_by_day.get(key))
             has_forecast = forecast_volume is not None
             data_state = (
                 "Provisional" if cursor >= date.today()
                 else "Review" if review_cases
+                else "No final absence" if absence_values is None
                 else "No actual" if not has_actual
                 else "No forecast" if not has_forecast
                 else "Final"
@@ -714,7 +865,7 @@ def build_realisations_workbook(
             _ratio(absence_hours, planned_hours),
             _ratio(shrinkage_hours, planned_hours), state,
         ))
-    status, status_text = _source_state(conn, ("calls", "forecast"), end)
+    status, status_text = _source_state(conn, ("calls", "forecast", "activities"), end)
     review_days = sum(1 for row in daily_rows if row[-4])
     if review_days:
         status, status_text = "INCOMPLETE", f"{review_days:,} day(s) include absence review cases"
@@ -755,7 +906,7 @@ def build_realisations_workbook(
         action_headers=("LOB", "ACTUAL", "FORECAST", "ATTAINMENT", "SERVICE LEVEL", "ABSENCE %", "STATE"),
         action_rows=tuple((row[0], row[1], row[2], row[3], row[4], row[8], row[10]) for row in profile_summary),
         action_kinds=("text", "integer", "integer", "percent", "percent", "percent", "alert"),
-        status="CHECK DATA" if status == "INCOMPLETE" else "IN DEVELOPMENT",
+        status="CHECK DATA" if status == "INCOMPLETE" else "OPERATIONAL",
         status_kind="INCOMPLETE" if status == "INCOMPLETE" else "PROVISIONAL",
         status_note=status_text,
     )
@@ -839,6 +990,29 @@ def build_realisations_workbook(
         "One agent-day per workforce LOB. Every shift minute goes to exactly one category; reconciliation delta should be zero.",
         hour_headers, agent_hours,
     )
+    aux_agent_headers, aux_agent_rows, aux_tl_headers, aux_tl_rows = (
+        _realisations_aux_breakdown(conn, selected_profiles, start, end, rulebook)
+    )
+    book.table(
+        "AUX_BY_TL", "Agent Status AUX by Team Lead",
+        "Exact status and governed AUX class inside published shifts; group by day, LOB and Team Lead.",
+        aux_tl_headers, aux_tl_rows,
+    )
+    book.table(
+        "AUX_BY_AGENT", "Agent Status AUX by agent",
+        "Exact observed status hours inside published shifts; BO is shown separately from other AUX.",
+        aux_agent_headers, aux_agent_rows,
+    )
+    book.table(
+        "ABS_BY_LOB", "Final absenteeism by LOB",
+        "Verint Activities only. UNPAID_LEAVE is excluded from absence; No Show remains absence.",
+        absence_lob_headers, absence_lob_rows,
+    )
+    book.table(
+        "ABS_BY_AGENT", "Final absenteeism by agent",
+        "Final Verint Activities evidence, unioned and capped per agent-day; unpaid leave is separate.",
+        absence_agent_headers, absence_agent_rows,
+    )
     book.definitions([
         ("Actual / forecast", "Actual offered contacts / forecast contacts", "Demand realisation", "Use summed volumes"),
         ("Service level", "Configured numerator / denominator for each service profile", "Service performance", "Calculated from summed counters; never average LOB percentages"),
@@ -846,6 +1020,8 @@ def build_realisations_workbook(
         ("Weighted AHT", "Handled seconds / answered contacts", "Workload", "Never average daily AHT values"),
         ("Absence rate", "Reviewed absence hours / planned hours", "Capacity impact", "Open attendance gaps remain review cases"),
         ("Hour allocation", "Exclusive Agent Status inside published shifts; LILO-only and missing evidence remain separate", "Where scheduled hours went", "Allocated hours plus reconciliation delta equals scheduled hours"),
+        ("Realisations absence", "Unioned final Verint Activities absence except UNPAID_LEAVE / planned net hours", "Final absenteeism", "No Show remains absence even though its source rule also flags unpaid; review ledger exceptions"),
+        ("AUX detail", "Exact Agent Status labels classified by the governed status rulebook", "Team Lead and agent coaching context", "BO is listed as its own work bucket; these are hours, not person counts"),
     ])
     book.audit(_audit_rows(conn, config, "realisations", start, end, [
         ("Service profiles", ", ".join(profile.profile_id for profile in selected_profiles), profiles.version),

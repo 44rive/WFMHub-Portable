@@ -178,7 +178,8 @@ function Set-SelectorNames {
     }
     foreach ($name in @("PCS_PERIOD_LIST", "PCS_LOB_LIST")) {
         $column = if ($name -eq "PCS_PERIOD_LIST") { "A" } else { "B" }
-        $formula = "='_PCS_FILTERS'!`$$column`$5:INDEX('_PCS_FILTERS'!`$$column`:`$$column,4+COUNTA('_PCS_FILTERS'!`$$column`$5:`$$column`$1048576))"
+        $bounded = "'_PCS_FILTERS'!`$$column`$5:`$$column`$50004"
+        $formula = "='_PCS_FILTERS'!`$$column`$5:INDEX($bounded,MAX(1,COUNTA($bounded)))"
         $existing = $null
         try { $existing = $script:Workbook.Names.Item($name); $existing.Delete() } catch {}
         finally { Release-ComObject $existing }
@@ -187,10 +188,10 @@ function Set-SelectorNames {
     }
     foreach ($entry in $groups.GetEnumerator()) {
         $group = [string]$entry.Value[0]
-        $keys = "'_PCS_FILTERS'!`$$($entry.Value[1]):`$$($entry.Value[1])"
-        $values = "'_PCS_FILTERS'!`$$($entry.Value[2]):`$$($entry.Value[2])"
+        $keys = "'_PCS_FILTERS'!`$$($entry.Value[1])`$5:`$$($entry.Value[1])`$50004"
+        $anchor = "'_PCS_FILTERS'!`$$($entry.Value[2])`$5"
         $first = "MATCH($group,$keys,0)"
-        $formula = "=INDEX($values,$first):INDEX($values,$first+COUNTIF($keys,$group)-1)"
+        $formula = "=OFFSET($anchor,$first-1,0,COUNTIF($keys,$group),1)"
         $existing = $null
         try {
             $existing = $script:Workbook.Names.Item([string]$entry.Key)
@@ -223,9 +224,18 @@ function Assert-SelectorIntegrity {
             $resolved = $null
             try {
                 $definedName = $script:Workbook.Names.Item([string]$check[0])
-                $resolved = $definedName.RefersToRange
+                try { $resolved = $definedName.RefersToRange } catch { $resolved = $null }
                 if ($null -eq $resolved -or $resolved.Rows.Count -lt 1) {
-                    throw "$($check[0]) does not resolve to a populated range"
+                    # Some desktop Excel builds return null for a calculated
+                    # OFFSET name although worksheet formulas and validation
+                    # can evaluate it. Verify the value instead of rejecting
+                    # a working selector solely on that COM property.
+                    $count = $script:Excel.Evaluate("IFERROR(COUNTA($($check[0])),0)")
+                    $firstValue = $script:Excel.Evaluate("INDEX($($check[0]),1)")
+                    if ([double]$count -lt 1 -or [string]$firstValue -ne [string]$check[3]) {
+                        throw "$($check[0]) is empty or invalid after refresh; selected LOB='$selectedLob', team='$selectedTeam'"
+                    }
+                    continue
                 }
                 $seenRequired = $false
                 foreach ($cell in $resolved.Cells) {
@@ -439,6 +449,15 @@ try {
         Add-QueryTable "PCS_DAILY" ([System.IO.File]::ReadAllText($DailyQueryPath)) "_PCS_DAILY" "tblPcsDaily" "A4"
         Add-QueryTable "PCS_RESULTS" ([System.IO.File]::ReadAllText($ResultsQueryPath)) "PERFORMANCE" "tblPcsPerformance" "A4"
         Add-QueryTable "PCS_COACHING_VIEW" ([System.IO.File]::ReadAllText($CoachingQueryPath)) "_PCS_COACH" "tblPcsCoachingView" "A4"
+        # A pre-install selection may no longer exist in the refreshed feed.
+        # Reset only the three dependent choices during explicit installation.
+        $overview = $script:Workbook.Worksheets.Item("OVERVIEW")
+        try {
+            foreach ($address in @("H3", "O3", "V3")) {
+                $overview.Range($address).Value2 = "All"
+            }
+        }
+        finally { Release-ComObject $overview }
         Set-SetupValue "Power Query Installed" "YES"
         Set-SetupValue "Last Installer Result" "Installed successfully"
     }

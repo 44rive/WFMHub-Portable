@@ -228,11 +228,11 @@ def _workforce_by_hour(
     pulse: dict[str, Any],
     rulebook: Rulebook | None = None,
 ) -> dict[int, dict[str, float | None]]:
-    """Return distinct-agent staffing snapshots and proven no-show HC.
+    """Return distinct agents with evidence overlapping each clock hour.
 
-    HC status is sampled at the end of each completed hour (or the live
-    checkpoint for the current hour). Available and BO are subsets of
-    Productive; the other state buckets are mutually exclusive.
+    An end-of-hour snapshot hid agents who handled calls then logged off
+    before :59. Agents may visit more than one state during an hour; these
+    distinct HC columns must not be added together as exclusive FTE.
     """
 
     checkpoint = _as_datetime(pulse.get("checkpoint"))
@@ -248,7 +248,7 @@ def _workforce_by_hour(
         if live and checkpoint is not None and left >= checkpoint:
             output[hour] = {key: None for key in fields}
             continue
-        snapshot = min(right, checkpoint) - timedelta(microseconds=1) if live and checkpoint else right - timedelta(microseconds=1)
+        observed_right = min(right, checkpoint) if live and checkpoint else right
         counts: dict[str, set[str]] = {key: set() for key in fields}
         no_show = set()
         for row in attendance:
@@ -265,32 +265,32 @@ def _workforce_by_hour(
                     and str(row.get("assignment_type") or "") != "Planned absence"
                     else []
                 )
-            if bool(row.get("no_show")) and any(start < right and end > left for start, end in expected_intervals):
+            if bool(row.get("no_show")) and any(start < observed_right and end > left for start, end in expected_intervals):
                 no_show.add(agent_id)
-            if not any(start <= snapshot < end for start, end in expected_intervals):
+            if not any(start < observed_right and end > left for start, end in expected_intervals):
                 continue
             counts["scheduled_hc"].add(agent_id)
-            segment = next((item for item in row.get("timeline_segments", ())
-                            if (_as_datetime(item.get("segment_start")) or snapshot) <= snapshot
-                            < (_as_datetime(item.get("segment_end")) or snapshot)), None)
-            if segment is None:
-                continue
-            category = str(segment.get("actual_category") or "").strip().casefold()
-            if category in {"future", "no_activity", "no_status_evidence", "logged off", "pto", "away"}:
-                continue
-            if str(segment.get("observed_source") or "").upper() not in {"AGENT_STATUS", "LILO"}:
-                continue
-            counts["logged_hc"].add(agent_id)
-            status_rule = rulebook.classify_status(segment.get("actual_status")) if rulebook else None
-            aux = str(status_rule.aux_classification if status_rule else "").strip().casefold()
-            if category == "productive":
-                counts["productive_hc"].add(agent_id)
-                if aux == "available":
-                    counts["available_hc"].add(agent_id)
-                elif aux == "bo":
-                    counts["bo_hc"].add(agent_id)
-            elif category in {"auxiliary", "break", "lunch", "unavailable"}:
-                counts["unavailable_hc"].add(agent_id)
+            for segment in row.get("timeline_segments", ()):
+                segment_start = _as_datetime(segment.get("segment_start"))
+                segment_end = _as_datetime(segment.get("segment_end"))
+                if not segment_start or not segment_end or segment_start >= observed_right or segment_end <= left:
+                    continue
+                category = str(segment.get("actual_category") or "").strip().casefold()
+                if category in {"future", "no_activity", "no_status_evidence", "logged off", "pto", "away"}:
+                    continue
+                if str(segment.get("observed_source") or "").upper() not in {"AGENT_STATUS", "LILO"}:
+                    continue
+                counts["logged_hc"].add(agent_id)
+                status_rule = rulebook.classify_status(segment.get("actual_status")) if rulebook else None
+                aux = str(status_rule.aux_classification if status_rule else "").strip().casefold()
+                if category == "productive":
+                    counts["productive_hc"].add(agent_id)
+                    if aux == "available":
+                        counts["available_hc"].add(agent_id)
+                    elif aux == "bo":
+                        counts["bo_hc"].add(agent_id)
+                elif category in {"auxiliary", "break", "lunch", "unavailable"}:
+                    counts["unavailable_hc"].add(agent_id)
         counts["no_show_hc"] = no_show
         output[hour] = {key: float(len(values)) for key, values in counts.items()}
     return output
@@ -310,6 +310,9 @@ def _attendance_pulse(
     """
 
     lob_marks = _marks(profile.staffing_lobs)
+    previous_day = report_day - timedelta(days=1)
+    day_start = datetime.combine(report_day, datetime.min.time())
+    next_day = day_start + timedelta(days=1)
     cursor = conn.execute(
         f"""SELECT business_date, agent_id, agent_name, team_leader,
                    ops_manager, lob, language, scheduled_start, scheduled_end,
@@ -319,27 +322,30 @@ def _attendance_pulse(
                    is_provisional, evaluation_as_of, planning_overlay,
                    planning_overlay_minutes
             FROM mart.attendance_agent_day
-            WHERE business_date=? AND lob IN ({lob_marks})
+            WHERE (business_date=? OR (business_date=? AND scheduled_end>?))
+              AND scheduled_start<? AND lob IN ({lob_marks})
               AND assignment_type<>'Off'
             ORDER BY scheduled_start, lob, team_leader, agent_name""",
-        [report_day, *profile.staffing_lobs],
+        [report_day, previous_day, day_start, next_day, *profile.staffing_lobs],
     )
     headers = [item[0] for item in cursor.description]
     attendance = [dict(zip(headers, row)) for row in cursor.fetchall()]
     timeline_cursor = conn.execute(
-        f"""SELECT agent_id, segment_start, segment_end, planned_state,
+        f"""SELECT business_date, agent_id, segment_start, segment_end, planned_state,
                    actual_status,
                    actual_category, mismatch_type, is_gap, observed_source
             FROM mart.shift_timeline_segment
-            WHERE business_date=? AND lob IN ({lob_marks})
+            WHERE business_date BETWEEN ? AND ?
+              AND segment_start<? AND segment_end>?
+              AND lob IN ({lob_marks})
             ORDER BY agent_id, segment_start""",
-        [report_day, *profile.staffing_lobs],
+        [previous_day, report_day, next_day, day_start, *profile.staffing_lobs],
     )
     timeline_headers = [item[0] for item in timeline_cursor.description]
-    segments_by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    segments_by_agent: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for values in timeline_cursor.fetchall():
         segment = dict(zip(timeline_headers, values))
-        segments_by_agent[str(segment["agent_id"])].append(segment)
+        segments_by_agent[(str(segment["business_date"])[:10], str(segment["agent_id"]))].append(segment)
 
     live = report_day == date.today()
     if live:
@@ -386,7 +392,7 @@ def _attendance_pulse(
         start = _as_datetime(row.get("scheduled_start"))
         end = _as_datetime(row.get("scheduled_end"))
         state_checkpoint = checkpoint - timedelta(seconds=1)
-        agent_segments = segments_by_agent.get(str(row["agent_id"]), [])
+        agent_segments = segments_by_agent.get((str(row["business_date"])[:10], str(row["agent_id"])), [])
         current_segment = next((
             item for item in agent_segments
             if (_as_datetime(item.get("segment_start")) or state_checkpoint) <= state_checkpoint

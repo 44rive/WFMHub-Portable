@@ -112,7 +112,8 @@ def test_existing_realisations_catalog_accepts_new_hour_sheets():
         )
         current_contract = (
             'sheets = ["DASHBOARD", "LOB_RESULTS", "TREND", "DATA", '
-            '"HOURS_BY_LOB", "HOURS_BY_AGENT", "DEFINITIONS", "_AUDIT"]'
+            '"HOURS_BY_LOB", "HOURS_BY_AGENT", "AUX_BY_TL", "AUX_BY_AGENT", '
+            '"ABS_BY_LOB", "ABS_BY_AGENT", "DEFINITIONS", "_AUDIT"]'
         )
         catalog = config.report_catalog
         content = catalog.read_text(encoding="utf-8")

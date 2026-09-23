@@ -340,10 +340,15 @@ class DecisionWorkbook:
                 "DASHBOARD", "LOB_RESULTS", "TREND", "DATA", "HOURS_BY_LOB",
                 "HOURS_BY_AGENT", "DEFINITIONS", "_AUDIT",
             )
+            current_realisations = (
+                "DASHBOARD", "LOB_RESULTS", "TREND", "DATA", "HOURS_BY_LOB",
+                "HOURS_BY_AGENT", "AUX_BY_TL", "AUX_BY_AGENT", "ABS_BY_LOB",
+                "ABS_BY_AGENT", "DEFINITIONS", "_AUDIT",
+            )
             compatible_extension = (
                 self.report_key == "realisations"
-                and expected == legacy_realisations
-                and actual == extended_realisations
+                and expected in {legacy_realisations, extended_realisations}
+                and actual == current_realisations
             )
             if actual != expected and not compatible_extension:
                 raise ValueError(

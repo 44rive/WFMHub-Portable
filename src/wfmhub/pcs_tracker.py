@@ -48,7 +48,7 @@ from .shared_feeds import (
 
 
 PCS_TRACKER_FILENAME = "PCS Live Tracker.xlsx"
-PCS_TRACKER_VERSION = "1.1.0"
+PCS_TRACKER_VERSION = "1.2.0"
 COACHING_ACTION_HEADERS = (
     "Coaching Key", "Call ID", "Coaching Status", "Coach",
     "Coaching Date", "Due Date", "Coaching Comment",
@@ -362,19 +362,18 @@ def _selected_key(*, sheet: str | None = None) -> str:
 
 def _add_filter_names(workbook) -> None:
     def list_range(column: str) -> str:
-        values = f"'_PCS_FILTERS'!${column}:${column}"
+        values = f"'_PCS_FILTERS'!${column}$5:${column}$50004"
         return (
             f"='_PCS_FILTERS'!${column}$5:"
-            f"INDEX({values},4+COUNTA('_PCS_FILTERS'!${column}$5:${column}$1048576))"
+            f"INDEX({values},MAX(1,COUNTA({values})))"
         )
 
     def group_range(group: str, key_column: str, value_column: str) -> str:
-        keys = f"'_PCS_FILTERS'!${key_column}:${key_column}"
-        values = f"'_PCS_FILTERS'!${value_column}:${value_column}"
+        keys = f"'_PCS_FILTERS'!${key_column}$5:${key_column}$50004"
+        anchor = f"'_PCS_FILTERS'!${value_column}$5"
         first = f"MATCH({group},{keys},0)"
         return (
-            f'=INDEX({values},{first}):'
-            f'INDEX({values},{first}+COUNTIF({keys},{group})-1)'
+            f'=OFFSET({anchor},{first}-1,0,COUNTIF({keys},{group}),1)'
         )
 
     workbook.define_name("PCS_PERIOD_LIST", list_range("A"))

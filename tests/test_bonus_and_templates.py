@@ -3,8 +3,11 @@ from __future__ import annotations
 import shutil
 import tempfile
 import unittest
+from xml.etree import ElementTree
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
+from zipfile import ZipFile
 
 from openpyxl import Workbook, load_workbook
 
@@ -66,6 +69,38 @@ def _bonus_source(path: Path) -> None:
 
 
 class BonusImportTests(unittest.TestCase):
+    def test_bonus_formula_upgrade_preserves_entered_raw_and_policy_values(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = _home(Path(folder))
+            config = load_config(home)
+            migrate(config)
+            path = report_current_path(config, "bonus")
+            conn = connect(config)
+            try:
+                with patch("wfmhub.bonus.BONUS_TRACKER_VERSION", "1.1.0"):
+                    build_bonus_performance_workbook(
+                        conn, config, date(2026, 9, 1), date(2026, 9, 30),
+                    )
+                old = load_workbook(path)
+                old["Raw_Data"]["A5"] = "007"
+                old["Raw_Data"]["B5"] = "Synthetic Agent"
+                old["Raw_Data"]["C5"] = "OEM FR"
+                old["Policy_Decisions"]["B5"] = "Percentage points"
+                old.save(path)
+                old.close()
+                build_bonus_performance_workbook(
+                    conn, config, date(2026, 9, 1), date(2026, 9, 30),
+                )
+                current = load_workbook(path, read_only=True)
+                try:
+                    self.assertEqual(current["Raw_Data"]["A5"].value, "007")
+                    self.assertEqual(current["Raw_Data"]["C5"].value, "OEM FR")
+                    self.assertEqual(current["Policy_Decisions"]["B5"].value, "Percentage points")
+                finally:
+                    current.close()
+            finally:
+                conn.close()
+
     def test_blank_permanent_bonus_template_is_formula_ready_and_keeps_manual_inputs(self):
         with tempfile.TemporaryDirectory() as folder:
             home = _home(Path(folder))
@@ -161,6 +196,7 @@ class BonusImportTests(unittest.TestCase):
                 ])
                 self.assertEqual(workbook.active.title, "Dashboard")
                 self.assertEqual(len(workbook["Dashboard"]._charts), 2)
+                self.assertTrue(workbook["Dashboard"]["AJ2"].value.startswith('=KPI_Config!B5&'))
                 self.assertEqual(
                     [workbook["Dashboard"][cell].value for cell in ("A5", "H5", "O5", "V5")],
                     ["TOTAL PAYOUT", "PAID AGENTS", "AVG PAID PAYOUT", "REVIEW ITEMS"],
@@ -172,6 +208,17 @@ class BonusImportTests(unittest.TestCase):
                 self.assertIn("Final Payout", [cell.value for cell in workbook["Results"][4]])
             finally:
                 workbook.close()
+            namespace = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+            with ZipFile(path) as archive:
+                self.assertIsNone(archive.testzip())
+                for filename in archive.namelist():
+                    if not filename.startswith("xl/worksheets/sheet") or not filename.endswith(".xml"):
+                        continue
+                    root = ElementTree.fromstring(archive.read(filename))
+                    for formula in root.iter(namespace + "f"):
+                        text = formula.text or ""
+                        for unsupported in ("XLOOKUP(", "LET(", "SORT(", "UNIQUE(", "FILTER(", " / ="):
+                            self.assertNotIn(unsupported, text, (filename, text))
 
 
 class ExcelTemplateTests(unittest.TestCase):

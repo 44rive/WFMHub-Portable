@@ -22,7 +22,7 @@ from openpyxl import load_workbook
 from .config import Config
 
 
-PCS_TEMPLATE_VERSION = "1.1.0"
+PCS_TEMPLATE_VERSION = "1.2.0"
 PCS_PRESENTATION_SHEETS = ("OVERVIEW", "COACHING", "_PCS_CALC")
 PCS_PRESENTATION_NAMES = (
     "PCS_LOB_DATA", "PCS_AGENT_DATA", "PCS_DAILY_DATA", "PCS_COACH_DATA",
@@ -148,8 +148,8 @@ def _presentation_problem(workbook) -> str | None:
         elif "#REF!" in reference:
             problems.append(f"workbook name {name} contains #REF!")
         elif name.startswith("PCS_") and name.endswith(("_LIST", "_ACTIVE")) \
-                and "OFFSET(" in reference.upper():
-            problems.append(f"workbook name {name} still uses a drift-prone OFFSET range")
+                and "$50004" not in reference:
+            problems.append(f"workbook name {name} lacks the bounded selector range")
     return "; ".join(problems[:5]) or None
 
 

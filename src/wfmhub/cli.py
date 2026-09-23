@@ -916,15 +916,15 @@ def menu(home: Path) -> int:
         print("    [2] RTM Daily Control")
         print("    [3] Attendance Review")
         print("    [4] PCS Report & Coaching")
+        print("    [5] Realisations")
+        print("    [6] Bonus")
         print("\n  ANALYZE")
-        print("    [5] Analyze a period")
-        print("    [6] Export clean data")
-        print("    [7] Open local WFM Manager Workbench")
+        print("    [7] Analyze a period")
+        print("    [8] Export clean data")
+        print("    [9] Open local WFM Manager Workbench")
         print("\n  IN DEVELOPMENT")
-        print("    [8] Staffing")
-        print("    [9] Realisations")
-        print("   [10] Final Absenteeism")
-        print("   [11] Bonus")
+        print("   [10] Staffing")
+        print("   [11] Final Absenteeism")
         print("\n  SETTINGS")
         print("   [12] System and advanced tools")
         print("   [13] Exit")
@@ -941,23 +941,8 @@ def menu(home: Path) -> int:
             elif choice == "4":
                 _pcs_menu(home)
             elif choice == "5":
-                domain, comparison = _choose_analysis()
-                start, end, use_config = _choose_period()
-                analyze_period(home, domain, start, end, comparison, use_config_period=use_config)
-            elif choice == "6":
-                dataset = _choose_dataset()
-                start, end, use_config = _choose_period()
-                file_format = input("Format CSV or XLSX [CSV]: ").strip().lower() or "csv"
-                export_clean(home, dataset, start, end, file_format, use_config_period=use_config)
-            elif choice == "7":
-                run_console(home)
-            elif choice == "8":
-                _build_menu_product(home, "staffing")
-            elif choice == "9":
                 _build_menu_product(home, "realisations")
-            elif choice == "10":
-                _build_menu_product(home, "absence")
-            elif choice == "11":
+            elif choice == "6":
                 print("\nBONUS MANAGEMENT")
                 print("1. Import Bonus Matrix v1.2, then build")
                 print("2. Build from the already imported matrix")
@@ -968,6 +953,21 @@ def menu(home: Path) -> int:
                 elif bonus_choice != "2":
                     raise ValueError("Please choose 1 or 2")
                 _build_menu_product(home, "bonus")
+            elif choice == "7":
+                domain, comparison = _choose_analysis()
+                start, end, use_config = _choose_period()
+                analyze_period(home, domain, start, end, comparison, use_config_period=use_config)
+            elif choice == "8":
+                dataset = _choose_dataset()
+                start, end, use_config = _choose_period()
+                file_format = input("Format CSV or XLSX [CSV]: ").strip().lower() or "csv"
+                export_clean(home, dataset, start, end, file_format, use_config_period=use_config)
+            elif choice == "9":
+                run_console(home)
+            elif choice == "10":
+                _build_menu_product(home, "staffing")
+            elif choice == "11":
+                _build_menu_product(home, "absence")
             elif choice == "12":
                 _advanced_menu(home)
             elif choice == "13":

@@ -39,6 +39,15 @@ Build the permanent workbook once, then paste monthly rows into `Raw_Data`.
 Validate KPI and policy inputs before sharing a copy. The workbook formulas
 update its Results and Dashboard in Excel. See [BONUS.md](BONUS.md).
 
+## Realisations
+
+Open `Realisations.xlsx` for daily actual-versus-forecast and final Verint
+Activities absenteeism. Use `HOURS_BY_AGENT`/`HOURS_BY_LOB` for exclusive
+scheduled-hour allocation, `AUX_BY_AGENT`/`AUX_BY_TL` for exact Agent Status
+AUX hours, and `ABS_BY_AGENT`/`ABS_BY_LOB` for final absence. Unpaid leave is
+shown separately and excluded from the Realisations absence numerator; No Show
+still counts. Review incomplete final-activity days before sharing.
+
 ## Local web app
 
 Run `WEBAPP.cmd`. It binds to `127.0.0.1`, so only the current computer can

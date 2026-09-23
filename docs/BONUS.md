@@ -29,3 +29,8 @@ The template has 1,000 prepared input/result rows. If the workforce exceeds
 that, increase `BONUS_INPUT_ROWS` in `bonus.py` and migrate the workbook while
 preserving the editable sheets. Excel must recalculate formulas after a paste;
 Python does not calculate Excel formulas or certify payroll payouts.
+
+The 1.0.1 portable release repairs the previous workbook formula contract.
+Close `Bonus Management.xlsx`, choose Bonus > build from the already imported
+matrix once, and let WFMHub archive the prior copy while preserving populated
+Policy, KPI, and Raw Data rows. Review the recalculated payout before sharing.
