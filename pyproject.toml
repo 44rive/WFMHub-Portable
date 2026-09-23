@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wfmhub-portable"
+version = "1.0.0"
+description = "Corporate-compatible portable SQLite WFM hub, local console, and Excel report generator"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = {text = "Proprietary"}
+authors = [{name = "44rive"}]
+dependencies = [
+  "openpyxl==3.1.5",
+  "XlsxWriter==3.2.5",
+  "et_xmlfile==2.0.0",
+  "tzdata==2026.3",
+]
+
+[project.scripts]
+wfmhub = "wfmhub.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+wfmhub = ["py.typed", "web/*.html", "web/*.css", "web/*.js"]

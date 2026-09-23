@@ -1,0 +1,3699 @@
+"""Materialize clean dimensions and WFM report marts."""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import re
+import time as clock
+import unicodedata
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
+from typing import Any, Iterable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from .analytics import build_findings, load_analytics_rules, validate_analytics_rules
+from .config import Config
+from .capacity_mapping import load_capacity_mapping
+from .database import DatabaseConnection, DatabaseCursor
+from .mapping import QueueMapping, load_queue_mapping
+from .metrics import MetricCatalog, MetricEvaluation, evaluate_metric, load_metric_catalog, validate_metric_catalog
+from .progress import ProgressCallback
+from .rules import Rulebook, load_rulebook
+from .semantic import SOURCE_COMPONENTS, build_metric_values
+from .utils import clip_intervals, interval_minutes, merge_intervals, subtract_intervals
+
+
+@dataclass
+class ModelSummary:
+    start: date
+    end: date
+    attendance_rows: int = 0
+    correction_rows: int = 0
+    forecast_rows: int = 0
+    pcs_rows: int = 0
+    quality_rows: int = 0
+    absence_rows: int = 0
+    absence_event_rows: int = 0
+    service_rows: int = 0
+    call_service_rows: int = 0
+    call_service_15min_rows: int = 0
+    staffing_rows: int = 0
+    timeline_rows: int = 0
+    schedule_integrity_rows: int = 0
+    final_absence_rows: int = 0
+    final_absence_event_rows: int = 0
+    metric_rows: int = 0
+    finding_rows: int = 0
+
+
+def _evaluation_time(timezone_name: str, as_of: datetime | None) -> datetime:
+    """Return one timezone-local naive cutoff, even on stripped Python builds."""
+    try:
+        local_zone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        # The portable package ships tzdata, but a damaged/incomplete copy must
+        # still run using the Windows-configured local clock instead of aborting.
+        if as_of is None:
+            return datetime.now()
+        return as_of.astimezone().replace(tzinfo=None) if as_of.tzinfo is not None else as_of
+    if as_of is None:
+        return datetime.now(local_zone).replace(tzinfo=None)
+    if as_of.tzinfo is not None:
+        return as_of.astimezone(local_zone).replace(tzinfo=None)
+    return as_of
+
+
+def _dicts(cursor: DatabaseCursor) -> list[dict[str, Any]]:
+    columns = [item[0] for item in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def _agent_name_key(value: Any) -> str | None:
+    """Use the same accent/case-insensitive name key as roster scoping."""
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    decomposed = unicodedata.normalize("NFKD", text).casefold()
+    clean = "".join(char for char in decomposed if not unicodedata.combining(char))
+    words = re.findall(r"[a-z0-9]+", clean)
+    return " ".join(words) or None
+
+
+def _metric_evaluation(
+    catalog: MetricCatalog,
+    metric_id: str,
+    business_date: date,
+    dimensions: dict[str, Any],
+    components: dict[str, Any],
+) -> MetricEvaluation:
+    method = catalog.method_for(metric_id, business_date, dimensions)
+    if method is None:
+        raise ValueError(
+            f"No effective metric method for {metric_id!r} on {business_date} "
+            f"with dimensions {dimensions}"
+        )
+    return evaluate_metric(method, components)
+
+
+def _optional_metric_value(
+    catalog: MetricCatalog,
+    metric_id: str,
+    business_date: date,
+    dimensions: dict[str, Any],
+    components: dict[str, Any],
+) -> float | None:
+    """Return a configured optional metric, or blank when it is not defined."""
+    method = catalog.method_for(metric_id, business_date, dimensions)
+    return evaluate_metric(method, components).value if method is not None else None
+
+
+def resolve_period(
+    conn: DatabaseConnection,
+    config: Config,
+    start: date | None,
+    end: date | None,
+    use_config_period: bool = True,
+) -> tuple[date, date]:
+    start = start or (config.period_start if use_config_period else None)
+    end = end or (config.period_end if use_config_period else None)
+    if start and end:
+        if start > end:
+            raise ValueError("Start date cannot be after end date")
+        return start, end
+    row = conn.execute(
+        """
+        SELECT min(d) AS "start_date [DATE]", max(d) AS "end_date [DATE]" FROM (
+            SELECT min(schedule_date) AS d FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(schedule_date) FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(extract_date) FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(extract_date) FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(extract_date) FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(extract_date) FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(business_date) FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT max(business_date) FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            UNION ALL SELECT min(period || '-01') FROM raw.bonus_import WHERE active=true
+            UNION ALL SELECT max(period || '-01') FROM raw.bonus_import WHERE active=true
+        ) x WHERE d IS NOT NULL
+        """
+    ).fetchone()
+    auto_start, auto_end = row if row else (None, None)
+    start = start or auto_start
+    end = end or auto_end
+    if not start or not end:
+        raise RuntimeError("No business dates were found. Load extracts first or supply --start and --end.")
+    return start, end
+
+
+def _load_schedules(conn: DatabaseConnection, start: date, end: date) -> list[dict[str, Any]]:
+    return _dicts(conn.execute(
+        """
+        WITH source_choice AS (
+            SELECT r.*,
+                   f.file_name AS source_file,
+                   f.modified_at,
+                   dense_rank() OVER (
+                       PARTITION BY r.schedule_date, coalesce(r.agent_id, 'NAME|' || upper(coalesce(r.agent_name,'')))
+                       ORDER BY CASE
+                                  WHEN f.source_variant='START_END' AND r.parse_ok=true
+                                       AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL THEN 0
+                                  ELSE 1
+                                END,
+                                f.modified_at DESC NULLS LAST, f.file_name DESC
+                   ) AS source_rank
+            FROM raw.schedule_shift r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+            WHERE f.source_variant='START_END'
+              AND r.schedule_date BETWEEN ? AND ?
+        ), dedup AS (
+            SELECT *, row_number() OVER (
+                PARTITION BY schedule_date, coalesce(agent_id, 'NAME|' || upper(coalesce(agent_name,''))),
+                             scheduled_start, scheduled_end, coalesce(assignment,'')
+                ORDER BY source_row DESC
+            ) AS row_rank
+            FROM source_choice WHERE source_rank=1
+        )
+        SELECT source_file_id, source_row, schedule_date, agent_id_raw, agent_id,
+               agent_name, scheduling_period, shift_assignment, assignment,
+               assignment_type, scheduled_start, scheduled_end, shift_events,
+               parse_ok, source_file
+        FROM dedup WHERE row_rank=1
+        ORDER BY schedule_date, agent_id, scheduled_start
+        """,
+        [start, end],
+    ))
+
+
+def _load_events(conn: DatabaseConnection, start: date, end: date) -> list[dict[str, Any]]:
+    window_start = datetime.combine(start - timedelta(days=1), time.min)
+    window_end = datetime.combine(end + timedelta(days=2), time.min)
+    return _dicts(conn.execute(
+        """
+        WITH chosen_shift AS (
+            SELECT r.source_file_id, r.source_row, r.schedule_date, r.agent_id,
+                   r.agent_name, r.assignment, r.scheduled_start, r.scheduled_end,
+                   r.parse_ok, f.file_name AS source_file,
+                   row_number() OVER (
+                       PARTITION BY r.schedule_date, r.agent_id
+                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.schedule_shift r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id
+            WHERE f.active=true AND f.status='SUCCESS'
+              AND f.source_variant='ACTIVITIES' AND r.agent_id IS NOT NULL
+              AND r.schedule_date BETWEEN ? AND ?
+        )
+        SELECT e.source_file_id, e.source_row, e.event_index, e.schedule_date,
+               e.agent_id, e.agent_name, e.activity, e.activity_type,
+               e.event_start, e.event_end, e.parse_ok, s.source_file
+        FROM chosen_shift s
+        JOIN raw.schedule_event e
+          ON e.source_file_id=s.source_file_id AND e.source_row=s.source_row
+        WHERE s.row_rank=1 AND e.parse_ok AND e.event_end >= ?
+          AND e.event_start < ?
+        UNION ALL
+        SELECT s.source_file_id, s.source_row, -1 AS event_index,
+               s.schedule_date, s.agent_id, s.agent_name,
+               s.assignment AS activity, 'FINAL_ASSIGNMENT' AS activity_type,
+               s.scheduled_start AS event_start, s.scheduled_end AS event_end,
+               s.parse_ok, s.source_file
+        FROM chosen_shift s
+        WHERE s.row_rank=1 AND s.parse_ok AND s.assignment IS NOT NULL
+          AND s.scheduled_end >= ? AND s.scheduled_start < ?
+        ORDER BY schedule_date, agent_id, event_start, event_index
+        """,
+        [
+            start - timedelta(days=1), end + timedelta(days=1),
+            window_start, window_end, window_start, window_end,
+        ],
+    ))
+
+
+def _load_lilo(conn: DatabaseConnection, start: date, end: date) -> tuple[dict[tuple[date, str], list[dict[str, Any]]], set[date], set[str]]:
+    rows = _dicts(conn.execute(
+        """
+        SELECT r.*, f.file_name AS source_file
+        FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+        WHERE r.extract_date BETWEEN ? AND ?
+        """,
+        [start - timedelta(days=1), end + timedelta(days=1)],
+    ))
+    grouped: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
+    loaded_dates: set[date] = set()
+    seen: set[str] = set()
+    for row in rows:
+        loaded_dates.add(row["extract_date"])
+        if row["agent_id"]:
+            grouped[(row["extract_date"], row["agent_id"])].append(row)
+            seen.add(row["agent_id"])
+    return grouped, loaded_dates, seen
+
+
+def _load_statuses(
+    conn: DatabaseConnection, start: date, end: date,
+) -> tuple[dict[tuple[date, str], list[dict[str, Any]]], set[date]]:
+    window_start = datetime.combine(start - timedelta(days=1), time.min)
+    window_end = datetime.combine(end + timedelta(days=2), time.min)
+    rows = _dicts(conn.execute(
+        """
+        SELECT source_file_id, source_row, serial_number, extract_date, agent_id,
+               agent_name, status, actual_category, status_start, status_end,
+               duration_seconds, queue, source_file
+        FROM (
+            SELECT r.*, f.file_name AS source_file, f.modified_at,
+                   row_number() OVER (
+                       -- Serial numbers may restart in every exported file.
+                       -- Attendance identity is the agent's physical status
+                       -- interval, not that report-local display number.
+                       PARTITION BY r.agent_id, r.status_start, r.status_end,
+                                    upper(trim(coalesce(r.status,'')))
+                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.agent_status r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+            WHERE r.status_start < ?
+              AND r.status_end >= ?
+        ) x WHERE row_rank=1 AND agent_id IS NOT NULL AND status_end > status_start
+        ORDER BY agent_id, status_start
+        """,
+        [window_end, window_start],
+    ))
+    grouped: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
+    loaded_dates: set[date] = set()
+    for row in rows:
+        first_day = row["status_start"].date()
+        last_day = (row["status_end"] - timedelta(microseconds=1)).date()
+        for offset in range((last_day - first_day).days + 1):
+            status_day = first_day + timedelta(days=offset)
+            loaded_dates.add(status_day)
+            grouped[(status_day, row["agent_id"])].append(row)
+    return grouped, loaded_dates
+
+
+def _statuses_for_shift(
+    agent_id: str,
+    start: datetime | None,
+    end: datetime | None,
+    statuses_by_day: dict[tuple[date, str], list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    if not start or not end:
+        return []
+    rows: dict[tuple[Any, ...], dict[str, Any]] = {}
+    first_day = start.date()
+    last_day = (end - timedelta(microseconds=1)).date()
+    for offset in range((last_day - first_day).days + 1):
+        for row in statuses_by_day.get((first_day + timedelta(days=offset), agent_id), []):
+            key = (row["serial_number"], row["status_start"], row["status_end"], row["source_file_id"])
+            rows[key] = row
+    return sorted(rows.values(), key=lambda row: (row["status_start"], row["source_row"]))
+
+
+def _build_agents(conn: DatabaseConnection) -> dict[str, dict[str, Any]]:
+    conn.execute("DELETE FROM core.dim_agent")
+    conn.execute(
+        """
+        WITH roster_ranked AS (
+            SELECT r.agent_id, r.agent_name,
+                   row_number() OVER (
+                       PARTITION BY r.agent_id
+                       ORDER BY f.modified_at DESC NULLS LAST, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.schedule_shift r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            WHERE r.agent_id IS NOT NULL AND r.agent_name IS NOT NULL
+        ), roster AS (
+            SELECT agent_id, agent_name FROM roster_ranked WHERE row_rank=1
+        ), actual_ranked AS (
+            SELECT r.agent_id, r.agent_name,
+                   row_number() OVER (
+                       PARTITION BY r.agent_id
+                       ORDER BY f.modified_at DESC NULLS LAST, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.lilo r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+            WHERE r.agent_id IS NOT NULL AND r.agent_name IS NOT NULL
+        ), actual_names AS (
+            SELECT agent_id, agent_name FROM actual_ranked WHERE row_rank=1
+        ), ids AS (
+            SELECT agent_id FROM roster UNION SELECT agent_id FROM actual_names
+            UNION SELECT agent_id FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
+            UNION SELECT agent_id FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE agent_id IS NOT NULL
+            UNION SELECT agent_id FROM raw.fte_agent r
+                  JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+                  WHERE agent_id IS NOT NULL
+                    AND (
+                        upper(trim(coalesce(employment_status,'')))='ACTIVE'
+                        OR (upper(trim(coalesce(employment_status,'')))='LEAVER' AND end_date IS NOT NULL)
+                    )
+        ), fte_ranked AS (
+                SELECT r.agent_id, r.agent_name, r.employment_status, r.team_leader,
+                       r.ops_manager, r.lob, r.market, r.language, r.location,
+                       r.city, r.fte, r.end_date,
+                       row_number() OVER (
+                    PARTITION BY r.agent_id
+                    ORDER BY CASE WHEN upper(coalesce(employment_status,''))='ACTIVE' THEN 0 ELSE 1 END,
+                             end_date DESC NULLS LAST, f.modified_at DESC NULLS LAST, source_row DESC
+                ) row_rank
+                FROM raw.fte_agent r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+                WHERE r.agent_id IS NOT NULL
+                  AND (
+                      upper(trim(coalesce(r.employment_status,'')))='ACTIVE'
+                      OR (upper(trim(coalesce(r.employment_status,'')))='LEAVER' AND r.end_date IS NOT NULL)
+                  )
+        ), fte AS (
+            SELECT agent_id, agent_name, employment_status, team_leader, ops_manager,
+                   lob, market, language, location, city, fte
+            FROM fte_ranked WHERE row_rank=1
+        )
+        INSERT INTO core.dim_agent
+        SELECT ids.agent_id,
+               coalesce(fte.agent_name, roster.agent_name, actual_names.agent_name) AS canonical_name,
+               fte.employment_status, fte.team_leader, fte.ops_manager, fte.lob, fte.market,
+               fte.language, fte.location, fte.city, fte.fte,
+               CASE WHEN fte.agent_id IS NOT NULL THEN 'Agent ID' ELSE 'Unmatched to FTE' END AS match_method
+        FROM ids LEFT JOIN roster USING(agent_id) LEFT JOIN actual_names USING(agent_id) LEFT JOIN fte USING(agent_id)
+        """
+    )
+    # A valid FTE roster may temporarily have blank Client IDs. Scoped source
+    # rows still preserve their Storm/Verint Agent ID after a unique name match.
+    # Attach the roster fields to that operational ID for reporting.
+    fte_rows = conn.execute(
+        """SELECT r.agent_name, r.employment_status, r.team_leader,
+                  r.ops_manager, r.lob, r.market, r.language, r.location,
+                  r.city, r.fte
+           FROM raw.fte_agent r
+           JOIN meta.source_file f ON f.file_id=r.source_file_id
+           WHERE f.active=true AND f.status='SUCCESS'
+             AND r.agent_id IS NULL
+             AND (
+                 upper(trim(coalesce(r.employment_status,'')))='ACTIVE'
+                 OR (upper(trim(coalesce(r.employment_status,'')))='LEAVER'
+                     AND r.end_date IS NOT NULL)
+             )"""
+    ).fetchall()
+    by_name: dict[str, list[tuple[Any, ...]]] = defaultdict(list)
+    for row in fte_rows:
+        key = _agent_name_key(row[0])
+        if key:
+            by_name[key].append(row)
+    for agent_id, canonical_name in conn.execute(
+        "SELECT agent_id, canonical_name FROM core.dim_agent"
+    ).fetchall():
+        candidates = by_name.get(_agent_name_key(canonical_name) or "", [])
+        if len(candidates) != 1:
+            continue
+        conn.execute(
+            """UPDATE core.dim_agent
+               SET canonical_name=?, employment_status=?, team_leader=?,
+                   ops_manager=?, lob=?, market=?, language=?, location=?,
+                   city=?, fte=?, match_method='Unique FTE name'
+               WHERE agent_id=?""",
+            [*candidates[0], agent_id],
+        )
+    return {row["agent_id"]: row for row in _dicts(conn.execute("SELECT * FROM core.dim_agent"))}
+
+
+PLANNED_TIME_OFF_COLUMNS = [
+    "segment_key", "agent_day_key", "business_date", "agent_id", "agent_name",
+    "team_leader", "ops_manager", "lob", "language", "source_kind",
+    "absence_type", "record_status", "segment_start", "segment_end",
+    "planned_minutes", "source_file", "source_sheet", "source_row",
+]
+
+
+def _build_planned_time_off(
+    conn: DatabaseConnection,
+    schedules: list[dict[str, Any]],
+    agents: dict[str, dict[str, Any]],
+    start: date,
+    end: date,
+    as_of: datetime,
+) -> dict[str, list[dict[str, Any]]]:
+    """Clip approved PTO/Away rows to shifts and make overlaps exclusive."""
+
+    source = _dicts(conn.execute(
+        """SELECT r.*, f.file_name AS source_file
+           FROM raw.fte_time_off r
+           JOIN meta.source_file f
+             ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+           WHERE r.start_date<=? AND coalesce(r.end_date, ?) >= ?
+             AND (
+               (r.source_kind='PTO' AND r.record_status='APPROVED')
+               OR (r.source_kind='AWAY' AND r.record_status IN ('ACTIVE','PLANNED','CLOSED'))
+             )
+           ORDER BY r.agent_id, r.start_date, r.source_kind, r.source_row""",
+        [end, end, start],
+    ))
+    by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in source:
+        by_agent[row["agent_id"]].append(row)
+
+    output: list[dict[str, Any]] = []
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for shift in schedules:
+        shift_start, shift_end = shift["scheduled_start"], shift["scheduled_end"]
+        agent_id = shift["agent_id"]
+        business_date = shift["schedule_date"]
+        if (
+            not agent_id or not shift_start or not shift_end or shift_end <= shift_start
+            or shift["assignment_type"] == "Off"
+        ):
+            continue
+        candidates: list[dict[str, Any]] = []
+        for row in by_agent.get(agent_id, []):
+            if business_date < row["start_date"]:
+                continue
+            if row["end_date"] is not None and business_date > row["end_date"]:
+                continue
+            if row["source_kind"] == "PTO" and row["day_coverage"] == "PARTIAL_DAY":
+                segment_start = datetime.combine(business_date, row["start_time"])
+                segment_end = datetime.combine(business_date, row["end_time"])
+            else:
+                segment_start, segment_end = shift_start, shift_end
+            # Planned Away is a capacity planning input only.  It cannot erase
+            # attendance evidence which has already happened.
+            if row["source_kind"] == "AWAY" and row["record_status"] == "PLANNED":
+                if segment_end <= as_of:
+                    continue
+                segment_start = max(segment_start, as_of)
+            segment_start = max(shift_start, segment_start)
+            segment_end = min(shift_end, segment_end)
+            if segment_end > segment_start:
+                candidates.append({**row, "segment_start": segment_start, "segment_end": segment_end})
+        if not candidates:
+            continue
+
+        # Away outranks PTO when two registers overlap. Within the same kind,
+        # the later physical row is the deterministic winner. The boundary
+        # sweep ensures downstream minutes are never double counted.
+        boundaries = sorted({
+            value
+            for item in candidates
+            for value in (item["segment_start"], item["segment_end"])
+        })
+        exclusive: list[dict[str, Any]] = []
+        for left, right in zip(boundaries, boundaries[1:]):
+            active = [
+                item for item in candidates
+                if item["segment_start"] < right and item["segment_end"] > left
+            ]
+            if not active:
+                continue
+            chosen = max(
+                active,
+                key=lambda item: (
+                    item["source_kind"] == "AWAY",
+                    item["source_row"],
+                ),
+            )
+            current = {**chosen, "segment_start": left, "segment_end": right}
+            identity = (
+                chosen["source_kind"], chosen["absence_type"], chosen["record_status"],
+                chosen["source_file"], chosen["source_sheet"], chosen["source_row"],
+            )
+            if exclusive and exclusive[-1]["segment_end"] == left and exclusive[-1]["identity"] == identity:
+                exclusive[-1]["segment_end"] = right
+            else:
+                exclusive.append({**current, "identity": identity})
+        agent = agents.get(agent_id, {})
+        agent_day_key = f"{business_date:%Y%m%d}-{agent_id}"
+        for item in exclusive:
+            minutes = int((item["segment_end"] - item["segment_start"]).total_seconds() // 60)
+            if minutes <= 0:
+                continue
+            segment_key = hashlib.sha256(
+                f"{agent_day_key}|{item['source_kind']}|{item['absence_type']}|"
+                f"{item['segment_start']}|{item['segment_end']}".encode("utf-8")
+            ).hexdigest()
+            result = {
+                "segment_key": segment_key, "agent_day_key": agent_day_key,
+                "business_date": business_date, "agent_id": agent_id,
+                "agent_name": agent.get("canonical_name") or shift["agent_name"],
+                "team_leader": agent.get("team_leader"),
+                "ops_manager": agent.get("ops_manager"), "lob": agent.get("lob"),
+                "language": agent.get("language"),
+                "source_kind": item["source_kind"], "absence_type": item["absence_type"],
+                "record_status": item["record_status"],
+                "segment_start": item["segment_start"], "segment_end": item["segment_end"],
+                "planned_minutes": minutes, "source_file": item["source_file"],
+                "source_sheet": item["source_sheet"], "source_row": item["source_row"],
+            }
+            output.append(result)
+            grouped[agent_day_key].append(result)
+    output.sort(key=lambda row: (row["business_date"], row["agent_id"], row["segment_start"]))
+    conn.execute("DELETE FROM mart.planned_time_off_segment")
+    _insert_dicts(conn, "mart.planned_time_off_segment", PLANNED_TIME_OFF_COLUMNS, output)
+    return grouped
+
+
+def _events_by_agent(events: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for event in events:
+        if event["agent_id"]:
+            grouped[event["agent_id"]].append(event)
+    return grouped
+
+
+def _shift_events(shift: dict[str, Any], events_by_agent: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    if not shift["scheduled_start"] or not shift["scheduled_end"] or not shift["agent_id"]:
+        return []
+    return [
+        event for event in events_by_agent.get(shift["agent_id"], [])
+        if event["event_start"] < shift["scheduled_end"] and event["event_end"] > shift["scheduled_start"]
+    ]
+
+
+def _planned_intervals(events: list[dict[str, Any]], categories: set[str]) -> list[tuple[datetime, datetime]]:
+    return merge_intervals(
+        (event["event_start"], event["event_end"])
+        for event in events if event["activity_type"] in categories
+    )
+
+
+def _lilo_boundaries(
+    shift: dict[str, Any],
+    lilo: dict[tuple[date, str], list[dict[str, Any]]],
+    loaded_dates: set[date],
+) -> tuple[datetime | None, datetime | None, bool, bool, str | None]:
+    agent_id = shift["agent_id"]
+    start = shift["scheduled_start"]
+    end = shift["scheduled_end"]
+    if start and end:
+        required = {start.date() + timedelta(days=n) for n in range((end.date() - start.date()).days + 1)}
+    else:
+        required = {shift["schedule_date"]}
+    rows = [row for day in sorted(required) for row in lilo.get((day, agent_id), [])]
+    source_loaded = required <= loaded_dates
+    row_present = bool(rows)
+    files = "; ".join(sorted({row["source_file"] for row in rows})) or None
+    first_candidates = sorted({row["first_login"] for row in rows if row["first_login"]})
+    last_candidates = sorted({value for row in rows for value in (row["raw_last_logout"], row["last_logout"]) if value})
+    if not start or not end:
+        first = min(first_candidates) if first_candidates else None
+        last = max(last_candidates) if last_candidates else None
+        return first, last, source_loaded, row_present, files
+    first_match = [value for value in first_candidates if start - timedelta(hours=4) <= value <= end]
+    last_match = [value for value in last_candidates if start <= value <= end + timedelta(hours=4)]
+    return (
+        min(first_match) if first_match else None,
+        max(last_match) if last_match else None,
+        source_loaded,
+        row_present,
+        files,
+    )
+
+
+ATTENDANCE_COLUMNS = [
+    "agent_day_key", "business_date", "agent_id", "agent_name", "team_leader", "ops_manager", "lob", "market", "language", "location",
+    "scheduled_start", "scheduled_end", "scheduled_minutes", "assignment", "assignment_type", "planned_absence_minutes", "first_login", "last_logout",
+    "source_loaded", "lilo_row_present", "seen_in_lilo", "raw_late_minutes", "raw_early_leave_minutes", "uncoded_late_minutes", "uncoded_early_leave_minutes",
+    "no_show_minutes", "worked_span_minutes", "attendance_result", "attendance_percent", "schedule_source", "lilo_source",
+    "actual_first_seen", "actual_last_seen", "actual_evidence", "status_covered_minutes", "status_source",
+    "shift_state", "call_action", "requires_call", "is_provisional", "evaluation_as_of",
+    "planned_work_minutes", "planning_overlay", "planning_overlay_minutes",
+    "planning_overlay_source",
+]
+
+UNRELIABLE_ATTENDANCE_RESULTS = {
+    "Schedule parse error", "Data not loaded", "Missing actual evidence",
+    "Incomplete actual evidence", "No schedule overlap",
+}
+
+
+def _insert_dicts(conn: DatabaseConnection, table: str, columns: list[str], rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    row_placeholders = "(" + ", ".join("?" for _ in columns) + ")"
+    batch_size = max(1, min(500, conn.max_variable_number // len(columns)))
+    for offset in range(0, len(rows), batch_size):
+        batch = rows[offset : offset + batch_size]
+        sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES " + ", ".join(row_placeholders for _ in batch)
+        params = [row.get(column) for row in batch for column in columns]
+        conn.execute(sql, params)
+
+
+def _build_attendance(
+    conn: DatabaseConnection,
+    rulebook: Rulebook,
+    schedules: list[dict[str, Any]],
+    events_by_agent: dict[str, list[dict[str, Any]]],
+    lilo: dict[tuple[date, str], list[dict[str, Any]]],
+    loaded_dates: set[date],
+    seen_ids: set[str],
+    agents: dict[str, dict[str, Any]],
+    statuses_by_day: dict[tuple[date, str], list[dict[str, Any]]],
+    status_loaded_dates: set[date],
+    planned_time_off: dict[str, list[dict[str, Any]]],
+    as_of: datetime,
+    minimum_status_coverage: float,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    tolerance = rulebook.late_tolerance_minutes
+    for shift in schedules:
+        agent_id = shift["agent_id"]
+        if not agent_id:
+            continue
+        start, end = shift["scheduled_start"], shift["scheduled_end"]
+        scheduled_minutes = int((end - start).total_seconds() // 60) if start and end and end > start else 0
+        events = _shift_events(shift, events_by_agent)
+        # Activities are the corrected Verint ledger, never operational attendance
+        # evidence. Only the StartEndTimes assignment can make the shift planned
+        # absence at this stage.
+        agent_day_key = f"{shift['schedule_date']:%Y%m%d}-{agent_id}"
+        time_off_rows = planned_time_off.get(agent_day_key, [])
+        time_off_intervals = [
+            (item["segment_start"], item["segment_end"])
+            for item in time_off_rows
+        ]
+        time_off_minutes = (
+            interval_minutes(start, end, time_off_intervals)
+            if start and end else 0
+        )
+        time_off_labels = list(dict.fromkeys(
+            f"{item['source_kind']}: {item['absence_type']}" for item in time_off_rows
+        ))
+        planning_overlay = "; ".join(time_off_labels) or None
+        planning_source = "; ".join(sorted({item["source_file"] for item in time_off_rows})) or None
+        full_time_off = bool(scheduled_minutes and time_off_minutes >= scheduled_minutes)
+        effective_assignment_type = (
+            "Planned absence"
+            if shift["assignment_type"] == "Planned absence" or full_time_off
+            else shift["assignment_type"]
+        )
+        effective_assignment = planning_overlay if full_time_off and planning_overlay else shift["assignment"]
+        planned_absence = (
+            scheduled_minutes
+            if shift["assignment_type"] == "Planned absence"
+            else min(scheduled_minutes, time_off_minutes)
+        )
+        planned_work_minutes = max(0, scheduled_minutes - planned_absence)
+        working_intervals = (
+            subtract_intervals(start, end, time_off_intervals)
+            if start and end and effective_assignment_type != "Planned absence"
+            else []
+        )
+        first, last, source_loaded, row_present, lilo_source = _lilo_boundaries(shift, lilo, loaded_dates)
+        evidence_end = min(end, as_of) if end and start and as_of > start else start
+        statuses = (
+            _statuses_for_shift(agent_id, start, evidence_end, statuses_by_day)
+            if start and evidence_end and evidence_end > start else []
+        )
+        if start and end and end > start:
+            status_window_end = evidence_end if evidence_end and evidence_end > start else start
+            status_category, status_covered, status_exclusive = (
+                _exclusive_category_minutes(start, status_window_end, statuses)
+                if status_window_end > start else ({}, 0, [])
+            )
+            gross_status_exclusive = status_exclusive
+            expected_exclusive: list[dict[str, Any]] = []
+            for item in status_exclusive:
+                for left, right in subtract_intervals(
+                    item["interval_start"], item["interval_end"], time_off_intervals,
+                ):
+                    expected_exclusive.append({**item, "interval_start": left, "interval_end": right})
+            status_exclusive = expected_exclusive
+            status_category = defaultdict(int)
+            for item in status_exclusive:
+                status_category[item["actual_category"]] += int(
+                    (item["interval_end"] - item["interval_start"]).total_seconds() // 60
+                )
+            status_category = dict(status_category)
+            status_covered = sum(status_category.values())
+            required_status_dates = {
+                start.date() + timedelta(days=offset)
+                for offset in range(((end - timedelta(microseconds=1)).date() - start.date()).days + 1)
+            }
+        else:
+            status_category, status_covered, status_exclusive = {}, 0, []
+            gross_status_exclusive = []
+            required_status_dates = {shift["schedule_date"]}
+        status_source_loaded = required_status_dates <= status_loaded_dates
+        status_sources = "; ".join(sorted({row["source_file"] for row in statuses})) or None
+        # Any non-Logged-Off state proves the agent is connected, including an
+        # Unavailable state that may still require its own correction. Using
+        # the complete interval timeline means a logout followed by a later
+        # return is an internal gap, never a false early leave.
+        status_presence = [
+            row for row in status_exclusive
+            if row["actual_category"] != "Logged Off"
+        ]
+        status_first = min((row["interval_start"] for row in status_presence), default=None)
+        status_last = max((row["interval_end"] for row in status_presence), default=None)
+        bounded_first = first if first is not None and first <= as_of else None
+        bounded_last = min(last, as_of) if last is not None else None
+        elapsed_minutes = (
+            max(0, int((min(end, as_of) - start).total_seconds() // 60))
+            if start and end and as_of > start else 0
+        )
+        elapsed_work_minutes = sum(
+            int((min(right, as_of) - left).total_seconds() // 60)
+            for left, right in working_intervals if left < as_of and min(right, as_of) > left
+        )
+        status_coverage_ratio = status_covered / elapsed_work_minutes if elapsed_work_minutes else 0.0
+        status_is_primary = bool(statuses) and status_coverage_ratio >= minimum_status_coverage
+        # Explicit Agent Status presence always remains real presence at its
+        # physical boundary.  In particular, a LILO logout that falls inside
+        # Meal Aux/Lunch must not truncate the meal or manufacture a gap.
+        if status_is_primary and status_first is not None:
+            actual_first = status_first
+        else:
+            actual_first = min((value for value in (bounded_first, status_first) if value is not None), default=None)
+        if status_is_primary and status_last is not None:
+            actual_last = status_last
+        else:
+            actual_last = max((value for value in (bounded_last, status_last) if value is not None), default=None)
+        shift_not_started = bool(start and as_of < start)
+        shift_in_progress = bool(start and end and start <= as_of < end)
+        shift_complete = bool(end and as_of >= end)
+        evidence_parts = []
+        if first is not None or last is not None or row_present:
+            evidence_parts.append("LILO")
+        if statuses:
+            evidence_parts.append("AGENT_STATUS")
+        actual_evidence = "+".join(evidence_parts) or "NONE"
+        raw_late = max(0, int((actual_first - start).total_seconds() // 60)) if actual_first and start else 0
+        raw_early = max(0, int((end - actual_last).total_seconds() // 60)) if actual_last and end and shift_complete else 0
+        usable_pair = bool(actual_first and actual_last and start and end and actual_last >= actual_first and actual_last > start and actual_first < end)
+        late_segments = (
+            subtract_intervals(start, min(actual_first, end), time_off_intervals)
+            if usable_pair and actual_first > start else []
+        )
+        early_segments = (
+            subtract_intervals(max(actual_last, start), end, time_off_intervals)
+            if usable_pair and shift_complete and end > actual_last else []
+        )
+        late = sum(int((b - a).total_seconds() // 60) for a, b in late_segments)
+        early = sum(int((b - a).total_seconds() // 60) for a, b in early_segments)
+        late = 0 if late <= tolerance else late
+        early = 0 if early <= tolerance else early
+        # Two independent sources can prove a completed no-show:
+        #   1. LILO contains the scheduled agent/day but both boundaries are blank.
+        #   2. Agent Status covers enough of the shift and every observed interval
+        #      is explicitly Logged Off.
+        # Merely missing from an otherwise loaded extract is not proof of absence;
+        # that stays Missing actual evidence and is surfaced as a data exception.
+        blank_lilo_row = bool(source_loaded and row_present and first is None and last is None)
+        status_proves_disconnected = bool(
+            status_exclusive and not status_presence
+            and status_coverage_ratio >= minimum_status_coverage
+        )
+        no_show_segments = working_intervals if (
+            (blank_lilo_row or status_proves_disconnected)
+            and effective_assignment_type not in {"Off", "Planned absence"}
+            and shift_complete
+        ) else []
+        no_show = sum(int((b - a).total_seconds() // 60) for a, b in no_show_segments)
+        worked_span = int((actual_last - actual_first).total_seconds() // 60) if actual_first and actual_last and actual_last >= actual_first else 0
+        parse_ok = bool(shift["parse_ok"])
+        if not parse_ok and effective_assignment_type != "Off":
+            result = "Schedule parse error"
+        elif effective_assignment_type == "Off":
+            result = "Off"
+        elif effective_assignment_type == "Planned absence":
+            if full_time_off and time_off_rows:
+                kinds = {item["source_kind"] for item in time_off_rows}
+                result = "PTO" if kinds == {"PTO"} else "Away" if kinds == {"AWAY"} else "Planned time off"
+            else:
+                result = "Planned absence"
+        elif shift_not_started:
+            result = "Not started"
+        elif shift_in_progress and late:
+            result = "Late - shift in progress"
+        elif (
+            shift_in_progress and actual_first is None and start
+            and elapsed_work_minutes > tolerance
+            and (blank_lilo_row or status_proves_disconnected)
+        ):
+            result = "Not seen - shift in progress"
+        elif shift_in_progress:
+            result = "Shift in progress"
+        elif not source_loaded and not status_source_loaded:
+            result = "Data not loaded"
+        elif no_show:
+            result = "No show - partial time off" if time_off_minutes else "No show"
+        elif actual_first is None and actual_last is None:
+            result = "Missing actual evidence"
+        elif actual_first is None or actual_last is None:
+            result = "Incomplete actual evidence"
+        elif not usable_pair:
+            result = "No schedule overlap"
+        elif late and early:
+            result = "Late + early leave"
+        elif late:
+            result = "Late"
+        elif early:
+            result = "Early leave"
+        else:
+            result = "Present - partial time off" if time_off_minutes else "Present"
+        shift_state = (
+            "NOT_STARTED" if shift_not_started else
+            "IN_PROGRESS" if shift_in_progress else
+            "COMPLETE" if shift_complete else
+            "INVALID"
+        )
+        if effective_assignment_type in {"Off", "Planned absence"}:
+            call_action = "NONE"
+        elif no_show:
+            call_action = "CALL_NO_SHOW"
+        elif result == "Not seen - shift in progress":
+            call_action = "CALL_NOT_SEEN_NOW"
+        elif late:
+            call_action = "CALL_LATE"
+        else:
+            call_action = "NONE"
+        agent = agents.get(agent_id, {})
+        rows.append({
+            "agent_day_key": agent_day_key,
+            "business_date": shift["schedule_date"], "agent_id": agent_id,
+            "agent_name": agent.get("canonical_name") or shift["agent_name"],
+            "team_leader": agent.get("team_leader"), "ops_manager": agent.get("ops_manager"),
+            "lob": agent.get("lob"), "market": agent.get("market"), "language": agent.get("language"), "location": agent.get("location"),
+            "scheduled_start": start, "scheduled_end": end, "scheduled_minutes": scheduled_minutes,
+            "assignment": effective_assignment, "assignment_type": effective_assignment_type,
+            # Capacity follows the published Verint assignment even when PTO or
+            # Away changes the effective attendance label for the day.
+            "_published_assignment": shift["assignment"],
+            "planned_absence_minutes": planned_absence,
+            "first_login": first, "last_logout": last, "source_loaded": source_loaded or status_source_loaded, "lilo_row_present": row_present,
+            "seen_in_lilo": agent_id in seen_ids, "raw_late_minutes": raw_late, "raw_early_leave_minutes": raw_early,
+            "uncoded_late_minutes": late, "uncoded_early_leave_minutes": early, "no_show_minutes": no_show,
+            "worked_span_minutes": worked_span, "attendance_result": result, "attendance_percent": None,
+            "schedule_source": shift["source_file"], "lilo_source": lilo_source,
+            "actual_first_seen": actual_first, "actual_last_seen": actual_last,
+            "actual_evidence": actual_evidence, "status_covered_minutes": status_covered,
+            "status_source": status_sources,
+            "shift_state": shift_state, "call_action": call_action,
+            "requires_call": call_action != "NONE",
+            "is_provisional": shift_state in {"NOT_STARTED", "IN_PROGRESS"},
+            "evaluation_as_of": as_of,
+            "planned_work_minutes": planned_work_minutes,
+            "planning_overlay": planning_overlay,
+            "planning_overlay_minutes": time_off_minutes,
+            "planning_overlay_source": planning_source,
+            "_events": events, "_late_segments": late_segments,
+            "_early_segments": early_segments, "_no_show_segments": no_show_segments,
+            "_planned_time_off_segments": time_off_rows,
+            "_status_exclusive": status_exclusive, "_status_category": status_category,
+            "_status_exclusive_gross": gross_status_exclusive,
+            "_status_is_primary": status_is_primary,
+            "_evidence_complete": result not in UNRELIABLE_ATTENDANCE_RESULTS,
+            "_schedule_source_file_id": shift["source_file_id"],
+        })
+    conn.execute("DELETE FROM mart.attendance_agent_day")
+    _insert_dicts(conn, "mart.attendance_agent_day", ATTENDANCE_COLUMNS, rows)
+    return rows
+
+
+def _exclusive_category_minutes(
+    shift_start: datetime,
+    shift_end: datetime,
+    statuses: list[dict[str, Any]],
+) -> tuple[dict[str, int], int, list[dict[str, Any]]]:
+    clipped: list[dict[str, Any]] = []
+    for status in statuses:
+        start, end = max(shift_start, status["status_start"]), min(shift_end, status["status_end"])
+        if end > start:
+            clipped.append({**status, "clip_start": start, "clip_end": end})
+    boundaries = sorted({shift_start, shift_end, *(row["clip_start"] for row in clipped), *(row["clip_end"] for row in clipped)})
+    minutes: dict[str, int] = defaultdict(int)
+    covered_segments: list[tuple[datetime, datetime]] = []
+    exclusive: list[dict[str, Any]] = []
+    for left, right in zip(boundaries, boundaries[1:]):
+        active = [row for row in clipped if row["clip_start"] < right and row["clip_end"] > left]
+        if not active:
+            continue
+        # During minute-rounded transitions, the newest starting state wins.
+        chosen = max(active, key=lambda row: (row["status_start"], row["source_row"]))
+        segment_minutes = int((right - left).total_seconds() // 60)
+        if segment_minutes <= 0:
+            continue
+        minutes[chosen["actual_category"]] += segment_minutes
+        covered_segments.append((left, right))
+        exclusive.append({**chosen, "interval_start": left, "interval_end": right})
+    covered = int(sum((b - a).total_seconds() for a, b in merge_intervals(covered_segments)) // 60)
+    return dict(minutes), covered, exclusive
+
+
+def _exact_status_gaps(
+    intervals: Iterable[tuple[datetime, datetime]],
+    minimum_minutes: int,
+) -> list[tuple[datetime, datetime]]:
+    """Keep physical status boundaries; never bridge a real return to service.
+
+    The configured tolerance suppresses tiny individual gaps. It must not join
+    two separate Logged Off/Unavailable spells across even a short active
+    interval, because Verint needs one correction per exact continuous spell.
+    """
+
+    return [
+        (start, end)
+        for start, end in merge_intervals(intervals)
+        if int((end - start).total_seconds() // 60) > minimum_minutes
+    ]
+
+
+CORRECTION_COLUMNS = [
+    "correction_id", "business_date", "agent_id", "agent_name", "team_leader", "ops_manager", "lob", "scheduled_start", "scheduled_end", "first_login", "last_logout",
+    "priority", "detected_issue", "gap_start", "gap_end", "gap_minutes", "confidence", "suggested_activity", "source_file",
+    "confirmed_activity", "validation_status", "owner", "comment", "injected_date",
+    "observed_source", "verint_reconciliation", "verint_activity", "verint_category",
+    "verint_overlap_minutes", "verint_source_file",
+]
+
+VERINT_EXCEPTION_COLUMNS = [
+    "exception_key", "agent_day_key", "business_date", "agent_id", "agent_name",
+    "activity", "category", "event_start", "event_end", "minutes",
+    "exception_type", "source_file", "rule_version", "rule_sha256",
+]
+
+CORRECTION_RESIDUAL_COLUMNS = [
+    "residual_id", "correction_id", "business_date", "agent_id",
+    "residual_start", "residual_end", "residual_minutes",
+    "suggested_activity", "observed_source", "source_file",
+    "verint_reconciliation",
+]
+
+
+def _correction_id(row: dict[str, Any], issue: str, start: datetime | None, end: datetime | None) -> str:
+    clean = "".join(char for char in issue.upper() if char.isalnum())
+    start_key = start.strftime("%H%M%S") if start else "DAY"
+    end_key = end.strftime("%H%M%S") if end else "DAY"
+    return f"{row['business_date']:%Y%m%d}-{row['agent_id']}-{start_key}-{end_key}-{clean}"
+
+
+def _final_verint_events(base: dict[str, Any], rulebook: Rulebook) -> list[dict[str, Any]]:
+    """Return post-day Verint activities that can explain an observed gap."""
+    candidates: list[dict[str, Any]] = []
+    ignored = {"OFF", "LUNCH", "BREAK", "NO_ACTIVITY", "PRODUCTION"}
+    for event in base.get("_events", []):
+        rule = rulebook.classify_activity(event.get("activity"))
+        if rule is None or rule.working or rule.category in ignored:
+            continue
+        candidates.append({
+            "activity": event.get("activity"), "category": rule.category,
+            "start": event.get("event_start"), "end": event.get("event_end"),
+            "source_file": event.get("source_file"), "rule": rule,
+        })
+    deduped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for item in candidates:
+        if item["start"] and item["end"] and item["end"] > item["start"]:
+            # Overlapping daily/full-history Activities exports can contain the
+            # same business event under different filenames.  Source filename
+            # is provenance, not event identity, so merge it instead of
+            # returning two rows that share one downstream exception key.
+            key = (item["activity"], item["start"], item["end"])
+            existing = deduped.get(key)
+            if existing is None:
+                deduped[key] = item
+                continue
+            sources = {
+                str(value).strip()
+                for source in (existing.get("source_file"), item.get("source_file"))
+                for value in str(source or "").split(";")
+                if str(value).strip()
+            }
+            existing["source_file"] = "; ".join(sorted(sources)) or None
+    return list(deduped.values())
+
+
+def _build_corrections(
+    conn: DatabaseConnection,
+    rulebook: Rulebook,
+    attendance: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+
+    def add(
+        base: dict[str, Any], issue: str, start: datetime | None, end: datetime | None,
+        minutes: int, priority: int, confidence: str, activity: str,
+        observed_source: str, source: str | None = None,
+    ) -> None:
+        output.append({
+            "correction_id": _correction_id(base, issue, start, end), "business_date": base["business_date"], "agent_id": base["agent_id"],
+            "agent_name": base["agent_name"], "team_leader": base["team_leader"], "ops_manager": base["ops_manager"], "lob": base["lob"],
+            "scheduled_start": base["scheduled_start"], "scheduled_end": base["scheduled_end"], "first_login": base["first_login"], "last_logout": base["last_logout"],
+            "priority": priority, "detected_issue": issue, "gap_start": start, "gap_end": end, "gap_minutes": minutes,
+            "confidence": confidence, "suggested_activity": activity, "source_file": source or base["schedule_source"],
+            "observed_source": observed_source,
+        })
+
+    status_tolerance = rulebook.status_gap_tolerance_minutes
+    for row in attendance:
+        start, end = row["scheduled_start"], row["scheduled_end"]
+        if row["no_show_minutes"] > 0 and start and end:
+            for gap_start, gap_end in row.get("_no_show_segments", []):
+                minutes = int((gap_end - gap_start).total_seconds() // 60)
+                if minutes <= 0:
+                    continue
+                source = "; ".join(value for value in (row["lilo_source"], row["status_source"]) if value) or row["schedule_source"]
+                add(row, "No show", gap_start, gap_end, minutes, 1, "High", "Review absence reason", row["actual_evidence"], source)
+        if row["uncoded_late_minutes"] > 0:
+            for gap_start, gap_end in row["_late_segments"]:
+                minutes = int((gap_end - gap_start).total_seconds() // 60)
+                if minutes > 0:
+                    source = "; ".join(value for value in (row["lilo_source"], row["status_source"]) if value) or row["schedule_source"]
+                    add(row, "Late", gap_start, gap_end, minutes, 2, "High", "Late", row["actual_evidence"], source)
+        if row["uncoded_early_leave_minutes"] > 0:
+            for gap_start, gap_end in row["_early_segments"]:
+                minutes = int((gap_end - gap_start).total_seconds() // 60)
+                if minutes > 0:
+                    source = "; ".join(value for value in (row["lilo_source"], row["status_source"]) if value) or row["schedule_source"]
+                    add(row, "Early leave", gap_start, gap_end, minutes, 3, "High", "Early Leaving", row["actual_evidence"], source)
+        if row["attendance_result"] == "Incomplete actual evidence":
+            source = "; ".join(value for value in (row["lilo_source"], row["status_source"]) if value) or row["schedule_source"]
+            add(row, "Incomplete actual evidence", None, None, 0, 9, "Review", "Schedule Correction", row["actual_evidence"], source)
+
+        actual_first, actual_last = row["actual_first_seen"], row["actual_last_seen"]
+        if not actual_first or not actual_last or actual_last <= actual_first:
+            continue
+        exclusive = row.get("_status_exclusive_gross", row.get("_status_exclusive", []))
+        for category, issue, priority in (("Logged Off", "Mid-shift logged off", 4), ("Unavailable", "Unavailable in shift", 7)):
+            raw = [(item["interval_start"], item["interval_end"]) for item in exclusive if item["actual_category"] == category]
+            exact_gaps = _exact_status_gaps(raw, status_tolerance)
+            clipped = clip_intervals(actual_first, actual_last, exact_gaps)
+            time_off = [
+                (item["segment_start"], item["segment_end"])
+                for item in row.get("_planned_time_off_segments", [])
+            ]
+            for raw_start, raw_end in clipped:
+                for hit_start, hit_end in subtract_intervals(raw_start, raw_end, time_off):
+                    minutes = int((hit_end - hit_start).total_seconds() // 60)
+                    if minutes <= status_tolerance:
+                        continue
+                    confidence = "High" if category == "Logged Off" else "Review"
+                    add(row, issue, hit_start, hit_end, minutes, priority, confidence, "General Unavailability", "AGENT_STATUS", row["status_source"])
+
+    # Attendance Review is now a read-only residual queue.  Final Verint
+    # Activities are not attendance evidence: they can only close an already
+    # detected exact gap after the day.  Subtract their physical overlap and
+    # retain only the still-unexplained fragments.
+    attendance_by_key = {
+        f"{row['business_date']:%Y%m%d}-{row['agent_id']}": row
+        for row in attendance
+    }
+    raw_output = output
+    raw_intervals_by_key: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+    for item in raw_output:
+        if item["gap_start"] and item["gap_end"]:
+            raw_intervals_by_key[
+                f"{item['business_date']:%Y%m%d}-{item['agent_id']}"
+            ].append((item["gap_start"], item["gap_end"]))
+
+    deduped: dict[str, dict[str, Any]] = {}
+    residual_rows: list[dict[str, Any]] = []
+    for raw_item in raw_output:
+        item = dict(raw_item)
+        agent_day_key = f"{item['business_date']:%Y%m%d}-{item['agent_id']}"
+        base = attendance_by_key.get(agent_day_key, {})
+        events = _final_verint_events(base, rulebook)
+        if not item["gap_start"] or not item["gap_end"]:
+            residuals: list[tuple[datetime | None, datetime | None]] = [(None, None)]
+            overlaps: list[dict[str, Any]] = []
+            overlap_minutes = 0
+            reconciliation = "NO_EXACT_INTERVAL"
+        else:
+            overlaps = [
+                event for event in events
+                if event["start"] < item["gap_end"]
+                and event["end"] > item["gap_start"]
+            ]
+            blocked = [(event["start"], event["end"]) for event in overlaps]
+            residuals = list(subtract_intervals(
+                item["gap_start"], item["gap_end"], blocked,
+            ))
+            residual_minutes = sum(
+                int((right - left).total_seconds() // 60)
+                for left, right in residuals
+            )
+            overlap_minutes = max(0, int(item["gap_minutes"] or 0) - residual_minutes)
+            reconciliation = (
+                "PARTIALLY_IN_VERINT" if overlap_minutes else "NOT_IN_VERINT"
+            )
+
+        # Full coverage deliberately creates no row: exporting the corrected
+        # Activities file on the next refresh makes the case disappear.
+        if not residuals:
+            continue
+        activities = "; ".join(sorted({
+            str(event.get("activity") or "").strip()
+            for event in overlaps if str(event.get("activity") or "").strip()
+        })) or None
+        categories = "; ".join(sorted({
+            str(event.get("category") or "").strip()
+            for event in overlaps if str(event.get("category") or "").strip()
+        })) or None
+        verint_sources = "; ".join(sorted({
+            value
+            for event in overlaps
+            for value in str(event.get("source_file") or "").split("; ")
+            if value
+        })) or None
+        for residual_start, residual_end in residuals:
+            residual = dict(item)
+            if residual_start is not None and residual_end is not None:
+                residual_minutes = int(
+                    (residual_end - residual_start).total_seconds() // 60
+                )
+                residual.update({
+                    "correction_id": _correction_id(
+                        residual, residual["detected_issue"],
+                        residual_start, residual_end,
+                    ),
+                    "gap_start": residual_start, "gap_end": residual_end,
+                    "gap_minutes": residual_minutes,
+                })
+            residual.update({
+                # Retained nullable columns keep the stable database contract;
+                # no workflow reads or writes human decisions anymore.
+                "confirmed_activity": None, "validation_status": "Residual",
+                "owner": None, "comment": None, "injected_date": None,
+                "verint_reconciliation": reconciliation,
+                "verint_activity": activities, "verint_category": categories,
+                "verint_overlap_minutes": overlap_minutes,
+                "verint_source_file": verint_sources,
+            })
+            deduped[residual["correction_id"]] = residual
+            if residual_start is None or residual_end is None:
+                continue
+            segment_id = hashlib.sha256(
+                f"{residual['correction_id']}|{residual_start}|{residual_end}".encode("utf-8")
+            ).hexdigest()
+            residual_rows.append({
+                "residual_id": segment_id,
+                "correction_id": residual["correction_id"],
+                "business_date": residual["business_date"],
+                "agent_id": residual["agent_id"],
+                "residual_start": residual_start, "residual_end": residual_end,
+                "residual_minutes": residual["gap_minutes"],
+                "suggested_activity": residual["suggested_activity"],
+                "observed_source": residual["observed_source"],
+                "source_file": residual["source_file"],
+                "verint_reconciliation": reconciliation,
+            })
+    output = sorted(deduped.values(), key=lambda item: (item["business_date"], item["priority"], -item["gap_minutes"], item["agent_id"]))
+    conn.execute("DELETE FROM mart.correction_candidate")
+    _insert_dicts(conn, "mart.correction_candidate", CORRECTION_COLUMNS, output)
+    conn.execute("DELETE FROM mart.correction_residual_segment")
+    _insert_dicts(conn, "mart.correction_residual_segment", CORRECTION_RESIDUAL_COLUMNS, residual_rows)
+
+    # Final absence/vacation/unpaid codes must be supported either by an
+    # observed exact gap or by governed PTO/Away.  Shrinkage-only activities
+    # such as Training may correctly occur while the agent is connected and
+    # therefore do not need a gap.
+    exception_rows: dict[str, dict[str, Any]] = {}
+    for agent_day_key, base in attendance_by_key.items():
+        support = list(raw_intervals_by_key.get(agent_day_key, []))
+        support.extend(
+            (row["segment_start"], row["segment_end"])
+            for row in base.get("_planned_time_off_segments", [])
+        )
+        for event in _final_verint_events(base, rulebook):
+            rule = event["rule"]
+            if not (rule.absence or rule.vacation or rule.unpaid):
+                continue
+            for unsupported_start, unsupported_end in subtract_intervals(
+                event["start"], event["end"], support,
+            ):
+                minutes = int(
+                    (unsupported_end - unsupported_start).total_seconds() // 60
+                )
+                if minutes <= 0:
+                    continue
+                exception_key = hashlib.sha256(
+                    f"{agent_day_key}|{event['activity']}|{event['category']}|"
+                    f"{unsupported_start}|{unsupported_end}|VERINT_FINAL_WITHOUT_OBSERVED_GAP".encode("utf-8")
+                ).hexdigest()
+                exception_rows[exception_key] = {
+                    "exception_key": exception_key,
+                    "agent_day_key": agent_day_key,
+                    "business_date": base["business_date"],
+                    "agent_id": base["agent_id"],
+                    "agent_name": base["agent_name"],
+                    "activity": event["activity"], "category": event["category"],
+                    "event_start": unsupported_start,
+                    "event_end": unsupported_end, "minutes": minutes,
+                    "exception_type": "VERINT_FINAL_WITHOUT_OBSERVED_GAP",
+                    "source_file": event["source_file"],
+                    "rule_version": rulebook.version,
+                    "rule_sha256": rulebook.sha256,
+                }
+    conn.execute("DELETE FROM mart.verint_final_exception")
+    _insert_dicts(
+        conn, "mart.verint_final_exception", VERINT_EXCEPTION_COLUMNS,
+        sorted(
+            exception_rows.values(),
+            key=lambda row: (
+                row["business_date"], row["agent_id"], row["event_start"],
+                row["exception_key"],
+            ),
+        ),
+    )
+    return output
+
+
+STAFFING_COLUMNS = [
+    "business_date", "interval_start", "interval_end", "lob", "language",
+    "planning_group", "staff_type", "capacity_mapping_status",
+    "scheduled_agents", "observed_agents", "productive_agents", "auxiliary_agents",
+    "scheduled_fte", "elapsed_scheduled_fte", "observed_fte", "productive_fte",
+    "staffing_variance_fte", "staffing_gap_fte", "staffing_state",
+    "evidence_basis", "evaluation_as_of",
+    "gross_scheduled_fte", "planned_time_off_fte",
+]
+
+TIMELINE_COLUMNS = [
+    "segment_key", "agent_day_key", "business_date", "agent_id", "agent_name",
+    "team_leader", "ops_manager", "lob", "language", "scheduled_start",
+    "scheduled_end", "segment_start", "segment_end", "segment_minutes",
+    "planned_state", "actual_status", "actual_category", "mismatch_type",
+    "is_gap", "observed_source", "source_file", "evaluation_as_of",
+]
+
+
+def _quarter_intervals(start: datetime, end: datetime) -> Iterable[tuple[datetime, datetime]]:
+    cursor = start.replace(minute=(start.minute // 15) * 15, second=0, microsecond=0)
+    while cursor < end:
+        right = cursor + timedelta(minutes=15)
+        yield cursor, right
+        cursor = right
+
+
+def _overlap_seconds(left: datetime, right: datetime, start: datetime, end: datetime) -> float:
+    return max(0.0, (min(right, end) - max(left, start)).total_seconds())
+
+
+def _build_staffing(
+    conn: DatabaseConnection,
+    config: Config,
+    attendance: list[dict[str, Any]],
+    as_of: datetime,
+) -> int:
+    capacity_mapping = load_capacity_mapping(config.capacity_mapping)
+    buckets: dict[tuple[date, datetime, str, str, str, str], dict[str, Any]] = {}
+
+    def bucket_for(row: dict[str, Any], left: datetime, right: datetime) -> dict[str, Any]:
+        lob = str(row.get("lob") or "(blank)")
+        language = str(row.get("language") or "(blank)")
+        capacity = capacity_mapping.map_schedule(
+            lob, row.get("_published_assignment") or row.get("assignment"),
+        )
+        key = (
+            row["business_date"], left, lob, language,
+            capacity.planning_group, capacity.staff_type,
+        )
+        return buckets.setdefault(key, {
+            "business_date": row["business_date"], "interval_start": left,
+            "interval_end": right, "lob": lob, "language": language,
+            "planning_group": capacity.planning_group,
+            "staff_type": capacity.staff_type,
+            "capacity_mapping_status": capacity.status,
+            "scheduled_ids": set(), "observed_ids": set(), "productive_ids": set(),
+            "auxiliary_ids": set(), "scheduled_seconds": 0.0,
+            "gross_scheduled_seconds": 0.0, "time_off_seconds": 0.0,
+            "source_available_seconds": 0.0,
+            "elapsed_scheduled_seconds": 0.0, "observed_seconds": 0.0,
+            "productive_seconds": 0.0, "evidence": set(),
+        })
+
+    for row in attendance:
+        start, end = row["scheduled_start"], row["scheduled_end"]
+        if (
+            not start or not end or end <= start
+            or row["assignment_type"] == "Off"
+        ):
+            continue
+        time_off_intervals = [
+            (item["segment_start"], item["segment_end"])
+            for item in row.get("_planned_time_off_segments", [])
+        ]
+        if row["assignment_type"] == "Planned absence" and not time_off_intervals:
+            time_off_intervals = [(start, end)]
+        working_intervals = subtract_intervals(start, end, time_off_intervals)
+        elapsed_end = min(end, as_of)
+        for left, right in _quarter_intervals(start, end):
+            bucket = bucket_for(row, left, right)
+            gross = _overlap_seconds(left, right, start, end)
+            scheduled = sum(_overlap_seconds(left, right, a, b) for a, b in working_intervals)
+            planned = max(0.0, gross - scheduled)
+            elapsed = sum(
+                _overlap_seconds(left, right, a, min(b, elapsed_end))
+                for a, b in working_intervals if a < elapsed_end
+            )
+            bucket["gross_scheduled_seconds"] += gross
+            bucket["time_off_seconds"] += planned
+            if scheduled:
+                bucket["scheduled_ids"].add(row["agent_id"])
+                bucket["scheduled_seconds"] += scheduled
+                if row.get("source_loaded") and row.get("_evidence_complete"):
+                    bucket["source_available_seconds"] += scheduled
+                bucket["elapsed_scheduled_seconds"] += elapsed
+
+        expected_exclusive = row.get("_status_exclusive", [])
+        exclusive = row.get("_status_exclusive_gross", expected_exclusive)
+        active_statuses = [
+            item for item in exclusive
+            if item["actual_category"] in {"Productive", "Auxiliary", "Lunch", "Break"}
+        ]
+        actual_intervals: list[tuple[datetime, datetime, str, str]] = []
+        for item in active_statuses:
+            actual_intervals.append((
+                item["interval_start"], min(item["interval_end"], as_of),
+                item["actual_category"], "AGENT_STATUS",
+            ))
+        # LILO can fill only portions for which Agent Status has no state at all.
+        # It must not turn an explicit Logged Off/Unavailable interval into presence.
+        if row["actual_first_seen"] and row["actual_last_seen"]:
+            lilo_start = max(start, row["actual_first_seen"])
+            lilo_end = min(end, as_of, row["actual_last_seen"])
+            covered = merge_intervals(
+                (item["interval_start"], min(item["interval_end"], as_of))
+                for item in exclusive if min(item["interval_end"], as_of) > item["interval_start"]
+            )
+            if lilo_end > lilo_start:
+                for residual_start, residual_end in subtract_intervals(lilo_start, lilo_end, covered):
+                    actual_intervals.append((residual_start, residual_end, "LILO_PRESENT", "LILO"))
+        for actual_start, actual_end, category, basis in actual_intervals:
+            if actual_end <= actual_start:
+                continue
+            for left, right in _quarter_intervals(actual_start, actual_end):
+                bucket = bucket_for(row, left, right)
+                seconds = _overlap_seconds(left, right, actual_start, actual_end)
+                if not seconds:
+                    continue
+                bucket["observed_ids"].add(row["agent_id"])
+                bucket["observed_seconds"] += seconds
+                bucket["evidence"].add(basis)
+                if category == "Productive":
+                    bucket["productive_ids"].add(row["agent_id"])
+                    bucket["productive_seconds"] += seconds
+                elif category == "Auxiliary":
+                    bucket["auxiliary_ids"].add(row["agent_id"])
+
+    output: list[dict[str, Any]] = []
+    for item in buckets.values():
+        scheduled_fte = item["scheduled_seconds"] / 900
+        gross_scheduled_fte = item["gross_scheduled_seconds"] / 900
+        planned_time_off_fte = item["time_off_seconds"] / 900
+        elapsed_scheduled_fte = item["elapsed_scheduled_seconds"] / 900
+        observed_fte = item["observed_seconds"] / 900
+        productive_fte = item["productive_seconds"] / 900
+        variance = observed_fte - elapsed_scheduled_fte
+        gap = max(0.0, -variance)
+        scheduled_seconds = item["scheduled_seconds"]
+        available_seconds = item["source_available_seconds"]
+        if item["interval_start"] >= as_of:
+            state = "FUTURE"
+            variance = None
+            gap = None
+        elif available_seconds + 0.001 < scheduled_seconds:
+            state = "DATA_MISSING" if available_seconds <= 0.001 else "DATA_PARTIAL"
+            variance = None
+            gap = None
+        elif item["interval_start"] < as_of < item["interval_end"]:
+            state = "PARTIAL_GAP" if gap is not None and gap > 0.001 else "PARTIAL_OK"
+        else:
+            state = "GAP" if gap is not None and gap > 0.001 else "OK"
+        evidence = "+".join(sorted(item["evidence"])) or "NONE"
+        if available_seconds + 0.001 < scheduled_seconds:
+            evidence = f"{evidence}+MISSING_SOURCE"
+        output.append({
+            **{key: item[key] for key in (
+                "business_date", "interval_start", "interval_end", "lob", "language",
+                "planning_group", "staff_type", "capacity_mapping_status",
+            )},
+            "scheduled_agents": len(item["scheduled_ids"]),
+            "observed_agents": len(item["observed_ids"]),
+            "productive_agents": len(item["productive_ids"]),
+            "auxiliary_agents": len(item["auxiliary_ids"]),
+            "scheduled_fte": scheduled_fte,
+            "elapsed_scheduled_fte": elapsed_scheduled_fte,
+            "observed_fte": observed_fte,
+            "productive_fte": productive_fte,
+            "staffing_variance_fte": variance,
+            "staffing_gap_fte": gap,
+            "staffing_state": state,
+            "evidence_basis": evidence,
+            "evaluation_as_of": as_of,
+            "gross_scheduled_fte": gross_scheduled_fte,
+            "planned_time_off_fte": planned_time_off_fte,
+        })
+    output.sort(key=lambda row: (
+        row["business_date"], row["interval_start"], row["planning_group"],
+        row["staff_type"], row["lob"], row["language"],
+    ))
+    conn.execute("DELETE FROM mart.staffing_interval")
+    _insert_dicts(conn, "mart.staffing_interval", STAFFING_COLUMNS, output)
+    return len(output)
+
+
+def _build_shift_timeline(
+    conn: DatabaseConnection,
+    attendance: list[dict[str, Any]],
+    as_of: datetime,
+) -> int:
+    output: list[dict[str, Any]] = []
+    for row in attendance:
+        start, end = row["scheduled_start"], row["scheduled_end"]
+        if (
+            not start or not end or end <= start or row["assignment_type"] == "Off"
+            or (
+                row["assignment_type"] == "Planned absence"
+                and not row.get("_planned_time_off_segments")
+            )
+        ):
+            continue
+        exclusive = row.get("_status_exclusive_gross", row.get("_status_exclusive", []))
+        boundaries = {start, end}
+        if start < as_of < end:
+            boundaries.add(as_of)
+        for item in exclusive:
+            boundaries.update((item["interval_start"], item["interval_end"]))
+        planned_segments = row.get("_planned_time_off_segments", [])
+        for item in planned_segments:
+            boundaries.update((item["segment_start"], item["segment_end"]))
+        for value in (row["actual_first_seen"], row["actual_last_seen"]):
+            if value is not None and start < value < end:
+                boundaries.add(value)
+        ordered = sorted(boundaries)
+        for left, right in zip(ordered, ordered[1:]):
+            minutes = int((right - left).total_seconds() // 60)
+            if minutes <= 0:
+                continue
+            chosen = next((
+                item for item in exclusive
+                if item["interval_start"] <= left and item["interval_end"] >= right
+            ), None)
+            actual_status = chosen.get("status") if chosen else None
+            source_file = chosen.get("source_file") if chosen else None
+            planned = next((
+                item for item in planned_segments
+                if item["segment_start"] <= left and item["segment_end"] >= right
+            ), None)
+            if planned is not None:
+                active_during_time_off = chosen is not None and chosen["actual_category"] != "Logged Off"
+                category = chosen["actual_category"] if active_during_time_off else planned["source_kind"]
+                mismatch = "WORK_DURING_TIME_OFF" if active_during_time_off else "PLANNED_TIME_OFF"
+                is_gap = False
+                source = "AGENT_STATUS" if active_during_time_off else planned["source_kind"]
+                source_file = chosen.get("source_file") if active_during_time_off else planned["source_file"]
+            elif left >= as_of:
+                category, mismatch, is_gap, source = "FUTURE", "FUTURE", False, "NONE"
+            elif any(a <= left and b >= right for a, b in row.get("_no_show_segments", [])):
+                category, mismatch, is_gap, source = "NO_ACTIVITY", "NO_SHOW", True, row["actual_evidence"]
+                source_file = row["lilo_source"] or row["status_source"]
+            elif chosen is not None:
+                category = chosen["actual_category"]
+                if category == "Logged Off":
+                    if row["actual_first_seen"] and right <= row["actual_first_seen"]:
+                        mismatch, is_gap = "LATE", True
+                    elif row["actual_last_seen"] and left >= row["actual_last_seen"] and as_of >= end:
+                        mismatch, is_gap = "EARLY_LEAVE", True
+                    else:
+                        mismatch, is_gap = "LOGGED_OFF", True
+                elif category == "Unavailable":
+                    mismatch, is_gap = "UNAVAILABLE", True
+                else:
+                    mismatch, is_gap = "MATCH", False
+                source = "AGENT_STATUS"
+            elif row["actual_first_seen"] and right <= row["actual_first_seen"]:
+                category, mismatch, is_gap, source = "NO_ACTIVITY", "LATE", True, row["actual_evidence"]
+                source_file = row["lilo_source"] or row["status_source"]
+            elif row["actual_last_seen"] and left >= row["actual_last_seen"] and as_of >= end:
+                category, mismatch, is_gap, source = "NO_ACTIVITY", "EARLY_LEAVE", True, row["actual_evidence"]
+                source_file = row["lilo_source"] or row["status_source"]
+            elif not exclusive and row["actual_first_seen"] and row["actual_last_seen"]:
+                category, mismatch, is_gap, source = "LILO_PRESENT", "MATCH", False, "LILO"
+                source_file = row["lilo_source"]
+            else:
+                category, mismatch, is_gap, source = "NO_STATUS_EVIDENCE", "MISSING_STATUS_DATA", False, "NONE"
+                source_file = row["status_source"] or row["lilo_source"]
+            segment_key = hashlib.sha256(
+                f"{row['agent_day_key']}|{left}|{right}|{category}|{mismatch}".encode("utf-8")
+            ).hexdigest()
+            output.append({
+                "segment_key": segment_key, "agent_day_key": row["agent_day_key"],
+                "business_date": row["business_date"], "agent_id": row["agent_id"],
+                "agent_name": row["agent_name"], "team_leader": row["team_leader"],
+                "ops_manager": row["ops_manager"], "lob": row["lob"],
+                "language": row["language"], "scheduled_start": start,
+                "scheduled_end": end, "segment_start": left, "segment_end": right,
+                "segment_minutes": minutes,
+                "planned_state": (
+                    f"{planned['source_kind']}: {planned['absence_type']}"
+                    if planned is not None else row["assignment_type"]
+                ),
+                "actual_status": actual_status, "actual_category": category,
+                "mismatch_type": mismatch, "is_gap": is_gap,
+                "observed_source": source, "source_file": source_file,
+                "evaluation_as_of": as_of,
+            })
+    output.sort(key=lambda row: (row["business_date"], row["agent_id"], row["segment_start"]))
+    conn.execute("DELETE FROM mart.shift_timeline_segment")
+    _insert_dicts(conn, "mart.shift_timeline_segment", TIMELINE_COLUMNS, output)
+    return len(output)
+
+
+SCHEDULE_INTEGRITY_COLUMNS = [
+    "integrity_key", "agent_day_key", "business_date", "agent_id",
+    "agent_name", "team_leader", "ops_manager", "lob", "language",
+    "scheduled_start", "scheduled_end", "observed_start", "observed_end",
+    "scheduled_minutes", "observed_span_minutes", "start_delta_minutes",
+    "end_delta_minutes", "displaced_minutes", "internal_gap_minutes",
+    "internal_gap_count", "classification", "pattern_family",
+    "recurrence_count", "eligible_day_count", "is_recurring",
+    "requires_review", "evidence_basis", "confidence", "evaluation_as_of",
+    "rule_version", "rule_sha256",
+]
+
+
+def _build_schedule_integrity(
+    conn: DatabaseConnection,
+    rulebook: Rulebook,
+    attendance: list[dict[str, Any]],
+    statuses_by_day: dict[tuple[date, str], list[dict[str, Any]]],
+    as_of: datetime,
+) -> int:
+    """Compare completed published shifts with physical Agent Status boundaries.
+
+    This is deliberately not an adherence score.  It detects a small set of
+    auditable boundary patterns, uses Agent Status first, and falls back to
+    LILO only when Agent Status cannot provide a sustained presence interval.
+    PTO/Away days and unfinished shifts are excluded from review counts.
+    """
+
+    candidates: list[dict[str, Any]] = []
+    search = timedelta(hours=rulebook.integrity_boundary_search_hours)
+    minimum = rulebook.integrity_boundary_minimum_minutes
+    gap_tolerance = rulebook.status_gap_tolerance_minutes
+
+    for row in attendance:
+        start, end = row.get("scheduled_start"), row.get("scheduled_end")
+        if (
+            not start or not end or end <= start
+            or row.get("shift_state") != "COMPLETE"
+            or row.get("assignment_type") in {"Off", "Planned absence"}
+            or int(row.get("planned_work_minutes") or 0) <= 0
+            or int(row.get("planning_overlay_minutes") or 0) > 0
+        ):
+            continue
+
+        window_start = start - search
+        window_end = min(end + search, as_of)
+        statuses = _statuses_for_shift(
+            row["agent_id"], window_start, window_end, statuses_by_day,
+        )
+        _, _, exclusive = _exclusive_category_minutes(
+            window_start, window_end, statuses,
+        ) if statuses and window_end > window_start else ({}, 0, [])
+        presence_runs = merge_intervals(
+            (item["interval_start"], item["interval_end"])
+            for item in exclusive if item["actual_category"] != "Logged Off"
+        )
+        presence_runs = [
+            (left, right) for left, right in presence_runs
+            if (right - left).total_seconds() >= minimum * 60
+        ]
+
+        if presence_runs:
+            observed_start = presence_runs[0][0]
+            observed_end = presence_runs[-1][1]
+            evidence_basis = "AGENT_STATUS"
+            confidence = "High"
+        else:
+            observed_start = row.get("first_login")
+            observed_end = row.get("last_logout")
+            evidence_basis = "LILO" if observed_start or observed_end else "NONE"
+            confidence = "Review" if evidence_basis == "LILO" else "Insufficient"
+
+        usable_pair = bool(
+            observed_start and observed_end and observed_end > observed_start
+        )
+        scheduled_minutes = int((end - start).total_seconds() // 60)
+        observed_span = (
+            int((observed_end - observed_start).total_seconds() // 60)
+            if usable_pair else None
+        )
+        start_delta = (
+            int((observed_start - start).total_seconds() // 60)
+            if observed_start is not None else None
+        )
+        end_delta = (
+            int((observed_end - end).total_seconds() // 60)
+            if observed_end is not None else None
+        )
+
+        explicit_disconnects = merge_intervals(
+            (max(item["interval_start"], start), min(item["interval_end"], end))
+            for item in exclusive
+            if (
+                usable_pair
+                and item["actual_category"] == "Logged Off"
+                and item["interval_end"] > max(start, observed_start)
+                and item["interval_start"] < min(end, observed_end)
+            )
+        )
+        explicit_disconnects = [
+            (left, right) for left, right in explicit_disconnects
+            if right > left and (right - left).total_seconds() > gap_tolerance * 60
+        ]
+        internal_gap_minutes = sum(
+            int((right - left).total_seconds() // 60)
+            for left, right in explicit_disconnects
+        )
+        internal_gap_count = len(explicit_disconnects)
+
+        displaced = 0
+        review = False
+        if not usable_pair:
+            classification = "No observed shift"
+            family = "Insufficient evidence"
+        else:
+            paired = abs(start_delta - end_delta) <= rulebook.integrity_paired_delta_tolerance_minutes
+            duration_preserved = abs(observed_span - scheduled_minutes) <= rulebook.integrity_paired_delta_tolerance_minutes
+            threshold = rulebook.integrity_displacement_threshold_minutes
+            if start_delta <= -threshold and end_delta <= -threshold and paired and duration_preserved:
+                classification = "Shifted early"
+                family = "Self-shifted early"
+                displaced = min(abs(start_delta), abs(end_delta))
+                review = True
+            elif start_delta >= threshold and end_delta >= threshold and paired and duration_preserved:
+                classification = "Shifted late"
+                family = "Self-shifted late"
+                displaced = min(abs(start_delta), abs(end_delta))
+                review = True
+            elif (
+                start_delta > rulebook.integrity_start_tolerance_minutes
+                and end_delta < -rulebook.integrity_end_tolerance_minutes
+            ):
+                classification = "Late start + early leave"
+                family = "Boundary loss"
+                displaced = start_delta + abs(end_delta)
+                review = True
+            elif start_delta > rulebook.integrity_start_tolerance_minutes:
+                classification = "Late start"
+                family = "Late start"
+                displaced = start_delta
+                review = True
+            elif end_delta < -rulebook.integrity_end_tolerance_minutes:
+                classification = "Early leave"
+                family = "Early leave"
+                displaced = abs(end_delta)
+                review = True
+            elif internal_gap_minutes > gap_tolerance:
+                classification = "Fragmented shift"
+                family = "Internal disconnect"
+                displaced = internal_gap_minutes
+                review = True
+            else:
+                classification = "Published shift respected"
+                family = "Aligned"
+
+        integrity_key = hashlib.sha256(
+            f"{row['agent_day_key']}|{start}|{end}|{observed_start}|{observed_end}".encode("utf-8")
+        ).hexdigest()
+        candidates.append({
+            "integrity_key": integrity_key,
+            "agent_day_key": row["agent_day_key"],
+            "business_date": row["business_date"],
+            "agent_id": row["agent_id"], "agent_name": row.get("agent_name"),
+            "team_leader": row.get("team_leader"),
+            "ops_manager": row.get("ops_manager"), "lob": row.get("lob"),
+            "language": row.get("language"), "scheduled_start": start,
+            "scheduled_end": end, "observed_start": observed_start,
+            "observed_end": observed_end, "scheduled_minutes": scheduled_minutes,
+            "observed_span_minutes": observed_span,
+            "start_delta_minutes": start_delta, "end_delta_minutes": end_delta,
+            "displaced_minutes": displaced,
+            "internal_gap_minutes": internal_gap_minutes,
+            "internal_gap_count": internal_gap_count,
+            "classification": classification, "pattern_family": family,
+            "recurrence_count": 0, "eligible_day_count": 0,
+            "is_recurring": False, "requires_review": review,
+            "evidence_basis": evidence_basis, "confidence": confidence,
+            "evaluation_as_of": as_of, "rule_version": rulebook.version,
+            "rule_sha256": rulebook.sha256,
+        })
+
+    by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in candidates:
+        by_agent[item["agent_id"]].append(item)
+    for rows in by_agent.values():
+        rows.sort(key=lambda item: (item["business_date"], item["integrity_key"]))
+        for index, item in enumerate(rows):
+            window = rows[max(0, index + 1 - rulebook.integrity_rolling_scheduled_days): index + 1]
+            item["eligible_day_count"] = len(window)
+            item["recurrence_count"] = sum(
+                candidate["requires_review"]
+                and candidate["pattern_family"] == item["pattern_family"]
+                for candidate in window
+            )
+            item["is_recurring"] = bool(
+                item["requires_review"]
+                and item["recurrence_count"] >= rulebook.integrity_recurrence_threshold
+            )
+
+    candidates.sort(
+        key=lambda item: (item["business_date"], item["agent_id"], item["integrity_key"]),
+    )
+    conn.execute("DELETE FROM mart.schedule_integrity_agent_day")
+    _insert_dicts(
+        conn, "mart.schedule_integrity_agent_day",
+        SCHEDULE_INTEGRITY_COLUMNS, candidates,
+    )
+    return len(candidates)
+
+
+FINAL_ABSENCE_EVENT_COLUMNS = [
+    "event_key", "agent_day_key", "business_date", "agent_id", "agent_name",
+    "team_leader", "ops_manager", "lob", "market", "language", "location",
+    "activity", "category", "event_start", "event_end", "minutes", "hours",
+    "counts_as_absence", "counts_as_vacation", "counts_as_unpaid",
+    "counts_as_shrinkage", "mapped", "evidence_type", "source_file",
+    "rule_version", "rule_sha256",
+]
+
+FINAL_ABSENCE_DAY_COLUMNS = [
+    "agent_day_key", "business_date", "agent_id", "agent_name", "team_leader",
+    "ops_manager", "lob", "market", "language", "location", "scheduled_minutes",
+    "planned_net_minutes",
+    "final_absence_minutes", "final_vacation_minutes", "final_unpaid_minutes",
+    "final_shrinkage_minutes", "final_unmapped_minutes", "final_absence_hours",
+    "final_absence_rate", "final_absence_day", "final_ledger_status",
+    "rule_version", "rule_sha256",
+]
+
+
+def _build_verint_final_absence(
+    conn: DatabaseConnection,
+    rulebook: Rulebook,
+    metric_catalog: MetricCatalog,
+    start: date,
+    end: date,
+    as_of: datetime,
+) -> tuple[int, int]:
+    # StartEndTimes alone defines the expected agent-day boundary. Activities
+    # remains post-day final evidence and never becomes schedule or presence.
+    shifts = _dicts(conn.execute(
+        """
+        WITH ranked AS (
+            SELECT r.*, f.file_name AS source_file, f.modified_at,
+                   d.canonical_name, d.team_leader, d.ops_manager,
+                   d.lob AS roster_lob, d.market, d.language, d.location,
+                   row_number() OVER (
+                       PARTITION BY r.schedule_date, r.agent_id
+                       ORDER BY CASE
+                                  WHEN f.source_variant='START_END' AND r.parse_ok=true
+                                       AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL THEN 0
+                                  ELSE 1
+                                END,
+                                f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.schedule_shift r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id
+            LEFT JOIN core.dim_agent d ON d.agent_id=r.agent_id
+            WHERE f.active=true AND f.status='SUCCESS'
+              AND f.source_variant='START_END'
+              AND r.schedule_date BETWEEN ? AND ? AND r.agent_id IS NOT NULL
+        )
+        SELECT * FROM ranked WHERE row_rank=1
+        """,
+        [start, end],
+    ))
+    activity_shifts = _dicts(conn.execute(
+        """
+        WITH ranked AS (
+            SELECT r.*, f.file_name AS source_file, f.modified_at,
+                   row_number() OVER (
+                       PARTITION BY r.schedule_date, r.agent_id
+                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, r.source_row DESC
+                   ) AS row_rank
+            FROM raw.schedule_shift r
+            JOIN meta.source_file f ON f.file_id=r.source_file_id
+            WHERE f.active=true AND f.status='SUCCESS'
+              AND f.source_variant='ACTIVITIES'
+              AND r.schedule_date BETWEEN ? AND ? AND r.agent_id IS NOT NULL
+        )
+        SELECT * FROM ranked WHERE row_rank=1
+        """,
+        [start, end],
+    ))
+    activity_by_key = {
+        f"{row['schedule_date']:%Y%m%d}-{row['agent_id']}": row
+        for row in activity_shifts
+    }
+    events = _dicts(conn.execute(
+        """SELECT r.*, f.file_name AS source_file
+           FROM raw.schedule_event r
+           JOIN meta.source_file f ON f.file_id=r.source_file_id
+           WHERE f.active=true AND f.status='SUCCESS'
+             AND f.source_variant='ACTIVITIES'
+             AND r.schedule_date BETWEEN ? AND ? AND r.parse_ok=true""",
+        [start, end],
+    ))
+    events_by_row: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    for event in events:
+        events_by_row[(event["source_file_id"], event["source_row"])].append(event)
+    attendance_by_key = {
+        row["agent_day_key"]: row
+        for row in _dicts(conn.execute(
+            """SELECT agent_day_key, attendance_result, actual_evidence,
+                      source_loaded, shift_state, planning_overlay_minutes,
+                      planning_overlay
+               FROM mart.attendance_agent_day WHERE business_date BETWEEN ? AND ?""",
+            [start, end],
+        ))
+    }
+    residual_by_key = {
+        f"{row['business_date']:%Y%m%d}-{row['agent_id']}": int(row["minutes"] or 0)
+        for row in _dicts(conn.execute(
+            """SELECT business_date, agent_id, sum(residual_minutes) AS minutes
+               FROM mart.correction_residual_segment
+               WHERE business_date BETWEEN ? AND ? GROUP BY business_date, agent_id""",
+            [start, end],
+        ))
+    }
+    verint_without_observed_gap = {
+        str(row[0])
+        for row in conn.execute(
+            """SELECT DISTINCT agent_day_key FROM mart.verint_final_exception
+               WHERE business_date BETWEEN ? AND ?
+                 AND exception_type='VERINT_FINAL_WITHOUT_OBSERVED_GAP'""",
+            [start, end],
+        ).fetchall()
+    }
+
+    event_rows: list[dict[str, Any]] = []
+    day_rows: list[dict[str, Any]] = []
+    for shift in shifts:
+        shift_start, shift_end = shift["scheduled_start"], shift["scheduled_end"]
+        if not shift["parse_ok"] or not shift_start or not shift_end or shift_end <= shift_start:
+            continue
+        agent_day_key = f"{shift['schedule_date']:%Y%m%d}-{shift['agent_id']}"
+        candidates: list[tuple[str | None, datetime, datetime, str, str]] = []
+        activity_shift = activity_by_key.get(agent_day_key)
+        if activity_shift is not None:
+            candidates.append((
+                activity_shift["assignment"], activity_shift["scheduled_start"],
+                activity_shift["scheduled_end"], "SHIFT_ASSIGNMENT",
+                activity_shift["source_file"],
+            ))
+            for event in events_by_row.get(
+                (activity_shift["source_file_id"], activity_shift["source_row"]), [],
+            ):
+                candidates.append((
+                    event["activity"], event["event_start"], event["event_end"],
+                    "SHIFT_EVENT", event["source_file"],
+                ))
+        flag_intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+        seen: set[tuple[Any, ...]] = set()
+        unmapped = 0
+        for activity, raw_start, raw_end, evidence_type, source_file in candidates:
+            if not raw_start or not raw_end:
+                continue
+            event_start, event_end = max(shift_start, raw_start), min(shift_end, raw_end)
+            if event_end <= event_start:
+                continue
+            rule = rulebook.classify_activity(activity)
+            if evidence_type == "SHIFT_ASSIGNMENT" and rule is None:
+                continue
+            if rule is not None and (
+                rule.working or rule.category in {"OFF", "LUNCH", "BREAK"}
+                or not (rule.absence or rule.vacation or rule.unpaid or rule.shrinkage)
+            ):
+                continue
+            mapped = rule is not None
+            category = rule.category if rule is not None else "UNMAPPED"
+            key = (activity, category, event_start, event_end, evidence_type, source_file)
+            if key in seen:
+                continue
+            seen.add(key)
+            minutes = int((event_end - event_start).total_seconds() // 60)
+            if minutes <= 0:
+                continue
+            flags = {
+                "absence": bool(rule and rule.absence),
+                "vacation": bool(rule and rule.vacation),
+                "unpaid": bool(rule and rule.unpaid),
+                "shrinkage": bool(rule and rule.shrinkage),
+            }
+            if not mapped:
+                unmapped += minutes
+                flag_intervals["unmapped"].append((event_start, event_end))
+            for flag, enabled in flags.items():
+                if enabled:
+                    flag_intervals[flag].append((event_start, event_end))
+            event_key = hashlib.sha256(
+                f"{agent_day_key}|{activity}|{event_start}|{event_end}|{evidence_type}|{source_file}".encode("utf-8")
+            ).hexdigest()
+            event_rows.append({
+                "event_key": event_key, "agent_day_key": agent_day_key,
+                "business_date": shift["schedule_date"], "agent_id": shift["agent_id"],
+                "agent_name": shift["canonical_name"] or shift["agent_name"],
+                "team_leader": shift["team_leader"], "ops_manager": shift["ops_manager"],
+                "lob": shift["roster_lob"], "market": shift["market"],
+                "language": shift["language"], "location": shift["location"],
+                "activity": activity, "category": category,
+                "event_start": event_start, "event_end": event_end,
+                "minutes": minutes, "hours": minutes / 60,
+                "counts_as_absence": flags["absence"],
+                "counts_as_vacation": flags["vacation"],
+                "counts_as_unpaid": flags["unpaid"],
+                "counts_as_shrinkage": flags["shrinkage"],
+                "mapped": mapped, "evidence_type": evidence_type,
+                "source_file": source_file, "rule_version": rulebook.version,
+                "rule_sha256": rulebook.sha256,
+            })
+        scheduled_minutes = int((shift_end - shift_start).total_seconds() // 60)
+        planned_net_minutes = min(scheduled_minutes, int(round(rulebook.standard_day_hours * 60)))
+        totals = {
+            flag: interval_minutes(shift_start, shift_end, intervals)
+            for flag, intervals in flag_intervals.items()
+        }
+        # The configured standard day is a net payroll denominator.  Final
+        # Activities may overlap or contain full-span assignments, so every
+        # classified daily numerator is unioned above and capped again here.
+        # This guarantees that no final rate can exceed 100% and mirrors the
+        # governed observed-absence mart.
+        absence_minutes = min(planned_net_minutes, totals.get("absence", 0))
+        vacation_minutes = min(planned_net_minutes, totals.get("vacation", 0))
+        unpaid_minutes = min(planned_net_minutes, totals.get("unpaid", 0))
+        shrinkage_minutes = min(planned_net_minutes, totals.get("shrinkage", 0))
+        unmapped_minutes = min(planned_net_minutes, totals.get("unmapped", 0))
+        dimensions = {
+            "lob": shift["roster_lob"],
+            "language": shift["language"],
+            "team_leader": shift["team_leader"],
+        }
+        final_absence = _metric_evaluation(
+            metric_catalog,
+            "final_absence_rate",
+            shift["schedule_date"],
+            dimensions,
+            {
+                "final_absence_minutes": absence_minutes,
+                "final_vacation_minutes": vacation_minutes,
+                "final_shrinkage_minutes": shrinkage_minutes,
+                "planned_net_minutes": planned_net_minutes,
+            },
+        )
+        attendance = attendance_by_key.get(agent_day_key)
+        unresolved_observed_minutes = residual_by_key.get(agent_day_key, 0)
+        final_code_present = bool(
+            absence_minutes or vacation_minutes or unpaid_minutes
+            or shrinkage_minutes or unmapped_minutes
+        )
+        expected_time_off_minutes = int(
+            attendance.get("planning_overlay_minutes") or 0
+        ) if attendance is not None else 0
+        coded_time_off_minutes = max(
+            absence_minutes, vacation_minutes, unpaid_minutes, shrinkage_minutes,
+        )
+        working_shift = shift.get("assignment_type") not in {"Off", "Planned absence"}
+        shift_is_complete = bool(
+            attendance.get("shift_state") == "COMPLETE"
+            if attendance is not None else shift_end <= as_of
+        )
+        provisional_day = bool(working_shift and not shift_is_complete)
+        missing_operational_evidence = bool(
+            attendance is None
+            or str(attendance.get("attendance_result") or "")
+            in ({"No show"} | UNRELIABLE_ATTENDANCE_RESULTS)
+        )
+        uncoded_empty_shift = bool(
+            working_shift and shift_is_complete
+            and not final_code_present and missing_operational_evidence
+        )
+        uncorrected_observed_gap = bool(
+            working_shift and shift_is_complete and not final_code_present
+            and not uncoded_empty_shift and unresolved_observed_minutes > 0
+        )
+        partially_corrected_gap = bool(
+            working_shift and shift_is_complete
+            and final_code_present and unresolved_observed_minutes > 0
+        )
+        unsupported_verint_code = agent_day_key in verint_without_observed_gap
+        day_rows.append({
+            "agent_day_key": agent_day_key, "business_date": shift["schedule_date"],
+            "agent_id": shift["agent_id"],
+            "agent_name": shift["canonical_name"] or shift["agent_name"],
+            "team_leader": shift["team_leader"], "ops_manager": shift["ops_manager"],
+            "lob": shift["roster_lob"], "market": shift["market"],
+            "language": shift["language"], "location": shift["location"],
+            "scheduled_minutes": scheduled_minutes,
+            "planned_net_minutes": planned_net_minutes,
+            "final_absence_minutes": absence_minutes,
+            "final_vacation_minutes": vacation_minutes,
+            "final_unpaid_minutes": unpaid_minutes,
+            "final_shrinkage_minutes": shrinkage_minutes,
+            "final_unmapped_minutes": unmapped_minutes,
+            "final_absence_hours": absence_minutes / 60,
+            "final_absence_rate": final_absence.value,
+            "final_absence_day": absence_minutes > 0,
+            "final_ledger_status": (
+                "UNMAPPED_REVIEW" if unmapped_minutes
+                else "PROVISIONAL_DAY" if provisional_day
+                else "PLANNED_TIME_OFF_NOT_IN_VERINT"
+                if expected_time_off_minutes and not final_code_present
+                else "TIME_OFF_PARTIALLY_IN_VERINT"
+                if expected_time_off_minutes and coded_time_off_minutes < expected_time_off_minutes
+                else "VERINT_WITHOUT_OBSERVED_GAP" if unsupported_verint_code
+                else "UNCODED_EMPTY_SHIFT" if uncoded_empty_shift
+                else "UNCORRECTED_OBSERVED_GAP" if uncorrected_observed_gap
+                else "PARTIAL_CORRECTION_REVIEW" if partially_corrected_gap
+                else "ABSENCE_RECORDED" if absence_minutes
+                else "CLEAR"
+            ),
+            "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
+        })
+    conn.execute("DELETE FROM mart.verint_final_absence_event")
+    conn.execute("DELETE FROM mart.verint_final_absence_agent_day")
+    _insert_dicts(conn, "mart.verint_final_absence_event", FINAL_ABSENCE_EVENT_COLUMNS, event_rows)
+    _insert_dicts(conn, "mart.verint_final_absence_agent_day", FINAL_ABSENCE_DAY_COLUMNS, day_rows)
+    return len(event_rows), len(day_rows)
+
+
+FORECAST_HOUR_COLUMNS = [
+    "business_date", "hour_start", "queue_name", "volume_forecast", "fte_forecast",
+    "fte_required", "sl_forecast", "sl_required", "aht_forecast_seconds", "source_file",
+    "source_interval_minutes", "source_interval_count", "service_scope",
+    "comparison_scope", "mapping_status", "mapping_sha256",
+]
+
+FORECAST_INTERVAL_COLUMNS = [
+    "business_date", "interval_start", "interval_end", "interval_minutes",
+    "queue_name", "volume_forecast", "abandons_forecast", "fte_forecast",
+    "fte_required", "headcount_forecast", "net_staffing_forecast",
+    "sl_forecast", "sl_required", "aht_forecast_seconds", "source_file",
+    "service_scope", "comparison_scope", "mapping_status", "mapping_sha256",
+]
+
+def _mean_present(rows: list[dict[str, Any]], field: str) -> float | None:
+    values = [float(row[field]) for row in rows if row.get(field) is not None]
+    return sum(values) / len(values) if values else None
+
+
+def _forecast_weighted_mean(
+    rows: list[dict[str, Any]],
+    field: str,
+) -> float | None:
+    values = [row for row in rows if row.get(field) is not None]
+    if not values:
+        return None
+    weighted = [
+        (float(row[field]), float(row.get("volume_forecast") or 0))
+        for row in values
+    ]
+    weight = sum(max(0.0, item[1]) for item in weighted)
+    if weight > 0:
+        return sum(value * max(0.0, volume) for value, volume in weighted) / weight
+    return sum(value for value, _ in weighted) / len(weighted)
+
+
+def _map_forecast_interval_rows(
+    source_rows: list[dict[str, Any]],
+    mapping: QueueMapping,
+) -> list[dict[str, Any]]:
+    """Map the clean source intervals without changing their native grain."""
+
+    output: list[dict[str, Any]] = []
+    for row in source_rows:
+        mapped = mapping.map_forecast(row["source_file"], row["queue_name"])
+        minutes = int(row["interval_minutes"] or 0)
+        output.append({
+            "business_date": row["business_date"],
+            "interval_start": row["interval_start"],
+            "interval_end": (
+                row["interval_start"] + timedelta(minutes=minutes)
+                if minutes > 0 else None
+            ),
+            "interval_minutes": minutes or None,
+            "queue_name": row.get("queue_name"),
+            "volume_forecast": row.get("volume_forecast"),
+            "abandons_forecast": row.get("abandons_forecast"),
+            "fte_forecast": row.get("fte_forecast"),
+            "fte_required": row.get("fte_required"),
+            "headcount_forecast": row.get("headcount_forecast"),
+            "net_staffing_forecast": row.get("net_staffing_forecast"),
+            "sl_forecast": row.get("sl_forecast"),
+            "sl_required": row.get("sl_required"),
+            "aht_forecast_seconds": row.get("aht_forecast_seconds"),
+            "source_file": row["source_file"],
+            "service_scope": mapped.service_scope,
+            "comparison_scope": mapped.comparison_scope,
+            "mapping_status": mapped.status,
+            "mapping_sha256": mapping.sha256,
+        })
+    return output
+
+
+def _select_current_forecast_rows(
+    source_rows: list[dict[str, Any]],
+    mapping: QueueMapping,
+) -> list[dict[str, Any]]:
+    """Select one current source row per governed Staff Type interval.
+
+    Operations can retain prior monthly exports beside a newer replacement.
+    Summing those overlapping level rows would duplicate both requirement and
+    volume. The newest source modification wins at the native interval grain;
+    different Staff Types and non-overlapping periods remain independent.
+    """
+
+    selected: dict[tuple[Any, ...], tuple[tuple[str, str, str], dict[str, Any]]] = {}
+    for row in source_rows:
+        mapped = mapping.map_forecast(row["source_file"], row.get("queue_name"))
+        key = (
+            row.get("business_date"), row.get("interval_start"),
+            int(row.get("interval_minutes") or 0),
+            mapped.service_scope.casefold(),
+            str(row.get("queue_name") or "").strip().casefold(),
+        )
+        rank = (
+            str(row.get("source_modified_at") or ""),
+            str(row.get("source_loaded_at") or ""),
+            str(row.get("source_file") or ""),
+        )
+        current = selected.get(key)
+        if current is None or rank > current[0]:
+            selected[key] = (rank, row)
+    return [
+        item[1] for _, item in sorted(
+            selected.items(), key=lambda pair: tuple(str(value or "") for value in pair[0]),
+        )
+    ]
+
+
+def _aggregate_forecast_hour_rows(
+    source_rows: list[dict[str, Any]],
+    mapping: QueueMapping,
+) -> list[dict[str, Any]]:
+    """Roll Verint forecast intervals into one governed hourly row.
+
+    Volume is additive. FTE/headcount values are point-in-time levels and are
+    averaged across the source intervals. AHT and SL percentages are weighted
+    by forecast volume. This supports both historical 60-minute files and the
+    new 15-minute export without quadrupling hourly staffing.
+    """
+
+    buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for row in source_rows:
+        mapped = mapping.map_forecast(row["source_file"], row["queue_name"])
+        hour_start = row["interval_start"].replace(minute=0, second=0, microsecond=0)
+        key = (
+            row["business_date"], hour_start, row.get("queue_name"),
+            row["source_file"], mapped.service_scope, mapped.comparison_scope,
+            mapped.status,
+        )
+        buckets[key].append(row)
+
+    output: list[dict[str, Any]] = []
+    for key, rows in sorted(
+        buckets.items(), key=lambda item: tuple(str(value or "") for value in item[0]),
+    ):
+        (
+            business_date, hour_start, queue_name, source_file,
+            service_scope, comparison_scope, mapping_status,
+        ) = key
+        volumes = [
+            float(row["volume_forecast"])
+            for row in rows if row.get("volume_forecast") is not None
+        ]
+        grains = {
+            int(row["interval_minutes"])
+            for row in rows if row.get("interval_minutes") is not None
+        }
+        output.append({
+            "business_date": business_date,
+            "hour_start": hour_start,
+            "queue_name": queue_name,
+            "volume_forecast": sum(volumes) if volumes else None,
+            "fte_forecast": _mean_present(rows, "fte_forecast"),
+            "fte_required": _mean_present(rows, "fte_required"),
+            "sl_forecast": _forecast_weighted_mean(rows, "sl_forecast"),
+            "sl_required": _forecast_weighted_mean(rows, "sl_required"),
+            "aht_forecast_seconds": _forecast_weighted_mean(
+                rows, "aht_forecast_seconds",
+            ),
+            "source_file": source_file,
+            "source_interval_minutes": min(grains) if grains else None,
+            "source_interval_count": len(rows),
+            "service_scope": service_scope,
+            "comparison_scope": comparison_scope,
+            "mapping_status": mapping_status,
+            "mapping_sha256": mapping.sha256,
+        })
+    return output
+
+
+def _build_forecast_models(
+    conn: DatabaseConnection,
+    start: date,
+    end: date,
+    mapping: QueueMapping,
+) -> int:
+    conn.execute("DELETE FROM mart.forecast_interval")
+    conn.execute("DELETE FROM mart.forecast_hour")
+    forecast_source = _dicts(conn.execute(
+        """
+        SELECT business_date, interval_start, interval_minutes, queue_name,
+               volume_forecast, abandons_forecast, fte_forecast, fte_required,
+               headcount_forecast, net_staffing_forecast, sl_forecast,
+               sl_required, aht_forecast_seconds, source_file,
+               source_modified_at, source_loaded_at
+        FROM (
+            SELECT r.*, f.file_name AS source_file, f.source_path,
+                   f.modified_at AS source_modified_at,
+                   f.loaded_at AS source_loaded_at,
+                   row_number() OVER (
+                       PARTITION BY f.source_path, queue_name, interval_start, interval_minutes
+                       ORDER BY f.modified_at DESC NULLS LAST, f.file_name DESC, source_row DESC
+                   ) row_rank
+            FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active AND f.status='SUCCESS'
+            WHERE business_date BETWEEN ? AND ?
+        ) x WHERE row_rank=1
+        """,
+        [start, end],
+    ))
+    forecast_source = _select_current_forecast_rows(forecast_source, mapping)
+    forecast_interval_rows = _map_forecast_interval_rows(
+        forecast_source, mapping,
+    )
+    _insert_dicts(
+        conn, "mart.forecast_interval", FORECAST_INTERVAL_COLUMNS,
+        forecast_interval_rows,
+    )
+    forecast_rows = _aggregate_forecast_hour_rows(forecast_source, mapping)
+    _insert_dicts(conn, "mart.forecast_hour", FORECAST_HOUR_COLUMNS, forecast_rows)
+    return len(forecast_rows)
+
+
+def _build_pcs(
+    conn: DatabaseConnection,
+    config: Config,
+    metric_catalog: MetricCatalog,
+    start: date,
+    end: date,
+) -> int:
+    """Aggregate deduplicated, FTE-scoped call legs to one agent/day."""
+    conn.execute("DELETE FROM mart.agent_pcs_day")
+    if not config.modules.get("pcs", True):
+        return 0
+    minimum = config.pcs.minimum_score
+    maximum = config.pcs.maximum_score
+    primary = config.pcs.primary_score_question
+    participation = config.pcs.participation_question
+    primary_score = f"question_{primary}_score"
+    participation_answer = f"question_{participation}"
+    allowed_scores = ", ".join(f"{value:g}" for value in config.pcs.allowed_scores)
+    comments = sorted(set(config.pcs.comment_questions))
+    comment_test = " OR ".join(
+        f"coalesce(trim(question_{number}), '') <> ''" for number in comments
+    ) or "0"
+    sql = f"""
+        WITH prepared AS (
+            SELECT c.*,
+                   d.canonical_name, d.team_leader, d.ops_manager,
+                   d.lob AS roster_lob, d.market, d.language AS roster_language,
+                   d.location,
+                   coalesce(c.talk_seconds,0)+coalesce(c.hold_seconds,0)+coalesce(c.wrap_seconds,0) AS handle_seconds,
+                   CASE WHEN upper(coalesce(c.call_direction,''))='I' THEN 1 ELSE 0 END AS is_inbound,
+                   CASE WHEN upper(coalesce(c.call_direction,''))='I'
+                              AND coalesce(c.post_call_survey_mode,'')=? THEN 1 ELSE 0 END AS pcs_eligible,
+                   CASE WHEN upper(coalesce(c.call_direction,''))='I'
+                              AND coalesce(c.pcs_status,'')=? THEN 1 ELSE 0 END AS pcs_status_call,
+                   CASE WHEN upper(coalesce(c.call_direction,''))='I'
+                              AND coalesce(trim(c.{participation_answer}),'')<>'' THEN 1 ELSE 0 END AS participation_answered,
+                   CASE WHEN upper(coalesce(c.call_direction,''))='I'
+                              AND c.{primary_score} IN ({allowed_scores})
+                        THEN c.{primary_score} END AS primary_score,
+                   CASE WHEN upper(coalesce(c.call_direction,''))='I'
+                              AND question_1_score IN ({allowed_scores}) THEN question_1_score END AS valid_q1,
+                   CASE WHEN upper(coalesce(c.call_direction,''))='I'
+                              AND question_2_score IN ({allowed_scores}) THEN question_2_score END AS valid_q2,
+                   CASE WHEN {comment_test} THEN 1 ELSE 0 END AS has_comment
+            FROM core.clean_call_leg c
+            LEFT JOIN core.dim_agent d ON d.agent_id=c.agent_id
+            WHERE c.business_date BETWEEN ? AND ? AND c.agent_id IS NOT NULL
+              AND d.match_method='Agent ID'
+        ), aggregated AS (
+            SELECT business_date, agent_id,
+                   coalesce(max(canonical_name), max(agent_name)) AS agent_name,
+                   max(team_leader) AS team_leader, max(ops_manager) AS ops_manager,
+                   coalesce(max(roster_lob), max(lob)) AS lob, max(market) AS market,
+                   coalesce(max(roster_language), max(language)) AS language,
+                   max(location) AS location,
+                   count(*) AS call_legs,
+                   sum(CASE WHEN handle_seconds>0 THEN 1 ELSE 0 END) AS handled_calls,
+                   sum(CASE WHEN upper(coalesce(call_direction,''))='I' THEN 1 ELSE 0 END) AS inbound_calls,
+                   sum(CASE WHEN upper(coalesce(call_direction,''))='O' THEN 1 ELSE 0 END) AS outbound_calls,
+                   sum(CASE WHEN coalesce(transferred,false) THEN 1 ELSE 0 END) AS transferred_legs,
+                   sum(coalesce(talk_seconds,0)) AS talk_seconds,
+                   sum(coalesce(hold_seconds,0)) AS hold_seconds,
+                   sum(coalesce(wrap_seconds,0)) AS wrap_seconds,
+                   sum(handle_seconds) AS handle_seconds,
+                   sum(pcs_eligible) AS pcs_enabled_calls,
+                   sum(CASE WHEN primary_score IS NOT NULL THEN 1 ELSE 0 END) AS survey_responses,
+                   sum(pcs_status_call) AS pcs_status_calls,
+                   sum(participation_answered) AS pcs_participation_responses,
+                   sum(CASE WHEN participation_answered=1 AND primary_score IS NULL THEN 1 ELSE 0 END) AS pcs_invalid_responses,
+                   sum(CASE WHEN pcs_status_call=1 AND participation_answered=0 THEN 1 ELSE 0 END) AS pcs_status_blank_responses,
+                   sum(CASE WHEN participation_answered=1 AND pcs_status_call=0 THEN 1 ELSE 0 END) AS pcs_response_without_status,
+                   sum(CASE WHEN valid_q1 IS NOT NULL THEN 1 ELSE 0 END) AS q1_response_count,
+                   sum(coalesce(valid_q1,0)) AS q1_score_sum,
+                   sum(CASE WHEN valid_q2 IS NOT NULL THEN 1 ELSE 0 END) AS q2_response_count,
+                   sum(coalesce(valid_q2,0)) AS q2_score_sum,
+                   sum(CASE WHEN primary_score IS NOT NULL THEN 1 ELSE 0 END) AS pcs_score_count,
+                   sum(coalesce(primary_score,0)) AS pcs_score_sum,
+                   sum(CASE WHEN primary_score > {config.pcs.negative_score_maximum:g} THEN 1 ELSE 0 END) AS top_box_responses,
+                   sum(CASE WHEN primary_score <= {config.pcs.negative_score_maximum:g} THEN 1 ELSE 0 END) AS low_score_responses,
+                   sum(CASE WHEN pcs_eligible=1 THEN has_comment ELSE 0 END) AS comments_count
+            FROM prepared
+            GROUP BY business_date, agent_id
+        )
+        INSERT INTO mart.agent_pcs_day (
+            agent_day_key, business_date, agent_id, agent_name, team_leader,
+            ops_manager, lob, market, language, location, call_legs,
+            handled_calls, inbound_calls, outbound_calls, talk_seconds,
+            hold_seconds, wrap_seconds, handle_seconds, average_talk_seconds,
+            average_hold_seconds, average_wrap_seconds, average_handle_seconds,
+            pcs_enabled_calls, survey_responses, response_rate,
+            q1_response_count, q1_score_sum, q1_average,
+            q2_response_count, q2_score_sum, q2_average,
+            pcs_score_count, pcs_score_sum, pcs_average,
+            top_box_responses, low_score_responses, top_box_percent,
+            low_score_percent, comments_count
+            , transferred_legs, pcs_status_calls,
+            pcs_participation_responses, pcs_participation_rate,
+            pcs_invalid_responses, pcs_status_blank_responses,
+            pcs_response_without_status
+        )
+        SELECT replace(business_date,'-','') || '-' || agent_id,
+               business_date, agent_id, agent_name, team_leader, ops_manager,
+               lob, market, language, location, call_legs, handled_calls,
+               inbound_calls, outbound_calls, talk_seconds, hold_seconds,
+               wrap_seconds, handle_seconds,
+               NULL,
+               NULL,
+               NULL,
+               NULL,
+               pcs_enabled_calls, survey_responses,
+               NULL,
+               q1_response_count, q1_score_sum,
+               NULL,
+               q2_response_count, q2_score_sum,
+               NULL,
+               pcs_score_count, pcs_score_sum,
+               NULL,
+               top_box_responses, low_score_responses,
+               NULL,
+               NULL,
+               comments_count, transferred_legs, pcs_status_calls,
+               pcs_participation_responses,
+               NULL,
+               pcs_invalid_responses, pcs_status_blank_responses,
+               pcs_response_without_status
+        FROM aggregated
+    """
+    conn.execute(
+        sql,
+        [config.pcs.survey_mode, config.pcs.participation_status, start, end],
+    )
+    rows = _dicts(conn.execute(
+        """SELECT agent_day_key, business_date, team_leader, lob, language,
+                  talk_seconds, hold_seconds, wrap_seconds, handle_seconds,
+                  handled_calls, q1_score_sum, q1_response_count,
+                  q2_score_sum, q2_response_count, pcs_score_sum, pcs_score_count,
+                  pcs_participation_responses, pcs_status_calls,
+                  top_box_responses, low_score_responses, survey_responses
+           FROM mart.agent_pcs_day"""
+    ))
+    for row in rows:
+        dimensions = {
+            "team_leader": row["team_leader"],
+            "lob": row["lob"],
+            "language": row["language"],
+        }
+        components = {
+            "talk_seconds": row["talk_seconds"],
+            "hold_seconds": row["hold_seconds"],
+            "wrap_seconds": row["wrap_seconds"],
+            "handle_seconds": row["handle_seconds"],
+            "handled_calls": row["handled_calls"],
+            "q1_score_sum": row["q1_score_sum"],
+            "q1_response_count": row["q1_response_count"],
+            "q2_score_sum": row["q2_score_sum"],
+            "q2_response_count": row["q2_response_count"],
+            "pcs_score_sum": row["pcs_score_sum"],
+            "pcs_score_count": row["pcs_score_count"],
+            "pcs_participation_responses": row["pcs_participation_responses"],
+            "pcs_status_calls": row["pcs_status_calls"],
+            "top_box_responses": row["top_box_responses"],
+            "low_score_responses": row["low_score_responses"],
+            "survey_responses": row["survey_responses"],
+        }
+        aht = _metric_evaluation(
+            metric_catalog, "agent_aht_seconds", row["business_date"], dimensions, components,
+        ).value
+        average_talk = _optional_metric_value(
+            metric_catalog, "agent_talk_seconds", row["business_date"], dimensions, components,
+        )
+        average_hold = _optional_metric_value(
+            metric_catalog, "agent_hold_seconds", row["business_date"], dimensions, components,
+        )
+        average_wrap = _optional_metric_value(
+            metric_catalog, "agent_wrap_seconds", row["business_date"], dimensions, components,
+        )
+        q1_average = _optional_metric_value(
+            metric_catalog, "pcs_q1_average", row["business_date"], dimensions, components,
+        )
+        q2_average = _optional_metric_value(
+            metric_catalog, "pcs_q2_average", row["business_date"], dimensions, components,
+        )
+        average = _metric_evaluation(
+            metric_catalog, "pcs_average", row["business_date"], dimensions, components,
+        ).value
+        participation = _metric_evaluation(
+            metric_catalog, "pcs_participation", row["business_date"], dimensions, components,
+        ).value
+        positive = _metric_evaluation(
+            metric_catalog, "pcs_positive_rate", row["business_date"], dimensions, components,
+        ).value
+        negative = _metric_evaluation(
+            metric_catalog, "pcs_negative_rate", row["business_date"], dimensions, components,
+        ).value
+        conn.execute(
+            """UPDATE mart.agent_pcs_day
+               SET average_talk_seconds=?, average_hold_seconds=?, average_wrap_seconds=?,
+                   average_handle_seconds=?, response_rate=?, q1_average=?, q2_average=?, pcs_average=?,
+                   top_box_percent=?, low_score_percent=?, pcs_participation_rate=?
+               WHERE agent_day_key=?""",
+            [average_talk, average_hold, average_wrap, aht, participation,
+             q1_average, q2_average, average, positive, negative, participation,
+             row["agent_day_key"]],
+        )
+    return conn.execute("SELECT count(*) FROM mart.agent_pcs_day").fetchone()[0]
+
+
+ABSENCE_EVENT_COLUMNS = [
+    "event_key", "agent_day_key", "business_date", "agent_id", "agent_name",
+    "team_leader", "ops_manager", "lob", "market", "language", "location",
+    "activity", "category", "event_start", "event_end", "minutes", "hours",
+    "planned", "working", "counts_as_absence", "counts_as_vacation",
+    "counts_as_unpaid", "counts_as_shrinkage", "mapped", "evidence_type",
+    "source_file", "rule_version", "rule_sha256",
+    "reconciliation_status", "verint_activity", "verint_category",
+    "verint_overlap_minutes", "verint_source_file",
+]
+
+ABSENCE_DAY_COLUMNS = [
+    "agent_day_key", "business_date", "agent_id", "agent_name", "team_leader",
+    "ops_manager", "lob", "market", "language", "location", "scheduled_minutes",
+    "break_minutes", "lunch_minutes", "planned_net_minutes", "production_minutes",
+    "absence_minutes", "vacation_minutes", "unpaid_minutes", "shrinkage_minutes",
+    "late_minutes", "early_leave_minutes", "no_show_minutes", "unmapped_minutes",
+    "absence_rate", "vacation_rate", "shrinkage_rate", "absence_day",
+    "absence_spell", "absence_spells", "absence_days", "bradford_factor",
+    "rule_version", "rule_sha256",
+    "unverified_minutes", "corrected_minutes",
+]
+
+
+def _rule_flags(rule, fallback_category: str, **fallback: bool) -> dict[str, Any]:
+    if rule is not None:
+        return {
+            "category": rule.category, "planned": rule.planned, "working": rule.working,
+            "absence": rule.absence, "vacation": rule.vacation, "unpaid": rule.unpaid,
+            "shrinkage": rule.shrinkage, "mapped": True,
+        }
+    return {
+        "category": fallback_category, "planned": fallback.get("planned", False),
+        "working": fallback.get("working", False), "absence": fallback.get("absence", False),
+        "vacation": fallback.get("vacation", False), "unpaid": fallback.get("unpaid", False),
+        "shrinkage": fallback.get("shrinkage", False), "mapped": False,
+    }
+
+
+def _build_absence(
+    conn: DatabaseConnection,
+    config: Config,
+    rulebook: Rulebook,
+    metric_catalog: MetricCatalog,
+    attendance: list[dict[str, Any]],
+    corrections: list[dict[str, Any]],
+) -> tuple[int, int]:
+    """Build the provisional observed-gap view plus governed PTO/Away.
+
+    This provisional mart is deliberately not a final absence ledger. Its
+    residual gaps remain unclassified until the corrected activity is visible
+    in Verint; ``mart.verint_final_absence_*`` remains the final authority.
+    """
+    conn.execute("DELETE FROM mart.absence_event")
+    conn.execute("DELETE FROM mart.absence_agent_day")
+    if not config.modules.get("absence", True):
+        return 0, 0
+    event_rows: list[dict[str, Any]] = []
+    day_rows: list[dict[str, Any]] = []
+    standard_day_minutes = max(1, int(round(rulebook.standard_day_hours * 60)))
+    corrections_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for correction in corrections:
+        corrections_by_key[f"{correction['business_date']:%Y%m%d}-{correction['agent_id']}"].append(correction)
+
+    for base in attendance:
+        shift_start, shift_end = base["scheduled_start"], base["scheduled_end"]
+        scheduled_minutes = base["scheduled_minutes"] if shift_start and shift_end else 0
+        intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+
+        issue_intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+        def add_event(correction: dict[str, Any]) -> None:
+            event_start, event_end = correction["gap_start"], correction["gap_end"]
+            if not shift_start or not shift_end or not event_start or not event_end:
+                return
+            if rulebook.cap_event_to_schedule:
+                event_start, event_end = max(event_start, shift_start), min(event_end, shift_end)
+            if event_end <= event_start:
+                return
+            decision_status = str(correction.get("validation_status") or "Open").title()
+            approved = decision_status == "Approved"
+            dismissed = decision_status == "Dismissed"
+            activity = (
+                correction.get("confirmed_activity")
+                if approved else "Dismissed gap" if dismissed
+                else "Pending Verint correction"
+            )
+            final_rule = rulebook.classify_activity(activity) if approved else None
+            if approved and final_rule is not None:
+                flags = _rule_flags(
+                    final_rule, final_rule.category, absence=False, unpaid=False,
+                    shrinkage=False, working=False, planned=False,
+                )
+            elif dismissed:
+                flags = _rule_flags(
+                    None, "DISMISSED", absence=False, unpaid=False,
+                    shrinkage=False, working=True, planned=False,
+                )
+                flags["mapped"] = True
+            else:
+                flags = _rule_flags(
+                    None, "PENDING_VERINT", absence=False, unpaid=False,
+                    shrinkage=False, working=False, planned=False,
+                )
+            minutes = int((event_end - event_start).total_seconds() // 60)
+            if minutes <= 0:
+                return
+            event_key = hashlib.sha256(
+                f"{base['agent_day_key']}|{correction['correction_id']}|{event_start}|{event_end}".encode("utf-8")
+            ).hexdigest()
+            event_rows.append({
+                "event_key": event_key, "agent_day_key": base["agent_day_key"],
+                "business_date": base["business_date"], "agent_id": base["agent_id"],
+                "agent_name": base["agent_name"], "team_leader": base["team_leader"],
+                "ops_manager": base["ops_manager"], "lob": base["lob"],
+                "market": base["market"], "language": base["language"], "location": base["location"],
+                "activity": activity, "category": flags["category"], "event_start": event_start,
+                "event_end": event_end, "minutes": minutes, "hours": minutes / 60.0,
+                "planned": flags["planned"], "working": flags["working"],
+                "counts_as_absence": flags["absence"], "counts_as_vacation": flags["vacation"],
+                "counts_as_unpaid": flags["unpaid"], "counts_as_shrinkage": flags["shrinkage"],
+                "mapped": flags["mapped"], "evidence_type": correction["observed_source"],
+                "source_file": correction["source_file"], "rule_version": rulebook.version,
+                "rule_sha256": rulebook.sha256,
+                "reconciliation_status": correction["verint_reconciliation"],
+                "verint_activity": None, "verint_category": None,
+                "verint_overlap_minutes": minutes if decision_status != "Open" else 0,
+                "verint_source_file": None,
+            })
+            if not flags["working"]:
+                intervals["all"].append((event_start, event_end))
+            intervals[flags["category"]].append((event_start, event_end))
+            if not flags["working"]:
+                intervals["non_working"].append((event_start, event_end))
+            for key in ("absence", "vacation", "unpaid", "shrinkage"):
+                if flags[key]:
+                    intervals[key].append((event_start, event_end))
+            if not flags["mapped"]:
+                intervals["unmapped"].append((event_start, event_end))
+            if approved:
+                issue_intervals[correction["detected_issue"]].append((event_start, event_end))
+            if decision_status != "Open":
+                intervals["reviewed"].append((event_start, event_end))
+
+        def add_planned_event(segment: dict[str, Any]) -> None:
+            event_start, event_end = segment["segment_start"], segment["segment_end"]
+            activity = str(segment.get("absence_type") or segment.get("source_kind") or "Planned time off")
+            rule = rulebook.classify_activity(activity)
+            if rule is not None:
+                flags = _rule_flags(
+                    rule, rule.category, absence=False, unpaid=False,
+                    shrinkage=False, working=False, planned=True,
+                )
+            else:
+                is_away = str(segment.get("source_kind") or "").upper() == "AWAY"
+                flags = _rule_flags(
+                    None, "PLANNED_AWAY" if is_away else "PLANNED_PTO",
+                    absence=is_away, vacation=not is_away, unpaid=False,
+                    shrinkage=True, working=False, planned=True,
+                )
+                flags["mapped"] = True
+            minutes = int((event_end - event_start).total_seconds() // 60)
+            if minutes <= 0:
+                return
+            event_key = hashlib.sha256(
+                f"{base['agent_day_key']}|{segment['segment_key']}|planned".encode("utf-8")
+            ).hexdigest()
+            event_rows.append({
+                "event_key": event_key, "agent_day_key": base["agent_day_key"],
+                "business_date": base["business_date"], "agent_id": base["agent_id"],
+                "agent_name": base["agent_name"], "team_leader": base["team_leader"],
+                "ops_manager": base["ops_manager"], "lob": base["lob"],
+                "market": base["market"], "language": base["language"],
+                "location": base["location"], "activity": activity,
+                "category": flags["category"], "event_start": event_start,
+                "event_end": event_end, "minutes": minutes, "hours": minutes / 60.0,
+                "planned": True, "working": flags["working"],
+                "counts_as_absence": flags["absence"],
+                "counts_as_vacation": flags["vacation"],
+                "counts_as_unpaid": flags["unpaid"],
+                "counts_as_shrinkage": flags["shrinkage"],
+                "mapped": flags["mapped"],
+                "evidence_type": f"FTE_{str(segment.get('source_kind') or 'PTO').upper()}",
+                "source_file": segment.get("source_file"),
+                "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
+                "reconciliation_status": "PLANNED_REGISTER",
+                "verint_activity": None, "verint_category": None,
+                "verint_overlap_minutes": 0, "verint_source_file": None,
+            })
+            intervals["all"].append((event_start, event_end))
+            intervals[flags["category"]].append((event_start, event_end))
+            intervals["non_working"].append((event_start, event_end))
+            for key in ("absence", "vacation", "unpaid", "shrinkage"):
+                if flags[key]:
+                    intervals[key].append((event_start, event_end))
+            if not flags["mapped"]:
+                intervals["unmapped"].append((event_start, event_end))
+
+        for segment in base.get("_planned_time_off_segments", []):
+            add_planned_event(segment)
+
+        for correction in corrections_by_key.get(base["agent_day_key"], []):
+            add_event(correction)
+
+        def minutes_for(key: str) -> int:
+            if not shift_start or not shift_end:
+                return 0
+            return interval_minutes(shift_start, shift_end, intervals.get(key, []))
+
+        status_exclusive = base.get("_status_exclusive", [])
+        lunch = interval_minutes(shift_start, shift_end, [
+            (row["interval_start"], row["interval_end"])
+            for row in status_exclusive if row["actual_category"] == "Lunch"
+        ]) if shift_start and shift_end else 0
+        breaks = interval_minutes(shift_start, shift_end, [
+            (row["interval_start"], row["interval_end"])
+            for row in status_exclusive if row["actual_category"] == "Break"
+        ]) if shift_start and shift_end else 0
+        # Standard-day hours are already net. Actual lunch/break statuses are
+        # descriptive evidence and are not subtracted from the denominator.
+        planned_net = 0 if base["assignment_type"] == "Off" else min(standard_day_minutes, scheduled_minutes)
+        absence = min(planned_net, minutes_for("absence"))
+        vacation = min(planned_net, minutes_for("vacation"))
+        unpaid = min(planned_net, minutes_for("unpaid"))
+        shrinkage = min(planned_net, minutes_for("shrinkage"))
+        production = max(0, planned_net - min(planned_net, minutes_for("all")))
+        corrected = min(planned_net, minutes_for("reviewed"))
+        unverified = minutes_for("unmapped")
+        dimensions = {
+            "lob": base["lob"],
+            "language": base["language"],
+            "team_leader": base["team_leader"],
+        }
+        components = {
+            "absence_minutes": absence,
+            "vacation_minutes": vacation,
+            "shrinkage_minutes": shrinkage,
+            "planned_net_minutes": planned_net,
+        }
+        day_rows.append({
+            **{key: base[key] for key in (
+                "agent_day_key", "business_date", "agent_id", "agent_name", "team_leader",
+                "ops_manager", "lob", "market", "language", "location",
+            )},
+            "scheduled_minutes": scheduled_minutes, "break_minutes": breaks,
+            "lunch_minutes": lunch, "planned_net_minutes": planned_net,
+            "production_minutes": production, "absence_minutes": absence,
+            "vacation_minutes": vacation, "unpaid_minutes": unpaid,
+            "shrinkage_minutes": shrinkage,
+            "late_minutes": interval_minutes(shift_start, shift_end, issue_intervals["Late"]) if shift_start and shift_end else 0,
+            "early_leave_minutes": interval_minutes(shift_start, shift_end, issue_intervals["Early leave"]) if shift_start and shift_end else 0,
+            "no_show_minutes": interval_minutes(shift_start, shift_end, issue_intervals["No show"]) if shift_start and shift_end else 0,
+            "unmapped_minutes": unverified,
+            "absence_rate": _metric_evaluation(
+                metric_catalog, "observed_absence_rate", base["business_date"], dimensions, components,
+            ).value,
+            "vacation_rate": _metric_evaluation(
+                metric_catalog, "observed_vacation_rate", base["business_date"], dimensions, components,
+            ).value,
+            "shrinkage_rate": _metric_evaluation(
+                metric_catalog, "observed_shrinkage_rate", base["business_date"], dimensions, components,
+            ).value,
+            "absence_day": absence > 0, "absence_spell": None, "absence_spells": 0,
+            "absence_days": 0.0, "bradford_factor": 0.0,
+            "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
+            "unverified_minutes": unverified, "corrected_minutes": corrected,
+        })
+
+    by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in day_rows:
+        by_agent[row["agent_id"]].append(row)
+    for agent_id, rows in by_agent.items():
+        absent = sorted((row for row in rows if row["absence_day"]), key=lambda item: item["business_date"])
+        spell_count = 0
+        previous = None
+        for row in absent:
+            if previous is None or (row["business_date"] - previous).days > rulebook.spell_gap_days:
+                spell_count += 1
+            row["absence_spell"] = f"{agent_id}-{spell_count:03d}"
+            previous = row["business_date"]
+        absence_days = sum(row["absence_minutes"] for row in rows) / standard_day_minutes
+        bradford = float(spell_count * spell_count * absence_days)
+        for row in rows:
+            row["absence_spells"] = spell_count
+            row["absence_days"] = absence_days
+            row["bradford_factor"] = bradford
+
+    _insert_dicts(conn, "mart.absence_event", ABSENCE_EVENT_COLUMNS, event_rows)
+    _insert_dicts(conn, "mart.absence_agent_day", ABSENCE_DAY_COLUMNS, day_rows)
+    return len(day_rows), len(event_rows)
+
+
+SERVICE_COLUMNS = [
+    "business_date", "interval_start", "hour_start", "source_system", "queue",
+    "business_partner", "lob", "language", "offered", "answered", "abandoned",
+    "short_abandoned", "abandoned_within_target", "answered_within_target",
+    "handled_seconds", "sl_gross",
+    "sl_adjusted", "sl_profile", "service_level", "service_availability",
+    "abandon_rate", "aht_seconds", "source_file", "rule_version", "rule_sha256",
+    "service_scope", "comparison_scope", "designation", "mapping_status", "mapping_sha256",
+    "sl_target", "sl_state",
+]
+
+CALL_SERVICE_COLUMNS = [
+    "business_date", "hour_start", "source_system", "service_scope",
+    "comparison_scope", "queue", "designation", "language", "offered",
+    "answered", "abandoned", "short_abandoned", "abandoned_within_target",
+    "answered_within_target",
+    "talk_seconds", "hold_seconds", "wrap_seconds", "handled_seconds",
+    "service_level", "service_availability", "abandon_rate", "aht_seconds",
+    "call_legs", "transferred_legs", "source_files", "mapping_sha256",
+    "rule_version", "rule_sha256",
+]
+
+CALL_SERVICE_15_COLUMNS = [
+    "business_date", "interval_start", "interval_end", "source_system",
+    "service_scope", "comparison_scope", "queue", "designation", "language",
+    "offered", "answered", "abandoned", "short_abandoned",
+    "abandoned_within_target", "answered_within_target", "talk_seconds",
+    "hold_seconds", "wrap_seconds", "handled_seconds", "service_level",
+    "service_availability", "abandon_rate", "aht_seconds", "call_legs",
+    "transferred_legs", "source_files", "mapping_sha256", "rule_version",
+    "rule_sha256",
+]
+
+
+def _build_call_service(
+    conn: DatabaseConnection,
+    rulebook: Rulebook,
+    metric_catalog: MetricCatalog,
+    mapping: QueueMapping,
+    start: date,
+    end: date,
+) -> int:
+    """Materialize Storm service at inbound queue-entry grain.
+
+    Storm's ``Total Entered`` is a count of inbound entries into the displayed
+    queues, not a count of unique customer interactions.  Outbound companion
+    legs never enter service demand; an inbound transfer into another mapped
+    queue is a new queue entry and is counted by Storm in that queue.
+    """
+
+    conn.execute("DELETE FROM mart.call_service_hour")
+    conn.execute("DELETE FROM mart.call_service_15min")
+    rows = _dicts(conn.execute(
+        """
+        SELECT business_date, interaction_key, call_key, call_start,
+               call_direction, queue, queue_wait_seconds, ringing_seconds, agent_id,
+               talk_seconds, hold_seconds, wrap_seconds, transferred,
+               language, lob, source_file
+        FROM core.clean_call_leg
+        WHERE business_date BETWEEN ? AND ?
+        ORDER BY business_date, interaction_key, call_start, call_key
+        """,
+        [start, end],
+    ))
+    aggregates: dict[tuple[Any, ...], dict[str, Any]] = {}
+    interval_aggregates: dict[tuple[Any, ...], dict[str, Any]] = {}
+
+    def add_to_bucket(
+        store: dict[tuple[Any, ...], dict[str, Any]],
+        key: tuple[Any, ...],
+        selected: dict[str, Any],
+        answered: int,
+        short_abandoned: int,
+        abandoned_within_target: int,
+        within_target: int,
+    ) -> None:
+        bucket = store.setdefault(key, {
+            "offered": 0, "answered": 0, "abandoned": 0,
+            "short_abandoned": 0, "abandoned_within_target": 0,
+            "answered_within_target": 0,
+            "talk_seconds": 0.0, "hold_seconds": 0.0,
+            "wrap_seconds": 0.0, "handled_seconds": 0.0,
+            "call_legs": 0, "transferred_legs": 0,
+            "source_files": set(),
+        })
+        bucket["offered"] += 1
+        bucket["answered"] += answered
+        bucket["abandoned"] += 1 - answered
+        bucket["short_abandoned"] += short_abandoned
+        bucket["abandoned_within_target"] += abandoned_within_target
+        bucket["answered_within_target"] += within_target
+        for name in ("talk_seconds", "hold_seconds", "wrap_seconds"):
+            bucket[name] += float(selected.get(name) or 0)
+        bucket["handled_seconds"] = (
+            bucket["talk_seconds"] + bucket["hold_seconds"] + bucket["wrap_seconds"]
+        )
+        bucket["call_legs"] += 1
+        bucket["transferred_legs"] += int(bool(selected.get("transferred")))
+        if selected.get("source_file"):
+            bucket["source_files"].add(str(selected["source_file"]))
+    for selected in rows:
+        if str(selected.get("call_direction") or "").strip().upper() != "I":
+            continue
+        mapped = mapping.map_actual("STORM", selected.get("queue"), None, None)
+        if mapped.status != "MAPPED":
+            continue
+        leg_workload = sum(
+            float(selected.get(name) or 0)
+            for name in ("talk_seconds", "hold_seconds", "wrap_seconds")
+        )
+        raw_agent = selected.get("agent_id")
+        has_agent = raw_agent is not None and bool(str(raw_agent).strip())
+        answered = int(has_agent or leg_workload > 0)
+        wait_seconds = selected.get("queue_wait_seconds")
+        response_seconds = (
+            float(wait_seconds) + float(selected.get("ringing_seconds") or 0)
+            if wait_seconds is not None else None
+        )
+        short_abandoned = int(
+            not answered
+            and response_seconds is not None
+            and response_seconds < rulebook.short_abandon_seconds
+        )
+        abandoned_within_target = int(
+            not answered
+            and response_seconds is not None
+            and rulebook.short_abandon_seconds <= response_seconds
+            and response_seconds < rulebook.target_seconds
+        )
+        within_target = int(
+            bool(answered)
+            and response_seconds is not None
+            and response_seconds < rulebook.target_seconds
+        )
+        call_start = selected.get("call_start")
+        if call_start is None:
+            continue
+        business_date = selected["business_date"]
+        hour_start = call_start.replace(minute=0, second=0, microsecond=0)
+        interval_start = call_start.replace(
+            minute=(call_start.minute // 15) * 15, second=0, microsecond=0,
+        )
+        queue = str(selected.get("queue") or "UNNAMED MAPPED QUEUE")
+        suffix = mapped.service_scope.rsplit(" ", 1)[-1].upper()
+        language = (
+            suffix
+            if suffix in {"FR", "VL", "NL", "DE", "EN"}
+            else str(selected.get("language") or "").strip().upper() or "(blank)"
+        )
+        key = (
+            business_date, hour_start, mapped.service_scope,
+            mapped.comparison_scope, queue, mapped.designation, language,
+        )
+        add_to_bucket(
+            aggregates, key, selected, answered, short_abandoned,
+            abandoned_within_target, within_target,
+        )
+        interval_key = (
+            business_date, interval_start, mapped.service_scope,
+            mapped.comparison_scope, queue, mapped.designation, language,
+        )
+        add_to_bucket(
+            interval_aggregates, interval_key, selected, answered,
+            short_abandoned, abandoned_within_target, within_target,
+        )
+
+    def materialize(
+        store: dict[tuple[Any, ...], dict[str, Any]], *, quarter_hour: bool,
+    ) -> list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
+        for key, values in sorted(
+            store.items(), key=lambda item: tuple(str(value or "") for value in item[0]),
+        ):
+            business_date, bucket_start, service_scope, comparison_scope, queue, designation, language = key
+            components = {
+                name: values[name]
+                for name in (
+                    "offered", "answered", "abandoned", "short_abandoned",
+                    "abandoned_within_target", "answered_within_target",
+                    "handled_seconds",
+                )
+            }
+            dimensions = {
+                "source_system": "CALL_BY_CALL", "queue": queue,
+                "lob": service_scope, "language": language,
+            }
+            service_level = _metric_evaluation(
+                metric_catalog, "service_level", business_date, dimensions, components,
+            )
+            availability = _metric_evaluation(
+                metric_catalog, "service_availability_business", business_date, dimensions, components,
+            )
+            abandon = _metric_evaluation(
+                metric_catalog, "abandon_rate", business_date, dimensions, components,
+            )
+            aht = _metric_evaluation(
+                metric_catalog, "aht_seconds", business_date, dimensions, components,
+            )
+            time_fields = (
+                {"interval_start": bucket_start, "interval_end": bucket_start + timedelta(minutes=15)}
+                if quarter_hour else {"hour_start": bucket_start}
+            )
+            output.append({
+                "business_date": business_date, **time_fields,
+                "source_system": "CALL_BY_CALL", "service_scope": service_scope,
+                "comparison_scope": comparison_scope, "queue": queue,
+                "designation": designation, "language": language,
+                **{name: values[name] for name in (
+                    "offered", "answered", "abandoned", "short_abandoned",
+                    "abandoned_within_target", "answered_within_target",
+                    "talk_seconds", "hold_seconds", "wrap_seconds",
+                    "handled_seconds", "call_legs", "transferred_legs",
+                )},
+                "service_level": service_level.value,
+                "service_availability": availability.value,
+                "abandon_rate": abandon.value, "aht_seconds": aht.value,
+                "source_files": " | ".join(sorted(values["source_files"])),
+                "mapping_sha256": mapping.sha256,
+                "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
+            })
+        return output
+
+    output = materialize(aggregates, quarter_hour=False)
+    interval_output = materialize(interval_aggregates, quarter_hour=True)
+    _insert_dicts(conn, "mart.call_service_hour", CALL_SERVICE_COLUMNS, output)
+    _insert_dicts(
+        conn, "mart.call_service_15min", CALL_SERVICE_15_COLUMNS, interval_output,
+    )
+    return len(output)
+
+
+def _build_service(
+    conn: DatabaseConnection,
+    rulebook: Rulebook,
+    metric_catalog: MetricCatalog,
+    mapping: QueueMapping,
+    start: date,
+    end: date,
+) -> int:
+    """Project governed Call-by-Call counters into the stable service mart."""
+    conn.execute("DELETE FROM mart.service_interval")
+    rows = _dicts(conn.execute(
+        """
+        SELECT business_date, hour_start AS interval_start, hour_start,
+               source_system, queue, NULL AS business_partner,
+               service_scope AS lob, language, offered, answered, abandoned,
+               short_abandoned, abandoned_within_target,
+               answered_within_target, handled_seconds,
+               source_files AS source_file, service_scope, comparison_scope,
+               designation, mapping_sha256
+        FROM mart.call_service_hour
+        WHERE business_date BETWEEN ? AND ?
+        ORDER BY business_date, hour_start, service_scope, queue
+        """, [start, end],
+    ))
+    output: list[dict[str, Any]] = []
+    for row in rows:
+        components = {
+            "offered": row["offered"], "answered": row["answered"],
+            "abandoned": row["abandoned"], "short_abandoned": row["short_abandoned"],
+            "abandoned_within_target": row["abandoned_within_target"],
+            "answered_within_target": row["answered_within_target"],
+            "handled_seconds": row["handled_seconds"],
+        }
+        dimensions = {
+            "source_system": row["source_system"],
+            "queue": row["queue"],
+            "business_partner": row["business_partner"],
+            "lob": row["lob"],
+            "language": row["language"],
+        }
+        service_level = _metric_evaluation(
+            metric_catalog, "service_level", row["business_date"], dimensions, components,
+        )
+        gross = _metric_evaluation(
+            metric_catalog, "service_level_gross", row["business_date"], dimensions, components,
+        )
+        availability = _metric_evaluation(
+            metric_catalog, "service_availability_business", row["business_date"], dimensions, components,
+        )
+        abandon = _metric_evaluation(
+            metric_catalog, "abandon_rate", row["business_date"], dimensions, components,
+        )
+        aht = _metric_evaluation(
+            metric_catalog, "aht_seconds", row["business_date"], dimensions, components,
+        )
+        output.append({
+            **{key: row[key] for key in (
+                "business_date", "interval_start", "hour_start", "source_system", "queue",
+                "business_partner", "lob", "language", "offered", "answered", "abandoned",
+                "source_file",
+            )},
+            "short_abandoned": row["short_abandoned"],
+            "abandoned_within_target": row["abandoned_within_target"],
+            "answered_within_target": row["answered_within_target"],
+            "handled_seconds": row["handled_seconds"],
+            "sl_gross": gross.value,
+            "sl_adjusted": service_level.value,
+            "sl_profile": service_level.method.method_id,
+            "service_level": service_level.value,
+            "service_availability": availability.value,
+            "abandon_rate": abandon.value,
+            "aht_seconds": aht.value,
+            "rule_version": rulebook.version, "rule_sha256": rulebook.sha256,
+            "service_scope": row["service_scope"],
+            "comparison_scope": row["comparison_scope"],
+            "designation": row["designation"],
+            "mapping_status": "MAPPED", "mapping_sha256": row["mapping_sha256"],
+            "sl_target": service_level.method.target,
+            "sl_state": service_level.state,
+        })
+    _insert_dicts(conn, "mart.service_interval", SERVICE_COLUMNS, output)
+    return len(output)
+
+
+def _record_rule_application(conn: DatabaseConnection, run_id: str, rulebook: Rulebook) -> None:
+    conn.execute(
+        """INSERT INTO meta.rule_application(
+               run_id, rule_version, rule_sha256, rule_file, effective_from, applied_at
+           ) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(run_id) DO UPDATE SET
+               rule_version=excluded.rule_version, rule_sha256=excluded.rule_sha256,
+               rule_file=excluded.rule_file, effective_from=excluded.effective_from,
+               applied_at=excluded.applied_at""",
+        [run_id, rulebook.version, rulebook.sha256, str(rulebook.file), rulebook.effective_from, datetime.now()],
+    )
+
+
+def _record_mapping_application(conn: DatabaseConnection, run_id: str, mapping: QueueMapping) -> None:
+    conn.execute(
+        """INSERT INTO meta.mapping_application(run_id, mapping_sha256, mapping_file, applied_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(run_id) DO UPDATE SET
+               mapping_sha256=excluded.mapping_sha256,
+               mapping_file=excluded.mapping_file,
+               applied_at=excluded.applied_at""",
+        [run_id, mapping.sha256, str(mapping.file), datetime.now()],
+    )
+
+
+def _issue_id(*parts: Any) -> str:
+    return hashlib.sha256("|".join(str(part or "") for part in parts).encode("utf-8")).hexdigest()
+
+
+def _build_quality(
+    conn: DatabaseConnection,
+    config: Config,
+    run_id: str,
+    start: date,
+    end: date,
+) -> int:
+    conn.execute("DELETE FROM meta.quality_issue")
+    now = datetime.now()
+    # A single underlying problem can be discovered through more than one
+    # metadata row (for example, repeated failed attempts for the same file).
+    # Keep one row per deterministic issue_id before touching SQLite so one
+    # noisy source can never abort the whole model refresh.
+    issues: dict[str, list[Any]] = {}
+
+    def add(family: str | None, source_file: str | None, business_date: date | None, agent_id: str | None, issue: str, severity: str, details: str) -> None:
+        issue_id = _issue_id(run_id, family, source_file, business_date, agent_id, issue, details)
+        candidate = [issue_id, run_id, now, family, source_file, business_date, agent_id, issue, severity, details]
+        existing = issues.get(issue_id)
+        severity_rank = {"INFO": 0, "REVIEW": 1, "ERROR": 2}
+        if existing is None or severity_rank.get(severity, 0) > severity_rank.get(existing[8], 0):
+            issues[issue_id] = candidate
+
+    for family, key in (
+        ("fte", "fte_file"), ("schedule", "schedule_folder"), ("lilo", "lilo_folder"),
+        ("agent_status", "agent_status_folder"), ("forecast", "forecast_folder"),
+        ("calls", "call_folder"),
+    ):
+        if family == "agent_status" and not config.modules.get("agent_status", True):
+            continue
+        if family == "forecast" and not config.modules.get("forecast", True):
+            continue
+        path = config.source_path(key)
+        if not path.exists():
+            add(family, str(path), None, None, "Missing source", "ERROR", f"Expected path does not exist: {path}")
+    for row in _dicts(conn.execute("SELECT * FROM meta.source_file WHERE status='ERROR'")):
+        if row["source_family"] in {"apbe", "apfr", "apde"}:
+            continue
+        if row["source_family"] == "agent_status" and not config.modules.get("agent_status", False):
+            continue
+        add(row["source_family"], row["file_name"], None, None, "Source load error", "ERROR", row["error_message"] or "Unknown load error")
+    schedule_variants = {
+        row[0] for row in conn.execute(
+            """SELECT DISTINCT source_variant FROM meta.source_file
+               WHERE source_family='schedule' AND active=true AND status='SUCCESS'"""
+        ).fetchall() if row[0]
+    }
+    if "START_END" not in schedule_variants:
+        add(
+            "schedule", str(config.source_path("schedule_folder")), None, None,
+            "Dedicated StartEndTimes schedule not loaded", "ERROR",
+            "No governed schedule boundary exists. Load a StartEndTimes export; "
+            "Activities is reserved for final absence/shrinkage evidence.",
+        )
+    else:
+        uncovered_activity_days = conn.execute(
+            """SELECT count(*) FROM (
+                   SELECT DISTINCT r.schedule_date, r.agent_id
+                   FROM raw.schedule_shift r
+                   JOIN meta.source_file f ON f.file_id=r.source_file_id
+                   WHERE f.active=true AND f.status='SUCCESS'
+                     AND f.source_variant='ACTIVITIES' AND r.parse_ok=true
+                     AND r.agent_id IS NOT NULL
+                     AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL
+                     AND NOT EXISTS (
+                         SELECT 1 FROM raw.schedule_shift preferred
+                         JOIN meta.source_file preferred_file
+                           ON preferred_file.file_id=preferred.source_file_id
+                         WHERE preferred_file.active=true
+                           AND preferred_file.status='SUCCESS'
+                           AND preferred_file.source_variant='START_END'
+                           AND preferred.schedule_date=r.schedule_date
+                           AND preferred.agent_id=r.agent_id
+                           AND preferred.parse_ok=true
+                           AND preferred.scheduled_start IS NOT NULL
+                           AND preferred.scheduled_end IS NOT NULL
+                     )
+               )"""
+        ).fetchone()[0]
+        if uncovered_activity_days:
+            add(
+                "schedule", str(config.source_path("schedule_folder")), None, None,
+                "StartEndTimes coverage incomplete", "ERROR",
+                f"{uncovered_activity_days:,} Activities agent-day row(s) have no "
+                "valid StartEndTimes boundary. They are not used as schedule fallback.",
+            )
+    rulebook = load_rulebook(config.home, config.business_rules)
+    for row in _dicts(conn.execute(
+        """SELECT schedule_date, agent_id_raw, agent_name, parse_ok, f.file_name
+           FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active
+           WHERE schedule_date BETWEEN ? AND ? AND (agent_id IS NULL OR NOT parse_ok)""", [start, end]
+    )):
+        issue = "Invalid schedule Agent ID" if row["agent_id_raw"] in {None, "", "-", "N/A", "NA", "NULL"} else "Schedule parse error"
+        add("schedule", row["file_name"], row["schedule_date"], row["agent_id_raw"], issue, "ERROR", f"Agent={row['agent_name'] or ''}; parse_ok={row['parse_ok']}")
+    for business_date, count in conn.execute(
+        """SELECT business_date, count(*) FROM mart.attendance_agent_day
+           WHERE attendance_result='Data not loaded' GROUP BY business_date ORDER BY business_date"""
+    ).fetchall():
+        add("attendance", None, business_date, None, "Actual evidence date not loaded", "ERROR", f"{count} scheduled Agent ID rows cannot be judged from LILO or Agent Status")
+    for row in _dicts(conn.execute(
+        """SELECT business_date, agent_id, attendance_result, schedule_source
+           FROM mart.attendance_agent_day
+           WHERE attendance_result IN ('Schedule parse error','Missing actual evidence','Incomplete actual evidence','No schedule overlap')"""
+    )):
+        severity = "ERROR" if row["attendance_result"] in {"Data not loaded", "Schedule parse error"} else "REVIEW"
+        add("attendance", row["schedule_source"], row["business_date"], row["agent_id"], row["attendance_result"], severity, "Attendance result requires review before payroll use")
+    if config.modules.get("agent_status", True):
+        for business_date, low_rows in conn.execute(
+            """SELECT business_date, count(*)
+               FROM mart.attendance_agent_day
+               WHERE planned_work_minutes>0 AND status_source IS NOT NULL
+                 AND 1.0*status_covered_minutes/planned_work_minutes < ?
+               GROUP BY business_date ORDER BY business_date""",
+            [config.rules.minimum_status_coverage],
+        ).fetchall():
+            add(
+                "agent_status", None, business_date, None, "Low Agent Status coverage", "REVIEW",
+                f"{low_rows} agent-day rows have less than {config.rules.minimum_status_coverage:.0%} status coverage; LILO boundaries still remain usable.",
+            )
+    forecast_unmapped = conn.execute("SELECT count(*) FROM mart.forecast_hour WHERE mapping_status='UNMAPPED'").fetchone()[0]
+    actual_unmapped = 0
+    if forecast_unmapped or actual_unmapped:
+        add(
+            "intraday", str(config.queue_mapping), None, None, "Unmapped service scope", "REVIEW",
+            f"{forecast_unmapped} forecast and {actual_unmapped} actual rows are unmapped. Edit config/queue_mapping.csv and refresh; extracts stay untouched.",
+        )
+    if config.modules.get("pcs", True):
+        call_rows = conn.execute("SELECT count(*) FROM core.clean_call_leg WHERE business_date BETWEEN ? AND ?", [start, end]).fetchone()[0]
+        responses = conn.execute("SELECT coalesce(sum(survey_responses),0) FROM mart.agent_pcs_day").fetchone()[0]
+        if call_rows and not responses:
+            add(
+                "calls", None, None, None, "No in-scope PCS responses", "REVIEW",
+                f"{call_rows} clean in-scope call legs were available, but no valid configured survey score was found.",
+            )
+        for row in _dicts(conn.execute(
+            """SELECT business_date, agent_id, survey_responses,
+                      low_score_responses, top_box_responses,
+                      pcs_participation_responses, pcs_invalid_responses,
+                      pcs_status_calls, pcs_response_without_status
+               FROM mart.agent_pcs_day
+               WHERE business_date BETWEEN ? AND ? AND (
+                   survey_responses<>low_score_responses+top_box_responses OR
+                   pcs_participation_responses<>survey_responses+pcs_invalid_responses OR
+                   pcs_participation_responses>pcs_status_calls OR
+                   pcs_response_without_status>0
+               )""", [start, end]
+        )):
+            details = (
+                f"valid={row['survey_responses']}, <=3={row['low_score_responses']}, "
+                f">3={row['top_box_responses']}, raw Q1={row['pcs_participation_responses']}, "
+                f"invalid={row['pcs_invalid_responses']}, PCSStatus=1={row['pcs_status_calls']}, "
+                f"Q1 without status={row['pcs_response_without_status']}"
+            )
+            add(
+                "calls", None, row["business_date"], row["agent_id"],
+                "PCS counter reconciliation", "REVIEW", details,
+            )
+    for row in _dicts(conn.execute(
+        """SELECT business_date, agent_id, activity, category, source_file, sum(minutes) AS minutes
+           FROM mart.absence_event
+           WHERE mapped=false AND business_date BETWEEN ? AND ?
+           GROUP BY business_date, agent_id, activity, category, source_file
+           ORDER BY business_date, agent_id, activity""", [start, end]
+    )):
+        severity = "REVIEW"
+        add(
+            "absence", row["source_file"], row["business_date"], row["agent_id"],
+            "Residual attendance gap not in final Verint", severity,
+            f"{row['activity']} -> {row['category']} ({row['minutes']} minutes). Correct the exact interval in Verint, export Activities, then refresh.",
+        )
+    for row in _dicts(conn.execute(
+        """SELECT r.agent_id, r.source_sheet, r.source_row, r.start_date,
+                  r.absence_type, f.file_name
+           FROM raw.fte_time_off r
+           JOIN meta.source_file f ON f.file_id=r.source_file_id
+           LEFT JOIN core.dim_agent d ON d.agent_id=r.agent_id
+           WHERE f.active=true AND f.status='SUCCESS'
+             AND coalesce(d.match_method,'Unmatched to FTE')<>'Agent ID'"""
+    )):
+        add(
+            "fte", row["file_name"], row["start_date"], row["agent_id"],
+            "Time-off Agent ID not in active roster", "ERROR",
+            f"{row['source_sheet']} row {row['source_row']} ({row['absence_type']}) "
+            "does not match an admitted Agent-sheet ID.",
+        )
+    for row in _dicts(conn.execute(
+        """SELECT business_date, source_system, queue, offered, answered, source_file
+           FROM mart.service_interval
+           WHERE business_date BETWEEN ? AND ? AND coalesce(answered,0) > coalesce(offered,0)""", [start, end]
+    )):
+        add(
+            "service", row["source_file"], row["business_date"], None,
+            "Answered exceeds offered", "REVIEW",
+            f"{row['source_system']} / {row['queue'] or '(no queue)'}: answered={row['answered']}, offered={row['offered']}",
+        )
+    for row in _dicts(conn.execute(
+        """SELECT business_date, agent_id, activity, source_file, sum(minutes) AS minutes
+           FROM mart.absence_event
+           WHERE category='NO_ACTIVITY' AND business_date BETWEEN ? AND ?
+           GROUP BY business_date, agent_id, activity, source_file""", [start, end]
+    )):
+        add(
+            "absence", row["source_file"], row["business_date"], row["agent_id"],
+            "Residual No Activity", "REVIEW",
+            f"No Activity covers {row['minutes']} scheduled minutes and is not yet supported by final Verint Activities.",
+        )
+    for row in _dicts(conn.execute(
+        """SELECT DISTINCT a.business_date, a.agent_id, a.agent_name,
+                          a.category AS category_a, b.category AS category_b,
+                          coalesce(a.source_file, b.source_file) AS source_file
+           FROM mart.absence_event a
+           JOIN mart.absence_event b
+             ON b.agent_day_key=a.agent_day_key AND b.event_key>a.event_key
+            AND b.event_start<a.event_end AND b.event_end>a.event_start
+           WHERE a.business_date BETWEEN ? AND ?
+             AND a.counts_as_absence=true AND b.counts_as_absence=true
+             AND a.category<>b.category""", [start, end]
+    )):
+        add(
+            "absence", row["source_file"], row["business_date"], row["agent_id"],
+            "Conflicting absence evidence", "REVIEW",
+            f"Overlapping categories {row['category_a']} and {row['category_b']} for {row['agent_name'] or row['agent_id']}. Daily absence is unioned, but payroll classification needs review.",
+        )
+    for family, file_name, scoped_out in conn.execute(
+        """SELECT source_family, file_name, scoped_out_count
+           FROM meta.source_file
+           WHERE active=true AND status='SUCCESS' AND source_family IN ('schedule','lilo','agent_status','calls')
+             AND row_count=0 AND scoped_out_count>0"""
+    ).fetchall():
+        add(
+            family, file_name, None, None, "Agent scope mismatch", "ERROR",
+            f"All {scoped_out} source rows were outside the active FTE roster; no rows were used.",
+        )
+    issue_rows = list(issues.values())
+    if issue_rows:
+        row_placeholders = "(" + ", ".join("?" for _ in range(10)) + ")"
+        for offset in range(0, len(issue_rows), 500):
+            batch = issue_rows[offset : offset + 500]
+            conn.execute(
+                "INSERT INTO meta.quality_issue VALUES " + ", ".join(row_placeholders for _ in batch),
+                [value for row in batch for value in row],
+            )
+    return len(issue_rows)
+
+
+def _build_source_health(conn: DatabaseConnection, config: Config) -> None:
+    conn.execute("DELETE FROM mart.source_health")
+    specs = [
+        ("fte", config.source_path("fte_file")), ("schedule", config.source_path("schedule_folder")),
+        ("lilo", config.source_path("lilo_folder")), ("agent_status", config.source_path("agent_status_folder")),
+        ("forecast", config.source_path("forecast_folder")), ("calls", config.source_path("call_folder")),
+    ]
+    specs = [
+        (family, path) for family, path in specs
+        if not (family == "agent_status" and not config.modules.get("agent_status", True))
+        and not (family == "forecast" and not config.modules.get("forecast", True))
+    ]
+    for family, expected in specs:
+        latest = conn.execute(
+            """SELECT file_name, modified_at, loaded_at, status, error_message
+               FROM meta.source_file WHERE source_family=?
+               ORDER BY loaded_at DESC NULLS LAST, modified_at DESC NULLS LAST LIMIT 1""", [family]
+        ).fetchone()
+        rows, rejected, scoped_out = conn.execute(
+            """SELECT coalesce(sum(row_count),0), coalesce(sum(rejected_count),0),
+                      coalesce(sum(scoped_out_count),0)
+               FROM meta.source_file
+               WHERE source_family=? AND active=true AND status='SUCCESS'""",
+            [family],
+        ).fetchone()
+        business_date = conn.execute(
+            """
+            SELECT max(d) FROM (
+                SELECT max(extract_date) d FROM raw.lilo r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='lilo'
+                UNION ALL SELECT max(extract_date) FROM raw.agent_status r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='agent_status'
+                UNION ALL SELECT max(schedule_date) FROM raw.schedule_shift r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='schedule'
+                UNION ALL SELECT max(business_date) FROM raw.forecast_interval r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='forecast'
+                UNION ALL SELECT max(business_date) FROM raw.call_leg r JOIN meta.source_file f ON f.file_id=r.source_file_id AND f.active WHERE ?='calls'
+            ) x
+            """, [family, family, family, family, family]
+        ).fetchone()[0]
+        if latest:
+            file_name, modified, loaded, status, error = latest
+            if error:
+                details = error
+            elif not rows and scoped_out:
+                status = "ERROR"
+                details = f"All {scoped_out} rows were outside the active FTE roster; no rows were used"
+            else:
+                notes = []
+                if rejected:
+                    notes.append(f"{rejected} rejected/flagged")
+                if scoped_out:
+                    notes.append(f"{scoped_out} outside roster excluded")
+                details = "Loaded successfully" + (f"; {', '.join(notes)} rows" if notes else "")
+        else:
+            file_name = modified = loaded = business_date = None
+            status = "MISSING" if not expected.exists() else "EMPTY"
+            details = "Path not found" if status == "MISSING" else "No matching files loaded"
+        conn.execute(
+            "INSERT INTO mart.source_health VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [family, str(expected), file_name, business_date, modified, loaded, rows, rejected, status, details, scoped_out],
+        )
+
+
+def _schedule_integrity_history_start(
+    conn: DatabaseConnection,
+    requested_start: date,
+    end: date,
+    rolling_scheduled_days: int,
+) -> date:
+    """Return the earliest date needed for an exact rolling integrity window."""
+
+    value = conn.execute(
+        """WITH eligible_days AS (
+               SELECT DISTINCT r.agent_id, r.schedule_date
+               FROM raw.schedule_shift r
+               JOIN meta.source_file f ON f.file_id=r.source_file_id
+               WHERE f.active=true AND f.status='SUCCESS'
+                 AND f.source_variant='START_END'
+                 AND r.agent_id IS NOT NULL AND r.parse_ok=true
+                 AND r.scheduled_start IS NOT NULL AND r.scheduled_end IS NOT NULL
+                 AND r.scheduled_end>r.scheduled_start
+                 AND r.schedule_date<=?
+                 AND coalesce(r.assignment_type,'') NOT IN ('Off','Planned absence')
+           ), ranked AS (
+               SELECT agent_id, schedule_date,
+                      row_number() OVER (
+                          PARTITION BY agent_id ORDER BY schedule_date DESC
+                      ) AS scheduled_day_rank
+               FROM eligible_days
+           )
+           SELECT min(schedule_date) FROM ranked WHERE scheduled_day_rank<=?""",
+        [end, rolling_scheduled_days],
+    ).fetchone()[0]
+    if value is None:
+        return requested_start
+    if isinstance(value, datetime):
+        value = value.date()
+    elif not isinstance(value, date):
+        value = date.fromisoformat(str(value)[:10])
+    return min(requested_start, value)
+
+
+def refresh_models(
+    conn: DatabaseConnection,
+    config: Config,
+    run_id: str,
+    start: date | None = None,
+    end: date | None = None,
+    use_config_period: bool = True,
+    progress: ProgressCallback | None = None,
+    as_of: datetime | None = None,
+) -> ModelSummary:
+    total_stages = 20
+    active_stage: str | None = None
+    stage_started = clock.perf_counter()
+
+    def stage(completed: int, label: str) -> None:
+        nonlocal active_stage, stage_started
+        now = clock.perf_counter()
+        if active_stage is not None:
+            logging.info(
+                "Model stage complete stage=%s seconds=%.3f",
+                active_stage, now - stage_started,
+            )
+        active_stage = label
+        stage_started = now
+        if progress is not None:
+            progress(completed, total_stages, label)
+
+    conn.execute("SAVEPOINT refresh_models")
+    try:
+        stage(0, "Validating business rules")
+        rulebook = load_rulebook(config.home, config.business_rules)
+        metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
+        validate_metric_catalog(metric_catalog, SOURCE_COMPONENTS)
+        analytics_rules = load_analytics_rules(config.home, config.analytics_rules)
+        validate_analytics_rules(analytics_rules, metric_catalog)
+        mapping = load_queue_mapping(config.queue_mapping)
+        evaluation_as_of = _evaluation_time(config.timezone, as_of)
+        stage(1, "Selecting reporting period")
+        start, end = resolve_period(conn, config, start, end, use_config_period)
+        integrity_start = _schedule_integrity_history_start(
+            conn, start, end, rulebook.integrity_rolling_scheduled_days,
+        )
+        stage(2, "Loading schedules and integrity history")
+        schedules = _load_schedules(conn, integrity_start, end)
+        stage(3, "Loading final Verint Activities for post-day reconciliation")
+        events_by_agent = _events_by_agent(_load_events(conn, start, end))
+        stage(4, "Loading LILO")
+        lilo, loaded_dates, seen_ids = _load_lilo(conn, integrity_start, end)
+        stage(5, "Loading Agent Status attendance evidence")
+        if config.modules.get("agent_status", True):
+            statuses, status_loaded_dates = _load_statuses(conn, integrity_start, end)
+        else:
+            statuses, status_loaded_dates = {}, set()
+        stage(6, "Building employee dimension")
+        agents = _build_agents(conn)
+        planned_time_off = _build_planned_time_off(
+            conn, schedules, agents, integrity_start, end, evaluation_as_of,
+        )
+        stage(7, "Building attendance")
+        attendance = _build_attendance(
+            conn, rulebook, schedules, events_by_agent, lilo, loaded_dates, seen_ids,
+            agents, statuses, status_loaded_dates, planned_time_off, evaluation_as_of,
+            config.rules.minimum_status_coverage,
+        )
+        selected_attendance = [
+            row for row in attendance if start <= row["business_date"] <= end
+        ]
+        stage(8, "Reconciling observed gaps against final Verint Activities")
+        corrections = _build_corrections(conn, rulebook, selected_attendance)
+        stage(9, "Building LOB and language staffing intervals")
+        staffing = _build_staffing(conn, config, selected_attendance, evaluation_as_of)
+        stage(10, "Building shift evidence timelines")
+        timeline = _build_shift_timeline(conn, selected_attendance, evaluation_as_of)
+        schedule_integrity = _build_schedule_integrity(
+            conn, rulebook, attendance, statuses, evaluation_as_of,
+        )
+        stage(11, "Building forecast and requirement intervals")
+        forecast = _build_forecast_models(conn, start, end, mapping)
+        stage(12, "Building exact PCS counters")
+        # The permanent PCS tracker needs a stable rolling history even when
+        # the operator refreshes Today or Current Week.  Keep the boundary in
+        # configuration so the workbook never owns business-data retention.
+        month_index = end.year * 12 + end.month - 1
+        first_index = month_index - (config.pcs_tracker.history_months - 1)
+        history_start = date(first_index // 12, first_index % 12 + 1, 1)
+        pcs_start = min(start, history_start)
+        pcs = _build_pcs(conn, config, metric_catalog, pcs_start, end)
+        stage(13, "Building observed absence and shrinkage")
+        absence, absence_events = _build_absence(
+            conn, config, rulebook, metric_catalog, selected_attendance, corrections,
+        )
+        stage(14, "Building final absence from Verint Activities")
+        final_absence_events, final_absence = _build_verint_final_absence(
+            conn, rulebook, metric_catalog, start, end, evaluation_as_of,
+        )
+        stage(15, "Building Call-by-Call service performance and flashes")
+        call_service = _build_call_service(
+            conn, rulebook, metric_catalog, mapping, start, end,
+        )
+        call_service_15min = conn.execute(
+            "SELECT count(*) FROM mart.call_service_15min"
+        ).fetchone()[0]
+        service = _build_service(conn, rulebook, metric_catalog, mapping, start, end)
+        _record_rule_application(conn, run_id, rulebook)
+        _record_mapping_application(conn, run_id, mapping)
+        stage(16, "Checking source health")
+        _build_source_health(conn, config)
+        stage(17, "Running data-quality checks")
+        quality = _build_quality(conn, config, run_id, start, end)
+        stage(18, "Materializing configured KPI values")
+        metric_rows = build_metric_values(
+            conn, metric_catalog, rulebook, run_id, start, end,
+        )
+        stage(19, "Preparing period findings")
+        finding_rows = build_findings(
+            conn, metric_catalog, analytics_rules, run_id, start, end,
+        )
+        result = ModelSummary(
+            start=start, end=end, attendance_rows=len(selected_attendance),
+            correction_rows=len(corrections), forecast_rows=forecast,
+            pcs_rows=pcs, quality_rows=quality,
+            absence_rows=absence, absence_event_rows=absence_events,
+            service_rows=service, call_service_rows=call_service,
+            call_service_15min_rows=call_service_15min,
+            staffing_rows=staffing, timeline_rows=timeline,
+            schedule_integrity_rows=schedule_integrity,
+            final_absence_rows=final_absence,
+            final_absence_event_rows=final_absence_events,
+            metric_rows=metric_rows, finding_rows=finding_rows,
+        )
+        conn.execute("RELEASE SAVEPOINT refresh_models")
+        stage(total_stages, "Models ready")
+        return result
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT refresh_models")
+        conn.execute("RELEASE SAVEPOINT refresh_models")
+        raise
+
+
+def refresh_pcs_models(
+    conn: DatabaseConnection,
+    config: Config,
+    run_id: str,
+    start: date | None = None,
+    end: date | None = None,
+    use_config_period: bool = True,
+    progress: ProgressCallback | None = None,
+) -> ModelSummary:
+    """Refresh only the employee dimension and PCS mart.
+
+    The permanent PCS tracker does not consume attendance, staffing, forecast,
+    service, absence, or findings. Rebuilding those domains made a simple PCS
+    update slow and increased the blast radius of an Excel-only failure.
+    """
+
+    total_stages = 5
+
+    def stage(completed: int, label: str) -> None:
+        if progress is not None:
+            progress(completed, total_stages, label)
+
+    conn.execute("SAVEPOINT refresh_pcs_models")
+    try:
+        stage(0, "Validating PCS rules and metrics")
+        rulebook = load_rulebook(config.home, config.business_rules)
+        metric_catalog = load_metric_catalog(config.home, config.metric_catalog)
+        validate_metric_catalog(metric_catalog, SOURCE_COMPONENTS)
+
+        stage(1, "Selecting PCS Call-by-Call period")
+        requested_start = start or (config.period_start if use_config_period else None)
+        requested_end = end or (config.period_end if use_config_period else None)
+        if requested_start and requested_end and requested_start > requested_end:
+            raise ValueError("Start date cannot be after end date")
+        first_call, last_call = conn.execute(
+            """SELECT min(r.business_date), max(r.business_date)
+               FROM raw.call_leg r
+               JOIN meta.source_file f ON f.file_id=r.source_file_id
+               WHERE f.active=true AND f.status='SUCCESS'""",
+        ).fetchone()
+        selected_start = requested_start or first_call
+        selected_end = requested_end or last_call
+        if selected_start is None or selected_end is None:
+            raise RuntimeError(
+                "No Call-by-Call dates were found. Load a valid call extract first."
+            )
+        if isinstance(selected_start, datetime):
+            selected_start = selected_start.date()
+        elif not isinstance(selected_start, date):
+            selected_start = date.fromisoformat(str(selected_start)[:10])
+        if isinstance(selected_end, datetime):
+            selected_end = selected_end.date()
+        elif not isinstance(selected_end, date):
+            selected_end = date.fromisoformat(str(selected_end)[:10])
+
+        stage(2, "Updating the active FTE employee dimension")
+        _build_agents(conn)
+
+        stage(3, "Building exact PCS agent-day counters")
+        month_index = selected_end.year * 12 + selected_end.month - 1
+        first_index = month_index - (config.pcs_tracker.history_months - 1)
+        history_start = date(first_index // 12, first_index % 12 + 1, 1)
+        pcs_start = min(selected_start, history_start)
+        pcs = _build_pcs(conn, config, metric_catalog, pcs_start, selected_end)
+
+        stage(4, "Updating source health")
+        _build_source_health(conn, config)
+        _record_rule_application(conn, run_id, rulebook)
+
+        result = ModelSummary(
+            start=selected_start,
+            end=selected_end,
+            pcs_rows=pcs,
+        )
+        conn.execute("RELEASE SAVEPOINT refresh_pcs_models")
+        stage(total_stages, "PCS data ready")
+        return result
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT refresh_pcs_models")
+        conn.execute("RELEASE SAVEPOINT refresh_pcs_models")
+        raise

@@ -1,0 +1,78 @@
+[app]
+timezone = "Europe/Berlin"
+
+[paths]
+# Relative paths are resolved from the WFMHub folder.
+source_root = "extracts"
+database = "_system/database/wfm.sqlite3"
+# Reports contains finished workbooks. Feed contains clean exports that can be
+# opened, filtered, or shared without touching the original extracts.
+reports = "Reports"
+feed = "Feed"
+system = "_system"
+output = "_system/output"
+logs = "_system/logs"
+backups = "_system/backups"
+custom = "_system/custom"
+business_rules = "config/wfm_rules.toml"
+metric_catalog = "config/metric_catalog.toml"
+analytics_rules = "config/analytics_rules.toml"
+report_catalog = "config/report_catalog.toml"
+queue_mapping = "config/queue_mapping.csv"
+service_profiles = "config/service_profiles.toml"
+capacity_mapping = "config/capacity_mapping.csv"
+
+[sources]
+# FTE Agent is the authoritative "our agents" roster. Schedule, LILO, and
+# Agent Status rows are admitted by exact Agent ID or one unique normalized
+# roster-name match. Source files are never changed.
+fte_file = "FTE/FTE Count.xlsx"
+lilo_folder = "Storm/LILO"
+agent_status_folder = "Storm/Agent Status"
+schedule_folder = "Verint/Schedules & Activities"
+# StartEndTimes supplies shift boundaries. Activities supplies final post-day
+# absence/shrinkage codes only and never proves attendance or presence.
+# Verint forecast exports may be 15- or 60-minute. Native intervals are kept
+# for staffing; WFMHub derives hourly totals for Flash and daily reporting.
+forecast_folder = "Verint/Forecast"
+call_folder = "Storm/Call by Call"
+
+[period]
+# Leave blank to use every date currently available in the database.
+start = ""
+end = ""
+
+[rules]
+# Runtime status settings. Attendance evidence rules live in wfm_rules.toml;
+# all KPI arithmetic, targets and scopes live in metric_catalog.toml.
+tolerance_minutes = 5
+# Completed-day allowances used by Attendance Review > BREAK & MEAL.
+break_minutes = 30
+lunch_minutes = 45
+minimum_status_coverage = 0.80
+# A live state older than this is UNKNOWN instead of assumed present/absent.
+status_stale_minutes = 30
+
+[modules]
+# Agent Status is the primary actual-attendance evidence. LILO is its fallback
+# for shift boundaries when status coverage is incomplete.
+agent_status = true
+forecast = true
+pcs = true
+absence = true
+
+[pcs_tracker]
+# The PCS mart retains this many complete calendar months so fixed report feeds
+# can provide current/prior comparisons. Two months is the minimum.
+history_months = 13
+
+[report]
+max_attendance_rows = 100000
+max_gap_rows = 100000
+max_pcs_agent_rows = 100000
+max_absence_rows = 100000
+max_service_rows = 100000
+max_staffing_rows = 100000
+max_timeline_rows = 100000
+max_final_absence_rows = 100000
+max_final_absence_event_rows = 100000

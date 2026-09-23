@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+class LauncherTests(unittest.TestCase):
+    def test_windows_launchers_only_use_embedded_python(self):
+        for name in ("SETUP.cmd", "WFMHub.cmd", "UPGRADE.cmd"):
+            text = (REPO / name).read_text(encoding="utf-8").lower()
+            self.assertIn(r"_system\runtime\python.exe", text)
+            self.assertNotIn("py -3", text)
+            self.assertNotIn("python -m wfmhub", text)
+            self.assertIn("source code zip", text)
+            self.assertIn("title wfmhub portable", text)
+            self.assertIn("if not defined no_color color 0b", text)
+
+    def test_webapp_launcher_uses_only_the_embedded_runtime(self):
+        text = (REPO / "WEBAPP.cmd").read_text(encoding="utf-8").lower()
+        self.assertIn(r"_system\runtime\python.exe", text)
+        self.assertIn("-m wfmhub", text)
+        self.assertIn(" web", text)
+        self.assertNotIn("py -3", text)
+
+    def test_pcs_packages_the_reviewed_power_query_installer(self):
+        text = (
+            REPO / "packaging" / "windows" / "build_portable.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'stage / "_system" / "scripts" / "Install-PCSWorkbook.ps1"',
+            text,
+        )
+        installer = (
+            REPO / "packaging" / "windows" / "Install-PCSWorkbook.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn('ValidateSet("Install", "Refresh")', installer)
+        self.assertIn('"tblPcsCoachingView"', installer)
+        self.assertIn('"tblPcsFilters"', installer)
+        self.assertNotIn('Remove-StarterTable "COACHING" "tblCoachingQueue"', installer)
+        self.assertIn("Assert-PresentationIntegrity", installer)
+        self.assertIn("PCS_LOB_DATA", installer)
+        self.assertIn("PCS_AGENT_DATA", installer)
+        self.assertIn("PCS_DAILY_DATA", installer)
+        self.assertIn("PCS_COACH_DATA", installer)
+        self.assertIn("Set-SelectorNames", installer)
+        self.assertIn("Assert-SelectorIntegrity", installer)
+        self.assertIn("$queryTable.RefreshStyle = 0", installer)
+        self.assertNotIn("$queryTable.RefreshStyle = 1", installer)
+        self.assertIn('if ($name -eq "PCS_PERIOD_LIST") { "A" } else { "B" }', installer)
+        self.assertIn('"PCS_TL_ACTIVE" = @($teamGroup, "C", "D")', installer)
+        self.assertIn('"PCS_AGENT_ACTIVE" = @($agentGroup, "E", "F")', installer)
+        self.assertIn("=INDEX($values,$first):INDEX($values", installer)
+        self.assertNotIn("Save-PresentationFormulas", installer)
+        self.assertNotIn("Restore-PresentationFormulas", installer)
+        self.assertNotIn('"tblCoachingActions"', installer)
+        self.assertNotIn("/home/founder", text)
+        self.assertNotIn("/home/founder", installer)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,54 @@
+# Presentation contracts. These choose workbook composition, never calculate KPIs.
+
+[catalog]
+version = "1.0.0"
+description = "Clear WFM reports with shared definitions and consistent presentation."
+
+[[packs]]
+key = "pcs"
+title = "PCS LIVE TRACKER"
+purpose = "Permanent lightweight PCS tracker refreshed from fixed CSV feeds through Power Query."
+finding_domains = ["pcs", "data_quality"]
+sheets = ["OVERVIEW", "PERFORMANCE", "COACHING", "SETUP", "HELP", "_PCS_FILTERS", "_PCS_LOB", "_PCS_AGENT", "_PCS_DAILY", "_PCS_COACH", "_PCS_CALC", "_AUDIT"]
+
+[[packs]]
+key = "bonus"
+title = "BONUS MANAGEMENT"
+purpose = "Monthly policy, KPI configuration, payout results and management analysis."
+finding_domains = ["bonus", "data_quality"]
+sheets = ["Policy_Decisions", "Control_Checks", "KPI_Config", "Raw_Data", "Results", "KPI_Analysis", "Team_Lead_Analysis", "Dashboard"]
+
+[[packs]]
+key = "service"
+title = "RTM DAILY CONTROL"
+purpose = "Daily service, proven no-show callouts, offline alerts and queue drivers for RSA and OEM operational LOBs."
+finding_domains = ["service", "forecast", "data_quality"]
+sheets = ["CONTROL", "RSA NL", "RSA BE", "FORD NL", "OEM", "ISSUES & DRIVERS", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "realisations"
+title = "REALISATIONS"
+purpose = "Actual versus forecast, service, staffing and reconciled scheduled-hour allocation across every mapped LOB."
+finding_domains = ["service", "forecast", "absence", "staffing", "data_quality"]
+sheets = ["DASHBOARD", "LOB_RESULTS", "TREND", "DATA", "HOURS_BY_LOB", "HOURS_BY_AGENT", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "staffing"
+title = "STAFFING & COVERAGE"
+purpose = "Past staffing control and future required-versus-net capacity by Management LOB, Planning Group, Verint Staff Type and 15-minute interval."
+finding_domains = ["staffing", "data_quality"]
+sheets = ["DASHBOARD", "WEEKLY_PLAN", "INTRADAY", "CAPACITY GAPS", "ACTIONS", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "corrections"
+title = "ATTENDANCE REVIEW"
+purpose = "Completed-day exact residual gaps after final Verint Activities reconciliation, with schedule-over-actual evidence and break/meal control."
+finding_domains = ["attendance", "data_quality"]
+sheets = ["CONTROL", "REVIEW BOARD", "BREAK & MEAL", "EVIDENCE", "DEFINITIONS", "_AUDIT"]
+
+[[packs]]
+key = "absence"
+title = "ABSENCE & SHRINKAGE"
+purpose = "Final mapped Verint Activities absence and shrinkage ledger with explicit completeness states."
+finding_domains = ["absence", "data_quality"]
+sheets = ["DASHBOARD", "TEAM_VIEW", "TEAM_SUMMARY", "AGENT_RESULTS", "ACTION_QUEUE", "ABSENCE_COMPONENTS", "SHRINKAGE_COMPONENTS", "COMPONENT_VIEW", "ACTIVITY_DETAIL", "ABSENCE_DATA", "HELP", "DEFINITIONS", "_LOOKUPS", "_AUDIT"]

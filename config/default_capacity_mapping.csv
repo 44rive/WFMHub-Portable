@@ -1,0 +1,15 @@
+management_lob,planning_group,workforce_lob,forecast_file_prefix,forecast_staff_type,schedule_assignment,staff_type
+RSA NL,RSA NL,RSA NL,RSA_NL,NL RSA FO,NL RSA Front-office,NL RSA FO
+RSA NL,RSA NL,RSA NL,,,NL RSA BO Dispatch,NL RSA BO Dispatch
+RSA NL,RSA NL,RSA NL,,,NL RSA Quality Monitoring,NL RSA Quality Monitoring
+FORD NL,FORD NL,Ford Dutch,FORD_NL,NL_RSA_Ford_Level 1,NL RSA Ford Level 1,NL RSA Ford Level 1
+FORD NL,FORD NL,Ford Dutch,FORD_NL,NL_RSA_Ford_Level 2,NL RSA Ford Level 2,NL RSA Ford Level 2
+FORD NL,FORD NL,Ford Dutch,,,NL RSA Ford Key-User,NL RSA Ford Key-User
+RSA BE,RSA BE FR,RSA FR,RSA_BE_FR,BE RSA FO FR,BE RSA Front-office FR,BE RSA FO FR
+RSA BE,RSA BE FR,RSA FR,RSA_BE_FR,BE RSA Dispatch FR,BE RSA BO Dispatch FR,BE RSA Dispatch FR
+RSA BE,RSA BE VL,RSA VL,RSA_BE_VL,BE RSA FO VL,BE RSA Front-office VL,BE RSA FO VL
+RSA BE,RSA BE VL,RSA VL,RSA_BE_VL,BE RSA Dispatch VL,BE RSA BO Dispatch VL,BE RSA Dispatch VL
+OEM,Ford FR,OEM FR,FORD_FR,FR_RSA_Ford_Level 1,FR RSA Ford Level 1,FR RSA Ford Level 1
+OEM,Ford FR,OEM FR,FORD_FR,FR_RSA_Ford_Level 2,FR RSA Ford Level 2,FR RSA Ford Level 2
+OEM,Ford FR,OEM FR,FORD_FR,FR_RSA_ACM,FR RSA ACM,FR RSA ACM
+OEM,Ford FR,OEM FR,,,FR RSA Ford Key-User,FR RSA Ford Key-User
