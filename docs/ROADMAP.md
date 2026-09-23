@@ -1,11 +1,13 @@
 # Roadmap
 
-## WFMHub-2 integration assessment
+## WFMHub technology adoption and RTM vertical slice
 
-`roadmap/wfmhub2-integration/README.md` compares the current operational Hub
-with the separate WFMHub-2 Phase 1 preview and proposes selective integration,
-not a direct Git/database merge. No implementation or product migration has
-been approved from that assessment.
+`roadmap/wfmhub2-integration/README.md` treats WFMHub-2 as a derivative
+technology/architecture reference for upgrading this functional product **in
+place**. It proposes one SQLite, one governed calculation engine, a secure
+React local UI, and RTM as the first complete vertical slice while existing
+operational reports and PCS continue to run. It is not a direct Git/database
+merge; the proposal does not itself change runtime behavior.
 
 ## RTM Flash reassessment
 

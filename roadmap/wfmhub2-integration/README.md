@@ -1,8 +1,10 @@
-# WFMHub-2 assessment and selective integration proposal
+# WFMHub technology adoption and RTM vertical slice
 
-Status: assessment/proposal recorded 2026-09-23; **no code or database merge is
-authorized by this note**. Reassess at implementation time against current
-GitHub heads and the managed-workstation result.
+Status: revised adoption proposal recorded 2026-09-23. WFMHub-2 grew from the
+portable Hub; it is a technology and WFM-architecture reference for upgrading
+the **same operational product**, not a competing business product. **This
+note does not implement or authorize a runtime/database migration.** Recheck
+both repository heads and the managed-workstation result before implementation.
 
 Compared:
 
@@ -39,69 +41,127 @@ wfm.sqlite3` versus `data/control.sqlite`); never point them at one another's
 database or merge tables by filename/copy. Both can read the same source-folder
 evidence read-only during a controlled comparison.
 
-## Judgment
+## Revised judgment
 
-Do **not** run a Git branch merge or replace the old app with Preview `.7`.
-That would trade useful daily WFM products for a promising but incomplete
-foundation. Also do not discard WFMHub-2: its portable security boundary,
-atomic generation model, no-op source reuse, diagnostics, and UI composition
-solve real weaknesses in the older product.
+The current portable Hub is the functional product and should remain the
+canonical repository, release, CLI, database, and WFM calculation authority.
+WFMHub-2 is a derivative whose **portable-compatible** stack and boundaries can
+modernize that product. A Git merge or runtime swap would be the wrong unit of
+change: its `control.sqlite` schema differs, its native development graph is
+blocked on the work PC, and the React preview has not implemented the daily
+products. Conversely, leaving the old workbench unchanged wastes a tested
+browser stack and a better way to structure WFM services.
 
-The recommendation is **one production product and one development track**:
-keep WFMHub-Portable as the operational owner for now; selectively port proven
-WFMHub-2 components into it behind acceptance tests. `WFMHub-2` remains a
-reference/prototype until its distinct capabilities are integrated or a future
-full-replacement decision is made. This is a recommendation, not an approved
-product migration decision.
+This is an **in-place modernization**, not a parallel Hub. Keep the existing
+operational workbooks and PCS collaboration path running throughout. Use the
+RTM redesign as the first complete vertical slice so that the new architecture
+is tested on a real RTA job, not on a decorative dashboard. WFMHub-2 remains a
+reference until its useful pieces have been integrated and verified.
 
-## Proposed merge sequence (not yet started)
+## Target technology decision
 
-1. **Freeze the contracts.** Put the current effective source roles, Client ID,
+| Layer | Adopt in the current Hub | Deliberately do not adopt now |
+| --- | --- | --- |
+| Portable host | Retain the already-proven official embedded CPython, stdlib SQLite, OpenPyXL/XlsxWriter, `.cmd` launchers, and local-only operation. Adapt Hub2's per-launch token, Host checks, static-asset security, and diagnostics to the existing server. | A second Python host, native FastAPI/Pydantic/DuckDB/Polars graph, installer, or cloud dependency. |
+| Browser | Build React/TypeScript into static local assets with Vite at release time; use Hub2's shell/design tokens, dense table/virtualization and charts where they solve a WFM task. Node is a **build-time** tool, never required on the work PC. | Copying prototype pages as if they were functional; adding every front-end package before a page needs it. |
+| Durable data | Keep the existing `_system/database/wfm.sqlite3` and additive migrations. One Python writer; one effective config and metric catalog; same governed marts feed CLI, Excel, CSV, and browser. | Copying `data/control.sqlite`, maintaining two authorities, or recalculating KPI formulas in JavaScript/Excel. |
+| Refresh | Adapt generation/no-op/source-reuse concepts behind the existing refresh contract, measuring actual time and rollback first. | Whole-schema replacement or claims of affected-date incremental refresh before it is implemented and benchmarked. |
+| Browser compute | None is needed for the first RTM release. | DuckDB-Wasm, Pyodide, HiGHS-Wasm, OPFS state, and forecasting/optimization until a measured WFM use case justifies cost. |
+
+The meaningful stack upgrade is therefore **secure local host + compiled
+browser UI + modular domain services + safer refresh**. Python, SQLite and
+Excel are retained because they already work on the managed PC. Hub2's Bronze /
+Silver / Gold terminology can describe the existing `raw_*` / `core_*` /
+`mart_*` responsibilities without building three databases or renaming tables.
+
+## WFM architecture to adopt
+
+```text
+Read-only source adapters (FTE, schedules, Agent Status, LILO, CBC, forecast,
+                           finalized Verint Activities)
+    -> canonical facts at their natural grain, with source/quality evidence
+    -> governed domain services (service, attendance, capacity, absence)
+    -> one RTM read model / other WFM products
+    -> local API + CLI + workbooks + CSV feeds
+```
+
+Extract parsers must not decide KPIs. Domain services must not import browser,
+HTTP, or workbook code. The UI may format, filter and visualize server-supplied
+components, but may not invent its own SL, no-show, availability, or staffing
+arithmetic. Keep the effective mappings and catalogs as the sole rule authority.
+Do this **slice by slice**: extract a tested service from `models.py`, retain a
+compatibility facade for existing callers, then move the next service. Do not
+copy Hub2's empty domain folders or create two live calculation engines.
+
+The UI follows the actual WFM cycle: **Operate** (RTM today and attendance
+actions), **Plan** (forecast, requirement, schedule, staffing), **Review**
+(realisations, schedule integrity, final absence), **Govern** (data health and
+rule versions), and **Deliver** (workbooks/exports). Only working pages appear.
+Operational Excel remains a printable/shareable snapshot; the local app is the
+interactive control surface. PCS stays the permanent shared workbook and is
+outside the first migration slice.
+
+## Adoption sequence: technology and RTM together (not yet started)
+
+1. **Freeze the contracts and baseline.** Put the current effective source roles, Client ID,
    Active/dated-Leaver, exact Flash queue allowlists, metric methods, Staff Type
    requirement, RSA BE service-versus-capacity split, PTO/Away, Agent Status,
    final Verint Activities, PCS and coaching ownership into versioned parity
-   fixtures. Defaults alone are insufficient. Use synthetic fixtures in Git;
-   compare confidential operational results locally without publishing them.
-2. **Keep one authoritative SQLite.** Start with the current operational DB and
-   expose existing governed marts through a narrow read API. Never create a
-   second copy of facts solely to make the new UI work. Improve the old local
-   HTTP boundary with WFMHub-2's per-launch token/Host validation before
-   exposing more actions, while preserving local-only/offline operation.
-3. **Port UI as presentation, not arithmetic.** Bring the useful React shell and
-   dense RTA visual patterns into the current product, then connect one page at
-   a time to existing calculations. First page: one LOB's live service plus
-   named attendance and 15-minute staffing ladder. Blank/unknown/stale data
-   stays explicit. No fake cards from mockups. Keep `.cmd`, Excel, and CSV as
-   working alternatives.
-4. **Port refresh mechanics separately.** Adopt generation staging and
+   fixtures. Defaults alone are insufficient. Capture the current RTM output,
+   named-agent evidence and refresh timings on representative real days locally;
+   use synthetic fixtures in Git. Do not publish confidential extracts.
+2. **Build one host and one RTM service contract.** Keep the current database and
+   CLI. Add a narrow, token-protected API to the existing local server. Define
+   typed RTM response shapes and source cutoff/freshness states. Extract RTM
+   arithmetic behind a Python domain-service boundary while its old callers
+   continue to work; the browser and workbook must consume the same governed
+   read model. Do not create a second copy of facts just for React.
+3. **Ship one usable RTM vertical slice.** Compile a React/TypeScript shell into
+   the portable ZIP and connect an **Operate / RTM** page to the real service:
+   combined service by approved LOB queues; 15-minute and hourly views; Staff
+   Type requirement and net schedule; observed capacity; named agents to call;
+   source confidence and issues/drivers. Keep RSA BE combined for SL but FR/VL
+   split for staffing. Show 24 hours, exact cutoff, and explicit unknowns. The
+   corresponding per-LOB Flash workbook is generated from the same read model,
+   not from a parallel formula implementation. `roadmap/rtm-flash-reassessment/`
+   defines the detailed RTM behavior and acceptance cases.
+4. **Validate without interrupting operations.** Run the new RTM view/workbook
+   beside the current operational Flash on the same source cut. Reconcile Storm
+   SL components, the OEM BO anomaly, cross-LOB handlers, night shifts,
+   unscheduled logins, PTO/Away, no-show versus not-yet-logged, and requirement
+   gaps by Client ID and interval. Keep old launchers/reports available and do
+   not promote RTM until cases pass on the work PC. Other operational products
+   remain on their current code path during this slice.
+5. **Improve refresh behind that product.** Adopt generation staging and
    source-version reuse only after measuring old-versus-new counts, error
    behavior, refresh duration, and database size on the same read-only source
    set. The first win should be fast unchanged refresh plus atomic rollback;
    affected-date rebuild comes later. Schema changes need normal additive
    migrations, verified backup, and upgrade tests. Do not transplant the new
    `control.sqlite` wholesale.
-5. **Close business parity by WFM cycle.** Reconcile Storm SL numerator and
-   denominator by exact profile; night shifts, unscheduled logged agents, PTO/
-   Away, and unknown/no-show; Verint Staff Type requirement and RSA BE FR/VL
-   capacity; final Activities absence; generated reports and PCS coaching.
-   Advance a page only after it helps a real RTA/manager decision and agrees
-   with the approved business reference. Keep `Other Tasks` as BO.
-6. **Rationalize only after acceptance.** Remove duplicate adapters/servers and
-   unused native-stack scaffolding only when the chosen implementation covers
-   the validated workflow. Preserve both Git histories and backup/restore paths.
-   Feature-gate DuckDB-Wasm, Pyodide and HiGHS until they beat a simpler
-   deterministic workflow on measured business value and workstation cost.
+6. **Move the rest by WFM cycle, then rationalize.** Port attendance review,
+   staffing preparation, realisations, final absence, reports and governance
+   only as each view is useful and parity-tested. Keep PCS's SharePoint CSV /
+   Power Query / coaching workflow and the permanent Bonus workbook intact.
+   Retire superseded old web screens only after their replacement is accepted;
+   preserve both Git histories and the upgrade/restore path.
 
-### Acceptance gate before any replacement
+### Acceptance gate before the new RTM is promoted
 
-One extracted ZIP must work offline on the managed PC; normal and failed
-refresh must preserve the last valid cut; same-source outputs must reconcile
-for RSA NL, RSA BE combined service plus FR/VL capacity, Ford NL and OEM;
-RTM/attendance/staffing/absence/PCS/report actions must match or explicitly
-supersede the old product; the shared PCS workbook and coaching must survive
-updates; source extracts and local SQLite must remain untouched by upgrades.
-Record measured elapsed time and memory for bootstrap, unchanged, added-day
-and corrected-day refresh—not just a green synthetic CI run.
+One extracted ZIP must work offline on the managed PC with **the existing
+database and CLI**. The new React page and Flash workbook must agree with one
+another and reconcile same-source service/capacity components for RSA NL, RSA
+BE combined service plus FR/VL capacity, Ford NL, and OEM. Named attendance,
+night shifts, unscheduled logins, PTO/Away, missing/stale evidence and the OEM
+BO case must pass the detailed RTM checklist. A failed RTM/API request must
+not affect stored facts or existing reports. Keep the old Flash available until
+the new one passes; PCS coaching, Bonus and all other operational products must
+remain usable, without a forced workbook or database replacement.
+
+Before later refresh-engine adoption, test normal/failed activation and record
+elapsed time and memory for bootstrap, unchanged, added-day and corrected-day
+refresh. The last valid cut must survive failure. Do not retire any other
+workbook or page until its own business-parity gate has passed.
 
 ## Current handoff boundaries
 
