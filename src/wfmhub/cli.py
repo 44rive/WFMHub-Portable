@@ -13,7 +13,10 @@ from pathlib import Path
 from . import __version__
 from .analytics import load_analytics_rules, validate_analytics_rules
 from .bonus import import_bonus_matrix
-from .config import ConfigError, ensure_user_config, load_config, write_source_root
+from .config import (
+    ConfigError, ensure_user_config, load_config, write_pcs_workbook,
+    write_source_root,
+)
 from .database import (
     HubLockedError, adopt_portable_install, backup_database, connect, migrate,
     write_session,
@@ -841,13 +844,21 @@ def _sync_pcs_workbook(home: Path) -> None:
 
 
 def _pcs_menu(home: Path) -> None:
+    config = load_config(home)
+    workbook = (
+        latest_pcs_report(config)
+        or config.pcs_workbook
+        or config.reports / "PCS Live Tracker.xlsx"
+    )
     print("\nPCS LIVE TRACKER")
+    print(f"Workbook: {workbook}")
     print("1. Update PCS data (load new FTE + Call-by-Call)")
     print("2. Update CSV feeds from current database (fast)")
     print("3. Sync PCS workbook from CSV feeds (close Excel)")
     print("4. Open permanent PCS Live Tracker")
-    print("5. Back")
-    choice = input("Choose 1-5: ").strip()
+    print("5. Set permanent PCS workbook path")
+    print("6. Back")
+    choice = input("Choose 1-6: ").strip()
     if choice == "1":
         _build_latest_pcs_report(home)
     elif choice == "2":
@@ -855,13 +866,26 @@ def _pcs_menu(home: Path) -> None:
     elif choice == "3":
         _sync_pcs_workbook(home)
     elif choice == "4":
-        config = load_config(home)
         report = latest_pcs_report(config)
         if report is None:
             raise FileNotFoundError("No PCS Live Tracker exists. Choose option 1 first.")
         open_workbook(report)
-    elif choice != "5":
-        raise ValueError("Please choose a number from 1 to 5")
+    elif choice == "5":
+        print("Paste the LOCAL path of the synced WFM SharePoint folder or PCS .xlsx file.")
+        print("A browser https:// link cannot be updated by desktop Excel.")
+        entered = input("PCS shared path: ").strip().strip('"')
+        if not entered or entered.lower().startswith(("http://", "https://")):
+            raise ConfigError("Paste a local synced folder/file path, not a web link")
+        path = Path(entered).expanduser()
+        if path.is_dir():
+            path /= "PCS Live Tracker.xlsx"
+        write_pcs_workbook(config.file, path)
+        print(f"Permanent PCS workbook: {path.resolve()}")
+        print("Close the existing local PCS tracker before the first update.")
+        print("The next PCS update will copy the current tracker once if this file is absent.")
+        print("Share this ONE SharePoint file link with the team; future syncs update it in place.")
+    elif choice != "6":
+        raise ValueError("Please choose a number from 1 to 6")
 
 
 def _advanced_menu(home: Path) -> None:

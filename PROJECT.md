@@ -135,6 +135,10 @@ WFMHub's PCS Sync updates six ordinary presentation tables from CSV in place
 using desktop Excel, without Power Query or table replacement. The tracker
 keeps keyed coaching rows. Migrating an old tracker first reads and preserves
 those rows from the same workbook.
+Only PCS may use the optional dedicated `paths.pcs_workbook` location, such as
+a locally synced WFM SharePoint library file. All other reports remain under
+`paths.reports`. On first use of an empty dedicated path, the existing local
+tracker is copied once, preserving coaching and leaving the original intact.
 
 ### Bonus and realisations
 
@@ -194,6 +198,7 @@ Controlled products under continued business validation:
 
 Clean exports in `Feed/` are generated outputs and can be rebuilt. `Reports/`
 contains current workbooks and timestamped prior copies under `Archive/`.
+PCS may instead live at its separately configured permanent workbook path.
 
 ## Code map
 

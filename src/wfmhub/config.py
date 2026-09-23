@@ -53,6 +53,7 @@ class Config:
     database: Path
     output: Path
     reports: Path
+    pcs_workbook: Path | None
     feed: Path
     system: Path
     logs: Path
@@ -84,6 +85,20 @@ class Config:
 def _portable_path(home: Path, value: str) -> Path:
     path = Path(value).expanduser()
     return path.resolve() if path.is_absolute() else (home / path).resolve()
+
+
+def _pcs_workbook_path(home: Path, value: str) -> Path | None:
+    value = value.strip()
+    if not value:
+        return None
+    if value.lower().startswith(("http://", "https://")):
+        raise ConfigError(
+            "paths.pcs_workbook needs the local path of a synced SharePoint file, not a web link"
+        )
+    path = _portable_path(home, value)
+    if path.suffix.lower() != ".xlsx":
+        raise ConfigError("paths.pcs_workbook must point to an .xlsx file")
+    return path
 
 
 def _date_or_none(value: Any, label: str) -> date | None:
@@ -128,6 +143,7 @@ def load_config(home: Path, config_file: Path | None = None) -> Config:
         database=_portable_path(home, str(paths.get("database", "_system/database/wfm.sqlite3"))),
         output=_portable_path(home, str(paths.get("output", "_system/output"))),
         reports=_portable_path(home, str(paths.get("reports", "Reports"))),
+        pcs_workbook=_pcs_workbook_path(home, str(paths.get("pcs_workbook", ""))),
         feed=_portable_path(home, str(paths.get("feed", "Feed"))),
         system=_portable_path(home, str(paths.get("system", "_system"))),
         logs=_portable_path(home, str(paths.get("logs", "_system/logs"))),
@@ -263,4 +279,38 @@ def write_source_root(config_file: Path, source_root: Path) -> None:
             break
     if not changed:
         raise ConfigError(f"Could not find paths.source_root in {config_file}")
+    config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_pcs_workbook(config_file: Path, workbook: Path) -> None:
+    """Set the one permanent PCS file without changing other report paths."""
+
+    if workbook.suffix.lower() != ".xlsx":
+        raise ConfigError("Choose a PCS .xlsx file, not a folder or web link")
+    if not workbook.parent.is_dir():
+        raise ConfigError(
+            f"PCS folder does not exist locally: {workbook.parent}. Sync the SharePoint library first."
+        )
+    if workbook.exists() and not workbook.is_file():
+        raise ConfigError(f"PCS workbook path is not a file: {workbook}")
+    lines = config_file.read_text(encoding="utf-8").splitlines()
+    safe = workbook.resolve().as_posix().replace('"', '\\"')
+    setting = f'pcs_workbook = "{safe}"'
+    section_start = None
+    section_end = len(lines)
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "[paths]":
+            section_start = index
+        elif section_start is not None and stripped.startswith("["):
+            section_end = index
+            break
+    if section_start is None:
+        raise ConfigError(f"Could not find [paths] in {config_file}")
+    for index in range(section_start + 1, section_end):
+        if lines[index].partition("=")[0].strip() == "pcs_workbook":
+            lines[index] = setting
+            break
+    else:
+        lines.insert(section_end, setting)
     config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")

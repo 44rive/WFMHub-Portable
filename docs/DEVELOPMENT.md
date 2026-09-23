@@ -31,7 +31,7 @@ et_xmlfile, and tzdata versions are pinned.
 python -m compileall -q src tests packaging
 python -m unittest discover -s tests -v
 python -m wfmhub --home /path/to/test-home rules validate
-python packaging/windows/build_portable.py --version 1.1.0
+python packaging/windows/build_portable.py --version 1.1.1
 ```
 
 ## Database changes

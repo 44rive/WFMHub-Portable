@@ -8,6 +8,9 @@ database = "_system/database/wfm.sqlite3"
 # Reports contains finished workbooks. Feed contains clean exports that can be
 # opened, filtered, or shared without touching the original extracts.
 reports = "Reports"
+# Optional permanent PCS tracker location. Use the LOCAL path of a synced
+# SharePoint library, not its https:// link. Blank keeps it under Reports.
+pcs_workbook = ""
 feed = "Feed"
 system = "_system"
 output = "_system/output"

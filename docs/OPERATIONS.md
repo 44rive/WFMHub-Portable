@@ -32,6 +32,9 @@ Use **PCS Report & Coaching > Update PCS data** to process new FTE and calls.
 Then close Excel and choose **Sync PCS workbook** in the PCS menu. The Hub
 updates the six data tables in place and leaves coaching actions untouched. Coaching
 owners edit the coaching table only. See [PCS.md](PCS.md).
+For one team-owned file, set the dedicated PCS path once to the locally synced
+WFM SharePoint folder. Share its link once; every later sync updates that same
+workbook. Keep the SQLite database and the other generated reports local.
 
 ## Bonus Management
 

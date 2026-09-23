@@ -9,12 +9,15 @@ from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from xml.etree import ElementTree
 
 from openpyxl import load_workbook
 
+from wfmhub.config import ConfigError, _pcs_workbook_path, write_pcs_workbook
 from wfmhub.cli import (
     _build_latest_pcs_report,
     _build_pcs_from_database,
+    _pcs_menu,
     _sync_pcs_workbook,
     refresh,
 )
@@ -28,6 +31,7 @@ from wfmhub.pcs_tracker import (
     _tracker_contract_version,
     ensure_pcs_tracker,
     latest_pcs_report,
+    tracker_path,
 )
 from wfmhub.shared_feeds import (
     PCS_AGENT_SCORECARD_HEADERS,
@@ -92,6 +96,89 @@ def _rows() -> dict[str, list[tuple[object, ...]]]:
 
 
 class PCSWorkflowTests(unittest.TestCase):
+    def test_dedicated_pcs_path_preserves_the_original_and_coaching(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            local = SimpleNamespace(reports=root / "Reports", feed=root / "Feed")
+            original = ensure_pcs_tracker(local, **_rows())
+            workbook = load_workbook(original)
+            workbook["COACHING"]["L5"] = "key-shared"
+            workbook["COACHING"]["N5"] = "In progress"
+            workbook.save(original)
+            workbook.close()
+            original_bytes = original.read_bytes()
+
+            shared_dir = root / "Synced WFM SharePoint"
+            shared_dir.mkdir()
+            shared = shared_dir / PCS_TRACKER_FILENAME
+            config = SimpleNamespace(
+                reports=local.reports, feed=local.feed, pcs_workbook=shared,
+            )
+            self.assertEqual(tracker_path(config), shared)
+            self.assertEqual(ensure_pcs_tracker(config, **_rows()), shared)
+            self.assertEqual(original.read_bytes(), original_bytes)
+            self.assertEqual(shared.read_bytes(), original_bytes)
+
+            # An existing collaborative copy wins over the old local file.
+            updated = load_workbook(shared)
+            updated["COACHING"]["N5"] = "Completed"
+            updated.save(shared)
+            updated.close()
+            shared_bytes = shared.read_bytes()
+            self.assertEqual(ensure_pcs_tracker(config, **_rows()), shared)
+            self.assertEqual(shared.read_bytes(), shared_bytes)
+            self.assertEqual(original.read_bytes(), original_bytes)
+
+    def test_dedicated_pcs_path_requires_a_synced_local_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = SimpleNamespace(
+                reports=root / "Reports",
+                pcs_workbook=root / "Missing Library" / PCS_TRACKER_FILENAME,
+            )
+            with self.assertRaisesRegex(RuntimeError, "folder is unavailable"):
+                ensure_pcs_tracker(config, **_rows())
+            self.assertFalse(config.pcs_workbook.parent.exists())
+
+    def test_pcs_setting_only_changes_the_dedicated_path(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config_file = root / "wfmhub.toml"
+            config_file.write_text(
+                '[paths]\nreports = "Reports"\nfeed = "Feed"\n\n[period]\nstart = ""\n',
+                encoding="utf-8",
+            )
+            target = root / "Synced WFM" / PCS_TRACKER_FILENAME
+            target.parent.mkdir()
+            write_pcs_workbook(config_file, target)
+            write_pcs_workbook(config_file, target)
+            content = config_file.read_text(encoding="utf-8")
+            self.assertEqual(content.count('pcs_workbook = '), 1)
+            self.assertIn('reports = "Reports"', content)
+            self.assertIn('feed = "Feed"', content)
+            self.assertEqual(_pcs_workbook_path(root, target.as_posix()), target)
+            with self.assertRaisesRegex(ConfigError, "local path"):
+                _pcs_workbook_path(root, "https://example.com/tracker.xlsx")
+
+    def test_pcs_menu_accepts_a_synced_folder_and_keeps_reports_local(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            shared_folder = root / "Synced WFM"
+            shared_folder.mkdir()
+            config_file = root / "wfmhub.toml"
+            config_file.write_text('[paths]\nreports = "Reports"\n', encoding="utf-8")
+            config = SimpleNamespace(
+                file=config_file, pcs_workbook=None, reports=root / "Reports",
+            )
+            with (
+                patch("wfmhub.cli.load_config", return_value=config),
+                patch("builtins.input", side_effect=("5", str(shared_folder))),
+            ):
+                _pcs_menu(root)
+            content = config_file.read_text(encoding="utf-8")
+            self.assertIn('reports = "Reports"', content)
+            self.assertIn(f'{shared_folder.as_posix()}/{PCS_TRACKER_FILENAME}', content)
+
     def test_text_business_dates_are_parsed_for_sqlite_rows(self):
         self.assertEqual(_as_date("2026-09-08 17:00:00"), date(2026, 9, 8))
 
@@ -207,6 +294,9 @@ class PCSWorkflowTests(unittest.TestCase):
             self.assertEqual(_tracker_contract_version(path), PCS_TRACKER_VERSION)
             with zipfile.ZipFile(path) as archive:
                 self.assertIsNone(archive.testzip())
+                for name in archive.namelist():
+                    if name.endswith((".xml", ".rels")):
+                        ElementTree.fromstring(archive.read(name))
                 self.assertNotIn(b"plotVisOnly", archive.read("xl/charts/chart1.xml"))
                 self.assertNotIn(b"plotVisOnly", archive.read("xl/charts/chart2.xml"))
                 self.assertNotIn("xl/metadata.xml", archive.namelist())

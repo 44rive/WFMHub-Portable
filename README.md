@@ -40,6 +40,9 @@ and Call-by-Call evidence and replaces the fixed CSV files under `Feed/PCS`.
 Close Excel and choose **Sync PCS workbook** in WFMHub to update the six data
 tables in place. Team leaders
 and Quality update only the coaching table. See [PCS workflow](docs/PCS.md).
+To keep one shared link, set **PCS Report & Coaching > Set permanent PCS workbook
+path** to the locally synced WFM SharePoint folder. Future PCS syncs update
+that same file; other reports and the SQLite database stay local.
 
 ## Updates
 

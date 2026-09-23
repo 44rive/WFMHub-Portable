@@ -1,5 +1,12 @@
 # Release notes
 
+## 1.1.1
+
+- Added an independent permanent PCS workbook path for a locally synced WFM
+  SharePoint library. First use copies the old tracker once without removing
+  its coaching or changing other report/database locations; later updates
+  sync the same shared file and keep its link stable.
+
 ## 1.1.0
 
 - Fixed RTM overnight carry-over: prior-day night shifts now contribute their

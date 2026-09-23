@@ -6,7 +6,8 @@ future releases.
 
 ## `wfmhub.toml`
 
-- `[paths]`: source root, SQLite, reports, feeds, logs, backups and catalogs.
+- `[paths]`: source root, SQLite, reports, optional dedicated PCS workbook,
+  feeds, logs, backups and catalogs.
 - `[sources]`: folders/files under the source root.
 - `[period]`: optional saved start/end in `YYYY-MM-DD`.
 - `[rules]`: runtime tolerances and status coverage thresholds.
@@ -16,6 +17,11 @@ future releases.
 
 The database path should remain `_system/database/wfm.sqlite3` and must be on a
 local writable disk.
+
+`paths.pcs_workbook = ""` keeps PCS under `Reports`. Set it through the PCS
+menu to the local `.xlsx` path in a synced WFM SharePoint library. This does
+not relocate the database, feeds, or other reports. A SharePoint web URL is
+not supported by the desktop-Excel sync.
 
 ## Mappings
 

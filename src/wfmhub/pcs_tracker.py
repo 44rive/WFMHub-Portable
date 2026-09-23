@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from uuid import uuid4
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Sequence
@@ -55,7 +56,37 @@ COACHING_ACTION_HEADERS = (
 
 
 def tracker_path(config: Config) -> Path:
-    return (config.reports / PCS_TRACKER_FILENAME).resolve()
+    dedicated = getattr(config, "pcs_workbook", None)
+    return (dedicated or config.reports / PCS_TRACKER_FILENAME).resolve()
+
+
+def _seed_dedicated_tracker(config: Config) -> Path:
+    """Copy the current local tracker once when a shared path is first chosen."""
+
+    target = tracker_path(config)
+    legacy = (config.reports / PCS_TRACKER_FILENAME).resolve()
+    if target == legacy:
+        return target
+    if not target.parent.is_dir():
+        raise RuntimeError(
+            f"PCS shared folder is unavailable: {target.parent}. "
+            "Sync the SharePoint library locally, then retry."
+        )
+    if target.exists():
+        if not target.is_file():
+            raise RuntimeError(f"PCS shared path is not a file: {target}")
+        return target
+    if not legacy.is_file():
+        return target
+    # Fail closed if the old workbook cannot be read; it may contain coaching.
+    _read_actions_from(legacy)
+    partial = target.with_name(f".{target.stem}.importing-{uuid4().hex}{target.suffix}")
+    try:
+        shutil.copy2(legacy, partial)
+        partial.replace(target)
+    finally:
+        partial.unlink(missing_ok=True)
+    return target
 
 
 def latest_pcs_report(config: Config) -> Path | None:
@@ -781,7 +812,7 @@ def ensure_pcs_tracker(
 ) -> Path:
     """Create or explicitly migrate the permanent action-preserving tracker."""
 
-    target = tracker_path(config)
+    target = _seed_dedicated_tracker(config)
     if target.is_file() and _tracker_contract_version(target) == PCS_TRACKER_VERSION:
         return target
     existing_actions = _existing_actions(config)
@@ -902,7 +933,7 @@ def build_pcs_live_tracker(
     available_start = _as_date(first) or start
     available_end = _as_date(last) or end
     publish_pcs_feeds(conn, config, available_start, available_end)
-    target = tracker_path(config)
+    target = _seed_dedicated_tracker(config)
     if target.is_file() and _tracker_contract_version(target) == PCS_TRACKER_VERSION:
         return target
     generated = datetime.now()

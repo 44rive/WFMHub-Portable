@@ -71,6 +71,33 @@ rows from the current tracker before replacement and restores them by Coaching
 Key. Keep one shared canonical tracker rather than generating a new file for
 each delivery interval.
 
+## One shared SharePoint file
+
+1. On the WFM work PC, sync the restricted WFM SharePoint document library with
+   OneDrive. Open its local folder in File Explorer. Do **not** move the Hub's
+   SQLite database into SharePoint.
+2. In `WFMHub.cmd`, choose **PCS Report & Coaching > Set permanent PCS workbook
+   path**. Paste the local synced folder path or the full path ending in
+   `PCS Live Tracker.xlsx`. A browser `https://` link is not a writable path.
+3. Close the old local tracker, run **Update PCS data** once, then close the
+   shared tracker in desktop Excel and
+   choose **Sync PCS workbook**. If the target file was absent, the Hub first
+   copies the existing local tracker, including coaching; the local original
+   remains as a backup. If a file already exists at the target, the Hub uses it
+   and does not replace it merely because the path changed.
+4. Check that OneDrive reports the file is synced, then share **that one
+   SharePoint file link** with Team Leaders and Quality. Keep the library's
+   permissions restricted to the intended WFM collaborators.
+5. For future updates, add extracts, run **Update PCS data**, close the shared
+   workbook, run **Sync PCS workbook**, and wait for OneDrive to sync. The team
+   keeps the same link and coaching rows; no new workbook is sent.
+
+This path setting is independent of `paths.reports`, so RTM, attendance,
+realisations, and other generated workbooks remain local. OneDrive/Excel may
+refuse the write if the shared file is locked or a sync conflict is active;
+close it and retry rather than creating a second report. Avoid simultaneous
+coaching edits during the brief sync window.
+
 ## Troubleshooting
 
 - Data feeds updated but cards/charts old: close Excel and run **Sync PCS workbook**.
