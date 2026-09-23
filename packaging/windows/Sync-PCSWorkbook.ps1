@@ -101,7 +101,7 @@ function Sync-FeedTable {
             $destination = $sheet.Range($sheet.Cells.Item(5, 1), $sheet.Cells.Item(4 + $rowCount, $columnCount))
             try { $destination.Value2 = $data }
             finally { Release-ComObject $destination }
-            Write-Output "$TableName: $($records.Count) rows"
+            Write-Output "${TableName}: $($records.Count) rows"
         }
         finally { Release-ComObject $table }
     }
