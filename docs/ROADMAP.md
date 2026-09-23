@@ -1,5 +1,12 @@
 # Roadmap
 
+## WFMHub-2 integration assessment
+
+`roadmap/wfmhub2-integration/README.md` compares the current operational Hub
+with the separate WFMHub-2 Phase 1 preview and proposes selective integration,
+not a direct Git/database merge. No implementation or product migration has
+been approved from that assessment.
+
 ## RTM Flash reassessment
 
 `roadmap/rtm-flash-reassessment/README.md` records the proposed per-LOB Flash,
