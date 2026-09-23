@@ -107,6 +107,13 @@ def test_fresh_schema_backup_and_portable_adoption_preserve_data():
         old_home, _ = _home(root, "old")
         new_home, _ = _home(root, "new")
         old_config = load_config(old_home)
+        old_capacity = old_home / "config" / "capacity_mapping.csv"
+        old_capacity.write_text(
+            old_capacity.read_text(encoding="utf-8")
+            + "Synthetic,Synthetic,Synthetic,,,,Synthetic Staff\n",
+            encoding="utf-8",
+        )
+        (new_home / "config" / "capacity_mapping.csv").unlink(missing_ok=True)
         assert migrate(old_config) == ["001_schema"]
         with write_session(old_config) as conn:
             conn.execute(
@@ -118,6 +125,7 @@ def test_fresh_schema_backup_and_portable_adoption_preserve_data():
         database, applied = adopt_portable_install(new_home, old_home)
         assert database.is_file()
         assert applied == []
+        assert (new_home / "config" / "capacity_mapping.csv").read_text(encoding="utf-8") == old_capacity.read_text(encoding="utf-8")
         copied = connect(load_config(new_home), read_only=True)
         try:
             assert copied.execute("SELECT canonical_name FROM core.dim_agent WHERE agent_id='001'").fetchone()[0] == "Synthetic Agent"

@@ -430,7 +430,7 @@ def adopt_portable_install(new_home: Path, old_home: Path) -> tuple[Path, list[s
     user_config_names = (
         "wfmhub.toml", "wfm_rules.toml", "metric_catalog.toml",
         "analytics_rules.toml", "report_catalog.toml", "queue_mapping.csv",
-        "service_profiles.toml",
+        "service_profiles.toml", "capacity_mapping.csv",
     )
     for name in user_config_names:
         source_file = old_home / "config" / name
