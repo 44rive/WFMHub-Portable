@@ -6,11 +6,11 @@ import csv
 import shutil
 import sqlite3
 import tempfile
+import unittest
 from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from openpyxl import Workbook
 
 from wfmhub.config import load_config, write_source_root
@@ -121,7 +121,7 @@ def test_fresh_schema_backup_and_portable_adoption_preserve_data():
         copied = connect(load_config(new_home), read_only=True)
         try:
             assert copied.execute("SELECT canonical_name FROM core.dim_agent WHERE agent_id='001'").fetchone()[0] == "Synthetic Agent"
-            with pytest.raises(sqlite3.OperationalError):
+            with unittest.TestCase().assertRaises(sqlite3.OperationalError):
                 copied.execute("DELETE FROM core.dim_agent")
         finally:
             copied.close()
@@ -134,7 +134,7 @@ def test_bad_migration_rolls_back_and_non_sqlite_file_is_preserved():
         migrate(config)
         bad = home / "sql/migrations/002_bad.sql"
         bad.write_text("CREATE TABLE core.should_rollback(value VARCHAR);\nTHIS IS INVALID;\n", encoding="utf-8")
-        with pytest.raises(sqlite3.OperationalError):
+        with unittest.TestCase().assertRaises(sqlite3.OperationalError):
             migrate(config)
         probe = connect(config, read_only=True)
         try:
@@ -148,6 +148,18 @@ def test_bad_migration_rolls_back_and_non_sqlite_file_is_preserved():
         payload = b"not sqlite and must remain"
         config.database.parent.mkdir(parents=True, exist_ok=True)
         config.database.write_bytes(payload)
-        with pytest.raises(DatabaseFormatError):
+        with unittest.TestCase().assertRaises(DatabaseFormatError):
             connect(config)
         assert config.database.read_bytes() == payload
+
+
+def load_tests(loader, tests, pattern):
+    """Include function-style contracts in the dependency-free CI suite."""
+    for test in (
+        test_client_id_scope_keeps_leavers_only_through_leave_date,
+        test_unchanged_extract_fast_path_and_scope_expansion,
+        test_fresh_schema_backup_and_portable_adoption_preserve_data,
+        test_bad_migration_rolls_back_and_non_sqlite_file_is_preserved,
+    ):
+        tests.addTest(unittest.FunctionTestCase(test))
+    return tests
