@@ -34,6 +34,22 @@ python -m wfmhub --home /path/to/test-home rules validate
 python packaging/windows/build_portable.py --version 1.1.2
 ```
 
+## Standalone Mr.Propre build
+
+Download `WFMHub-Portable-v1.1.2-win-x64.zip` from release `v1.1.2`, then run:
+
+```bash
+python tools/mr_propre/build_portable.py --runtime-archive /path/to/WFMHub-Portable-v1.1.2-win-x64.zip --output build/mr-propre
+python -m unittest discover -s tools/mr_propre/tests -v
+```
+
+The builder verifies the source ZIP and Excel wheel hashes, packages the embedded
+runtime with the standalone CLI, and writes a deterministic ZIP and SHA-256 file.
+The Mr.Propre Windows workflow extracts that ZIP and runs synthetic tests with
+its embedded interpreter, including XLSX loading and the CMD launcher in paths
+containing spaces. See `tools/mr_propre/README.md` for its separate ID-membership
+contract. This utility has no database or report dependency.
+
 ## Database changes
 
 `001_schema.sql` is the clean baseline. After 1.0.0, append small numbered,

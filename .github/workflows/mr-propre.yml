@@ -1,0 +1,51 @@
+name: Mr.Propre portable verification
+
+on:
+  push:
+    branches: [mr-propre-v1.0.1]
+    paths:
+      - 'tools/mr_propre/**'
+      - '.github/workflows/mr-propre.yml'
+  pull_request:
+    paths:
+      - 'tools/mr_propre/**'
+      - '.github/workflows/mr-propre.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download pinned runtime source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v1.1.2 --repo 44rive/WFMHub-Portable --pattern WFMHub-Portable-v1.1.2-win-x64.zip --dir build/runtime-source
+      - name: Build standalone ZIP
+        run: python tools/mr_propre/build_portable.py --runtime-archive build/runtime-source/WFMHub-Portable-v1.1.2-win-x64.zip --output build/mr-propre
+      - name: Extract release into path with spaces
+        shell: pwsh
+        run: Expand-Archive -LiteralPath build/mr-propre/Mr.Propre-Portable-v1.0.1-win-x64.zip -DestinationPath 'build/release smoke'
+      - name: Test bundled interpreter, Excel reader and CMD launcher
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path 'build/release smoke/Mr.Propre').Path
+          $env:MR_PROPRE_TEST_APP = Join-Path $root '_system/app/mr_propre.py'
+          $env:MR_PROPRE_TEST_LAUNCHER = Join-Path $root 'Mr.Propre.cmd'
+          & "$root/_system/runtime/python.exe" -I -c "import sys, openpyxl, et_xmlfile; assert sys.version_info[:3] == (3,13,7); print(sys.version)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$root/_system/runtime/python.exe" -I tools/mr_propre/tests/test_mr_propre.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mr.Propre-Portable-v1.0.1-win-x64
+          path: |
+            build/mr-propre/*.zip
+            build/mr-propre/*.sha256
+          if-no-files-found: error

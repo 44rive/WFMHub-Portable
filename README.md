@@ -4,6 +4,10 @@ WFMHub turns unchanged Verint, Storm, FTE, and Call-by-Call extracts into a
 durable local WFM database, operational Excel products, clean CSV feeds, and a
 localhost manager workbench.
 
+For a small, offline **Client ID only** extract filter, see
+[Mr.Propre](tools/mr_propre/README.md). Its Windows release ZIP includes Python
+and the Excel reader; extract it and launch `Mr.Propre.cmd`.
+
 ## First use on Windows
 
 1. Download the Windows ZIP from GitHub Releases—not the GitHub source ZIP.

@@ -23,6 +23,16 @@ The product serves the WFM cycle:
 The SQLite database is durable user state. Reports are replaceable outputs.
 Source extracts are evidence and are never edited.
 
+### Standalone Mr.Propre utility
+
+`tools/mr_propre` is a separately packaged, offline Windows extract filter.
+At the user's explicit request, its scope is **Client ID listing membership
+only**, without WFMHub's Active/Leaver date gate or name fallback. It preserves
+source columns and field values in filtered CSV copies and does not read or
+write the WFMHub database, reports, or calculated Feed exports. Its contract and
+runtime packaging are documented in `tools/mr_propre/README.md`. WFMHub's own
+employee eligibility and export contracts remain unchanged.
+
 ## Runtime and launchers
 
 The Windows release is a no-admin ZIP containing official embeddable CPython,
