@@ -11,6 +11,11 @@ on:
       - 'tools/mr_propre/**'
       - '.github/workflows/mr-propre.yml'
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified Mr.Propre ZIP to its GitHub release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,3 +54,43 @@ jobs:
             build/mr-propre/*.zip
             build/mr-propre/*.sha256
           if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/mr-propre-v1.0.1'
+    needs: windows-portable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Mr.Propre-Portable-v1.0.1-win-x64
+          path: release-assets
+      - name: Verify release asset checksum and package source
+        shell: bash
+        run: |
+          cd release-assets
+          sha256sum --check Mr.Propre-Portable-v1.0.1-win-x64.zip.sha256
+          cd ..
+          git archive --format=zip --prefix=Mr.Propre-source/ --output=release-assets/Mr.Propre-v1.0.1-source.zip HEAD tools/mr_propre .github/workflows/mr-propre.yml PROJECT.md README.md docs/DEVELOPMENT.md
+      - name: Publish verified Windows ZIP
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag=mr-propre-v1.0.1
+          if gh release view "$tag" >/dev/null 2>&1; then
+            if [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" != true ]; then
+              echo 'Refusing to replace assets on an already published release.'
+              exit 1
+            fi
+          else
+            gh release create "$tag" --draft --target "$RELEASE_COMMIT" --latest=false --title 'Mr.Propre v1.0.1 — Portable Windows x64' --notes-file tools/mr_propre/RELEASE_NOTES.md
+          fi
+          gh release edit "$tag" --target "$RELEASE_COMMIT" --notes-file tools/mr_propre/RELEASE_NOTES.md
+          gh release upload "$tag" release-assets/*.zip release-assets/*.sha256 --clobber
+          gh release edit "$tag" --draft=false --latest=false

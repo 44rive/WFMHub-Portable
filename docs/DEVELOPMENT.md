@@ -50,6 +50,11 @@ its embedded interpreter, including XLSX loading and the CMD launcher in paths
 containing spaces. See `tools/mr_propre/README.md` for its separate ID-membership
 contract. This utility has no database or report dependency.
 
+To publish the Windows-tested ZIP, dispatch the Mr.Propre workflow on branch
+`mr-propre-v1.0.1` with `publish=true`. Publication requires the Windows job to
+pass, verifies the artifact checksum, uploads the portable ZIP and source to a
+draft release, then publishes it without changing WFMHub's latest release.
+
 ## Database changes
 
 `001_schema.sql` is the clean baseline. After 1.0.0, append small numbered,
