@@ -14,6 +14,13 @@ et_xmlfile, and tzdata versions are pinned.
 
 ## Independent BO Live mini app
 
+The current C# collector diagnostic is built on Windows with
+`./packaging/windows/build_abs_csharp_probe.ps1 -Test`. It targets the installed
+.NET Framework 4.8 and has no NuGet or Python dependencies. Windows CI runs
+native synthetic-control/redaction/bounds tests, then checks launch, missing
+source, worker timeout and archive integrity. This does not establish permission
+to execute or source-data coverage on the business workstation.
+
 `miniapps/bo_live/` uses only Python's standard library plus available timezone
 data. It has no imports from `wfmhub` and is excluded from the main package and
 release build. Its local settings, captures, and SQLite file live under its own

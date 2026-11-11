@@ -1,5 +1,22 @@
 # TOYOTA BO Live
 
+## Current diagnostic: portable C# and installed .NET Framework
+
+`miniapps/abs_csharp_probe/` provides CHECK_LAUNCH.cmd followed by PROBE_ABS.cmd.
+It targets .NET Framework 4.8, uses the installed Microsoft UI Automation
+assemblies, and bundles no Python/native runtime DLLs. It is unsigned and still
+requires permission to run on the workstation. No application policy is changed.
+
+The first command reports `launch_ok` without accessing ABS. The second reads
+redacted accessibility metadata in a bounded worker; it never clicks, scrolls,
+changes focus, reads the clipboard, changes tasks, or publishes a task capture.
+It reports missing/ambiguous windows, provider failures, limits and timeouts.
+Native UI Automation tests use a synthetic owned window in Windows CI; only
+the actual PC can establish compatibility and full ABS value availability.
+The package follows `_system/collector`, `_system/source`, `_system/output`.
+See its included README for the current run instructions. The prior Python
+probe below is historical and was blocked on the workstation's ctypes import.
+
 ## Current collector milestone: PAD removed from the new design
 
 The read-only Windows probe is implemented in `miniapps/bo_live/abs_probe.py`.
@@ -13,6 +30,13 @@ known headers, read failures, and traversal limits. Arbitrary control text is
 redacted and passwords are skipped. A separate worker has a timeout. The probe
 does not click, scroll, change focus, use the clipboard, or publish a snapshot.
 Full backlog coverage remains explicitly unverified, even on a completed scan.
+
+A workstation test reported Application Control blocking the `_ctypes` import
+before collection starts. The denied file may be `_ctypes.pyd` or a DLL
+dependency; the workstation policy event identifies it. Portable packaging
+does not grant execution permission. This collection path needs IT approval
+of the runtime components. Supported ABS feeds or normal user-initiated copy/
+paste are alternatives to evaluate; copying must be tested and is manual.
 
 Once the actual ABS report proves the necessary data is exposed, the next
 milestone is a portable collector for one TOYOTA group, with full traversal and

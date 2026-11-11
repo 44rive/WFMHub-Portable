@@ -1,0 +1,53 @@
+name: Build and validate CSharp ABS diagnostic
+on:
+  push:
+    branches: [release/abs-csharp-probe-v0.1.0]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  diagnostic:
+    if: github.repository == '44rive/WFMHub-Portable'
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build .NET Framework executable and test native UI Automation
+        shell: pwsh
+        run: ./packaging/windows/build_abs_csharp_probe.ps1 -Test
+      - name: Check launch, missing source, timeout containment and the packaged files
+        shell: python
+        run: |
+          import tempfile, subprocess, json, hashlib
+          from pathlib import Path
+          from zipfile import ZipFile
+          exe=Path('build/abs-csharp-probe/WFMHub-ABS-CSharp-Probe/_system/collector/ABSProbe.exe').resolve()
+          for args,status,code in [(['--check-launch'],'launch_ok',0),(['--title','__SYNTHETIC_NONEXISTENT_ABS_a823__'],'no_matching_window',1),(['--test-timeout','--timeout','5'],'timeout',1)]:
+              with tempfile.TemporaryDirectory() as folder:
+                  run=subprocess.run([str(exe),*args,'--output',folder],capture_output=True,text=True,timeout=65)
+                  assert run.returncode==code,(run.stdout,run.stderr)
+                  reports=list(Path(folder).glob('*.json'))
+                  assert len(reports)==1
+                  data=json.loads(reports[0].read_text(encoding='utf-8-sig'))
+                  assert data['status']==status,data
+                  assert data['values_redacted'] is True
+                  assert data['full_backlog_coverage']=='not_verified'
+                  assert 'rows' not in data
+          path=Path('dist/WFMHub-ABS-CSharp-Probe-v0.1.0-win-x64.zip')
+          assert hashlib.sha256(path.read_bytes()).hexdigest()==path.with_suffix('.zip.sha256').read_text().split()[0]
+          with ZipFile(path) as archive:
+              assert archive.testzip() is None
+              names=archive.namelist()
+              assert not any(n.endswith(('.dll','.pyd','.py','.sqlite3')) or '/output/' in n for n in names)
+              assert archive.read('WFMHub-ABS-CSharp-Probe/_system/source/ABSProbe.cs')==Path('miniapps/abs_csharp_probe/ABSProbe.cs').read_bytes()
+              for line in archive.read('WFMHub-ABS-CSharp-Probe/SHA256SUMS.txt').decode('utf-8-sig').splitlines():
+                  digest,name=line.split('  ',1)
+                  assert hashlib.sha256(archive.read('WFMHub-ABS-CSharp-Probe/'+name)).hexdigest()==digest,name
+          print('PASS: launch/report, no matching window, worker timeout, no task-capture claims, archive/source/checksum/manifest integrity.')
+      - name: Publish standalone CSharp diagnostic and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload v1.1.2 dist/WFMHub-ABS-CSharp-Probe-v0.1.0-win-x64.zip dist/WFMHub-ABS-CSharp-Probe-v0.1.0-win-x64.zip.sha256 --repo 44rive/WFMHub-Portable

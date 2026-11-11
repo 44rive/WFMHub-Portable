@@ -40,6 +40,15 @@ database and can launch bounded refresh, analysis, export, and report jobs.
 
 ### Standalone TOYOTA BO companion
 
+The current portability experiment is `miniapps/abs_csharp_probe/`: a standalone
+.NET Framework 4.8 C# diagnostic. It uses installed Microsoft UI Automation
+assemblies and packages no Python or native runtime DLLs. CHECK_LAUNCH.cmd tests
+executable/report-writer startup separately from PROBE_ABS.cmd accessibility.
+Reports redact arbitrary UI text and do not claim task capture or full coverage.
+The executable is unsigned and may still be blocked by workstation policy.
+The Windows build/validation pipeline is defined in
+`.github/workflows/abs-csharp-probe-release.yml`; actual ABS needs a PC test.
+
 The next collector removes PAD. Its first implemented milestone is the
 read-only `miniapps/bo_live/abs_probe.py` Windows accessibility diagnostic.
 `packaging/windows/build_abs_probe.py` produces its own portable ZIP using the
