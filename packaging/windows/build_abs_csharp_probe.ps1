@@ -16,15 +16,15 @@ function Find-Reference([string]$Name) {
     if ($null -eq $Item) { throw "Missing Framework build reference: $Name" }
     return $Item.FullName
 }
-$References = @('System.dll','System.Core.dll','System.Web.Extensions.dll','UIAutomationClient.dll','UIAutomationTypes.dll','WindowsBase.dll') | ForEach-Object { '/reference:' + (Find-Reference $_) }
+$References = @('mscorlib.dll','System.dll','System.Core.dll','System.Web.Extensions.dll','UIAutomationClient.dll','UIAutomationTypes.dll','WindowsBase.dll') | ForEach-Object { '/reference:' + (Find-Reference $_) }
 $Executable = Join-Path $Collector 'ABSProbe.exe'
-& $Compiler /nologo /target:exe /platform:x64 /optimize+ /warnaserror+ "/out:$Executable" @References (Join-Path $SourceRoot 'ABSProbe.cs')
+& $Compiler /nologo /noconfig /nostdlib+ /target:exe /platform:x64 /optimize+ /warnaserror+ "/out:$Executable" @References (Join-Path $SourceRoot 'ABSProbe.cs')
 if ($LASTEXITCODE -ne 0) { throw 'C# diagnostic compilation failed.' }
 Copy-Item (Join-Path $SourceRoot 'ABSProbe.exe.config') $Collector
 if ($Test) {
     $Tests = Join-Path $BuildRoot 'NativeTests.exe'
     $TestReferences = @(('/reference:' + (Find-Reference 'System.Windows.Forms.dll')), ('/reference:' + (Find-Reference 'System.Drawing.dll')))
-    & $Compiler /nologo /target:exe /platform:x64 /optimize+ /warnaserror+ /main:WfmHubAbsProbe.NativeTests "/out:$Tests" @References @TestReferences (Join-Path $SourceRoot 'ABSProbe.cs') (Join-Path $SourceRoot 'NativeTests.cs')
+    & $Compiler /nologo /noconfig /nostdlib+ /target:exe /platform:x64 /optimize+ /warnaserror+ /main:WfmHubAbsProbe.NativeTests "/out:$Tests" @References @TestReferences (Join-Path $SourceRoot 'ABSProbe.cs') (Join-Path $SourceRoot 'NativeTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Native test compilation failed.' }
     Copy-Item (Join-Path $SourceRoot 'ABSProbe.exe.config') ($Tests + '.config')
     & $Tests
