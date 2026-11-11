@@ -12,6 +12,25 @@ python -m unittest discover -s tests -v
 The supported release runtime is Python 3.13. SQLite, openpyxl, XlsxWriter,
 et_xmlfile, and tzdata versions are pinned.
 
+## Independent BO Live mini app
+
+`miniapps/bo_live/` uses only Python's standard library plus available timezone
+data. It has no imports from `wfmhub` and is excluded from the main package and
+release build. Its local settings, captures, and SQLite file live under its own
+ignored `_local/` folder. Tests use synthetic tasks.
+
+```bash
+python miniapps/bo_live/app.py serve --demo
+python -m unittest discover -s tests -p test_bo_live.py -v
+node --check miniapps/bo_live/web/app.js
+python packaging/windows/build_bo_live.py
+```
+
+The separate builder uses an explicit code/document allowlist, reviewed CPython
+archive, and the existing hash-pinned timezone wheel. The Windows PAD selectors
+are a workstation setup task; synthetic capture tests do not establish source
+extraction reliability. See [BO Live](BO_LIVE.md).
+
 ## Definition of done
 
 - active code has one caller or a documented public contract;

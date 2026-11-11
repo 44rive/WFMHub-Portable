@@ -45,6 +45,12 @@ To keep one shared link, set **PCS Report & Coaching > Set permanent PCS workboo
 path** to the existing, locally synced WFM SharePoint workbook. Future Excel
 Refresh All operations update that same file; other reports and SQLite stay local.
 
+## TOYOTA BO Live
+
+For TOYOTA back-office task monitoring, the separate **WFMHub BO Live** mini
+app uses PAD captures and its own local database. See [BO Live](docs/BO_LIVE.md)
+for its standalone Windows ZIP, demo, and connection instructions.
+
 ## Updates
 
 Extract each release into a new local folder, run `UPGRADE.cmd` there, and point

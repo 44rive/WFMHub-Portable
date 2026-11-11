@@ -60,3 +60,7 @@ Thumbs.db
 
 # Local orchestration handoffs
 .codex/
+
+# BO Live companion: local captures, settings, and independent SQLite state
+miniapps/bo_live/_local/
+miniapps/bo_live/runtime/

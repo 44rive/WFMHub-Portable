@@ -1,5 +1,15 @@
 # Roadmap
 
+## TOYOTA BO Live Control
+
+`miniapps/bo_live/` implements the independently launched TOYOTA companion.
+It validates PAD captures, keeps its own database, and supplies a local dashboard
+for task counts, priority, assignment, scheduled-action timing, and capture
+health. Build it with `packaging/windows/build_bo_live.py`; see [BO Live](BO_LIVE.md).
+The screen-based design record remains in `roadmap/bo-realtime/README.md`.
+ABS selectors, full group names, and actual extraction reliability still need
+Windows PAD validation. Roadmap files are not runtime dependencies.
+
 ## WFMHub technology adoption and RTM vertical slice
 
 `roadmap/wfmhub2-integration/README.md` treats WFMHub-2 as a derivative

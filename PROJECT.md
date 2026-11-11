@@ -38,6 +38,22 @@ SQLite from that runtime, and pure-Python Excel libraries.
 `WFMHub.cmd` remains the operational controller. The web app reads the same
 database and can launch bounded refresh, analysis, export, and report jobs.
 
+### Standalone TOYOTA BO companion
+
+`miniapps/bo_live/` contains WFMHub BO Live, an independently launched local
+TOYOTA task-snapshot app. It has its own SQLite schema and data folder; it is
+not imported by the WFMHub runtime or included in the main release archive.
+`packaging/windows/build_bo_live.py` builds its separate Windows ZIP.
+
+The companion validates immutable, complete PAD captures, preserves repeated
+case numbers as separate task rows, and shows configured task-group counts,
+priority, assignment, scheduled-action timing, and capture health. Scheduled
+time is the time to action a task, not a creation or SLA timestamp. It makes
+no employee productivity, task-completion, or throughput inference. Local
+companion settings own its scope and calculation thresholds. ABS selectors
+and actual full-grid extraction still require validation in the Windows PAD
+session. See [BO Live](docs/BO_LIVE.md).
+
 ## Authoritative sources
 
 All locations are relative to `paths.source_root` in `config/wfmhub.toml`.
