@@ -1,0 +1,45 @@
+name: Validate and publish portable ABS probe
+on:
+  push:
+    branches: [release/abs-probe-v0.1.0]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  probe:
+    if: github.repository == '44rive/WFMHub-Portable'
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Test redaction, bounds, and actual Windows COM interfaces
+        run: python -m unittest discover -s tests -p test_abs_probe.py -v
+      - name: Build verified portable Windows runtime and diagnostic
+        run: python packaging/windows/build_abs_probe.py
+      - name: Exercise the packaged worker and verify the release archive
+        shell: python
+        run: |
+          import subprocess, json, tempfile, hashlib
+          from pathlib import Path
+          from zipfile import ZipFile
+          root=Path('build/abs-probe/WFMHub-ABS-Probe')
+          with tempfile.TemporaryDirectory() as folder:
+              result=subprocess.run([str(root/'_system/runtime/python.exe'),'-I',str(root/'_system/app/abs_probe.py'),'--title','__WFMHUB_SYNTHETIC_NONEXISTENT_WINDOW_8f72__','--output',folder],capture_output=True,text=True,timeout=60)
+              assert result.returncode==1,(result.stdout,result.stderr)
+              report=json.loads(next(Path(folder).glob('*.json')).read_text())
+              assert report['status']=='no_matching_window', report
+              assert report['values_redacted'] is True
+              assert 'rows' not in report
+          path=Path('dist/WFMHub-ABS-Probe-v0.1.0-win-x64.zip')
+          assert hashlib.sha256(path.read_bytes()).hexdigest()==path.with_suffix('.zip.sha256').read_text().split()[0]
+          with ZipFile(path) as archive:
+              assert archive.testzip() is None
+              assert archive.read('WFMHub-ABS-Probe/_system/app/abs_probe.py')==Path('miniapps/bo_live/abs_probe.py').read_bytes()
+              assert not any('/output/' in n or n.endswith(('.sqlite3','.pyc')) for n in archive.namelist())
+      - name: Publish the diagnostic separately from BO Live v0.1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload v1.1.2 dist/WFMHub-ABS-Probe-v0.1.0-win-x64.zip dist/WFMHub-ABS-Probe-v0.1.0-win-x64.zip.sha256 --repo 44rive/WFMHub-Portable

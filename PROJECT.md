@@ -40,6 +40,15 @@ database and can launch bounded refresh, analysis, export, and report jobs.
 
 ### Standalone TOYOTA BO companion
 
+The next collector removes PAD. Its first implemented milestone is the
+read-only `miniapps/bo_live/abs_probe.py` Windows accessibility diagnostic.
+`packaging/windows/build_abs_probe.py` produces its own portable ZIP using the
+WFMHub `_system/runtime`, `_system/app`, and local `_system/output` structure.
+The probe does not create backlog captures or establish extraction coverage.
+It redacts arbitrary UI text and only queries the selected visible Edge window.
+Actual ABS accessibility still needs a workstation test before automatic
+collection can be implemented. The prior v0.1.0 release below remains historical.
+
 `miniapps/bo_live/` contains WFMHub BO Live, an independently launched local
 TOYOTA task-snapshot app. It has its own SQLite schema and data folder; it is
 not imported by the WFMHub runtime or included in the main release archive.

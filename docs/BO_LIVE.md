@@ -1,5 +1,25 @@
 # TOYOTA BO Live
 
+## Current collector milestone: PAD removed from the new design
+
+The read-only Windows probe is implemented in `miniapps/bo_live/abs_probe.py`.
+Build it with `python packaging/windows/build_abs_probe.py` and run its
+`PROBE_ABS.cmd` after manually opening the TOYOTA backlog in Edge. The ZIP uses
+official embedded Python and built-in Windows UI Automation through ctypes/COM.
+It contains no extension, browser driver, or third-party automation package.
+
+Local TXT/JSON reports show candidate grid properties, row/column positions,
+known headers, read failures, and traversal limits. Arbitrary control text is
+redacted and passwords are skipped. A separate worker has a timeout. The probe
+does not click, scroll, change focus, use the clipboard, or publish a snapshot.
+Full backlog coverage remains explicitly unverified, even on a completed scan.
+
+Once the actual ABS report proves the necessary data is exposed, the next
+milestone is a portable collector for one TOYOTA group, with full traversal and
+source-total validation. The existing BO database and dashboard remain reusable.
+
+The rest of this guide describes the previously published v0.1.0 package.
+
 WFMHub BO Live is a standalone local companion for the ABS back-office task
 list. The implementation lives in `miniapps/bo_live/` and has no imports from
 the main WFMHub runtime. It keeps its own database and local settings; the
